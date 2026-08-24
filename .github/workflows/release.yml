@@ -18,6 +18,24 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # The hermetic suite can only guard the manifest keys it already knows
+      # about; this is the check that catches everything else the plugin
+      # tooling rejects. It gates the release rather than every PR because a
+      # mismatch between plugin.json and the marketplace entry is what
+      # `claude plugin tag` refuses to release on, and because pinning routine
+      # PRs to Claude Code's release cadence would stall the queue for changes
+      # nowhere near the manifests. Unpinned so it reflects what a user's own
+      # tooling will do; pin it here if a validator change ever blocks a
+      # release for an unrelated reason.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: validate plugin manifests
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude plugin validate .
+
       - name: build binaries
         shell: bash
         run: |

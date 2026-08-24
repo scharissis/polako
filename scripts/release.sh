@@ -24,6 +24,15 @@ fi
 
 echo "==> releasing $version"
 
+# Both tags below are pushed before anything in CI runs, so a manifest the
+# plugin tooling rejects has to be caught here or not at all. `plugin tag`
+# refuses on plugin.json and the marketplace entry disagreeing; this catches
+# the rest of what the validator checks, before a tag exists to retract.
+if ! claude plugin validate .; then
+  echo "manifest validation failed - fix it before tagging; no tag was pushed" >&2
+  exit 1
+fi
+
 # Refuses if plugin.json and the marketplace entry disagree.
 claude plugin tag --push --message "backlog-drain %s"
 

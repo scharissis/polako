@@ -386,8 +386,12 @@ Two tags for one release is a footgun, so a script does both:
 ```
 
 Each refuses to run on a dirty tree, so the version bump has to be committed
-first. Pushing `v0.2.0` starts the release workflow, which cross-compiles the
-five targets and attaches them to a GitHub release with generated notes.
+first, and each runs `claude plugin validate .` before either tag exists —
+both tags are pushed before CI sees them, so a manifest the plugin tooling
+rejects has to be caught locally or not at all. Pushing `v0.2.0` starts the
+release workflow, which validates the manifests again on a clean machine with
+current tooling, then cross-compiles the five targets and attaches them to a
+GitHub release with generated notes.
 
 **Installs track the default branch, not tags.** The marketplace entry uses
 `"source": "./"` — the plugin lives in the same repo as the marketplace — so
@@ -422,7 +426,8 @@ go test ./...
 ```
 
 `check` runs `gofmt`, `go vet` and the full test suite — the same three things
-CI runs, on Linux, macOS and Windows. The plugin side has its own validator:
+CI runs, on Linux, macOS and Windows. The plugin side has its own validator,
+which `release.sh` and the release workflow both run for you:
 
 ```bash
 claude plugin validate .

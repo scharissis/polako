@@ -8,6 +8,14 @@ if (git status --porcelain) { throw 'working tree is dirty - commit the version 
 
 Write-Host "==> releasing $version"
 
+# Both tags below are pushed before anything in CI runs, so a manifest the
+# plugin tooling rejects has to be caught here or not at all. See release.sh.
+claude plugin validate .
+if ($LASTEXITCODE -ne 0) {
+  Write-Error 'manifest validation failed - fix it before tagging; no tag was pushed'
+  exit $LASTEXITCODE
+}
+
 # Refuses if plugin.json and the marketplace entry disagree.
 claude plugin tag --push --message 'backlog-drain %s'
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
