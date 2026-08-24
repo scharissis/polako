@@ -54,13 +54,16 @@ failing an hour into an unattended run.
 
 ### The skill
 
-As a plugin (also brings the marketplace entry along):
+As a plugin — the repo doubles as its own marketplace, so this is two commands
+and no clone:
 
 ```bash
 claude plugin marketplace add scharissis/backlog-drain
 ```
 
-Then, inside Claude Code, install `backlog-drain@scharissis` from `/plugin`.
+```bash
+claude plugin install backlog-drain@scharissis
+```
 
 Or copy the skill in by hand:
 
@@ -169,7 +172,11 @@ go test ./...
 ```
 
 `check` runs `gofmt`, `go vet` and the full test suite — the same three things
-CI runs, on Linux, macOS and Windows.
+CI runs, on Linux, macOS and Windows. The plugin side has its own validator:
+
+```bash
+claude plugin validate .
+```
 
 The suite is hermetic: no network, no `gh`, no real `claude`. Tests that need a
 Claude process re-execute the test binary as a fake CLI that streams canned
