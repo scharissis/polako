@@ -33,7 +33,9 @@ close the issue, remove the worktree, advance to the next
 **All state lives in GitHub** — issues, comments, PRs, branches. The process
 itself is stateless and restart-safe: kill it at any point, rerun it later, and
 it re-derives where things stand. If a PR already exists for `issue-N`, it
-never re-runs Claude on that issue; it goes straight to waiting.
+never re-runs Claude on that issue; it goes straight to waiting. (The one thing
+it writes locally is a line of numbers per run, which nothing reads back — see
+[Run data & cost tracking](#run-data--cost-tracking).)
 
 **Human touchpoints are deliberately just two**, both on GitHub:
 
@@ -208,12 +210,84 @@ backlog-drain -skip 12,17
 | `-tools` | *(see below)* | `--allowedTools` for unattended runs. **Replaces** the default set. |
 | `-add-tools` | *(none)* | Extra `--allowedTools` entries, **appended** to `-tools`. |
 | `-permission-mode` | `acceptEdits` | Passed to `claude --permission-mode`. |
+| `-model` | *(the CLI's own default)* | Passed to `claude --model`. Vary it between batches to compare models — see [Run data & cost tracking](#run-data--cost-tracking). |
 | `-poll` | `5m` | Interval between GitHub checks while waiting. |
 | `-retries` | `3` | Resume attempts after a crashed run. |
 | `-retry-wait` | `30s` | Wait before each resume attempt. |
 | `-stall` | `15m` | Kill and resume a run that has emitted no events for this long (`0` disables). |
 | `-skip` | *(none)* | Comma-separated issue numbers to skip. |
 | `-once` | `false` | Process a single issue to merge, then exit. |
+| `-run-tag` | *(none)* | Freeform label recorded with every run, so one batch can be compared against another. |
+| `-metrics` | `~/.backlog-drain/metrics` | Directory for run-data records, or `off` to write nothing. |
+
+## Run data & cost tracking
+
+Every run writes one line of numbers, so you can answer what a drained backlog
+actually cost — and which settings are worth changing.
+
+**What is written, in full:** for each `claude` invocation, one JSON object
+holding the repository and issue number, why the run happened and what it left
+behind (a PR, questions, or neither), its status and exit code, turns, tool-use
+count, wall and API duration, tokens (in / out / cache read / cache write, plus
+the per-model split), dollars, and the configuration under test — skill, model,
+permission mode, `-run-tag`, a hash of the tool allowlist, the strategy knobs,
+and both CLI versions. One more object per issue records how it ended:
+`merged`, `closed_unmerged` or `needs_human`.
+
+**What is never written:** issue titles, issue bodies, PR titles, comment text,
+diffs, or anything the model said. Records hold numbers, identifiers and labels
+you chose. That is what makes one of these files safe to hand to a teammate, or
+paste into an analysis session, without re-reading it first.
+
+**Where it goes:** `~/.backlog-drain/metrics/<owner>--<repo>.jsonl`, one
+append-only file per repository — so deleting one project's data is `rm` on one
+file, and aggregating across projects is a glob. Created `0700`, so on a shared
+machine the records stay yours. Never inside your checkout: the skill commits
+things there, and cost data must not become committable by accident.
+
+**Nothing leaves your machine.** There is no telemetry endpoint, no phone-home,
+and no network path out of the recorder — the binary is the only thing that
+meters anything, and it writes to your disk and nowhere else. The skill half,
+the part you can install from a marketplace, carries no data collection at all:
+it is a prompt.
+
+To write nothing at all:
+
+```bash
+backlog-drain -metrics off
+```
+
+Records are write-only by design. The drain loop never reads them, no decision
+depends on them, and deleting the directory mid-drain changes nothing about
+what the supervisor does next — that is what keeps run data compatible with
+"all state lives in GitHub". Writes are best-effort: a failure warns once and
+the drain carries on.
+
+### Comparing configurations
+
+`-run-tag` labels a batch so you can price one setup against another later:
+
+```bash
+backlog-drain -model claude-opus-5 -run-tag baseline
+```
+
+Change one thing — the model, the skill's wording, `-stall` — tag the next
+batch differently, and the two sets of records are comparable. Note that the
+binary's version does not pin the skill's text: you can run any binary against
+any installed version of the plugin, so tag discipline is what makes
+skill-wording experiments mean anything.
+
+The files are JSONL, which jq, DuckDB and every spreadsheet already read. What
+a day cost:
+
+```bash
+cat ~/.backlog-drain/metrics/*.jsonl | jq -s 'map(select(.kind=="run")) | map(.cost_usd) | add'
+```
+
+**On dollars:** `cost_usd` is the CLI's API-equivalent pricing — real money on
+API-key auth, notional on a subscription plan. Tokens are the ground truth;
+dollars are derived from them. This binary never hardcodes a price sheet, since
+prices change and the CLI already applies the current ones.
 
 ## Using it on another project
 
