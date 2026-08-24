@@ -6,9 +6,11 @@ package main
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -84,6 +86,38 @@ func TestMarketplaceManifestListsThisPlugin(t *testing.T) {
 		}
 	}
 	t.Errorf("marketplace.json does not list %q (got %+v)", want, market.Plugins)
+}
+
+// `claude plugin validate` rejects any root key it does not know, and that
+// validator is what catches plugin.json and the marketplace entry disagreeing
+// — the thing `claude plugin tag` refuses to release on. A stray root key
+// takes the whole check out, so guard the key set here where the suite can see
+// it without shelling out to `claude`.
+func TestMarketplaceManifestHasNoUnrecognizedRootKeys(t *testing.T) {
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(readRepoFile(t, ".claude-plugin", "marketplace.json")), &root); err != nil {
+		t.Fatalf("marketplace.json is not valid JSON: %v", err)
+	}
+	accepted := map[string]bool{"name": true, "owner": true, "metadata": true, "plugins": true}
+	for key := range root {
+		if !accepted[key] {
+			t.Errorf("marketplace.json has root key %q; `claude plugin validate` accepts only %v", key, slices.Sorted(maps.Keys(accepted)))
+		}
+	}
+
+	// Omitting it validates, but only with a warning, and the description is
+	// what the marketplace listing shows.
+	var meta struct {
+		Description string `json:"description"`
+	}
+	if raw, ok := root["metadata"]; ok {
+		if err := json.Unmarshal(raw, &meta); err != nil {
+			t.Fatalf("marketplace.json metadata is not an object: %v", err)
+		}
+	}
+	if meta.Description == "" {
+		t.Error("marketplace.json needs metadata.description: it is what the marketplace listing shows")
+	}
 }
 
 // Claude namespaces plugin skills as <plugin>:<skill>, so the -skill default
