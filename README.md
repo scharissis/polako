@@ -221,8 +221,9 @@ Nothing here is tied to one repository or language — `-dir` points anywhere.
 The one thing worth tuning per project is the tool allowlist, because an
 unattended run stalls if a command it needs would raise a permission prompt.
 
-The default `-tools` set covers git, the two gh verbs the skill uses
-(`gh issue`, `gh pr`), the tools the skill itself needs (`Read`, `Write`,
+The default `-tools` set covers git, the handful of gh subcommands the skill
+uses (`gh issue view`/`comment`, `gh pr create`, plus read-only `gh pr
+view`/`list`/`diff`), the tools the skill itself needs (`Read`, `Write`,
 `Edit`, `Glob`, `Grep`, `Skill`, `TodoWrite`), and the usual entry points for
 npm/pnpm/yarn, Go, Cargo, Make, Python/uv/pytest, dotnet, Maven and Gradle.
 For anything else, widen it rather than replacing it:
@@ -245,22 +246,31 @@ issues from outside the team, that input is attacker-controllable. Two things
 constrain it, and they work at different layers:
 
 **The tool allowlist bounds what a run can do.** `-tools` is enforced by Claude
-Code itself, not by the skill's good behaviour, so it holds even if the model
-is talked into trying something else. gh is granted per verb — `Bash(gh
-issue:*)` and `Bash(gh pr:*)` — rather than as a blanket `Bash(gh:*)`, which
-would also permit `gh api`, `gh secret set`, `gh release create` and `gh repo
-delete`. If your project genuinely needs more, add it explicitly with
-`-add-tools` rather than widening back to the whole CLI.
+Code itself, not by the skill's good behaviour, so it does not depend on the
+model declining a request. gh is granted per subcommand — `Bash(gh issue
+view:*)`, `Bash(gh pr create:*)` and a few more — rather than as a blanket
+`Bash(gh:*)`, which would also permit `gh api`, `gh secret set` and `gh repo
+delete`. Even a per-verb grant is too wide: `Bash(gh pr:*)` includes
+`gh pr merge`, and `Bash(gh issue:*)` includes `gh issue edit --add-label`,
+which is enough to pull an unlabelled issue into a `-label`-gated queue. If
+your project genuinely needs more, add it explicitly with `-add-tools` rather
+than widening back to a whole verb.
 
-Two gaps the allowlist does not close: `Bash(git:*)` includes `git push`, which
-is what opening a PR requires, and the build commands run whatever the checked-
-out repo's scripts contain. Point `-dir` at repositories you would run
-`make test` in yourself.
+What the allowlist does *not* close, and cannot: `Bash(git:*)` includes
+`git push`, which is what opening a PR requires; the build commands run
+whatever the checked-out repo's scripts contain; and `Bash(python:*)`,
+`Bash(npx:*)`, `Bash(uv:*)` and `Bash(go:*)` are arbitrary code execution by
+construction — `python -c` can run anything the user can, gh included. So the
+allowlist is a narrowing, not a sandbox. Point `-dir` at repositories you would
+run `make test` in yourself, and drop the interpreter entries from `-tools` if
+your project does not need them.
 
-**`-label` bounds *which* issues are eligible.** Only someone with write access
-can apply a label, so requiring one means a maintainer has to opt each issue in
-before the supervisor will touch it. An outsider can still file an issue; they
-just cannot start a run with it.
+**`-label` bounds *which* issues are eligible.** Applying a label takes triage
+permission or better, so requiring one means a maintainer has to opt each issue
+in before the supervisor will touch it. An outsider can still file an issue;
+they just cannot start a run with it — unless an issue template hands them the
+label, since the `labels:` key on a template or issue form is applied on
+creation whoever files it. Keep the gate label out of your templates.
 
 ```bash
 backlog-drain -label ready-for-claude
