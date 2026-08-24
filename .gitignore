@@ -1,0 +1,11 @@
+# Built binaries
+/backlog-drain
+/backlog-drain.exe
+/dist/
+
+# Go
+*.test
+*.out
+
+# Editors / OS
+.DS_Store

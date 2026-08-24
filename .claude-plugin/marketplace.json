@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "scharissis",
+  "description": "Personal Claude Code plugins",
+  "owner": {
+    "name": "Stefano Charissis"
+  },
+  "plugins": [
+    {
+      "name": "backlog-drain",
+      "description": "Drain a GitHub issue backlog one issue at a time, from issue to merged PR.",
+      "category": "workflow",
+      "source": "./"
+    }
+  ]
+}
