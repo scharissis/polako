@@ -52,20 +52,59 @@ failing an hour into an unattended run.
 
 ## Install
 
-### The skill
+> **This repository is private.** Installing it requires a GitHub account with
+> read access — see [Access](#access) below. Nothing here is published to any
+> public registry.
 
-As a plugin — the repo doubles as its own marketplace, so this is two commands
-and no clone:
+### The skill, as a plugin (recommended)
+
+The repo doubles as its own marketplace, so there is no clone step. Register
+the marketplace once:
 
 ```bash
 claude plugin marketplace add scharissis/backlog-drain
 ```
 
+Then install the plugin from it:
+
 ```bash
 claude plugin install backlog-drain@scharissis
 ```
 
-Or copy the skill in by hand:
+`backlog-drain` is the plugin, `scharissis` is the marketplace it came from —
+the name declared in [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json),
+not the GitHub username, though here they happen to match. The plugin ships one
+component, the `implement-issue` skill, and costs ~40 tokens of always-on
+context; the skill body is only loaded when it fires.
+
+Restart Claude Code, and `/implement-issue 48` is available.
+
+Both commands take a `--scope`:
+
+| Scope | Where it is declared | Use it for |
+| --- | --- | --- |
+| `user` *(default)* | `~/.claude/settings.json` | Your own machine, every project. |
+| `project` | the repo's `.claude/settings.json` | Committing the marketplace + plugin so collaborators on *that* repo get the skill automatically. |
+| `local` | the repo's git-ignored local settings | Trying it on one project without committing anything. |
+
+So to make every contributor to some project pick the skill up, run both
+commands with `--scope project` inside that project and commit the resulting
+`.claude/settings.json`. They still each need read access to this repo.
+
+To update later, and to remove:
+
+```bash
+claude plugin marketplace update scharissis && claude plugin update backlog-drain
+```
+
+```bash
+claude plugin uninstall backlog-drain && claude plugin marketplace remove scharissis
+```
+
+### The skill, by hand
+
+If you would rather not involve the plugin system, copy the skill directory in.
+It behaves identically; it just will not update itself.
 
 ```bash
 cp -r skills/implement-issue ~/.claude/skills/
@@ -75,20 +114,44 @@ cp -r skills/implement-issue ~/.claude/skills/
 Copy-Item -Recurse skills\implement-issue $HOME\.claude\skills\
 ```
 
+Do one or the other, not both — two copies of the same skill name drift apart
+silently.
+
 ### The binary
 
 ```bash
 go install github.com/scharissis/backlog-drain/cmd/backlog-drain@latest
 ```
 
-Or build a local copy:
+For a private module, `go install` needs to be told not to consult the public
+proxy, and to use your git credentials:
+
+```bash
+GOPRIVATE=github.com/scharissis/* go install github.com/scharissis/backlog-drain/cmd/backlog-drain@latest
+```
+
+Or build from a clone, which avoids the question entirely:
 
 ```bash
 go build -o backlog-drain ./cmd/backlog-drain
 ```
 
 Prebuilt binaries for Linux, macOS and Windows are attached to each tagged
-release.
+release, and are the easiest option on a machine without Go.
+
+### Access
+
+The repository is private, so:
+
+- **Other people cannot install this** unless you grant them access. Adding the
+  marketplace runs a `git clone` as them; without access it fails there.
+- **You can**, on any machine where `git` can already clone your private repos —
+  an SSH key, or the credential helper `gh auth login` sets up.
+- To share it with named people, add them as collaborators
+  (`gh repo add-collaborator`) or move the repo into an organisation.
+- To make it installable by anyone, publish it: `gh repo edit --visibility public`.
+  The skill, the README and the plugin metadata all become public at that point,
+  so read them once with that in mind first.
 
 ## Usage
 
@@ -156,6 +219,53 @@ Two other knobs matter when moving between repos:
 - `-branch-prefix` must match what the skill names its branches, since that is
   how a PR is matched back to its issue.
 - `-label` is the cleanest way to opt individual issues in on a busy repo.
+
+## Publishing and versioning
+
+The repo ships two artefacts — a Claude plugin and a Go binary — and they share
+one version number, the `version` field in
+[`.claude-plugin/plugin.json`](.claude-plugin/plugin.json). That field is the
+source of truth; everything else is derived from it.
+
+A release is that number, bumped and committed, plus two tags on the same
+commit:
+
+| Tag | Who needs it |
+| --- | --- |
+| `backlog-drain--v0.2.0` | The Claude plugin tooling. `claude plugin tag` creates it, and refuses if `plugin.json` and the marketplace entry disagree. |
+| `v0.2.0` | Go modules — `go install ...@v0.2.0` only resolves semver tags — and the trigger for the binary release workflow. |
+
+Two tags for one release is a footgun, so a script does both:
+
+```bash
+./scripts/release.sh
+```
+
+```powershell
+.\scripts\release.ps1
+```
+
+Each refuses to run on a dirty tree, so the version bump has to be committed
+first. Pushing `v0.2.0` starts the release workflow, which cross-compiles the
+five targets and attaches them to a GitHub release with generated notes.
+
+**Installs track the default branch, not tags.** The marketplace entry uses
+`"source": "./"` — the plugin lives in the same repo as the marketplace — so
+`claude plugin marketplace update` fetches whatever is on `main`. The tags are
+release markers and rollback points, not what the installer resolves. If you
+ever want installs pinned to a reviewed release instead, change the entry in
+`marketplace.json` from `"./"` to an explicit git source with a `ref`, and
+moving that `ref` becomes the act of publishing.
+
+What to bump, pre-1.0:
+
+- **Patch** — bug fixes, doc changes, anything invisible to a caller.
+- **Minor** — new flags, changed defaults, changes to the skill's phases. The
+  `-tools` default counts: widening it changes what unattended runs may do.
+- **Major** — deferred until the skill's contract with the supervisor settles.
+  The coupling to watch is the branch name: the supervisor finds a PR by its
+  head branch, so if the skill ever stops naming branches `issue-N`, that is a
+  breaking change on both sides at once.
 
 ## Development
 

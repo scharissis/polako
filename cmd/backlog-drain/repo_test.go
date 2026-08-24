@@ -51,8 +51,13 @@ func TestPluginManifestMatchesTheModule(t *testing.T) {
 	if want := moduleName(t); manifest.Name != want {
 		t.Errorf("plugin name = %q, want %q to match the module", manifest.Name, want)
 	}
-	if manifest.Version == "" || manifest.Description == "" {
-		t.Errorf("plugin.json needs a version and a description, got %+v", manifest)
+	if manifest.Description == "" {
+		t.Error("plugin.json needs a description: it is what the marketplace lists")
+	}
+	// Both release tags derive from this field — backlog-drain--vX.Y.Z for the
+	// plugin tooling, vX.Y.Z for `go install` — so it has to be plain semver.
+	if !regexp.MustCompile(`^\d+\.\d+\.\d+$`).MatchString(manifest.Version) {
+		t.Errorf("plugin version %q is not semver; the release tags derive from it", manifest.Version)
 	}
 }
 
