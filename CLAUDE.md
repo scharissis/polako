@@ -13,10 +13,17 @@ in the PR body rather than doing it quietly.
   branches from a default branch already containing the previous merge. Parking
   an issue and working a later one preserves that. Implementing two issues
   concurrently does not.
-- **All state lives in GitHub** — issues, comments, labels, PRs, branches. The
-  process keeps no durable state and writes no state files: kill it at any
+- **All orchestration state lives in GitHub** — issues, comments, labels, PRs,
+  branches. The process keeps no durable state it reads back: kill it at any
   point, rerun it later, and it must re-derive where things stand from GitHub
   alone. Anything that would want a local database is the wrong design here.
+- **Write-only telemetry is the one exception**, and it stays that way. The
+  run-data recorder (`metrics.go`) appends JSONL under `~/.backlog-drain`; the
+  drain loop never reads it, no decision depends on it, and deleting the
+  directory mid-drain changes no behavior. A read from those files anywhere
+  outside `stats` would turn telemetry back into state. Records hold numbers,
+  identifiers and operator-chosen labels only — never issue, comment or PR
+  text — and nothing is ever sent off the machine.
 - **Restart safety.** If a PR already exists for an issue's branch, never re-run
   the skill for that issue — go straight to waiting on the PR.
 - **`issue-N` branch naming is a contract.** The supervisor finds a PR by its

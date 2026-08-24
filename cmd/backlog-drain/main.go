@@ -11,6 +11,9 @@
 // re-derives where things stand. The only human touchpoints are answering
 // clarification comments and merging PRs — both on GitHub.
 //
+// The one thing it writes locally is run data: a line of numbers per run,
+// under ~/.backlog-drain, which nothing here ever reads back. See metrics.go.
+//
 // Nothing here is tied to one repository or language: point -dir at any GitHub
 // checkout, and use -tools/-add-tools to match that project's ecosystem.
 //
@@ -88,12 +91,23 @@ type config struct {
 	tools          string
 	addTools       string
 	permissionMode string
+	model          string
 	poll           time.Duration
 	retries        int
 	retryWait      time.Duration
 	stall          time.Duration
 	skip           map[int]bool
 	once           bool
+
+	// Run-data capture. tag labels a batch of runs so configurations can be
+	// compared later; rec is the sink, and writes nothing when -metrics is off.
+	tag string
+	rec *recorder
+
+	// Filled in by preflight, recorded with every run: which repository this
+	// is, and which CLI produced its numbers.
+	repo          string
+	claudeVersion string
 }
 
 func main() {
@@ -116,7 +130,7 @@ func main() {
 
 func parseFlags() config {
 	var cfg config
-	var skip string
+	var skip, metrics string
 	flag.StringVar(&cfg.dir, "dir", ".", "path to the repository's main checkout")
 	flag.StringVar(&cfg.claudeBin, "claude", "claude", "claude binary to invoke")
 	flag.StringVar(&cfg.skill, "skill", defaultSkill, "skill to run per issue")
@@ -127,14 +141,19 @@ func parseFlags() config {
 	flag.StringVar(&cfg.addTools, "add-tools", "",
 		"extra --allowedTools entries, appended to -tools instead of replacing it")
 	flag.StringVar(&cfg.permissionMode, "permission-mode", "acceptEdits", "claude --permission-mode")
+	flag.StringVar(&cfg.model, "model", "", "claude --model for every run (empty = whatever the CLI defaults to)")
 	flag.DurationVar(&cfg.poll, "poll", 5*time.Minute, "interval between GitHub checks while waiting")
 	flag.IntVar(&cfg.retries, "retries", 3, "resume attempts after a crashed claude run (nonzero exit)")
 	flag.DurationVar(&cfg.retryWait, "retry-wait", 30*time.Second, "wait before each resume attempt")
 	flag.DurationVar(&cfg.stall, "stall", 15*time.Minute, "kill and resume a run with no output events for this long (0 disables)")
 	flag.StringVar(&skip, "skip", "", "comma-separated issue numbers to skip (head-of-line escape hatch)")
 	flag.BoolVar(&cfg.once, "once", false, "process a single issue to merge, then exit")
+	flag.StringVar(&cfg.tag, "run-tag", "", "label recorded with every run, for comparing one batch against another")
+	flag.StringVar(&metrics, "metrics", "",
+		`directory for run-data records, or "off" (default ~/.backlog-drain/metrics)`)
 	flag.Parse()
 
+	cfg.rec = newRecorder(metrics)
 	cfg.skip = parseSkip(skip)
 	abs, err := filepath.Abs(cfg.dir)
 	if err != nil {
@@ -169,7 +188,7 @@ func resolveTools(tools, add string) string {
 }
 
 func run(ctx context.Context, cfg config) error {
-	if err := preflight(ctx, cfg); err != nil {
+	if err := preflight(ctx, &cfg); err != nil {
 		return err
 	}
 	for {
@@ -195,30 +214,60 @@ func run(ctx context.Context, cfg config) error {
 
 // preflight fails fast on a misconfigured environment, so an unattended run
 // can't die on its first gh call an hour after being started.
-func preflight(ctx context.Context, cfg config) error {
+func preflight(ctx context.Context, cfg *config) error {
 	for _, bin := range []string{cfg.claudeBin, "gh", "git"} {
 		if _, err := exec.LookPath(bin); err != nil {
 			return fmt.Errorf("%q not found on PATH: %w", bin, err)
 		}
 	}
-	if _, err := git(ctx, cfg, "rev-parse", "--git-dir"); err != nil {
+	if _, err := git(ctx, *cfg, "rev-parse", "--git-dir"); err != nil {
 		return fmt.Errorf("-dir %s is not a git checkout: %w", cfg.dir, err)
 	}
-	out, err := gh(ctx, cfg, "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
+	out, err := gh(ctx, *cfg, "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
 	if err != nil {
 		return fmt.Errorf("no GitHub repository reachable from %s (is gh authenticated?): %w", cfg.dir, err)
 	}
-	log.Printf("%s — running /%s per issue, polling every %s",
-		strings.TrimSpace(string(out)), cfg.skill, cfg.poll)
+	cfg.repo = strings.TrimSpace(string(out))
+	cfg.claudeVersion = claudeVersion(ctx, *cfg)
+	log.Printf("%s — running /%s per issue, polling every %s", cfg.repo, cfg.skill, cfg.poll)
+	if cfg.rec.enabled() {
+		// Say where the data goes, every time, unprompted: it is the whole of
+		// the answer to "what does this tool record".
+		log.Printf("recording run data in %s — numbers only, never leaves this machine (-metrics off to disable)",
+			cfg.rec.dir)
+	}
 	return nil
+}
+
+// claudeVersion pins which CLI produced a run's numbers. Best-effort: a
+// version it cannot read leaves the field empty rather than stopping a drain
+// over telemetry.
+func claudeVersion(ctx context.Context, cfg config) string {
+	out, err := capture(ctx, cfg.dir, cfg.claudeBin, "--version")
+	if err != nil {
+		return ""
+	}
+	if fields := strings.Fields(string(out)); len(fields) > 0 {
+		return fields[0]
+	}
+	return ""
 }
 
 // processIssue advances one issue all the way to merged, however many
 // implement/wait cycles that takes.
 func processIssue(ctx context.Context, cfg config, issue int) error {
 	branch := fmt.Sprintf("%s%d", cfg.branchPrefix, issue)
-	attempt := 0    // 0 = fresh skill run; >0 = retry after a crash
-	sessionID := "" // from the run's init event; resume target for retries
+	attempt := 0      // 0 = fresh skill run; >0 = retry after a crash
+	sessionID := ""   // from the run's init event; resume target for retries
+	answered := false // a human replied, so the next run folds the answers in
+
+	// terminal marks how the issue ended, failures included — they are the
+	// most informative rows in the dataset, and every one of them exits the
+	// process. Transient GitHub errors and Ctrl+C are deliberately not
+	// outcomes: the issue is still open, and the next drain resumes it.
+	terminal := func(prNumber int, outcome string) {
+		cfg.rec.recordIssue(cfg, issue, prNumber, outcome)
+	}
 
 	for {
 		// Restart safety: if a PR already exists for this branch, never
@@ -234,22 +283,43 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 				return err
 			}
 
-			resumeTarget := ""
-			if attempt > 0 {
+			resumeTarget, reason := "", reasonImplement
+			switch {
+			case attempt > 0:
 				resumeTarget = sessionID // empty if the crashed run never got a session
+				reason = reasonResume
+			case answered:
+				reason = reasonAnswers
 			}
-			newID, runErr := runClaude(ctx, cfg, issue, resumeTarget)
-			if newID != "" {
-				sessionID = newID
+			answered = false
+
+			started := time.Now()
+			rep, runErr := runClaude(ctx, cfg, issue, resumeTarget)
+			rc := runContext{
+				issue: issue, reason: reason, attempt: attempt,
+				resumedFrom: resumeTarget, started: started, ended: time.Now(),
 			}
+			if rep.sessionID != "" {
+				sessionID = rep.sessionID
+			}
+			// record closes over the run; the outcome is whatever the checks
+			// below turn out to find, so every exit from here on passes one.
+			record := func(prNumber int, outcome string) {
+				rc.pr, rc.outcome = prNumber, outcome
+				cfg.rec.recordRun(cfg, rc, rep)
+			}
+
 			if runErr != nil {
 				if ctx.Err() != nil {
+					record(0, outcomeUnknown)
 					return ctx.Err()
 				}
 				// A prompt that never resolved will never resolve on a retry,
 				// and the generic "no PR and no questions" report buries the
 				// cause. Say what is actually wrong and stop.
 				if errors.Is(runErr, errNoWork) {
+					record(0, outcomeNothing)
+					terminal(0, issueNeedsHuman)
 					return fmt.Errorf("%w — check that -skill %q names a skill this "+
 						"installation has; plugin skills are namespaced <plugin>:<skill>, "+
 						"a skill copied into ~/.claude/skills is not",
@@ -260,28 +330,32 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 
 			pr, err = prForBranch(ctx, cfg, branch)
 			if err != nil {
+				record(0, outcomeUnknown)
 				return err
 			}
 			if pr == nil {
 				after, err := commentCount(ctx, cfg, issue)
 				if err != nil {
+					record(0, outcomeUnknown)
 					return err
 				}
 				switch {
 				case after > before:
 					// Questions were posted (even if the run then crashed):
 					// wait for a human reply, then fold it in with a fresh run.
+					record(0, outcomeQuestions)
 					log.Printf("blocked on questions — waiting for a reply on the issue thread")
 					if err := waitForComments(ctx, cfg, issue, after); err != nil {
 						return err
 					}
 					log.Printf("new activity on #%d — re-running to fold the answers in", issue)
-					attempt = 0
+					attempt, answered = 0, true
 					continue
 				case runErr != nil && attempt < cfg.retries:
 					// Crash (API drop, stall, tool failure): resume the exact
 					// session by ID, keeping its research context. If no
 					// session was ever created, retry as a fresh run instead.
+					record(0, outcomeNothing)
 					attempt++
 					mode := "restarting fresh"
 					if sessionID != "" {
@@ -294,13 +368,18 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 					}
 					continue
 				case runErr != nil:
+					record(0, outcomeNothing)
+					terminal(0, issueNeedsHuman)
 					return fmt.Errorf("claude crashed and %d resume attempts failed — needs a human", cfg.retries)
 				default:
 					// Clean exit, yet no PR and no questions: Claude decided
 					// nothing, which a machine shouldn't paper over.
+					record(0, outcomeNothing)
+					terminal(0, issueNeedsHuman)
 					return errors.New("run completed but produced no PR and no questions — needs a human")
 				}
 			}
+			record(pr.Number, outcomeOpenedPR)
 			attempt = 0
 		}
 
@@ -309,6 +388,9 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 			log.Printf("PR #%d open — waiting for merge (%s)", pr.Number, pr.URL)
 			state, err := supervisePR(ctx, cfg, issue, pr.Number)
 			if err != nil {
+				if ctx.Err() == nil { // not Ctrl+C: remediation ran out of attempts
+					terminal(pr.Number, issueNeedsHuman)
+				}
 				return err
 			}
 			pr.State = state
@@ -317,10 +399,13 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 			if pr.State == "MERGED" {
 				log.Printf("PR #%d merged — cleaning up and advancing", pr.Number)
 				cleanupWorktree(ctx, cfg, issue)
+				terminal(pr.Number, issueMerged)
 				return ensureIssueClosed(ctx, cfg, issue, pr.Number)
 			}
+			terminal(pr.Number, issueClosed)
 			return fmt.Errorf("PR #%d closed without merge — needs a human decision", pr.Number)
 		default:
+			terminal(pr.Number, issueNeedsHuman)
 			return fmt.Errorf("PR #%d in unexpected state %q", pr.Number, pr.State)
 		}
 	}
@@ -328,10 +413,9 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 
 // --- Claude ---
 
-// runClaude executes one headless skill run and returns the session ID it
-// observed (empty if the run died before a session was created). A non-empty
-// resumeID continues that exact session instead of starting the skill fresh.
-func runClaude(ctx context.Context, cfg config, issue int, resumeID string) (string, error) {
+// runClaude executes one headless skill run. A non-empty resumeID continues
+// that exact session instead of starting the skill fresh.
+func runClaude(ctx context.Context, cfg config, issue int, resumeID string) (runReport, error) {
 	prompt := fmt.Sprintf("/%s %d", cfg.skill, issue)
 	if resumeID != "" {
 		prompt = fmt.Sprintf("Continue the /%s %d workflow exactly where it stopped.", cfg.skill, issue)
@@ -345,8 +429,11 @@ func buildArgs(cfg config, prompt, resumeID string) []string {
 	if resumeID != "" {
 		args = append(args, "--resume", resumeID)
 	}
-	return append(args, "-p", prompt,
-		"--permission-mode", cfg.permissionMode,
+	args = append(args, "-p", prompt, "--permission-mode", cfg.permissionMode)
+	if cfg.model != "" {
+		args = append(args, "--model", cfg.model)
+	}
+	return append(args,
 		"--allowedTools", resolveTools(cfg.tools, cfg.addTools),
 		"--output-format", "stream-json", // one JSON event per message, in real time
 		"--verbose", // required for stream-json in print mode
@@ -366,9 +453,165 @@ func watchTick(stall time.Duration) time.Duration {
 	return tick
 }
 
+// streamEvent is one stream-json line. Every consumer — the progress log and
+// the run report — reads this single parse: the stream carries whole file
+// contents, so unmarshalling each line once per consumer was never free.
+type streamEvent struct {
+	Type      string `json:"type"`
+	Subtype   string `json:"subtype"`
+	Model     string `json:"model"`
+	SessionID string `json:"session_id"`
+	Message   struct {
+		Content []struct {
+			Type  string          `json:"type"`
+			Text  string          `json:"text"`
+			Name  string          `json:"name"`
+			Input json.RawMessage `json:"input"`
+		} `json:"content"`
+		Usage streamUsage `json:"usage"`
+	} `json:"message"`
+	DurationMS    int64                       `json:"duration_ms"`
+	DurationAPIMS int64                       `json:"duration_api_ms"`
+	NumTurns      int                         `json:"num_turns"`
+	TotalCost     float64                     `json:"total_cost_usd"`
+	IsError       bool                        `json:"is_error"`
+	Usage         streamUsage                 `json:"usage"`
+	ModelUsage    map[string]streamModelUsage `json:"modelUsage"`
+}
+
+// streamUsage is the token block the CLI hangs off both assistant messages and
+// the final result event.
+type streamUsage struct {
+	Input      int64 `json:"input_tokens"`
+	Output     int64 `json:"output_tokens"`
+	CacheRead  int64 `json:"cache_read_input_tokens"`
+	CacheWrite int64 `json:"cache_creation_input_tokens"`
+}
+
+// streamModelUsage is the per-model breakdown on the result event. Two things
+// to honour: camelCase keys, unlike the snake_case block above, and older CLI
+// versions omit it entirely.
+type streamModelUsage struct {
+	Input      int64   `json:"inputTokens"`
+	Output     int64   `json:"outputTokens"`
+	CacheRead  int64   `json:"cacheReadInputTokens"`
+	CacheWrite int64   `json:"cacheCreationInputTokens"`
+	CostUSD    float64 `json:"costUSD"`
+}
+
+// salvageSessionID reads the one field worth recovering from a line the full
+// schema rejected.
+func salvageSessionID(line []byte) string {
+	var v struct {
+		SessionID string `json:"session_id"`
+	}
+	if json.Unmarshal(line, &v) != nil {
+		return ""
+	}
+	return v.SessionID
+}
+
+func parseEvent(line []byte) (streamEvent, bool) {
+	var ev streamEvent
+	if json.Unmarshal(line, &ev) != nil {
+		return streamEvent{}, false // not an event we understand
+	}
+	return ev, true
+}
+
+// runReport is what one claude invocation yielded: the session to resume, the
+// numbers it reported, and how it ended. It is filled in as the stream
+// arrives, so it stays valid — and worth recording — for a run that crashed,
+// stalled or was interrupted before it could report anything itself.
+type runReport struct {
+	sessionID  string
+	model      string // what actually ran, which -model only requests
+	subtype    string
+	isError    bool
+	hasResult  bool
+	turns      int // -1 until a result event says otherwise
+	toolUses   int
+	wallMS     int64
+	apiMS      int64
+	costUSD    float64
+	usage      tokenCounts
+	modelUsage map[string]modelTokens
+
+	// Observed as the run streamed: the only numbers a crash, a stall or an
+	// interrupt leaves behind, since none of the three emits a result event.
+	// Approximate by construction — turns counts assistant messages, and cost
+	// stays zero because pricing belongs to the CLI, never to this binary.
+	observed      tokenCounts
+	observedTurns int
+
+	exitCode    int
+	stalled     bool
+	interrupted bool
+}
+
+// status maps a run to exactly one value, most specific first: an interrupted
+// run is a nonzero exit too, and so is a stalled one.
+func (r runReport) status() string {
+	switch {
+	case r.interrupted:
+		return "interrupted"
+	case r.stalled:
+		return "stalled"
+	case r.exitCode != 0:
+		return "crash"
+	case r.isError:
+		return "error"
+	case r.hasResult && r.turns == 0:
+		return "no-turns"
+	}
+	return "ok"
+}
+
+// observe folds one event into the report.
+func (r *runReport) observe(ev streamEvent) {
+	if ev.SessionID != "" {
+		r.sessionID = ev.SessionID
+	}
+	switch ev.Type {
+	case "system":
+		if ev.Subtype == "init" && ev.Model != "" {
+			r.model = ev.Model
+		}
+	case "assistant":
+		r.observedTurns++
+		r.observed.add(ev.Message.Usage)
+		for _, c := range ev.Message.Content {
+			if c.Type == "tool_use" {
+				r.toolUses++
+			}
+		}
+	case "result":
+		r.hasResult = true
+		r.subtype, r.isError = ev.Subtype, ev.IsError
+		r.turns = ev.NumTurns
+		r.wallMS, r.apiMS = ev.DurationMS, ev.DurationAPIMS
+		r.costUSD = ev.TotalCost
+		r.usage = tokenCounts{}
+		r.usage.add(ev.Usage)
+		for name, u := range ev.ModelUsage {
+			if r.modelUsage == nil {
+				r.modelUsage = make(map[string]modelTokens, len(ev.ModelUsage))
+			}
+			r.modelUsage[name] = modelTokens{
+				tokenCounts: tokenCounts{In: u.Input, Out: u.Output,
+					CacheRead: u.CacheRead, CacheWrite: u.CacheWrite},
+				CostUSD: u.CostUSD,
+			}
+		}
+	}
+}
+
 // execClaude runs one headless claude invocation with the shared streaming,
-// logging, and stall-watchdog machinery.
-func execClaude(ctx context.Context, cfg config, prompt, resumeID string) (string, error) {
+// logging, and stall-watchdog machinery. The report it returns is valid on
+// every path, error included: the retry logic needs the session ID to resume,
+// and the run burned real tokens whether or not it lived to report them.
+func execClaude(ctx context.Context, cfg config, prompt, resumeID string) (runReport, error) {
+	rep := runReport{sessionID: resumeID, turns: -1, exitCode: -1}
 	args := buildArgs(cfg, prompt, resumeID)
 	log.Printf("running: %s %s", cfg.claudeBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.claudeBin, args...)
@@ -376,10 +619,10 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID string) (strin
 	cmd.Stderr = os.Stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return "", err
+		return rep, err
 	}
 	if err := cmd.Start(); err != nil {
-		return "", err
+		return rep, err
 	}
 
 	// Stall watchdog: if no events arrive for cfg.stall, kill the run.
@@ -411,77 +654,43 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID string) (strin
 		}()
 	}
 
-	sessionID := resumeID
-	turns := -1 // -1 = the run never reported a result
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 64*1024), 32*1024*1024) // events carrying file contents can be large
 	for sc.Scan() {
 		lastEvent.Store(time.Now().UnixNano())
-		if id := extractSessionID(sc.Bytes()); id != "" {
-			sessionID = id
+		ev, ok := parseEvent(sc.Bytes())
+		if !ok {
+			// Junk on stdout, or an event whose JSON does not fit the schema
+			// — a content field typed as a string rather than an array, say.
+			// Stay quiet about it, but never at the price of the session ID:
+			// that one field is what a retry resumes, and it is worth a
+			// second, far laxer parse on the rare line that fails the first.
+			if id := salvageSessionID(sc.Bytes()); id != "" {
+				rep.sessionID = id
+			}
+			continue
 		}
-		if n := resultTurns(sc.Bytes()); n >= 0 {
-			turns = n
-		}
-		logEvent(sc.Bytes())
+		rep.observe(ev)
+		logEvent(ev)
 	}
 
 	err = cmd.Wait()
-	if stalled.Load() {
-		return sessionID, fmt.Errorf("run stalled: no output events for %s", cfg.stall)
+	if cmd.ProcessState != nil {
+		rep.exitCode = cmd.ProcessState.ExitCode()
 	}
-	if err == nil && turns == 0 {
-		return sessionID, fmt.Errorf("%w: %q produced no work", errNoWork, prompt)
+	rep.stalled = stalled.Load()
+	rep.interrupted = ctx.Err() != nil
+	if rep.stalled {
+		return rep, fmt.Errorf("run stalled: no output events for %s", cfg.stall)
 	}
-	return sessionID, err
-}
-
-// resultTurns reports the turn count carried by a result event, or -1 for any
-// other line. A result of zero means the run ended without doing anything.
-func resultTurns(line []byte) int {
-	var v struct {
-		Type     string `json:"type"`
-		NumTurns int    `json:"num_turns"`
+	if err == nil && rep.turns == 0 {
+		return rep, fmt.Errorf("%w: %q produced no work", errNoWork, prompt)
 	}
-	if json.Unmarshal(line, &v) != nil || v.Type != "result" {
-		return -1
-	}
-	return v.NumTurns
-}
-
-// extractSessionID pulls the session_id most stream events carry.
-func extractSessionID(line []byte) string {
-	var v struct {
-		SessionID string `json:"session_id"`
-	}
-	if json.Unmarshal(line, &v) != nil {
-		return ""
-	}
-	return v.SessionID
+	return rep, err
 }
 
 // logEvent renders one stream-json event as a single progress line.
-func logEvent(line []byte) {
-	var ev struct {
-		Type    string `json:"type"`
-		Subtype string `json:"subtype"`
-		Model   string `json:"model"`
-		Message struct {
-			Content []struct {
-				Type  string          `json:"type"`
-				Text  string          `json:"text"`
-				Name  string          `json:"name"`
-				Input json.RawMessage `json:"input"`
-			} `json:"content"`
-		} `json:"message"`
-		DurationMS int64   `json:"duration_ms"`
-		NumTurns   int     `json:"num_turns"`
-		TotalCost  float64 `json:"total_cost_usd"`
-		IsError    bool    `json:"is_error"`
-	}
-	if json.Unmarshal(line, &ev) != nil {
-		return // not an event we understand; stay quiet rather than noisy
-	}
+func logEvent(ev streamEvent) {
 	switch ev.Type {
 	case "system":
 		if ev.Subtype == "init" {
@@ -672,7 +881,14 @@ func remediateConflicts(ctx context.Context, cfg config, issue, prNumber int) er
 			"fix anything the rebase broke, and push with --force-with-lease. "+
 			"Do not open a new PR, do not merge anything, and do not commit to the default branch.",
 		prNumber, branch, branch)
-	_, err := execClaude(ctx, cfg, prompt, "")
+	started := time.Now()
+	rep, err := execClaude(ctx, cfg, prompt, "")
+	// A remediation run pushes to a PR that already exists, so it leaves
+	// behind neither a new PR nor questions.
+	cfg.rec.recordRun(cfg, runContext{
+		issue: issue, pr: prNumber, reason: reasonRemediate, outcome: outcomeNothing,
+		started: started, ended: time.Now(),
+	}, rep)
 	return err
 }
 

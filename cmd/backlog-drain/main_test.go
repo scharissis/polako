@@ -34,12 +34,39 @@ func fakeClaude(mode string) int {
 	switch mode {
 	case "stream":
 		emit(`{"type":"system","subtype":"init","session_id":"sess-xyz","model":"claude-opus-5"}`)
-		emit(`{"type":"assistant","session_id":"sess-xyz","message":{"content":[{"type":"text","text":"Reading the issue."}]}}`)
-		emit(`{"type":"result","subtype":"success","session_id":"sess-xyz","duration_ms":1000,"num_turns":3,"total_cost_usd":0.5}`)
+		emit(`{"type":"assistant","session_id":"sess-xyz","message":{"content":[{"type":"text","text":"Reading the issue."}],` +
+			`"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":30,"cache_creation_input_tokens":40}}}`)
+		emit(`{"type":"assistant","session_id":"sess-xyz","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./..."}}],` +
+			`"usage":{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":3,"cache_creation_input_tokens":4}}}`)
+		emit(`{"type":"result","subtype":"success","session_id":"sess-xyz","duration_ms":1000,"duration_api_ms":800,` +
+			`"num_turns":3,"total_cost_usd":0.5,` +
+			`"usage":{"input_tokens":100,"output_tokens":200,"cache_read_input_tokens":300,"cache_creation_input_tokens":400},` +
+			`"modelUsage":{"claude-opus-5":{"inputTokens":100,"outputTokens":190,"cacheReadInputTokens":300,` +
+			`"cacheCreationInputTokens":400,"costUSD":0.45},` +
+			`"claude-haiku-4-5":{"inputTokens":0,"outputTokens":10,"costUSD":0.05}}}`)
 		return 0
+	case "oldcli":
+		// A CLI old enough to report a result with no per-model breakdown.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-old","model":"claude-opus-5"}`)
+		emit(`{"type":"result","subtype":"success","session_id":"sess-old","duration_ms":10,"num_turns":2,` +
+			`"total_cost_usd":0.25,"usage":{"input_tokens":5,"output_tokens":6}}`)
+		return 0
+	case "partial":
+		// Died mid-stream: real tokens burned, no result event to report them.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-partial","model":"claude-opus-5"}`)
+		emit(`{"type":"assistant","session_id":"sess-partial","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"main.go"}}],` +
+			`"usage":{"input_tokens":7,"output_tokens":8,"cache_read_input_tokens":9,"cache_creation_input_tokens":11}}}`)
+		emit(`{"type":"assistant","session_id":"sess-partial","message":{"content":[{"type":"text","text":"Still working."}],` +
+			`"usage":{"input_tokens":1,"output_tokens":1,"cache_read_input_tokens":1,"cache_creation_input_tokens":1}}}`)
+		return 9
 	case "crash":
 		emit(`{"type":"system","subtype":"init","session_id":"sess-crash","model":"claude-opus-5"}`)
 		return 7
+	case "oddshape":
+		// content as a plain string rather than an array: valid JSON the event
+		// schema cannot hold, and here the only line carrying the session.
+		emit(`{"type":"user","session_id":"sess-odd","message":{"content":"a string, not an array"}}`)
+		return 3
 	case "noturns":
 		// What an unresolvable slash command looks like: a clean exit, no work.
 		emit(`{"type":"system","subtype":"init","session_id":"sess-none","model":"claude-opus-5"}`)
@@ -77,7 +104,9 @@ func TestLogEventRendersProgressLines(t *testing.T) {
 		`{"type":"result","subtype":"success","duration_ms":1141000,"num_turns":74,"total_cost_usd":4.12,"is_error":false}`,
 	}
 	for _, e := range events {
-		logEvent([]byte(e))
+		if ev, ok := parseEvent([]byte(e)); ok {
+			logEvent(ev)
+		}
 	}
 
 	out := buf.String()
@@ -99,22 +128,37 @@ func TestLogEventRendersProgressLines(t *testing.T) {
 
 func TestLogEventMarksErrorResults(t *testing.T) {
 	buf := captureLog(t)
-	logEvent([]byte(`{"type":"result","subtype":"error_max_turns","num_turns":9,"is_error":true}`))
+	ev, ok := parseEvent([]byte(`{"type":"result","subtype":"error_max_turns","num_turns":9,"is_error":true}`))
+	if !ok {
+		t.Fatal("a result event should parse")
+	}
+	logEvent(ev)
 	if got := buf.String(); !strings.Contains(got, "finished (ERROR: error_max_turns)") {
 		t.Errorf("error results should be flagged\ngot: %s", got)
 	}
 }
 
-func TestExtractSessionID(t *testing.T) {
+// One parse per line feeds both the progress log and the run report, so the
+// session ID every consumer depends on now comes out of parseEvent.
+func TestParseEventReadsTheSessionAndRejectsJunk(t *testing.T) {
 	cases := map[string]string{
 		`{"type":"system","subtype":"init","session_id":"abc-123","model":"claude-opus-5"}`: "abc-123",
 		`{"type":"assistant","session_id":"abc-123","message":{"content":[]}}`:              "abc-123",
 		`{"type":"result","subtype":"success"}`:                                             "",
-		`garbage`:                                                                           "",
 	}
 	for line, want := range cases {
-		if got := extractSessionID([]byte(line)); got != want {
-			t.Errorf("extractSessionID(%s) = %q, want %q", line, got, want)
+		ev, ok := parseEvent([]byte(line))
+		if !ok {
+			t.Errorf("parseEvent(%s) rejected a valid event", line)
+			continue
+		}
+		if ev.SessionID != want {
+			t.Errorf("parseEvent(%s).SessionID = %q, want %q", line, ev.SessionID, want)
+		}
+	}
+	for _, junk := range []string{`garbage`, `["not", "an", "event"]`, `"a string"`, ``} {
+		if _, ok := parseEvent([]byte(junk)); ok {
+			t.Errorf("parseEvent(%q) should reject a line that is not an event", junk)
 		}
 	}
 }
@@ -278,6 +322,20 @@ func TestBuildArgs(t *testing.T) {
 	}
 }
 
+// -model is what varies the thing being measured; a run that silently ignored
+// it would make every model comparison a comparison of the same model.
+func TestBuildArgsPassesTheRequestedModel(t *testing.T) {
+	cfg := config{permissionMode: "acceptEdits", tools: "Read", model: "claude-haiku-4-5"}
+	args := buildArgs(cfg, "p", "")
+	i := slices.Index(args, "--model")
+	if i < 0 || args[i+1] != "claude-haiku-4-5" {
+		t.Errorf("-model should reach the invocation, got %v", args)
+	}
+	if slices.Contains(buildArgs(config{tools: "Read"}, "p", ""), "--model") {
+		t.Error("an unset -model must leave the CLI's own default alone")
+	}
+}
+
 func TestBuildArgsAppliesAddTools(t *testing.T) {
 	cfg := config{permissionMode: "plan", tools: "Read", addTools: "Bash(zig:*)"}
 	args := buildArgs(cfg, "p", "")
@@ -333,12 +391,12 @@ func TestExecClaudeStreamsEventsAndCapturesSession(t *testing.T) {
 	buf := captureLog(t)
 	cfg := fakeClaudeConfig(t, "stream")
 
-	id, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
 	if err != nil {
 		t.Fatalf("execClaude: %v", err)
 	}
-	if id != "sess-xyz" {
-		t.Errorf("session id = %q, want %q", id, "sess-xyz")
+	if rep.sessionID != "sess-xyz" {
+		t.Errorf("session id = %q, want %q", rep.sessionID, "sess-xyz")
 	}
 	for _, want := range []string{"session started", "Reading the issue.", "finished (ok)"} {
 		if !strings.Contains(buf.String(), want) {
@@ -351,13 +409,20 @@ func TestExecClaudeReportsCrashesWithTheSessionToResume(t *testing.T) {
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "crash")
 
-	id, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
 	if err == nil {
 		t.Fatal("a nonzero exit must surface as an error")
 	}
-	// The ID matters more than the error: it is what the retry resumes.
-	if id != "sess-crash" {
-		t.Errorf("session id = %q, want %q so the retry can resume it", id, "sess-crash")
+	// The report matters more than the error: it is what the retry resumes
+	// from, and what the run record is built out of.
+	if rep.sessionID != "sess-crash" {
+		t.Errorf("session id = %q, want %q so the retry can resume it", rep.sessionID, "sess-crash")
+	}
+	if rep.exitCode != 7 {
+		t.Errorf("exit code = %d, want 7", rep.exitCode)
+	}
+	if got := rep.status(); got != "crash" {
+		t.Errorf("status = %q, want %q", got, "crash")
 	}
 }
 
@@ -367,12 +432,17 @@ func TestExecClaudeKillsAStalledRun(t *testing.T) {
 	cfg.stall = 300 * time.Millisecond
 
 	start := time.Now()
-	id, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
 	if err == nil || !strings.Contains(err.Error(), "stalled") {
 		t.Fatalf("a silent run should be killed as stalled, got err=%v", err)
 	}
-	if id != "sess-hang" {
-		t.Errorf("session id = %q, want %q so the retry can resume it", id, "sess-hang")
+	if rep.sessionID != "sess-hang" {
+		t.Errorf("session id = %q, want %q so the retry can resume it", rep.sessionID, "sess-hang")
+	}
+	// A killed process also exits nonzero; "stalled" is the more specific
+	// answer, and the one that explains the retry.
+	if got := rep.status(); got != "stalled" {
+		t.Errorf("status = %q, want %q", got, "stalled")
 	}
 	if elapsed := time.Since(start); elapsed > 10*time.Second {
 		t.Errorf("watchdog took %s to fire", elapsed)
@@ -430,5 +500,132 @@ func TestExecClaudeFlagsARunThatTookNoTurns(t *testing.T) {
 	_, err := execClaude(context.Background(), cfg, "/nope 1", "")
 	if !errors.Is(err, errNoWork) {
 		t.Fatalf("a clean exit at 0 turns should report errNoWork, got %v", err)
+	}
+}
+
+// --- run-data capture, end to end against the fake CLI ---
+
+func TestExecClaudeCapturesTheResultUsage(t *testing.T) {
+	captureLog(t)
+	cfg := fakeClaudeConfig(t, "stream")
+
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
+	if err != nil {
+		t.Fatalf("execClaude: %v", err)
+	}
+	if rep.model != "claude-opus-5" {
+		t.Errorf("model = %q, want the one the init event reported", rep.model)
+	}
+	if rep.turns != 3 || rep.wallMS != 1000 || rep.apiMS != 800 || rep.costUSD != 0.5 {
+		t.Errorf("result fields = %d turns, %dms wall, %dms api, $%v", rep.turns, rep.wallMS, rep.apiMS, rep.costUSD)
+	}
+	// The tally is the stream's, not the result's: the result reports no tool count.
+	if rep.toolUses != 1 {
+		t.Errorf("tool_uses = %d, want 1", rep.toolUses)
+	}
+	want := tokenCounts{In: 100, Out: 200, CacheRead: 300, CacheWrite: 400}
+	if rep.usage != want {
+		t.Errorf("usage = %+v, want the result's block %+v", rep.usage, want)
+	}
+	if len(rep.modelUsage) != 2 {
+		t.Fatalf("model_usage = %+v, want both models", rep.modelUsage)
+	}
+	// modelUsage is camelCase where the block above is snake_case.
+	if opus := rep.modelUsage["claude-opus-5"]; opus.In != 100 || opus.CostUSD != 0.45 {
+		t.Errorf("per-model entry = %+v, want the camelCase keys read", opus)
+	}
+}
+
+// Losing the session ID means a retry restarts the skill from scratch instead
+// of resuming, throwing away the crashed run's research context — so one
+// unparseable line must not cost it.
+func TestExecClaudeSalvagesTheSessionFromAnUnparseableLine(t *testing.T) {
+	captureLog(t)
+	cfg := fakeClaudeConfig(t, "oddshape")
+
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
+	if err == nil {
+		t.Fatal("a nonzero exit must surface as an error")
+	}
+	if rep.sessionID != "sess-odd" {
+		t.Errorf("session id = %q, want %q — the retry has nothing to resume without it",
+			rep.sessionID, "sess-odd")
+	}
+}
+
+// Older CLI versions report a result with no per-model breakdown at all.
+func TestExecClaudeToleratesAResultWithoutModelUsage(t *testing.T) {
+	captureLog(t)
+	cfg := fakeClaudeConfig(t, "oldcli")
+
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
+	if err != nil {
+		t.Fatalf("execClaude: %v", err)
+	}
+	if rep.modelUsage != nil {
+		t.Errorf("model_usage = %+v, want it absent rather than invented", rep.modelUsage)
+	}
+	if rep.usage.In != 5 || rep.costUSD != 0.25 || rep.status() != "ok" {
+		t.Errorf("the rest of the result should still be read, got %+v", rep)
+	}
+	if rec := newRunRecord(cfg, runContext{started: time.Now(), ended: time.Now()}, rep); rec.UsageSource != usageResult {
+		t.Errorf("usage_source = %q, want %q — the run did report one", rec.UsageSource, usageResult)
+	}
+}
+
+// The bias this guards against: a run that crashes mid-flight burned real
+// tokens. Recording zero for it would make whatever configuration crashes most
+// look like the cheapest one.
+func TestExecClaudeKeepsTheUsageObservedBeforeACrash(t *testing.T) {
+	captureLog(t)
+	cfg := fakeClaudeConfig(t, "partial")
+
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
+	if err == nil {
+		t.Fatal("a nonzero exit must surface as an error")
+	}
+	if rep.hasResult {
+		t.Fatal("a crashed run has no result event to report")
+	}
+	want := tokenCounts{In: 8, Out: 9, CacheRead: 10, CacheWrite: 12}
+	if rep.observed != want {
+		t.Errorf("observed usage = %+v, want the streamed tally %+v", rep.observed, want)
+	}
+	if rep.observedTurns != 2 || rep.toolUses != 1 {
+		t.Errorf("observed %d turns and %d tool uses, want 2 and 1", rep.observedTurns, rep.toolUses)
+	}
+
+	rec := newRunRecord(cfg, runContext{issue: 7, started: time.Now(), ended: time.Now()}, rep)
+	if rec.UsageSource != usageObserved || rec.Tokens != want {
+		t.Errorf("record = %q / %+v, want the observed tally, flagged as observed", rec.UsageSource, rec.Tokens)
+	}
+	if rec.Status != "crash" || rec.ExitCode != 9 {
+		t.Errorf("record status = %q, exit %d, want crash / 9", rec.Status, rec.ExitCode)
+	}
+}
+
+// Records hold numbers, identifiers and operator-chosen labels only. Issue and
+// PR text is sensitive and, on a repo open to outside issues, attacker
+// controlled — so nothing the model said may reach a record file.
+func TestRecordsNeverCarryWhatTheRunSaid(t *testing.T) {
+	captureLog(t)
+	cfg := fakeClaudeConfig(t, "stream")
+	dir := t.TempDir()
+	cfg.repo, cfg.rec = "owner/repo", newRecorder(dir)
+
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
+	if err != nil {
+		t.Fatalf("execClaude: %v", err)
+	}
+	cfg.rec.recordRun(cfg, runContext{issue: 7, reason: reasonImplement,
+		outcome: outcomeOpenedPR, started: time.Now(), ended: time.Now()}, rep)
+
+	written := strings.Join(readRecords(t, dir, cfg.repo), "\n")
+	// Both the assistant text and the tool input the stream carried; the
+	// record counts tool uses, but must never say what they were.
+	for _, leaked := range []string{"Reading the issue", "go test ./...", "Bash"} {
+		if strings.Contains(written, leaked) {
+			t.Errorf("record carries %q from the stream:\n%s", leaked, written)
+		}
 	}
 }
