@@ -1,9 +1,10 @@
 {
-  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "scharissis",
-  "description": "Personal Claude Code plugins",
   "owner": {
     "name": "Stefano Charissis"
+  },
+  "metadata": {
+    "description": "Personal Claude Code plugins"
   },
   "plugins": [
     {
