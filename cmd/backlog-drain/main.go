@@ -37,9 +37,6 @@ import (
 	"time"
 )
 
-// defaultTools is the --allowedTools set for unattended runs: everything the
-// implement-issue skill needs, plus the build/test entry points of the common
-// ecosystems. Replace it with -tools, or extend it with -add-tools.
 // skillDir is the per-issue skill this repo ships under skills/.
 const skillDir = "implement-issue"
 
@@ -55,7 +52,27 @@ const defaultSkill = "backlog-drain:" + skillDir
 // naming a slash command this installation does not have.
 var errNoWork = errors.New("claude took no turns")
 
-const defaultTools = "Bash(git:*),Bash(gh:*)," +
+// defaultTools is the --allowedTools set for unattended runs: everything the
+// implement-issue skill needs, plus the build/test entry points of the common
+// ecosystems. Replace it with -tools, or extend it with -add-tools.
+//
+// gh is granted per subcommand rather than as Bash(gh:*). The run's input —
+// issue bodies and comments — is attacker-controllable on any repository that
+// accepts issues from outside the team, and a blanket grant hands it `gh api`,
+// `gh secret set` and `gh repo delete`. Verb-level grants are not enough
+// either: `gh pr:*` includes `gh pr merge`, which would let a run merge its
+// own PR past the human check, and `gh issue:*` includes
+// `gh issue edit --add-label`, which would let one labelled issue pull an
+// unlabelled one into a -label-gated queue.
+//
+// The skill itself only needs issue view/comment and pr create. The read-only
+// pr lookups are here because a resumed run orients itself before deciding
+// what to do, and a gh call that raises a prompt hangs an unattended run
+// silently — the one failure mode worse than being too narrow. Nothing else
+// that writes is granted; that is what -add-tools is for.
+const defaultTools = "Bash(git:*)," +
+	"Bash(gh issue view:*),Bash(gh issue comment:*)," +
+	"Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh pr diff:*)," +
 	"Read,Write,Edit,Glob,Grep,TodoWrite,Skill," +
 	"Bash(npm:*),Bash(npx:*),Bash(pnpm:*),Bash(yarn:*)," +
 	"Bash(go:*),Bash(cargo:*),Bash(make:*)," +

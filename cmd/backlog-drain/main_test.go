@@ -177,9 +177,31 @@ func TestResolveToolsAppendsWithoutDuplicating(t *testing.T) {
 // gate. Unattended runs die silently if any of those tools needs a prompt.
 func TestDefaultToolsCoverWhatTheSkillNeeds(t *testing.T) {
 	have := strings.Split(defaultTools, ",")
-	for _, want := range []string{"Bash(git:*)", "Bash(gh:*)", "Read", "Write", "Edit", "Glob", "Grep", "Skill"} {
+	for _, want := range []string{
+		"Bash(git:*)", "Bash(gh issue view:*)", "Bash(gh issue comment:*)", "Bash(gh pr create:*)",
+		"Read", "Write", "Edit", "Glob", "Grep", "Skill",
+	} {
 		if !slices.Contains(have, want) {
 			t.Errorf("defaultTools is missing %q", want)
+		}
+	}
+}
+
+// The gh grant is per subcommand on purpose, and the positive test above still
+// passes with a broader one present — so the narrowing needs its own check.
+// Each of these would hand attacker-supplied issue text something the skill
+// never needs and the design forbids.
+func TestDefaultToolsDoNotGrantGhWholesale(t *testing.T) {
+	have := strings.Split(defaultTools, ",")
+	for entry, why := range map[string]string{
+		"Bash(gh:*)":       "gh api, gh secret set and gh repo delete",
+		"Bash(gh pr:*)":    "gh pr merge — nothing may merge itself",
+		"Bash(gh issue:*)": "gh issue edit --add-label — that reopens a -label-gated queue",
+	} {
+		if slices.Contains(have, entry) {
+			t.Errorf("defaultTools grants %s, which permits %s; grant the subcommands the "+
+				"skill needs and leave -add-tools as the escape hatch for projects that need more",
+				entry, why)
 		}
 	}
 }

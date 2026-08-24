@@ -204,7 +204,7 @@ backlog-drain -skip 12,17
 | `-claude` | `claude` | The Claude Code binary to invoke. |
 | `-skill` | `backlog-drain:implement-issue` | Slash command run once per issue. Plugin skills are namespaced `<plugin>:<skill>`; pass `-skill implement-issue` if you copied the skill into `~/.claude/skills` instead. |
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how PRs are matched back to issues. |
-| `-label` | *(none)* | Only process issues carrying this label. |
+| `-label` | *(none)* | Only process issues carrying this label. Doubles as an access control — see [Security](#security). |
 | `-tools` | *(see below)* | `--allowedTools` for unattended runs. **Replaces** the default set. |
 | `-add-tools` | *(none)* | Extra `--allowedTools` entries, **appended** to `-tools`. |
 | `-permission-mode` | `acceptEdits` | Passed to `claude --permission-mode`. |
@@ -221,10 +221,12 @@ Nothing here is tied to one repository or language — `-dir` points anywhere.
 The one thing worth tuning per project is the tool allowlist, because an
 unattended run stalls if a command it needs would raise a permission prompt.
 
-The default `-tools` set covers git, gh, the tools the skill itself needs
-(`Read`, `Write`, `Edit`, `Glob`, `Grep`, `Skill`, `TodoWrite`), and the usual
-entry points for npm/pnpm/yarn, Go, Cargo, Make, Python/uv/pytest, dotnet,
-Maven and Gradle. For anything else, widen it rather than replacing it:
+The default `-tools` set covers git, the handful of gh subcommands the skill
+uses (`gh issue view`/`comment`, `gh pr create`, plus read-only `gh pr
+view`/`list`/`diff`), the tools the skill itself needs (`Read`, `Write`,
+`Edit`, `Glob`, `Grep`, `Skill`, `TodoWrite`), and the usual entry points for
+npm/pnpm/yarn, Go, Cargo, Make, Python/uv/pytest, dotnet, Maven and Gradle.
+For anything else, widen it rather than replacing it:
 
 ```bash
 backlog-drain -add-tools "Bash(bazel:*),Bash(just:*)"
@@ -235,6 +237,54 @@ Two other knobs matter when moving between repos:
 - `-branch-prefix` must match what the skill names its branches, since that is
   how a PR is matched back to its issue.
 - `-label` is the cleanest way to opt individual issues in on a busy repo.
+
+## Security
+
+An unattended run is a Claude session with `--permission-mode acceptEdits`
+whose only input is issue bodies and comments. On any repository that accepts
+issues from outside the team, that input is attacker-controllable. Two things
+constrain it, and they work at different layers:
+
+**The tool allowlist bounds what a run can do.** `-tools` is enforced by Claude
+Code itself, not by the skill's good behaviour, so it does not depend on the
+model declining a request. gh is granted per subcommand — `Bash(gh issue
+view:*)`, `Bash(gh pr create:*)` and a few more — rather than as a blanket
+`Bash(gh:*)`, which would also permit `gh api`, `gh secret set` and `gh repo
+delete`. Even a per-verb grant is too wide: `Bash(gh pr:*)` includes
+`gh pr merge`, and `Bash(gh issue:*)` includes `gh issue edit --add-label`,
+which is enough to pull an unlabelled issue into a `-label`-gated queue. If
+your project genuinely needs more, add it explicitly with `-add-tools` rather
+than widening back to a whole verb.
+
+What the allowlist does *not* close, and cannot: `Bash(git:*)` includes
+`git push`, which is what opening a PR requires; the build commands run
+whatever the checked-out repo's scripts contain; and `Bash(python:*)`,
+`Bash(npx:*)`, `Bash(uv:*)` and `Bash(go:*)` are arbitrary code execution by
+construction — `python -c` can run anything the user can, gh included. So the
+allowlist is a narrowing, not a sandbox. Point `-dir` at repositories you would
+run `make test` in yourself, and drop the interpreter entries from `-tools` if
+your project does not need them.
+
+**`-label` bounds *which* issues are eligible.** Applying a label takes triage
+permission or better, so requiring one means a maintainer has to opt each issue
+in before the supervisor will touch it. An outsider can still file an issue;
+they just cannot start a run with it — unless an issue template hands them the
+label, since the `labels:` key on a template or issue form is applied on
+creation whoever files it. Keep the gate label out of your templates.
+
+```bash
+backlog-drain -label ready-for-claude
+```
+
+On any repository open to issues from outside the team, run it that way. It is
+the difference between "anyone can queue work for an unattended agent" and
+"a maintainer chose this one".
+
+Beyond those, the skill is told in Phase 0 to read issue and comment text as a
+description of a change to make, never as instructions addressed to it, and to
+report anything that tries to be — rather than obey it — in the PR body. That
+is a mitigation, not a boundary: treat it as defence in depth behind the two
+above, and keep the human merge step as the last check on what actually lands.
 
 ## Publishing and versioning
 
