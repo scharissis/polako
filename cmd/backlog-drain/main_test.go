@@ -177,9 +177,27 @@ func TestResolveToolsAppendsWithoutDuplicating(t *testing.T) {
 // gate. Unattended runs die silently if any of those tools needs a prompt.
 func TestDefaultToolsCoverWhatTheSkillNeeds(t *testing.T) {
 	have := strings.Split(defaultTools, ",")
-	for _, want := range []string{"Bash(git:*)", "Bash(gh:*)", "Read", "Write", "Edit", "Glob", "Grep", "Skill"} {
+	for _, want := range []string{
+		"Bash(git:*)", "Bash(gh issue:*)", "Bash(gh pr:*)",
+		"Read", "Write", "Edit", "Glob", "Grep", "Skill",
+	} {
 		if !slices.Contains(have, want) {
 			t.Errorf("defaultTools is missing %q", want)
+		}
+	}
+}
+
+// The gh grant is per verb on purpose: the skill only reads an issue, comments
+// on it, and opens a PR, while an unattended run's input is attacker-supplied
+// issue text. A blanket grant would also permit `gh api`, `gh secret set` and
+// `gh repo delete` — and the positive test above still passes with one present,
+// so widening the default back needs a check of its own to catch it.
+func TestDefaultToolsDoNotGrantGhWholesale(t *testing.T) {
+	for _, entry := range strings.Split(defaultTools, ",") {
+		if entry == "Bash(gh:*)" {
+			t.Error("defaultTools grants Bash(gh:*): that permits gh api, gh secret set and " +
+				"gh repo delete on attacker-supplied input — grant the verbs the skill needs, " +
+				"and leave -add-tools as the escape hatch for projects that need more")
 		}
 	}
 }

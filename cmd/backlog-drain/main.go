@@ -37,9 +37,6 @@ import (
 	"time"
 )
 
-// defaultTools is the --allowedTools set for unattended runs: everything the
-// implement-issue skill needs, plus the build/test entry points of the common
-// ecosystems. Replace it with -tools, or extend it with -add-tools.
 // skillDir is the per-issue skill this repo ships under skills/.
 const skillDir = "implement-issue"
 
@@ -55,7 +52,17 @@ const defaultSkill = "backlog-drain:" + skillDir
 // naming a slash command this installation does not have.
 var errNoWork = errors.New("claude took no turns")
 
-const defaultTools = "Bash(git:*),Bash(gh:*)," +
+// defaultTools is the --allowedTools set for unattended runs: everything the
+// implement-issue skill needs, plus the build/test entry points of the common
+// ecosystems. Replace it with -tools, or extend it with -add-tools.
+//
+// gh is granted per verb rather than as Bash(gh:*). The skill only ever reads
+// an issue, comments on it, and opens a PR; a blanket grant would also hand an
+// unattended run `gh api`, `gh secret set`, `gh release create` and
+// `gh repo delete`. That matters because the run's input — issue bodies and
+// comments — is attacker-controllable on any repository that accepts issues
+// from outside the team.
+const defaultTools = "Bash(git:*),Bash(gh issue:*),Bash(gh pr:*)," +
 	"Read,Write,Edit,Glob,Grep,TodoWrite,Skill," +
 	"Bash(npm:*),Bash(npx:*),Bash(pnpm:*),Bash(yarn:*)," +
 	"Bash(go:*),Bash(cargo:*),Bash(make:*)," +
