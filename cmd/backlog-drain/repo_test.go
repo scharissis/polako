@@ -86,12 +86,21 @@ func TestMarketplaceManifestListsThisPlugin(t *testing.T) {
 	t.Errorf("marketplace.json does not list %q (got %+v)", want, market.Plugins)
 }
 
+// Claude namespaces plugin skills as <plugin>:<skill>, so the -skill default
+// has to track the plugin name. Getting this wrong is invisible until a run
+// exits at 0 turns with "Unknown command".
+func TestDefaultSkillIsNamespacedForThePlugin(t *testing.T) {
+	if want := moduleName(t) + ":" + skillDir; defaultSkill != want {
+		t.Errorf("defaultSkill = %q, want %q", defaultSkill, want)
+	}
+}
+
 func TestShippedSkillMatchesTheDefaultFlag(t *testing.T) {
-	skill := readRepoFile(t, "skills", defaultSkill, "SKILL.md")
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	front, _, ok := strings.Cut(strings.TrimPrefix(skill, "---\n"), "\n---")
 	if !ok {
-		t.Fatalf("skills/%s/SKILL.md has no YAML frontmatter", defaultSkill)
+		t.Fatalf("skills/%s/SKILL.md has no YAML frontmatter", skillDir)
 	}
 	for _, key := range []string{"description:", "argument-hint:", "arguments:"} {
 		if !strings.Contains(front, key) {

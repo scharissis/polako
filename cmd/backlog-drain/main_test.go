@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -39,6 +40,12 @@ func fakeClaude(mode string) int {
 	case "crash":
 		emit(`{"type":"system","subtype":"init","session_id":"sess-crash","model":"claude-opus-5"}`)
 		return 7
+	case "noturns":
+		// What an unresolvable slash command looks like: a clean exit, no work.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-none","model":"claude-opus-5"}`)
+		emit(`{"type":"assistant","session_id":"sess-none","message":{"content":[{"type":"text","text":"Unknown command: /nope"}]}}`)
+		emit(`{"type":"result","subtype":"success","session_id":"sess-none","duration_ms":100,"num_turns":0,"total_cost_usd":0}`)
+		return 0
 	case "hang":
 		emit(`{"type":"system","subtype":"init","session_id":"sess-hang","model":"claude-opus-5"}`)
 		time.Sleep(30 * time.Second) // the stall watchdog is expected to kill this
@@ -373,8 +380,9 @@ func TestRunClaudeResumesRatherThanRestartingTheSkill(t *testing.T) {
 	if _, err := runClaude(context.Background(), cfg, 12, ""); err != nil {
 		t.Fatalf("fresh run: %v", err)
 	}
-	if !strings.Contains(buf.String(), "-p /implement-issue 12") {
-		t.Errorf("a fresh run should invoke the skill\ngot:\n%s", buf.String())
+	want := fmt.Sprintf("-p /%s 12", defaultSkill)
+	if !strings.Contains(buf.String(), want) {
+		t.Errorf("a fresh run should invoke %q\ngot:\n%s", want, buf.String())
 	}
 
 	buf.Reset()
@@ -385,7 +393,20 @@ func TestRunClaudeResumesRatherThanRestartingTheSkill(t *testing.T) {
 	if !strings.Contains(out, "--resume sess-old") {
 		t.Errorf("a resume should pass --resume\ngot:\n%s", out)
 	}
-	if strings.Contains(out, "-p /implement-issue 12") {
+	if strings.Contains(out, want) {
 		t.Errorf("a resume must not restart the skill from scratch\ngot:\n%s", out)
+	}
+}
+
+// The failure this guards against: -skill naming a slash command the
+// installation does not have. Claude answers "Unknown command", exits 0, and
+// without this the supervisor reports only "no PR and no questions".
+func TestExecClaudeFlagsARunThatTookNoTurns(t *testing.T) {
+	captureLog(t)
+	cfg := fakeClaudeConfig(t, "noturns")
+
+	_, err := execClaude(context.Background(), cfg, "/nope 1", "")
+	if !errors.Is(err, errNoWork) {
+		t.Fatalf("a clean exit at 0 turns should report errNoWork, got %v", err)
 	}
 }

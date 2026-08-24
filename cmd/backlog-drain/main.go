@@ -40,9 +40,20 @@ import (
 // defaultTools is the --allowedTools set for unattended runs: everything the
 // implement-issue skill needs, plus the build/test entry points of the common
 // ecosystems. Replace it with -tools, or extend it with -add-tools.
-// defaultSkill is the per-issue skill this repo ships under skills/. Point
-// -skill elsewhere to drive a different workflow with the same supervisor.
-const defaultSkill = "implement-issue"
+// skillDir is the per-issue skill this repo ships under skills/.
+const skillDir = "implement-issue"
+
+// defaultSkill is how that skill is invoked once installed as a plugin: Claude
+// namespaces plugin skills as <plugin>:<skill>. A skill hand-copied into
+// ~/.claude/skills is invoked bare instead, so that install path needs
+// -skill implement-issue. Point -skill anywhere else to drive a different
+// workflow with the same supervisor.
+const defaultSkill = "backlog-drain:" + skillDir
+
+// errNoWork marks a run that exited cleanly without taking a single turn.
+// In practice that means the prompt never resolved — almost always a -skill
+// naming a slash command this installation does not have.
+var errNoWork = errors.New("claude took no turns")
 
 const defaultTools = "Bash(git:*),Bash(gh:*)," +
 	"Read,Write,Edit,Glob,Grep,TodoWrite,Skill," +
@@ -218,6 +229,15 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
+				// A prompt that never resolved will never resolve on a retry,
+				// and the generic "no PR and no questions" report buries the
+				// cause. Say what is actually wrong and stop.
+				if errors.Is(runErr, errNoWork) {
+					return fmt.Errorf("%w — check that -skill %q names a skill this "+
+						"installation has; plugin skills are namespaced <plugin>:<skill>, "+
+						"a skill copied into ~/.claude/skills is not",
+						runErr, cfg.skill)
+				}
 				log.Printf("claude run ended with error (%v) — checking what it left behind", runErr)
 			}
 
@@ -375,12 +395,16 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID string) (strin
 	}
 
 	sessionID := resumeID
+	turns := -1 // -1 = the run never reported a result
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 64*1024), 32*1024*1024) // events carrying file contents can be large
 	for sc.Scan() {
 		lastEvent.Store(time.Now().UnixNano())
 		if id := extractSessionID(sc.Bytes()); id != "" {
 			sessionID = id
+		}
+		if n := resultTurns(sc.Bytes()); n >= 0 {
+			turns = n
 		}
 		logEvent(sc.Bytes())
 	}
@@ -389,7 +413,23 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID string) (strin
 	if stalled.Load() {
 		return sessionID, fmt.Errorf("run stalled: no output events for %s", cfg.stall)
 	}
+	if err == nil && turns == 0 {
+		return sessionID, fmt.Errorf("%w: %q produced no work", errNoWork, prompt)
+	}
 	return sessionID, err
+}
+
+// resultTurns reports the turn count carried by a result event, or -1 for any
+// other line. A result of zero means the run ended without doing anything.
+func resultTurns(line []byte) int {
+	var v struct {
+		Type     string `json:"type"`
+		NumTurns int    `json:"num_turns"`
+	}
+	if json.Unmarshal(line, &v) != nil || v.Type != "result" {
+		return -1
+	}
+	return v.NumTurns
 }
 
 // extractSessionID pulls the session_id most stream events carry.

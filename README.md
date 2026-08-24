@@ -77,7 +77,16 @@ not the GitHub username, though here they happen to match. The plugin ships one
 component, the `implement-issue` skill, and costs ~40 tokens of always-on
 context; the skill body is only loaded when it fires.
 
-Restart Claude Code, and `/implement-issue 48` is available.
+Restart Claude Code, and `/backlog-drain:implement-issue 48` is available.
+
+Note the namespace. Claude prefixes plugin skills with the plugin name, so the
+command is *not* `/implement-issue` on this path. The supervisor's `-skill`
+default matches the plugin form; see [the hand install](#the-skill-by-hand) for
+the other one. To see what a session actually has, the `init` event lists them:
+
+```bash
+claude -p "hi" --output-format stream-json --verbose | head -1
+```
 
 Both commands take a `--scope`:
 
@@ -114,7 +123,14 @@ cp -r skills/implement-issue ~/.claude/skills/
 Copy-Item -Recurse skills\implement-issue $HOME\.claude\skills\
 ```
 
-Do one or the other, not both — two copies of the same skill name drift apart
+A skill installed this way is invoked bare, with no plugin prefix, so the
+supervisor needs telling:
+
+```bash
+backlog-drain -skill implement-issue
+```
+
+Do one or the other, not both — two copies of the same skill drift apart
 silently.
 
 ### The binary
@@ -186,7 +202,7 @@ backlog-drain -skip 12,17
 | --- | --- | --- |
 | `-dir` | `.` | Path to the repository's main checkout. |
 | `-claude` | `claude` | The Claude Code binary to invoke. |
-| `-skill` | `implement-issue` | Skill run once per issue. |
+| `-skill` | `backlog-drain:implement-issue` | Slash command run once per issue. Plugin skills are namespaced `<plugin>:<skill>`; pass `-skill implement-issue` if you copied the skill into `~/.claude/skills` instead. |
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how PRs are matched back to issues. |
 | `-label` | *(none)* | Only process issues carrying this label. |
 | `-tools` | *(see below)* | `--allowedTools` for unattended runs. **Replaces** the default set. |
