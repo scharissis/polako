@@ -34,8 +34,9 @@ if ($LASTEXITCODE -ne 0) {
   exit $LASTEXITCODE
 }
 
-# Refuses if plugin.json and the marketplace entry disagree.
-claude plugin tag --push
+# Refuses if plugin.json and the marketplace entry disagree. --message takes
+# %s for the version; see release.sh for why it matches the tag below.
+claude plugin tag --push --message 'backlog-drain %s'
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 git tag -a "v$version" -m "backlog-drain $version"

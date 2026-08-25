@@ -62,8 +62,11 @@ if ! claude plugin validate .; then
   exit 1
 fi
 
-# Refuses if plugin.json and the marketplace entry disagree.
-claude plugin tag --push
+# Refuses if plugin.json and the marketplace entry disagree. --message takes
+# %s for the version, and is spelled to match the annotation on the semver tag
+# below: one release wearing two tags should read the same on both, by
+# construction rather than by the default happening to agree.
+claude plugin tag --push --message "backlog-drain %s"
 
 git tag -a "v$version" -m "backlog-drain $version"
 git push origin "refs/tags/v$version"
