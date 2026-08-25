@@ -74,15 +74,27 @@ unanswered on the thread.
 ## Phase 3 — Implement (only when PLAN.md exists and isn't blocked)
 1. Implement the plan, committing in logical increments following the
    repo's commit conventions. Run the test suite, typecheck, and lint.
-2. MANDATORY GATE — do not create a PR until this step has run:
-   invoke `/code-review high --fix issue-$issue` and address its
-   findings. Name the branch every time. The review forks a fresh agent
-   that starts in the session's cwd, which the Phase 1 `cd` does not
-   move; with no target it reviews whatever the main checkout holds —
-   on a clean default branch, the change someone already merged — and
-   writes its fixes there. Before accepting the gate as run, check the
-   result describes this branch's change; if it names another commit or
-   branch, invoke it again with the target.
+2. MANDATORY GATE — do not create a PR until this step has run.
+   a. Bring the local default branch up to date first. In the main
+      checkout — the first line of `git worktree list` — run
+      `git merge --ff-only` against the `origin/…` ref Phase 1 resolved.
+      Skip it if that checkout is not on the default branch, or if it
+      refuses; never force it. The review resolves this branch's base
+      from that local ref, and a drain merges on GitHub and never pulls,
+      so the ref falls a commit behind per merged PR. Left stale it
+      folds somebody else's merged PR into the diff, and `--fix`
+      rewrites their code inside your branch.
+   b. Invoke `/code-review high --fix issue-$issue` and address its
+      findings. Name the branch every time: the review forks a fresh
+      agent that starts in the session's cwd, which the Phase 1 `cd`
+      does not move, so with no target it reviews whatever the main
+      checkout holds — on a clean default branch, a change someone
+      already merged — and writes its fixes there.
+   c. Check what it reviewed against `git log --oneline` for your own
+      commits before accepting the gate as run. Every finding has to sit
+      on a commit this run made. One that names a file or commit you did
+      not touch means the base was wrong: revert any `--fix` edit
+      outside your own commits, correct the base, and invoke it again.
    If the code-review skill is not invocable in this session, say so
    explicitly, then perform a substitute review pass: re-read the full
    diff critically for correctness, edge cases, and convention
