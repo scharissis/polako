@@ -118,6 +118,15 @@ func parkReason(err error) (string, bool) {
 // straight back up. Removing the label is how an operator puts it back in.
 const needsHumanLabel = "needs-human"
 
+// awaitingAnswerLabel says a run stopped to ask something. It is the only
+// evidence the supervisor has that "no PR" means "blocked on a human" rather
+// than "the run produced nothing at all": the count of comments on the thread
+// cannot tell the skill's question apart from CI, a bot, a linked-PR notice or
+// a passer-by, and reading any of those as a question left the drain waiting
+// on a reply nobody knew was expected. The skill raises it, the skill lowers
+// it, and it is also the only sign on GitHub that an issue is waiting on you.
+const awaitingAnswerLabel = "awaiting-answer"
+
 // defaultTools is the --allowedTools set for unattended runs: everything the
 // implement-issue skill needs, plus the build/test entry points of the common
 // ecosystems. Replace it with -tools, or extend it with -add-tools.
@@ -136,6 +145,9 @@ const needsHumanLabel = "needs-human"
 // what to do, and a gh call that raises a prompt hangs an unattended run
 // silently — the one failure mode worse than being too narrow. Nothing else
 // that writes is granted; that is what -add-tools is for.
+//
+// The one label command the skill does need is not here either: it is minted
+// per run and pinned to that run's issue number — see issueLabelTools.
 const defaultTools = "Bash(git:*)," +
 	"Bash(gh issue view:*),Bash(gh issue comment:*)," +
 	"Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh pr diff:*)," +
@@ -437,9 +449,11 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string) {
 	_, err := gh(ctx, cfg, "issue", "edit", n, "--add-label", needsHumanLabel)
 	if err != nil {
 		// Far the likeliest cause is a repository that has never used the
-		// label: GitHub refuses to add one that does not exist yet.
-		if _, cerr := gh(ctx, cfg, "label", "create", needsHumanLabel, "--color", "D93F0B",
-			"--description", "backlog-drain parked this issue for a human"); cerr == nil {
+		// label: GitHub refuses to add one that does not exist yet. A create
+		// that fails means the label was already there, so the first failure
+		// was something else and retrying the edit would only repeat it.
+		if cerr := ensureLabel(ctx, cfg, needsHumanLabel, "D93F0B",
+			"backlog-drain parked this issue for a human"); cerr == nil {
 			_, err = gh(ctx, cfg, "issue", "edit", n, "--add-label", needsHumanLabel)
 		}
 	}
@@ -453,6 +467,16 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string) {
 		log.Printf("could not comment on issue #%d (%v) — the reason is in this log and in the exit summary",
 			issue, cerr)
 	}
+}
+
+// ensureLabel declares a label on the repository, and errors if it was already
+// there — which is what makes it useful as a test as well as a create. Both
+// callers want it best-effort in their own way: preflight ignores the answer,
+// and a park reads it to tell "the label did not exist" apart from "the edit
+// failed for some other reason".
+func ensureLabel(ctx context.Context, cfg config, name, color, description string) error {
+	_, err := gh(ctx, cfg, "label", "create", name, "--color", color, "--description", description)
+	return err
 }
 
 // drainSummary is what the process says on its way out: what merged, what was
@@ -495,6 +519,13 @@ func preflight(ctx context.Context, cfg *config) error {
 		return fmt.Errorf("no GitHub repository reachable from %s (is gh authenticated?): %w", cfg.dir, err)
 	}
 	cfg.repo = strings.TrimSpace(string(out))
+	// Defined up front rather than when a run first needs it: GitHub refuses to
+	// apply a label the repository never declared, and the run that applies this
+	// one is a headless session holding no grant that could create it. Discovering
+	// that at the moment a question needs flagging is the expensive time to find
+	// out — the question gets posted and then never waited on.
+	_ = ensureLabel(ctx, *cfg, awaitingAnswerLabel, "FBCA04",
+		"backlog-drain is waiting for an answer on this issue")
 	cfg.claudeVersion = claudeVersion(ctx, *cfg)
 	cfg.pluginVersion = pluginVersion(ctx, *cfg)
 	log.Printf("%s — running /%s per issue, polling every %s", cfg.repo, cfg.skill, cfg.poll)
@@ -674,11 +705,6 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 		}
 
 		if pr == nil {
-			before, err := commentCount(ctx, cfg, issue)
-			if err != nil {
-				return err
-			}
-
 			resumeTarget, reason := "", reasonImplement
 			switch {
 			case attempt > 0:
@@ -730,36 +756,42 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 				return err
 			}
 			if pr == nil {
-				after, err := commentCount(ctx, cfg, issue)
+				// The token does not come back on its own, so every resume
+				// spends minutes reaching the same 401 and buries the cause
+				// under a report about crashes. Stop the drain: every later
+				// issue would hit the same wall.
+				//
+				// Checked here rather than beside errNoWork, which stops
+				// before the PR lookup: a token can die after the run opened
+				// its PR, and that case belongs on the waiting path above,
+				// which needs no token at all. Checked before the label, too:
+				// a run refused at the door cannot have raised one, so a label
+				// found here is an older run's, and crediting it to this one
+				// would bias every questions rate stats computes.
+				if errors.Is(runErr, errAuth) {
+					record(0, outcomeNothing)
+					terminal(0, issueNeedsHuman)
+					return authAdvice(runErr)
+				}
+				blocked, err := issueHasLabel(ctx, cfg, issue, awaitingAnswerLabel)
 				if err != nil {
 					record(0, outcomeUnknown)
 					return err
 				}
 				switch {
-				case errors.Is(runErr, errAuth):
-					// The token does not come back on its own, so every
-					// resume spends minutes reaching the same 401 and buries
-					// the cause under a report about crashes. Stop the drain:
-					// every later issue would hit the same wall.
-					//
-					// Checked here rather than beside errNoWork, which stops
-					// before the PR lookup: a token can die after the run
-					// opened its PR, and that case belongs on the waiting
-					// path above, which needs no token at all.
-					//
-					// Always outcomeNothing, even if the comment count grew:
-					// a run refused at the door cannot have commented, so a
-					// new comment is a human's, and crediting it to the run
-					// would bias every questions rate stats computes.
-					record(0, outcomeNothing)
-					terminal(0, issueNeedsHuman)
-					return authAdvice(runErr)
-				case after > before:
-					// Questions were posted (even if the run then crashed):
-					// wait for a human reply, then fold it in with a fresh run.
+				case blocked:
+					// Questions were posted and flagged (even if the run then
+					// crashed): wait for a human reply, then fold it in with a
+					// fresh run. The baseline for "a reply arrived" is read
+					// now, so it already counts the question itself.
 					record(0, outcomeQuestions)
-					log.Printf("blocked on questions — waiting for a reply on the issue thread")
-					if err := waitForComments(ctx, cfg, issue, after); err != nil {
+					log.Printf("issue #%d is labelled %q — waiting for a reply on the thread",
+						issue, awaitingAnswerLabel)
+					baseline, err := commentCount(ctx, cfg, issue)
+					if err != nil {
+						return err
+					}
+					if err := waitForComments(ctx, cfg, issue, baseline); err != nil {
 						return err
 					}
 					log.Printf("new activity on #%d — re-running to fold the answers in", issue)
@@ -832,6 +864,12 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 // runClaude executes one headless skill run. A non-empty resumeID continues
 // that exact session instead of starting the skill fresh.
 func runClaude(ctx context.Context, cfg config, issue int, resumeID string) (runReport, error) {
+	// cfg is a copy, so the widened allowlist reaches this invocation and
+	// nothing else: the recorder's tools_hash goes on identifying the operator's
+	// -tools/-add-tools, which is the thing worth grouping runs by, rather than
+	// changing with every issue number.
+	cfg.addTools = resolveTools(cfg.addTools, issueLabelTools(issue))
+
 	prompt, invokes := fmt.Sprintf("/%s %d", cfg.skill, issue), cfg.skill
 	if resumeID != "" {
 		// Plain English, so invokes is empty: the resumed session already
@@ -839,6 +877,24 @@ func runClaude(ctx context.Context, cfg config, issue int, resumeID string) (run
 		prompt, invokes = fmt.Sprintf("Continue the /%s %d workflow exactly where it stopped.", cfg.skill, issue), ""
 	}
 	return execClaude(ctx, cfg, prompt, resumeID, invokes)
+}
+
+// issueLabelTools grants a run the two commands it needs to raise and lower
+// awaitingAnswerLabel, pinned to the issue it was dispatched for.
+//
+// A single `Bash(gh issue edit:*)` in defaultTools would cover both and is
+// exactly what that list refuses to grant: it would let attacker-supplied issue
+// text label some *other* issue, which on a -label-gated queue is enough to
+// queue work no maintainer triaged. Pinned to one number, the furthest it
+// reaches is the issue the run is already working on — where the worst it can
+// do is park or unpark itself, neither of which is an escalation.
+//
+// The number comes first because that is how the skill is told to spell the
+// command and how anyone would write it by hand; a prefix that did not match
+// would raise a permission prompt, and an unattended run has nobody to answer.
+func issueLabelTools(issue int) string {
+	return fmt.Sprintf("Bash(gh issue edit %d --add-label:*),Bash(gh issue edit %d --remove-label:*)",
+		issue, issue)
 }
 
 // buildArgs assembles one headless claude invocation.
@@ -1346,6 +1402,26 @@ func (i ghIssue) hasLabel(name string) bool {
 	})
 }
 
+// issueHasLabel asks GitHub whether one issue carries one label. Matched
+// case-insensitively, the way GitHub itself treats label names.
+func issueHasLabel(ctx context.Context, cfg config, issue int, name string) (bool, error) {
+	out, err := gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "labels")
+	if err != nil {
+		return false, err
+	}
+	var v ghIssue
+	if err := json.Unmarshal(out, &v); err != nil {
+		return false, fmt.Errorf("parsing issue labels: %w", err)
+	}
+	return v.hasLabel(name), nil
+}
+
+// commentCount is a reply detector and nothing more. It used to decide whether
+// a run had asked a question, by comparing the count before and after — which
+// counted CI, bots and passers-by as questions and left the drain waiting on a
+// reply nobody was expecting. awaitingAnswerLabel decides that now; a count is
+// only ever compared against a baseline taken once the issue is already known
+// to be blocked, where any new comment is worth re-reading the thread for.
 func commentCount(ctx context.Context, cfg config, issue int) (int, error) {
 	out, err := gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "comments")
 	if err != nil {

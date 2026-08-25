@@ -41,6 +41,12 @@ type fakeIssue struct {
 	Open     bool     `json:"open"`
 	Labels   []string `json:"labels"`
 	Comments int      `json:"comments"`
+
+	// ReplyOnRead is a human answering a question while the supervisor polls:
+	// their comment appears on the Nth read of the thread from now. Counting
+	// reads rather than wall clock keeps the test deterministic — the drain
+	// unblocks because the thread moved, never because a timer went off.
+	ReplyOnRead int `json:"reply_on_read"`
 }
 
 type fakePR struct {
@@ -119,7 +125,24 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			return "", false, 1
 		}
 		if strings.Contains(flagVal("--json"), "comments") {
-			return `{"comments":[` + strings.TrimSuffix(strings.Repeat("{},", is.Comments), ",") + `]}`, false, 0
+			counting := is.ReplyOnRead > 0
+			if counting {
+				is.ReplyOnRead--
+				if is.ReplyOnRead == 0 {
+					is.Comments++ // the human's reply lands on this read
+				}
+			}
+			// The countdown has to be persisted even on the reads before the
+			// reply, or every read would start it over.
+			return `{"comments":[` + strings.TrimSuffix(strings.Repeat("{},", is.Comments), ",") + `]}`,
+				counting, 0
+		}
+		if strings.Contains(flagVal("--json"), "labels") {
+			var labels []string
+			for _, l := range is.Labels {
+				labels = append(labels, fmt.Sprintf(`{"name":%q}`, l))
+			}
+			return `{"labels":[` + strings.Join(labels, ",") + `]}`, false, 0
 		}
 		state := "CLOSED"
 		if is.Open {
@@ -128,14 +151,18 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 		return `{"state":"` + state + `"}`, false, 0
 
 	case "issue edit":
+		is := issue()
+		if is == nil {
+			return "", false, 1
+		}
+		if label := flagVal("--remove-label"); label != "" {
+			is.Labels = slices.DeleteFunc(is.Labels, func(l string) bool { return l == label })
+			return "", true, 0
+		}
 		label := flagVal("--add-label")
 		if !slices.Contains(st.Labels, label) {
 			// What GitHub does with a label the repository never defined.
 			fmt.Fprintf(os.Stderr, "could not add label: '%s' not found\n", label)
-			return "", false, 1
-		}
-		is := issue()
-		if is == nil {
 			return "", false, 1
 		}
 		is.Labels = append(is.Labels, label)
@@ -294,6 +321,74 @@ func TestDrainParksADeadIssueAndKeepsGoing(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("log is missing %q\ngot:\n%s", want, out)
 		}
+	}
+}
+
+// The whole question round, end to end: a run that asks something flags the
+// issue, the drain waits on that flag, and the re-run that finds the answer
+// clears it and ships. The claude invocation is checked too — the run can only
+// raise the flag if the allowlist it was handed permits it, pinned to this
+// issue and no other.
+func TestDrainWaitsForAnAnswerThenFoldsItIn(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "asks", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		Labels: []string{awaitingAnswerLabel},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if got := st.Issues["1"].Labels; slices.Contains(got, awaitingAnswerLabel) {
+		t.Errorf("issue 1 labels = %v, want %s cleared once the answer landed", got, awaitingAnswerLabel)
+	}
+	if got := st.Issues["1"].Labels; slices.Contains(got, needsHumanLabel) {
+		t.Errorf("issue 1 labels = %v, want a question round not to park the issue", got)
+	}
+	if st.Issues["1"].Open {
+		t.Error("issue 1 should have been closed after its PR merged")
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		`issue #1 is labelled "awaiting-answer" — waiting for a reply on the thread`,
+		"new activity on #1 — re-running to fold the answers in",
+		"Bash(gh issue edit 1 --add-label:*)",
+		"summary: 1 issue merged, 0 issues parked",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
+	}
+}
+
+// The bug this label replaced: "the skill asked a question" was inferred from
+// the comment count rising across a run, so CI, a bot or a passer-by commenting
+// mid-run left the drain waiting forever on a reply nobody knew was expected.
+// Only the label says a question was asked, so a noisy thread now ends the way
+// any other run that produced nothing does.
+func TestDrainDoesNotReadStrayCommentsAsQuestions(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "noisy", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		Labels: []string{awaitingAnswerLabel},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if got := st.Issues["1"].Comments; got < 1 {
+		t.Fatalf("issue 1 comments = %d, want the bot's comment to have landed", got)
+	}
+	if got := st.Issues["1"].Labels; !slices.Contains(got, needsHumanLabel) {
+		t.Errorf("issue 1 labels = %v, want it parked rather than waited on", got)
+	}
+	if want := "the run completed but produced no PR and no questions"; !strings.Contains(buf.String(), want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, buf.String())
 	}
 }
 

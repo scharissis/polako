@@ -42,10 +42,27 @@ If PLAN.md doesn't exist in the worktree, or new answers have appeared:
    resume point if this session dies.
 2. If anything genuinely blocks implementation: record the questions in
    PLAN.md under "## Open questions", post them with
-   `gh issue comment $issue` in terse, simple English, then STOP and tell
-   me to re-run once there's a reply. Do not implement.
+   `gh issue comment $issue` in terse, simple English, and then flag the
+   issue with exactly:
+
+       gh issue edit $issue --add-label awaiting-answer
+
+   Issue number first, that spelling — it is the only form the run is
+   permitted, and any other raises a permission prompt nobody is there to
+   answer. That label is the only thing telling the supervisor a question
+   was asked rather than nothing produced; without it your questions are
+   never waited on. If the command fails, say so in your final message
+   and stop anyway — do not try to create the label or reach for another
+   command. Then STOP and tell me to re-run once there's a reply. Do not
+   implement.
 3. If the thread answers previously posted questions, fold them into
-   PLAN.md and mark it FINAL.
+   PLAN.md, mark it FINAL, and clear the flag with
+   `gh issue edit $issue --remove-label awaiting-answer`.
+
+If PLAN.md already has open questions and the thread still hasn't answered
+them, none of the above applies: leave the label where it is, don't post the
+questions a second time, and stop. Removing the label would tell the
+supervisor to carry on without an answer.
 
 ## Phase 3 — Implement (only when PLAN.md exists and isn't blocked)
 1. Implement the plan, committing in logical increments following the
