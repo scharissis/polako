@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -131,9 +132,95 @@ func fakeClaude(mode string) int {
 		emit(`{"type":"system","subtype":"init","session_id":"sess-hang","model":"claude-opus-5"}`)
 		time.Sleep(30 * time.Second) // the stall watchdog is expected to kill this
 		return 0
+	case "asks", "noisy", "askscrash":
+		// A run that leaves something behind on the thread. Both then stream
+		// like a healthy one, because the supervisor's whole reading of what
+		// happened comes from GitHub afterwards, not from the events.
+		if err := fakeSkillEffect(mode); err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		return fakeClaude("stream")
 	}
 	fmt.Fprintf(os.Stderr, "unknown fake claude mode %q\n", mode)
 	return 2
+}
+
+// errFakeCrash is a simulated death, not a broken harness: the run exits
+// nonzero having changed nothing on the pretend repository.
+var errFakeCrash = errors.New("died before it could clear the flag")
+
+// fakeSkillEffect is what a run leaves on the pretend repository, written
+// through the same fake gh the supervisor talks to — so a label the repository
+// never declared is refused here exactly as it would be on GitHub.
+//
+// It reads which run this is off the state itself rather than a counter, so one
+// mode answers both halves of a question round: the run that asks, and the
+// re-run that finds the answer.
+func fakeSkillEffect(mode string) error {
+	path := os.Getenv(fakeGhEnv)
+	st, err := readGhState(path)
+	if err != nil {
+		return err
+	}
+	n := promptIssue()
+	is := st.Issues[n]
+	if is == nil {
+		return fmt.Errorf("no issue #%q to work on", n)
+	}
+	call := func(args ...string) error {
+		if _, _, code := answerGh(st, append([]string{"issue"}, args...)); code != 0 {
+			return fmt.Errorf("fake gh refused %v", args)
+		}
+		return nil
+	}
+	switch {
+	case mode == "noisy":
+		// CI, a bot, a linked-PR notice: a comment the run did not write, and
+		// one nobody is waiting for an answer to.
+		err = call("comment", n, "--body", "Build #1234 passed.")
+	case slices.Contains(is.Labels, awaitingAnswerLabel) && mode == "askscrash":
+		// Dispatched to fold the answer in and dies on the way, leaving the
+		// asking run's flag standing.
+		return errFakeCrash
+	case slices.Contains(is.Labels, awaitingAnswerLabel):
+		// The question has been answered, so this run folds it in and ships.
+		// `gh pr create` is not in the fake's repertoire, so the PR is planted
+		// directly; what matters downstream is only that the branch has one.
+		if st.PRs == nil {
+			st.PRs = map[string]*fakePR{}
+		}
+		st.PRs["issue-"+n] = &fakePR{Number: 42, State: "MERGED"}
+		err = call("edit", n, "--remove-label", awaitingAnswerLabel)
+	default:
+		if err = call("comment", n, "--body", "Which of the two should it do?"); err == nil {
+			if err = call("edit", n, "--add-label", awaitingAnswerLabel); err == nil {
+				is.ReplyOnRead = 2 // a human answers while the supervisor is polling
+			}
+		}
+	}
+	if err != nil {
+		return err
+	}
+	return writeGhState(path, st)
+}
+
+// promptIssue is the issue number this invocation was dispatched for, taken
+// from the prompt the supervisor built. The last number rather than the last
+// word, because a resume is dispatched as a sentence ("Continue the
+// /implement-issue 1 workflow…") rather than as "/implement-issue 1".
+func promptIssue() string {
+	i := slices.Index(os.Args, "-p")
+	if i < 0 || i+1 >= len(os.Args) {
+		return ""
+	}
+	n := ""
+	for _, f := range strings.Fields(os.Args[i+1]) {
+		if _, err := strconv.Atoi(f); err == nil {
+			n = f
+		}
+	}
+	return n
 }
 
 // captureLog redirects the standard logger for one test and returns the buffer.
@@ -310,6 +397,33 @@ func TestDefaultToolsDoNotGrantGhWholesale(t *testing.T) {
 			t.Errorf("defaultTools grants %s, which permits %s; grant the subcommands the "+
 				"skill needs and leave -add-tools as the escape hatch for projects that need more",
 				entry, why)
+		}
+	}
+}
+
+// The one label command the skill needs is granted per run, pinned to the issue
+// that run was dispatched for. In defaultTools it would have to be
+// `Bash(gh issue edit:*)`, which reaches every other issue in the repository.
+func TestIssueLabelToolsStayPinnedToOneIssue(t *testing.T) {
+	got := strings.Split(issueLabelTools(7), ",")
+	for _, want := range []string{
+		"Bash(gh issue edit 7 --add-label:*)",
+		"Bash(gh issue edit 7 --remove-label:*)",
+	} {
+		if !slices.Contains(got, want) {
+			t.Errorf("issueLabelTools(7) = %v, missing %q", got, want)
+		}
+	}
+	if strings.Contains(defaultTools, "gh issue edit") {
+		t.Error("defaultTools grants gh issue edit; it belongs in issueLabelTools, " +
+			"where it is bounded to the issue the run is already working on")
+	}
+	// The pinned entries have to survive alongside an operator's own -add-tools,
+	// since that is how they reach the run.
+	merged := resolveTools(defaultTools, resolveTools("Bash(bazel:*)", issueLabelTools(7)))
+	for _, want := range []string{"Bash(bazel:*)", "Bash(gh issue edit 7 --add-label:*)"} {
+		if !strings.Contains(merged, want) {
+			t.Errorf("resolved allowlist is missing %q\ngot: %s", want, merged)
 		}
 	}
 }

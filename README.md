@@ -22,7 +22,7 @@ lowest open issue without a `needs-human` label
    ↓
 claude -p "/implement-issue N"        ← headless, streamed to your terminal
    ↓
-PR opened?  ──no──►  questions posted on the issue?  ──yes──►  wait for a human reply, re-run
+PR opened?  ──no──►  issue labelled `awaiting-answer`?  ──yes──►  wait for a reply, re-run
    │                          │
    │                          └──no──►  crashed? resume the same session (-retries)
    │                                       │
@@ -56,6 +56,18 @@ summary: 3 issues merged, 1 issue parked, 6h12m of wall clock
 
 Parking preserves the no-conflict guarantee: only one issue is ever in flight,
 and a parked issue is simply not in flight.
+
+**A run that has to ask something labels the issue `awaiting-answer`**, and the
+supervisor waits on that label rather than on the thread getting busier. The
+distinction matters because plenty of things comment on an issue that are not
+answers to anything — CI, a linked-PR notice, a bot, a passer-by — and treating
+those as a question left the drain waiting on a reply nobody knew was expected.
+The label is also the only sign on GitHub that an issue is waiting on *you*;
+reply on the thread and the next check picks it up. `backlog-drain` declares the
+label on startup if the repository does not have it yet, and the run that folds
+your answer in is what removes it — or the park, if the issue is handed back
+before anyone gets that far, since a parked issue waits on a decision rather
+than on a reply.
 
 **Refused credentials stop the drain immediately.** A resume cannot mint a new
 token, so retrying one spends `-retries` × several minutes reaching the
@@ -534,7 +546,9 @@ uses (`gh issue view`/`comment`, `gh pr create`, plus read-only `gh pr
 view`/`list`/`diff`), the tools the skill itself needs (`Read`, `Write`,
 `Edit`, `Glob`, `Grep`, `Skill`, `TodoWrite`), and the usual entry points for
 npm/pnpm/yarn, Go, Cargo, Make, Python/uv/pytest, dotnet, Maven and Gradle.
-For anything else, widen it rather than replacing it:
+One more entry is added per run and is not in `-tools`: the run may add and
+remove labels on the single issue it was dispatched for, which is how it raises
+`awaiting-answer`. For anything else, widen it rather than replacing it:
 
 ```bash
 backlog-drain -add-tools "Bash(bazel:*),Bash(just:*)"
@@ -563,6 +577,18 @@ delete`. Even a per-verb grant is too wide: `Bash(gh pr:*)` includes
 which is enough to pull an unlabelled issue into a `-label`-gated queue. If
 your project genuinely needs more, add it explicitly with `-add-tools` rather
 than widening back to a whole verb.
+
+The skill does need one label command, to raise `awaiting-answer` when it stops
+to ask something. Rather than granting `gh issue edit` at large, the supervisor
+mints that grant per run and pins it to the issue number that run was
+dispatched for — `Bash(gh issue edit 42 --add-label:*)` and its `--remove-label`
+twin. Ordinarily the furthest attacker-supplied issue text can then reach is the
+issue the run is already working on, where the worst it can do is park or unpark
+itself. Like every entry in the list this is a prefix, not a signature: `gh issue
+edit` takes several numbers, and one appended *after* the flag still starts with
+the granted prefix. So read it as narrowing the blast radius from every issue in
+the repository to something an audit of the run's own commands would catch —
+which is what the rest of this section says about the allowlist generally.
 
 What the allowlist does *not* close, and cannot: `Bash(git:*)` includes
 `git push`, which is what opening a PR requires; the build commands run
