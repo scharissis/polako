@@ -50,10 +50,13 @@ const skillDir = "implement-issue"
 // workflow with the same supervisor.
 const defaultSkill = "backlog-drain:" + skillDir
 
-// errNoWork marks a run that exited cleanly without taking a single turn.
-// In practice that means the prompt never resolved — almost always a -skill
-// naming a slash command this installation does not have.
-var errNoWork = errors.New("claude took no turns")
+// errNoWork marks a run whose prompt never resolved to a skill — almost
+// always a -skill naming a slash command this installation does not have.
+// Two detections funnel here: the init event listing the session's commands
+// without the one the prompt invokes (CLIs from 2.1.85 answer an unknown
+// command with an ordinary-looking success result, so the list is the only
+// early tell), and a clean exit at zero turns (how older CLIs reported it).
+var errNoWork = errors.New("the prompt never resolved to a skill")
 
 // defaultTools is the --allowedTools set for unattended runs: everything the
 // implement-issue skill needs, plus the build/test entry points of the common
@@ -416,11 +419,13 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 // runClaude executes one headless skill run. A non-empty resumeID continues
 // that exact session instead of starting the skill fresh.
 func runClaude(ctx context.Context, cfg config, issue int, resumeID string) (runReport, error) {
-	prompt := fmt.Sprintf("/%s %d", cfg.skill, issue)
+	prompt, invokes := fmt.Sprintf("/%s %d", cfg.skill, issue), cfg.skill
 	if resumeID != "" {
-		prompt = fmt.Sprintf("Continue the /%s %d workflow exactly where it stopped.", cfg.skill, issue)
+		// Plain English, so invokes is empty: the resumed session already
+		// holds the skill's context and never re-resolves the command.
+		prompt, invokes = fmt.Sprintf("Continue the /%s %d workflow exactly where it stopped.", cfg.skill, issue), ""
 	}
-	return execClaude(ctx, cfg, prompt, resumeID)
+	return execClaude(ctx, cfg, prompt, resumeID, invokes)
 }
 
 // buildArgs assembles one headless claude invocation.
@@ -461,7 +466,11 @@ type streamEvent struct {
 	Subtype   string `json:"subtype"`
 	Model     string `json:"model"`
 	SessionID string `json:"session_id"`
-	Message   struct {
+	// SlashCommands is the init event's inventory of every command the
+	// session can invoke — the only early sign of a -skill this installation
+	// does not have. CLIs before 2.1.85 do not send it.
+	SlashCommands []string `json:"slash_commands"`
+	Message       struct {
 		Content []struct {
 			Type  string          `json:"type"`
 			Text  string          `json:"text"`
@@ -475,6 +484,7 @@ type streamEvent struct {
 	NumTurns      int                         `json:"num_turns"`
 	TotalCost     float64                     `json:"total_cost_usd"`
 	IsError       bool                        `json:"is_error"`
+	Result        string                      `json:"result"` // the result event's final text
 	Usage         streamUsage                 `json:"usage"`
 	ModelUsage    map[string]streamModelUsage `json:"modelUsage"`
 }
@@ -544,15 +554,19 @@ type runReport struct {
 	observed      tokenCounts
 	observedTurns int
 
-	exitCode    int
-	stalled     bool
-	interrupted bool
+	exitCode     int
+	stalled      bool
+	interrupted  bool
+	skillMissing bool // the session's command list lacks the skill the prompt invokes
 }
 
-// status maps a run to exactly one value, most specific first: an interrupted
-// run is a nonzero exit too, and so is a stalled one.
+// status maps a run to exactly one value, most specific first: a run stopped
+// over a missing skill was killed deliberately, an interrupted run is a
+// nonzero exit too, and so is a stalled one.
 func (r runReport) status() string {
 	switch {
+	case r.skillMissing:
+		return "no-skill"
 	case r.interrupted:
 		return "interrupted"
 	case r.stalled:
@@ -606,11 +620,49 @@ func (r *runReport) observe(ev streamEvent) {
 	}
 }
 
+// lacksCommand reports whether an init event's command inventory is present
+// and cmd is missing from it. An absent inventory (CLIs before 2.1.85) is no
+// evidence either way, and entries are compared with any leading slash
+// stripped: a wrong "missing" verdict kills a healthy run, so every
+// uncertainty has to resolve toward "found".
+func lacksCommand(commands []string, cmd string) bool {
+	if cmd == "" || len(commands) == 0 {
+		return false
+	}
+	return !slices.ContainsFunc(commands, func(c string) bool {
+		return strings.TrimPrefix(c, "/") == cmd
+	})
+}
+
+// nearMatches returns inventory entries that differ from cmd only by plugin
+// namespacing — the exact confusion the missing-skill error warns about, so
+// naming the spelling the session does have turns that warning into a fix.
+func nearMatches(commands []string, cmd string) []string {
+	tail := func(s string) string {
+		if i := strings.LastIndexByte(s, ':'); i >= 0 {
+			return s[i+1:]
+		}
+		return s
+	}
+	var near []string
+	for _, c := range commands {
+		if c = strings.TrimPrefix(c, "/"); tail(c) == tail(cmd) {
+			near = append(near, "/"+c)
+		}
+	}
+	return near
+}
+
 // execClaude runs one headless claude invocation with the shared streaming,
-// logging, and stall-watchdog machinery. The report it returns is valid on
-// every path, error included: the retry logic needs the session ID to resume,
-// and the run burned real tokens whether or not it lived to report them.
-func execClaude(ctx context.Context, cfg config, prompt, resumeID string) (runReport, error) {
+// logging, and stall-watchdog machinery. invokes names the slash command the
+// prompt starts with — "" for a plain-text prompt — so a session whose init
+// inventory lacks it can be stopped instead of run; the caller states it
+// outright because re-deriving it from the prompt would make "never start a
+// plain prompt with /" a load-bearing rule enforced nowhere. The report it
+// returns is valid on every path, error included: the retry logic needs the
+// session ID to resume, and the run burned real tokens whether or not it
+// lived to report them.
+func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes string) (runReport, error) {
 	rep := runReport{sessionID: resumeID, turns: -1, exitCode: -1}
 	args := buildArgs(cfg, prompt, resumeID)
 	log.Printf("running: %s %s", cfg.claudeBin, strings.Join(args, " "))
@@ -656,6 +708,7 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID string) (runRe
 
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 64*1024), 32*1024*1024) // events carrying file contents can be large
+	missing := ""                                  // the diagnosis, once the inventory rules the prompt's command out
 	for sc.Scan() {
 		lastEvent.Store(time.Now().UnixNano())
 		ev, ok := parseEvent(sc.Bytes())
@@ -672,6 +725,20 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID string) (runRe
 		}
 		rep.observe(ev)
 		logEvent(ev)
+		// An unknown slash command no longer shows up as a zero-turn exit:
+		// the CLI (2.1.85) answers it with an ordinary-looking success
+		// result. The init event's command inventory is the early tell, and
+		// a prompt invoking a command that is not there can only fail — so
+		// stop the run now instead of paying for whatever it does next.
+		if ev.Type == "system" && ev.Subtype == "init" && lacksCommand(ev.SlashCommands, invokes) {
+			missing = fmt.Sprintf("the session has no /%s command", invokes)
+			if near := nearMatches(ev.SlashCommands, invokes); len(near) > 0 {
+				missing += " (it does list " + strings.Join(near, ", ") + ")"
+			}
+			rep.skillMissing = true
+			log.Printf("%s — stopping the run", missing)
+			_ = cmd.Process.Kill()
+		}
 	}
 
 	err = cmd.Wait()
@@ -680,6 +747,9 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID string) (runRe
 	}
 	rep.stalled = stalled.Load()
 	rep.interrupted = ctx.Err() != nil
+	if rep.skillMissing {
+		return rep, fmt.Errorf("%w: %s", errNoWork, missing)
+	}
 	if rep.stalled {
 		return rep, fmt.Errorf("run stalled: no output events for %s", cfg.stall)
 	}
@@ -708,6 +778,13 @@ func logEvent(ev streamEvent) {
 			}
 		}
 	case "result":
+		// The final text first: for a healthy run it restates the last
+		// assistant message, but a result the CLI synthesized itself —
+		// "Unknown skill: x" — appears nowhere else in the stream, and is
+		// usually the whole diagnosis.
+		if t := strings.TrimSpace(ev.Result); t != "" {
+			log.Printf("[claude] %s", clip(t, 160))
+		}
 		status := "ok"
 		if ev.IsError {
 			status = "ERROR: " + ev.Subtype
@@ -882,7 +959,7 @@ func remediateConflicts(ctx context.Context, cfg config, issue, prNumber int) er
 			"Do not open a new PR, do not merge anything, and do not commit to the default branch.",
 		prNumber, branch, branch)
 	started := time.Now()
-	rep, err := execClaude(ctx, cfg, prompt, "")
+	rep, err := execClaude(ctx, cfg, prompt, "", "")
 	// A remediation run pushes to a PR that already exists, so it leaves
 	// behind neither a new PR nor questions.
 	cfg.rec.recordRun(cfg, runContext{

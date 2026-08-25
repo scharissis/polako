@@ -87,8 +87,11 @@ just resets `attempt` and loops, and nothing at the callsite distinguishes it
 from a first run.)
 
 Run **status**, with defined precedence so one run maps to one value:
-`interrupted > stalled > crash > error (result.is_error) > no-turns > ok`.
-Crash records also keep the raw exit code.
+`no-skill > interrupted > stalled > crash > error (result.is_error) >
+no-turns > ok`. Crash records also keep the raw exit code. (`no-skill` was
+added when Claude Code 2.1.85 stopped reporting an unknown slash command as
+zero turns: it marks a run the supervisor stopped because the init event's
+command inventory did not list the -skill.)
 
 Run **outcome** — the single most predictive signal for optimization — is
 what the run left behind: `opened_pr | posted_questions | nothing`, plus the

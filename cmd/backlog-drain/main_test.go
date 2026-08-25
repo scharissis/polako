@@ -33,13 +33,17 @@ func fakeClaude(mode string) int {
 	}
 	switch mode {
 	case "stream":
-		emit(`{"type":"system","subtype":"init","session_id":"sess-xyz","model":"claude-opus-5"}`)
+		// The init event carries the session's command inventory (2.1.85+);
+		// both spellings of the skill are listed so the healthy path proves
+		// the missing-skill tripwire stays quiet when the command exists.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-xyz","model":"claude-opus-5",` +
+			`"slash_commands":["compact","context","cost","backlog-drain:implement-issue","implement-issue"]}`)
 		emit(`{"type":"assistant","session_id":"sess-xyz","message":{"content":[{"type":"text","text":"Reading the issue."}],` +
 			`"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":30,"cache_creation_input_tokens":40}}}`)
 		emit(`{"type":"assistant","session_id":"sess-xyz","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./..."}}],` +
 			`"usage":{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":3,"cache_creation_input_tokens":4}}}`)
 		emit(`{"type":"result","subtype":"success","session_id":"sess-xyz","duration_ms":1000,"duration_api_ms":800,` +
-			`"num_turns":3,"total_cost_usd":0.5,` +
+			`"num_turns":3,"total_cost_usd":0.5,"result":"Opened a PR for issue 7.",` +
 			`"usage":{"input_tokens":100,"output_tokens":200,"cache_read_input_tokens":300,"cache_creation_input_tokens":400},` +
 			`"modelUsage":{"claude-opus-5":{"inputTokens":100,"outputTokens":190,"cacheReadInputTokens":300,` +
 			`"cacheCreationInputTokens":400,"costUSD":0.45},` +
@@ -68,10 +72,26 @@ func fakeClaude(mode string) int {
 		emit(`{"type":"user","session_id":"sess-odd","message":{"content":"a string, not an array"}}`)
 		return 3
 	case "noturns":
-		// What an unresolvable slash command looks like: a clean exit, no work.
+		// How CLIs before 2.1.85 reported an unresolvable slash command: a
+		// clean exit at zero turns, and no command inventory on the init
+		// event. Newer CLIs look like "unknownskill" instead, but this
+		// fallback keeps catching installations still on an old CLI.
 		emit(`{"type":"system","subtype":"init","session_id":"sess-none","model":"claude-opus-5"}`)
 		emit(`{"type":"assistant","session_id":"sess-none","message":{"content":[{"type":"text","text":"Unknown command: /nope"}]}}`)
 		emit(`{"type":"result","subtype":"success","session_id":"sess-none","duration_ms":100,"num_turns":0,"total_cost_usd":0}`)
+		return 0
+	case "unknownskill":
+		// Claude Code 2.1.85 on an unknown slash command: a success result,
+		// nonzero num_turns, no error flag. Only the init event's command
+		// inventory and the result text give the misconfiguration away.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-unk","model":"claude-opus-5",` +
+			`"slash_commands":["compact","context","cost","init","todos"]}`)
+		emit(`{"type":"result","subtype":"success","is_error":false,"session_id":"sess-unk","duration_ms":11,` +
+			`"num_turns":2,"total_cost_usd":0,"result":"Unknown skill: backlog-drain:implement-issue"}`)
+		// Both lines are already in the pipe; linger so the supervisor's
+		// deliberate kill — not this process's own exit — ends the run, and
+		// tests observe the killed path deterministically instead of racing.
+		time.Sleep(500 * time.Millisecond)
 		return 0
 	case "hang":
 		emit(`{"type":"system","subtype":"init","session_id":"sess-hang","model":"claude-opus-5"}`)
@@ -101,7 +121,8 @@ func TestLogEventRendersProgressLines(t *testing.T) {
 		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"PLAN.md","content":"..."}}]}}`,
 		`{"type":"user","message":{"content":[{"type":"tool_result","content":"ignored"}]}}`,
 		`not even json`,
-		`{"type":"result","subtype":"success","duration_ms":1141000,"num_turns":74,"total_cost_usd":4.12,"is_error":false}`,
+		`{"type":"result","subtype":"success","duration_ms":1141000,"num_turns":74,"total_cost_usd":4.12,"is_error":false,` +
+			`"result":"Unknown skill: backlog-drain:implement-issue"}`,
 	}
 	for _, e := range events {
 		if ev, ok := parseEvent([]byte(e)); ok {
@@ -115,6 +136,9 @@ func TestLogEventRendersProgressLines(t *testing.T) {
 		"Gathering context on issue #48. Starting now.",
 		"→ Bash: gh issue view 48",
 		"→ Write: PLAN.md",
+		// The result text must reach the log: for a run the CLI answered
+		// itself, it is the only place the diagnosis ever appears.
+		"Unknown skill: backlog-drain:implement-issue",
 		"finished (ok) — 74 turns, 19m1s, $4.12",
 	} {
 		if !strings.Contains(out, want) {
@@ -133,8 +157,14 @@ func TestLogEventMarksErrorResults(t *testing.T) {
 		t.Fatal("a result event should parse")
 	}
 	logEvent(ev)
-	if got := buf.String(); !strings.Contains(got, "finished (ERROR: error_max_turns)") {
+	got := buf.String()
+	if !strings.Contains(got, "finished (ERROR: error_max_turns)") {
 		t.Errorf("error results should be flagged\ngot: %s", got)
+	}
+	// This event carries no result text — the shape old CLIs still send on
+	// every run — so nothing but the finished line may render.
+	if strings.Contains(got, "[claude] \n") {
+		t.Errorf("an absent result text must not render an empty line\ngot: %s", got)
 	}
 }
 
@@ -391,7 +421,7 @@ func TestExecClaudeStreamsEventsAndCapturesSession(t *testing.T) {
 	buf := captureLog(t)
 	cfg := fakeClaudeConfig(t, "stream")
 
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue")
 	if err != nil {
 		t.Fatalf("execClaude: %v", err)
 	}
@@ -409,7 +439,7 @@ func TestExecClaudeReportsCrashesWithTheSessionToResume(t *testing.T) {
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "crash")
 
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue")
 	if err == nil {
 		t.Fatal("a nonzero exit must surface as an error")
 	}
@@ -432,7 +462,7 @@ func TestExecClaudeKillsAStalledRun(t *testing.T) {
 	cfg.stall = 300 * time.Millisecond
 
 	start := time.Now()
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue")
 	if err == nil || !strings.Contains(err.Error(), "stalled") {
 		t.Fatalf("a silent run should be killed as stalled, got err=%v", err)
 	}
@@ -457,7 +487,7 @@ func TestExecClaudeStopsWhenTheContextIsCancelled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	if _, err := execClaude(ctx, cfg, "/implement-issue 7", ""); err == nil {
+	if _, err := execClaude(ctx, cfg, "/implement-issue 7", "", "implement-issue"); err == nil {
 		t.Fatal("cancelling the context should end the run with an error")
 	}
 	if elapsed := time.Since(start); elapsed > 10*time.Second {
@@ -490,16 +520,86 @@ func TestRunClaudeResumesRatherThanRestartingTheSkill(t *testing.T) {
 	}
 }
 
-// The failure this guards against: -skill naming a slash command the
-// installation does not have. Claude answers "Unknown command", exits 0, and
-// without this the supervisor reports only "no PR and no questions".
+// The failure both of these guard against: -skill naming a slash command the
+// installation does not have. CLIs before 2.1.85 answered with a clean exit
+// at zero turns, and without this fallback the supervisor reports only "no PR
+// and no questions".
 func TestExecClaudeFlagsARunThatTookNoTurns(t *testing.T) {
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "noturns")
 
-	_, err := execClaude(context.Background(), cfg, "/nope 1", "")
+	_, err := execClaude(context.Background(), cfg, "/nope 1", "", "nope")
 	if !errors.Is(err, errNoWork) {
 		t.Fatalf("a clean exit at 0 turns should report errNoWork, got %v", err)
+	}
+}
+
+// From 2.1.85 the CLI answers an unknown slash command with a success result
+// — two turns on paper, nothing done — so the zero-turn fallback never fires.
+// The init event's command inventory is the tell that still does.
+func TestExecClaudeFlagsASkillTheSessionDoesNotList(t *testing.T) {
+	captureLog(t)
+	cfg := fakeClaudeConfig(t, "unknownskill")
+
+	rep, err := execClaude(context.Background(), cfg, "/"+defaultSkill+" 1", "", defaultSkill)
+	if !errors.Is(err, errNoWork) {
+		t.Fatalf("a session that does not list the skill should report errNoWork, got %v", err)
+	}
+	if !strings.Contains(err.Error(), defaultSkill) {
+		t.Errorf("the error should name the missing command, got %v", err)
+	}
+	if got := rep.status(); got != "no-skill" {
+		t.Errorf("status = %q, want %q — the deliberate stop must not be recorded as a crash", got, "no-skill")
+	}
+}
+
+// Resume and conflict-remediation prompts are plain English — their callers
+// pass an empty invokes — and must run even in a session that does not list
+// the -skill, or a misconfigured -skill would break remediation of a PR that
+// already exists.
+func TestExecClaudeLeavesPlainPromptsAloneWhenTheSkillIsMissing(t *testing.T) {
+	captureLog(t)
+	cfg := fakeClaudeConfig(t, "unknownskill")
+
+	if _, err := execClaude(context.Background(), cfg,
+		"PR #3 has merge conflicts with the remote default branch.", "", ""); err != nil {
+		t.Fatalf("a plain prompt must not trip the missing-skill check, got %v", err)
+	}
+}
+
+// The near-match hint is what turns "no such command" into a fix, and the
+// bare-vs-namespaced confusion is symmetrical, so both directions must hit.
+func TestNearMatchesBridgesPluginNamespacing(t *testing.T) {
+	inv := []string{"compact", "backlog-drain:implement-issue"}
+	if got := nearMatches(inv, "implement-issue"); !slices.Equal(got, []string{"/backlog-drain:implement-issue"}) {
+		t.Errorf("a bare -skill should surface the namespaced spelling, got %v", got)
+	}
+	if got := nearMatches([]string{"compact", "implement-issue"}, "backlog-drain:implement-issue"); !slices.Equal(got, []string{"/implement-issue"}) {
+		t.Errorf("a namespaced -skill should surface the bare spelling, got %v", got)
+	}
+	if got := nearMatches(inv, "something-else"); got != nil {
+		t.Errorf("no relative should mean no hint, got %v", got)
+	}
+}
+
+// A wrong "missing" verdict kills a healthy run, so the check may only fire
+// on positive evidence: an inventory that is present and lacks the command.
+func TestLacksCommandNeedsPositiveEvidence(t *testing.T) {
+	list := []string{"compact", "cost", "backlog-drain:implement-issue"}
+	if lacksCommand(list, "backlog-drain:implement-issue") {
+		t.Error("a listed command must be found")
+	}
+	if !lacksCommand(list, "implement-issue") {
+		t.Error("a command absent from a populated inventory is missing")
+	}
+	if lacksCommand(nil, "implement-issue") {
+		t.Error("an absent inventory (older CLIs) must not read as missing")
+	}
+	if lacksCommand(list, "") {
+		t.Error("a plain prompt invokes nothing, so nothing can be missing")
+	}
+	if lacksCommand([]string{"/compact", "/implement-issue"}, "implement-issue") {
+		t.Error("a leading slash on inventory entries must not hide the command")
 	}
 }
 
@@ -509,7 +609,7 @@ func TestExecClaudeCapturesTheResultUsage(t *testing.T) {
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "stream")
 
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue")
 	if err != nil {
 		t.Fatalf("execClaude: %v", err)
 	}
@@ -543,7 +643,7 @@ func TestExecClaudeSalvagesTheSessionFromAnUnparseableLine(t *testing.T) {
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "oddshape")
 
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue")
 	if err == nil {
 		t.Fatal("a nonzero exit must surface as an error")
 	}
@@ -558,7 +658,7 @@ func TestExecClaudeToleratesAResultWithoutModelUsage(t *testing.T) {
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "oldcli")
 
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue")
 	if err != nil {
 		t.Fatalf("execClaude: %v", err)
 	}
@@ -580,7 +680,7 @@ func TestExecClaudeKeepsTheUsageObservedBeforeACrash(t *testing.T) {
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "partial")
 
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue")
 	if err == nil {
 		t.Fatal("a nonzero exit must surface as an error")
 	}
@@ -613,7 +713,7 @@ func TestRecordsNeverCarryWhatTheRunSaid(t *testing.T) {
 	dir := t.TempDir()
 	cfg.repo, cfg.rec = "owner/repo", newRecorder(dir)
 
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue")
 	if err != nil {
 		t.Fatalf("execClaude: %v", err)
 	}
@@ -621,9 +721,10 @@ func TestRecordsNeverCarryWhatTheRunSaid(t *testing.T) {
 		outcome: outcomeOpenedPR, started: time.Now(), ended: time.Now()}, rep)
 
 	written := strings.Join(readRecords(t, dir, cfg.repo), "\n")
-	// Both the assistant text and the tool input the stream carried; the
-	// record counts tool uses, but must never say what they were.
-	for _, leaked := range []string{"Reading the issue", "go test ./...", "Bash"} {
+	// One representative per kind of text the stream carried: assistant text,
+	// tool input, the command inventory, the final result text. The record
+	// counts tool uses, but must never say what any of them were.
+	for _, leaked := range []string{"Reading the issue", "go test ./...", "Bash", "compact", "Opened a PR"} {
 		if strings.Contains(written, leaked) {
 			t.Errorf("record carries %q from the stream:\n%s", leaked, written)
 		}
