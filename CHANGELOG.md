@@ -80,10 +80,13 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   pulls — it merges on GitHub — so the ref falls one commit behind per merged
   PR. Reviewing against a stale one silently pulled an earlier merged PR into
   the diff, where `--fix` rewrote that already-merged code inside the branch
-  under review. **Operator impact:** a run now fast-forwards the main checkout's
-  default branch, which is the only thing it does outside its own worktree. It
-  is `--ff-only`, so it refuses rather than moving anything it cannot advance
-  cleanly, and it is skipped when that checkout sits on another branch.
+  under review. The supervisor now does the same thing itself, before it picks
+  up an issue and after a merge it saw — a teammate's push and a drain restarted
+  days later open the same gap, not only the drain's own merges. **Operator
+  impact:** a drain now fast-forwards `-dir`'s default branch. It is `--ff-only`
+  and nothing else: a default branch carrying a commit of its own, work in the
+  way, or a checkout sitting on another branch is reported in the log and left
+  exactly as it is, never rebased or reset.
 
 ## [0.6.1]
 

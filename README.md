@@ -33,6 +33,17 @@ wait for merge (-poll)               ← rebases if GitHub reports CONFLICTING,
 close the issue, remove the worktree, advance to the next
 ```
 
+**Your checkout is kept level with origin, and never written to.** Before each
+issue and after each merge, the drain fast-forwards `-dir`'s default branch. It
+has to: a drain never pulls — you merge on GitHub and it only watches — so that
+branch falls a commit behind on every merge, and it is what the skill cuts a new
+branch from and what a code review resolves a base against. Left behind, a
+review silently diffs the branch against a base that predates the last merge and
+folds an already-merged PR into what it reviews. It is `--ff-only` and nothing
+else: if your default branch has a commit of its own, or work in the way, or you
+are sitting on another branch, the drain says so in its log and leaves it
+exactly as it is.
+
 **All state lives in GitHub** — issues, comments, PRs, branches. The process
 itself is stateless and restart-safe: kill it at any point, rerun it later, and
 it re-derives where things stand. If a PR already exists for `issue-N`, it

@@ -867,6 +867,12 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 	branch := fmt.Sprintf("%s%d", cfg.branchPrefix, issue)
 	attempt := 0 // 0 = fresh skill run; >0 = retry after a crash
 
+	// Before the run, not only after the last merge: the gap this closes is also
+	// opened by a teammate's push and by a drain restarted days later, and the
+	// moment that matters is the one just before a branch is cut and a review
+	// resolves its base.
+	syncDefaultBranch(ctx, cfg)
+
 	// tally is what -post-summary reports. It lives on the state rather than
 	// here so an issue put down for an answer and picked up later still reports
 	// every run behind it. Nothing reads it back once the process ends, so it
@@ -1055,6 +1061,10 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 			if pr.State == "MERGED" {
 				log.Printf("PR #%d merged — cleaning up and advancing", pr.Number)
 				cleanupWorktree(ctx, cfg, issue)
+				// The merge just made the local default branch stale. The next issue
+				// would sync anyway; doing it here too is what leaves the operator a
+				// current checkout when this was the last issue in the backlog.
+				syncDefaultBranch(ctx, cfg)
 				terminal(pr.Number, issueMerged)
 				postSummary(ctx, cfg, pr.Number, *tally)
 				return ensureIssueClosed(ctx, cfg, issue, pr.Number)
@@ -2054,6 +2064,61 @@ func ensureIssueClosed(ctx context.Context, cfg config, issue, prNumber int) err
 
 // cleanupWorktree removes the sibling worktree the skill creates. Best-effort:
 // a desktop-app session may have used its own worktree path instead.
+// syncDefaultBranch brings the main checkout's default branch up to whatever
+// origin has. A drain never pulls — a human merges on GitHub and the drain only
+// watches — so the local ref falls a commit behind on every merge, and anything
+// that resolves "this branch's base" from the checkout then reads a base that
+// predates it. The review gate does exactly that: against a stale base it folds
+// an already-merged PR into the diff under review, where a --fix rewrites code
+// that shipped days ago into the branch being reviewed.
+//
+// Merges are not the only source. A teammate's push, a hotfix, or a drain
+// restarted after days down all leave the same gap, which is why this runs when
+// an issue is picked up and not only after a merge.
+//
+// --ff-only is the whole safety story: it advances a local mirror to a state a
+// human already created on the remote, and refuses rather than moving anything
+// it cannot advance cleanly. It creates no commit, merges no PR, rewrites
+// nothing somebody committed here — so it stays on the right side of "nothing
+// merges itself". Every failure is best-effort and logged rather than fatal: a
+// checkout on another branch, or with work in the way, is the operator's to
+// sort out and none of it is worth ending an overnight drain over. It is logged
+// loudly because a skipped sync is what puts a stale base under the next review.
+func syncDefaultBranch(ctx context.Context, cfg config) {
+	if _, err := git(ctx, cfg, "fetch", "origin", "--quiet"); err != nil {
+		log.Printf("could not fetch origin, so the default branch may be behind "+
+			"and a review may run against a stale base: %v", err)
+		return
+	}
+	head, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short")
+	if err != nil {
+		log.Printf("could not resolve origin's default branch, so %s is left as it is "+
+			"— run `git remote set-head origin -a` there if reviews look mis-scoped: %v", cfg.dir, err)
+		return
+	}
+	remote := strings.TrimSpace(string(head))
+	local := strings.TrimPrefix(remote, "origin/")
+	on, err := git(ctx, cfg, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return
+	}
+	if got := strings.TrimSpace(string(on)); got != local {
+		log.Printf("%s is on %s, not %s — leaving it alone, but a run's review base "+
+			"comes from %s, so check it before trusting a review's scope", cfg.dir, got, local, local)
+		return
+	}
+	before, _ := git(ctx, cfg, "rev-parse", "HEAD")
+	if _, err := git(ctx, cfg, "merge", "--ff-only", remote); err != nil {
+		log.Printf("could not fast-forward %s to %s, so a review may run against a stale "+
+			"base — commit, stash or discard whatever is in the way in %s: %v",
+			local, remote, cfg.dir, err)
+		return
+	}
+	if after, _ := git(ctx, cfg, "rev-parse", "HEAD"); string(after) != string(before) {
+		log.Printf("fast-forwarded %s to %s", local, remote)
+	}
+}
+
 func cleanupWorktree(ctx context.Context, cfg config, issue int) {
 	repo := filepath.Base(cfg.dir)
 	path := filepath.Join(filepath.Dir(cfg.dir), fmt.Sprintf("%s-issue-%d", repo, issue))
