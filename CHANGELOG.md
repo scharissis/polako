@@ -81,9 +81,9 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   alongside an install of the same plugin — how a tip skill gets tested against
   a tip binary. The session copy is what runs, so every record carried the
   installed version instead, and the version-skew warning compared a pair that
-  was not in play. A session-scoped copy now wins, and a list that still cannot
-  be resolved records nothing rather than a number nothing downstream could tell
-  was wrong.
+  was not in play. A session-scoped copy now wins, disabled copies are not
+  candidates at all, and a list that still cannot be resolved records nothing
+  rather than a number nothing downstream could tell was wrong.
 - The skill's review gate brings the local default branch up to date before it
   reviews. It resolves the branch's base from that local ref, and a drain never
   pulls — it merges on GitHub — so the ref falls one commit behind per merged

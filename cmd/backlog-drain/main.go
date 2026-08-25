@@ -763,11 +763,18 @@ func pluginVersion(ctx context.Context, cfg config) string {
 }
 
 // installedPlugin is the part of a `plugin list --json` entry this reads.
+// Enabled is a pointer because the list holds disabled plugins too, and a CLI
+// that omits the field must not be read as "everything is off" — absent means
+// enabled, which is what every CLI without the field meant.
 type installedPlugin struct {
 	ID      string `json:"id"`
 	Version string `json:"version"`
 	Scope   string `json:"scope"`
+	Enabled *bool  `json:"enabled"`
 }
+
+// loadable reports whether a session would pick this copy up at all.
+func (p installedPlugin) loadable() bool { return p.Enabled == nil || *p.Enabled }
 
 // installedVersion picks the copy of plugin a session started now would load,
 // out of `plugin list --json` output. The list can hold the same plugin twice,
@@ -779,10 +786,12 @@ func installedVersion(list []byte, plugin string) string {
 	}
 	// The id is <plugin>@<marketplace>; the marketplace is whatever the
 	// operator named it when they added it, so only the plugin half is ours to
-	// match on.
+	// match on. A disabled copy is listed but never loaded, so it is not a
+	// candidate — counting it would both report a version no session ran and
+	// let a stale disabled duplicate wash out an otherwise unambiguous answer.
 	var matches []installedPlugin
 	for _, p := range installed {
-		if name, _, _ := strings.Cut(p.ID, "@"); name == plugin {
+		if name, _, _ := strings.Cut(p.ID, "@"); name == plugin && p.loadable() {
 			matches = append(matches, p)
 		}
 	}

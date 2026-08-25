@@ -1203,6 +1203,21 @@ func TestPluginVersionPicksTheCopyThatWillRun(t *testing.T) {
 		want: "0.6.1",
 		why:  "whichever one wins reports the same version, so it is not a guess",
 	}, {
+		name: "a disabled duplicate beside an enabled one",
+		list: `[{"id":"backlog-drain@a-fork","version":"0.1.0","scope":"user","enabled":false},
+		        {"id":"backlog-drain@scharissis","version":"0.6.1","scope":"user","enabled":true}]`,
+		want: "0.6.1",
+		why:  "a disabled copy never loads, so it is not one of the copies to choose between",
+	}, {
+		name: "the only copy is disabled",
+		list: `[{"id":"backlog-drain@scharissis","version":"0.6.1","scope":"user","enabled":false}]`,
+		why:  "nothing will load it, so no version drove the run",
+	}, {
+		name: "a CLI that does not report enabled",
+		list: `[{"id":"backlog-drain@scharissis","version":"0.6.1","scope":"user"}]`,
+		want: "0.6.1",
+		why:  "an absent field is not a disabled plugin",
+	}, {
 		name: "no match",
 		list: `[{"id":"some-other-plugin@elsewhere","version":"9.9.9","scope":"user"}]`,
 		why:  "the plugin is not installed at all",
