@@ -90,6 +90,14 @@ func fakeClaude(mode string) int {
 	case "crash":
 		emit(`{"type":"system","subtype":"init","session_id":"sess-crash","model":"claude-opus-5"}`)
 		return 7
+	case "costlycrash":
+		// Reported what it spent and then died anyway. The combination is what
+		// a cost cap needs to be exercised end to end: a run that leaves a bill
+		// behind and a supervisor that would otherwise resume it.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-costly","model":"claude-opus-5"}`)
+		emit(`{"type":"result","subtype":"success","session_id":"sess-costly","duration_ms":1000,` +
+			`"num_turns":4,"total_cost_usd":9,"usage":{"input_tokens":5,"output_tokens":6}}`)
+		return 7
 	case "oddshape":
 		// content as a plain string rather than an array: valid JSON the event
 		// schema cannot hold, and here the only line carrying the session.
@@ -847,6 +855,179 @@ func TestWatchTickScalesWithStall(t *testing.T) {
 		if got := watchTick(c.stall); got != c.want {
 			t.Errorf("watchTick(%s) = %s, want %s", c.stall, got, c.want)
 		}
+	}
+}
+
+// The caps are off unless somebody sets one, which is the whole of what keeps
+// every existing drain behaving as it did — and each reports in the words the
+// park comment and the summary go on to carry.
+func TestOverBudgetOnlySpeaksWhenACapIsSet(t *testing.T) {
+	spent := issueTally{costUSD: 9, wallMS: (2 * time.Hour).Milliseconds()}
+
+	if got := overBudget(config{}, spent); got != "" {
+		t.Errorf("overBudget with no caps = %q, want silence — the default must not park anything", got)
+	}
+	if got := overBudget(config{maxCost: 20, maxIssueTime: 3 * time.Hour}, spent); got != "" {
+		t.Errorf("overBudget under both caps = %q, want silence", got)
+	}
+	cost := overBudget(config{maxCost: 5}, spent)
+	if !strings.Contains(cost, "$9.00") || !strings.Contains(cost, "-max-cost of $5.00") {
+		t.Errorf("cost breach = %q, want it to quote what was spent and the cap it broke", cost)
+	}
+	clock := overBudget(config{maxIssueTime: time.Hour}, spent)
+	if !strings.Contains(clock, "2h") || !strings.Contains(clock, "-max-issue-time of 1h") {
+		t.Errorf("time breach = %q, want it to quote the run time and the cap it broke", clock)
+	}
+	// Exactly at the cap counts as spent: a cap of $5 that permits a run once
+	// $5 is gone is a cap on nothing.
+	if got := overBudget(config{maxCost: 9}, spent); got == "" {
+		t.Error("spending the cap exactly must count as reaching it")
+	}
+}
+
+// The limit handed to a run is what the cap has left, not the cap: an issue on
+// its fourth run does not get the whole allowance over again.
+func TestRunLimitLeavesOnlyWhatTheIssueHasLeft(t *testing.T) {
+	spent := issueTally{wallMS: (20 * time.Minute).Milliseconds()}
+
+	if got := runLimit(config{}, spent); got != 0 {
+		t.Errorf("runLimit with the cap off = %v, want 0 for unbounded", got)
+	}
+	if got := runLimit(config{maxIssueTime: time.Hour}, spent); got != 40*time.Minute {
+		t.Errorf("runLimit = %v, want 40m of a 1h cap after 20m of runs", got)
+	}
+	// Only reachable if a caller skipped overBudget; a limit of zero would read
+	// as unbounded, which is the one answer an exhausted issue must not get.
+	if got := runLimit(config{maxIssueTime: time.Minute}, spent); got <= 0 {
+		t.Errorf("runLimit past the cap = %v, want a positive floor rather than unbounded", got)
+	}
+}
+
+// A cap set in a shell profile is still a cap, so startup names the ones in
+// force rather than leaving a park to quote a flag nobody typed.
+func TestCapNotesNameEveryCapInForce(t *testing.T) {
+	if got := capNotes(config{}); got != "" {
+		t.Errorf("capNotes with no caps = %q, want nothing said", got)
+	}
+	got := capNotes(config{maxCost: 15, maxIssueTime: 90 * time.Minute, maxSessionCost: 200})
+	for _, want := range []string{"-max-cost $15.00", "-max-issue-time 1h30m", "-max-session-cost $200.00"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("capNotes = %q, missing %q", got, want)
+		}
+	}
+}
+
+// remediable is what the spend caps ask instead of repeating supervisePR's
+// switch, so it has to answer yes to every condition that switch dispatches at
+// and no to a PR that is merely waiting. A fourth kind of remediation added
+// without a line here is a hole in the budget.
+func TestRemediableCoversEveryDispatch(t *testing.T) {
+	reviewed := prView{changesRequested: true, reviewedAt: time.Now()}
+	for _, tc := range []struct {
+		name string
+		pr   prView
+		want bool
+	}{
+		{"conflicting", prView{mergeable: "CONFLICTING"}, true},
+		{"red checks", prView{checks: checksFailing, failing: []string{"build"}}, true},
+		{"review outstanding", reviewed, true},
+		{"green and mergeable", prView{mergeable: "MERGEABLE", checks: checksPassing}, false},
+		{"checks still running", prView{mergeable: "MERGEABLE", checks: checksPending}, false},
+		{"a check stopped on a person", prView{mergeable: "MERGEABLE", checks: checksHuman}, false},
+		{"review already answered", prView{changesRequested: true,
+			reviewedAt: reviewed.reviewedAt, branchAt: reviewed.reviewedAt.Add(time.Minute)}, false},
+	} {
+		if got := tc.pr.remediable(); got != tc.want {
+			t.Errorf("%s: remediable = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// The cap -stall cannot stand in for: this run is not silent, it just never
+// stops. The kill has to read as a deliberate stop rather than as the crash it
+// looks like from the exit code, or the supervisor resumes it into the same
+// wall.
+func TestExecClaudeKillsARunPastItsBudget(t *testing.T) {
+	buf := captureLog(t)
+	cfg := fakeClaudeConfig(t, "hang")
+	cfg.stall = 0 // only the budget may end this run
+
+	start := time.Now()
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue",
+		100*time.Millisecond)
+	if !errors.Is(err, errBudget) {
+		t.Fatalf("a run past -max-issue-time should report errBudget, got %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("the run took %v — the budget watchdog did not kill it", elapsed)
+	}
+	if !rep.overBudget {
+		t.Error("the report should say the budget stopped this run")
+	}
+	if got := rep.status(); got != "budget" {
+		t.Errorf("status = %q, want %q so the run data can tell it from a crash", got, "budget")
+	}
+	// The session survives the kill even though nothing else about the run
+	// does: a later drain that raises the cap has something to resume.
+	if rep.sessionID != "sess-hang" {
+		t.Errorf("sessionID = %q, want the session the run reported before it was killed", rep.sessionID)
+	}
+	if !strings.Contains(buf.String(), "-max-issue-time") {
+		t.Errorf("the log should say why the run was killed\ngot:\n%s", buf.String())
+	}
+}
+
+// The caps gate runs, never waiting: a PR that needs no fixing is free to
+// merge however much its issue has already cost, and parking it would hand
+// back an issue whose work is finished and sitting on GitHub.
+func TestSupervisePRStillWaitsOutAnOverspentPRNobodyHasToFix(t *testing.T) {
+	captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		PRs: map[string]*fakePR{"issue-1": {
+			Number: 9, State: "OPEN", Mergeable: "MERGEABLE",
+			Head: "abc123", Checks: []string{"SUCCESS"}, MergeOnRead: 2,
+		}},
+	})
+	cfg.maxCost = 1
+	tally := issueTally{runs: 1, costUSD: 9}
+
+	state, err := supervisePR(context.Background(), cfg, 1, 9, &tally)
+	if err != nil {
+		t.Fatalf("an overspent issue whose PR is green must still be waited out: %v", err)
+	}
+	if state != "MERGED" {
+		t.Errorf("state = %q, want MERGED", state)
+	}
+	if tally.runs != 1 {
+		t.Errorf("tally.runs = %d, want no run dispatched while waiting", tally.runs)
+	}
+}
+
+// The other half: a PR that does need fixing is a run this issue can no longer
+// afford, so it parks instead of dispatching one.
+func TestSupervisePRParksRatherThanRemediateOnAnOverspentIssue(t *testing.T) {
+	captureLog(t)
+	cfg, _ := drainConfig(t, "fixci", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		PRs: map[string]*fakePR{"issue-1": {
+			Number: 9, State: "OPEN", Mergeable: "MERGEABLE",
+			Head: "abc123", Checks: []string{"FAILURE"},
+		}},
+	})
+	cfg.maxIssueTime = time.Minute
+	tally := issueTally{runs: 1, wallMS: (2 * time.Minute).Milliseconds()}
+
+	_, err := supervisePR(context.Background(), cfg, 1, 9, &tally)
+	reason, parked := parkReason(err)
+	if !parked {
+		t.Fatalf("a red PR on an issue past its cap should park, got %v", err)
+	}
+	if !strings.Contains(reason, "-max-issue-time") {
+		t.Errorf("park reason = %q, want it to name the cap that stopped the remediation", reason)
+	}
+	if tally.runs != 1 {
+		t.Errorf("tally.runs = %d, want the remediation never dispatched", tally.runs)
 	}
 }
 

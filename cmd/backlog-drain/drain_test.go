@@ -1141,3 +1141,146 @@ func TestDrainSummaryIsSilentWithoutResults(t *testing.T) {
 		t.Errorf("summary = %v, want nothing", got)
 	}
 }
+
+// What a drained backlog cost, in total and issue by issue.
+func TestDrainSummaryPricesTheDrainAndEachIssue(t *testing.T) {
+	got := strings.Join(drainSummary([]issueResult{
+		{issue: 1, parked: true, reason: "no PR and no questions", cost: 2.5},
+		{issue: 2, cost: 4},
+		{issue: 3, awaiting: true, cost: 0.25},
+	}, 90*time.Minute), "\n")
+
+	for _, want := range []string{
+		"$6.75 spent, 1h30m of wall clock",
+		"merged  #2 ($4.00)",
+		"waiting #3 ($0.25)",
+		"parked  #1 ($2.50) — no PR and no questions",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary is missing %q\ngot:\n%s", want, got)
+		}
+	}
+}
+
+// A run that crashed, stalled or was interrupted never reported a cost, so the
+// total is a floor rather than the bill. Unqualified it would read as the
+// whole of it — and the caps that read the same number would look broken
+// rather than conservative.
+func TestDrainSummarySaysWhenTheTotalUndercounts(t *testing.T) {
+	got := strings.Join(drainSummary([]issueResult{
+		{issue: 1, cost: 4, approximated: 2},
+	}, time.Minute), "\n")
+
+	if want := "$4.00 spent (2 runs reported none, so that is an undercount)"; !strings.Contains(got, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
+	}
+}
+
+// A drain that only waited on a PR an earlier process opened spent nothing,
+// and "$0.00" reads as a free backlog rather than as an absent number.
+func TestDrainSummaryOmitsDollarsItNeverSpent(t *testing.T) {
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, time.Minute), "\n")
+	if strings.Contains(got, "$") {
+		t.Errorf("an uncosted drain should print no dollars at all\ngot:\n%s", got)
+	}
+}
+
+// The point of the cost cap: a run reports what it spent, the cap says that is
+// the lot, and the issue is parked with the arithmetic in the reason rather
+// than resumed into another bill.
+func TestDrainParksAnIssueOverItsCostCap(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "costlycrash", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	cfg.maxCost = 1
+	cfg.retries = 2 // without the cap, this run would be resumed twice
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a cap is a park, not a fatal error: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if got := st.Issues["1"].Labels; !slices.Contains(got, needsHumanLabel) {
+		t.Errorf("issue 1 labels = %v, want %s", got, needsHumanLabel)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"issue #1 needs a human: this drain has spent $9.00 on it, the whole of its -max-cost of $1.00",
+		"parked  #1 ($9.00) — this drain has spent $9.00 on it",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
+	}
+	// One run, not three: the cap has to be read before the resume budget, or
+	// it only ever fires after -retries has spent the money anyway.
+	if got := strings.Count(out, "session started"); got != 1 {
+		t.Errorf("%d runs dispatched, want 1 — the cap must be read before the resume", got)
+	}
+}
+
+// The gap -stall leaves: this run is not silent, it just never stops. The
+// budget watchdog kills it, and the kill is a park rather than the crash it
+// looks like — a resume would spend the same allowance reaching the same kill.
+func TestDrainParksAnIssueOverItsTimeCap(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "hang", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	cfg.stall = 0 // only the budget may end this run
+	cfg.maxIssueTime = 100 * time.Millisecond
+	cfg.retries = 2
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a cap is a park, not a fatal error: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if got := st.Issues["1"].Labels; !slices.Contains(got, needsHumanLabel) {
+		t.Errorf("issue 1 labels = %v, want %s", got, needsHumanLabel)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "issue #1 needs a human:") || !strings.Contains(out, "-max-issue-time") {
+		t.Errorf("log should park issue 1 and name the cap that did it\ngot:\n%s", out)
+	}
+	if got := strings.Count(out, "session started"); got != 1 {
+		t.Errorf("%d runs dispatched, want 1 — a run the cap killed must not be resumed", got)
+	}
+}
+
+// The session budget ends the drain rather than parking anything: the operator
+// asked to stop spending, not to hand issues back. Everything is on GitHub, so
+// raising it and starting again carries on from here.
+func TestDrainStopsCleanlyOnTheSessionBudget(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true},
+			"2": {Open: true},
+		},
+	})
+	cfg.maxSessionCost = 0.4 // one run of the fake CLI costs $0.50
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("an exhausted session budget is a clean exit: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if got := st.Issues["2"]; slices.Contains(got.Labels, needsHumanLabel) || got.Comments != 0 {
+		t.Errorf("issue 2 = %+v, want it left untouched rather than parked", got)
+	}
+	if !st.Issues["2"].Open {
+		t.Error("issue 2 should still be open — the budget must not close anything")
+	}
+
+	out := buf.String()
+	if want := "spent $0.50 of its -max-session-cost of $0.40 — stopping here"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+	if strings.Contains(out, "=== issue #2 ===") {
+		t.Errorf("issue 2 was picked up after the budget was spent\ngot:\n%s", out)
+	}
+}
