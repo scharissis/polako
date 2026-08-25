@@ -93,6 +93,17 @@ func fakeClaude(mode string) int {
 		// tests observe the killed path deterministically instead of racing.
 		time.Sleep(500 * time.Millisecond)
 		return 0
+	case "authfail":
+		// Claude Code on a rejected OAuth token: one turn, no cost, and a
+		// result flagged is_error whose subtype is nonetheless "success".
+		// The 401 body is the CLI's, quoted exactly as it was logged.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-auth","model":"claude-sonnet-4-6"}`)
+		emit(`{"type":"result","subtype":"success","is_error":true,"session_id":"sess-auth",` +
+			`"duration_ms":183000,"num_turns":1,"total_cost_usd":0,` +
+			`"result":"Failed to authenticate. API Error: 401 {\"type\":\"error\",\"error\":` +
+			`{\"type\":\"authentication_error\",\"message\":\"OAuth access token is invalid.\"},` +
+			`\"request_id\":null}"}`)
+		return 1
 	case "hang":
 		emit(`{"type":"system","subtype":"init","session_id":"sess-hang","model":"claude-opus-5"}`)
 		time.Sleep(30 * time.Second) // the stall watchdog is expected to kill this
@@ -727,6 +738,106 @@ func TestRecordsNeverCarryWhatTheRunSaid(t *testing.T) {
 	for _, leaked := range []string{"Reading the issue", "go test ./...", "Bash", "compact", "Opened a PR"} {
 		if strings.Contains(written, leaked) {
 			t.Errorf("record carries %q from the stream:\n%s", leaked, written)
+		}
+	}
+}
+
+// A rejected token is not a crash: resuming it spends minutes reaching the
+// identical 401, so the classification has to survive at the boundary where
+// the retry decision is made.
+func TestExecClaudeStopsOnRefusedCredentials(t *testing.T) {
+	buf := captureLog(t)
+	cfg := fakeClaudeConfig(t, "authfail")
+
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 2", "", "implement-issue")
+	if !errors.Is(err, errAuth) {
+		t.Fatalf("a refused token should report errAuth, got %v", err)
+	}
+	if rep.status() != "auth" {
+		t.Errorf("status = %q, want %q — recording it as a crash hides the cause", rep.status(), "auth")
+	}
+	// The session still has to come back: it is what the run record is keyed
+	// on, and what a human resumes by hand once the token works again.
+	if rep.sessionID != "sess-auth" {
+		t.Errorf("session id = %q, want %q", rep.sessionID, "sess-auth")
+	}
+	if got := buf.String(); strings.Contains(got, "ERROR: success") {
+		t.Errorf("a failed run must not report the subtype as its status\ngot: %s", got)
+	}
+}
+
+// The advice is the whole point of stopping early, so it has to name the
+// commands that fix it rather than only what broke.
+func TestAuthAdviceSaysHowToFixIt(t *testing.T) {
+	got := authAdvice(errAuth).Error()
+	for _, want := range []string{"could not authenticate", "claude auth status", "claude auth login"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("advice is missing %q\ngot: %s", want, got)
+		}
+	}
+}
+
+// Two independent gates keep the matcher off a healthy run, and this repo's
+// own backlog is what makes both necessary: it contains OAuth issues, so runs
+// legitimately talk about authentication errors while succeeding.
+func TestAuthFailureNeedsAFailedResultThatLeadsWithIt(t *testing.T) {
+	const refused = `Failed to authenticate. API Error: 401 {"type":"error",` +
+		`"error":{"type":"authentication_error","message":"OAuth access token is invalid."}}`
+	const mentions = "Fixed the OAuth issue: an authentication_error no longer retries."
+
+	cases := []struct {
+		name   string
+		ev     streamEvent
+		want   bool
+		reason string
+	}{
+		{"refused credentials", streamEvent{Type: "result", Subtype: "success", IsError: true, Result: refused},
+			true, "the CLI's own refusal has to be recognised"},
+		{"success mentioning auth", streamEvent{Type: "result", Subtype: "success", Result: mentions},
+			false, "a run that succeeded is not a failure to authenticate"},
+		{"failure mentioning auth", streamEvent{Type: "result", Subtype: "success", IsError: true, Result: mentions},
+			false, "a failed run that merely discusses auth must still be retried"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var rep runReport
+			rep.observe(c.ev)
+			if rep.authFailed != c.want {
+				t.Errorf("authFailed = %v, want %v — %s", rep.authFailed, c.want, c.reason)
+			}
+		})
+	}
+}
+
+func TestAuthFailureMatchesTheWaysTheCLIReportsIt(t *testing.T) {
+	refused := []string{
+		`Failed to authenticate. API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth access token is invalid."},"request_id":null}`,
+		"OAuth token has expired. Please run /login",
+		"API Error: 401 Unauthorized",
+		"Invalid x-api-key",
+	}
+	for _, r := range refused {
+		if !authFailure(r) {
+			t.Errorf("should read as refused credentials: %s", clip(r, 80))
+		}
+	}
+	fine := []string{
+		"Opened a PR for issue 2.",
+		"API Error: 500 Internal Server Error", // transient, and worth every retry
+		"API Error: 429 rate limit exceeded",   // likewise
+		"Unknown skill: backlog-drain:implement-issue",
+		// The reason the match is anchored: this repo's own backlog contains
+		// OAuth issues, and a run that quotes one while failing for an
+		// unrelated reason must still be retried, not treated as a token
+		// this process cannot fix.
+		"I reproduced the report in issue #13, where the drain logged " +
+			`Failed to authenticate. API Error: 401 {"type":"error","error":` +
+			`{"type":"authentication_error","message":"OAuth access token is invalid."}} ` +
+			"and then retried three times. I ran out of turns before opening the PR.",
+	}
+	for _, r := range fine {
+		if authFailure(r) {
+			t.Errorf("should not read as refused credentials: %s", clip(r, 80))
 		}
 	}
 }

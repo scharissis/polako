@@ -58,6 +58,20 @@ const defaultSkill = "backlog-drain:" + skillDir
 // early tell), and a clean exit at zero turns (how older CLIs reported it).
 var errNoWork = errors.New("the prompt never resolved to a skill")
 
+// errAuth marks a run whose credentials the API refused. It is a dead end,
+// not a crash: nothing this process does changes the token, so resuming the
+// session thirty seconds later buys another 401 and another few minutes of
+// wall clock. Runs carrying it stop the drain rather than retry it.
+var errAuth = errors.New("claude could not authenticate")
+
+// authAdvice attaches the fix to an authentication failure. This process runs
+// unattended, so its last log line is usually the whole diagnosis a human
+// gets, and "needs a human" without the remedy wastes the trip.
+func authAdvice(err error) error {
+	return fmt.Errorf("%w — check `claude auth status`, then `claude auth login` "+
+		"(or `claude setup-token` for an unattended host), and start the drain again", err)
+}
+
 // defaultTools is the --allowedTools set for unattended runs: everything the
 // implement-issue skill needs, plus the build/test entry points of the common
 // ecosystems. Replace it with -tools, or extend it with -add-tools.
@@ -363,6 +377,24 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 					return err
 				}
 				switch {
+				case errors.Is(runErr, errAuth):
+					// The token does not come back on its own, so every
+					// resume spends minutes reaching the same 401 and buries
+					// the cause under a report about crashes. Stop the drain:
+					// every later issue would hit the same wall.
+					//
+					// Checked here rather than beside errNoWork, which stops
+					// before the PR lookup: a token can die after the run
+					// opened its PR, and that case belongs on the waiting
+					// path above, which needs no token at all.
+					//
+					// Always outcomeNothing, even if the comment count grew:
+					// a run refused at the door cannot have commented, so a
+					// new comment is a human's, and crediting it to the run
+					// would bias every questions rate stats computes.
+					record(0, outcomeNothing)
+					terminal(0, issueNeedsHuman)
+					return authAdvice(runErr)
 				case after > before:
 					// Questions were posted (even if the run then crashed):
 					// wait for a human reply, then fold it in with a fresh run.
@@ -578,11 +610,13 @@ type runReport struct {
 	stalled      bool
 	interrupted  bool
 	skillMissing bool // the session's command list lacks the skill the prompt invokes
+	authFailed   bool // the result text is the CLI reporting refused credentials
 }
 
 // status maps a run to exactly one value, most specific first: a run stopped
 // over a missing skill was killed deliberately, an interrupted run is a
-// nonzero exit too, and so is a stalled one.
+// nonzero exit too, and so is a stalled one — and so is a run the API refused
+// to authenticate, which is the one worth telling apart from a crash.
 func (r runReport) status() string {
 	switch {
 	case r.skillMissing:
@@ -591,6 +625,8 @@ func (r runReport) status() string {
 		return "interrupted"
 	case r.stalled:
 		return "stalled"
+	case r.authFailed:
+		return "auth"
 	case r.exitCode != 0:
 		return "crash"
 	case r.isError:
@@ -622,6 +658,7 @@ func (r *runReport) observe(ev streamEvent) {
 	case "result":
 		r.hasResult = true
 		r.subtype, r.isError = ev.Subtype, ev.IsError
+		r.authFailed = ev.IsError && authFailure(ev.Result)
 		r.turns = ev.NumTurns
 		r.wallMS, r.apiMS = ev.DurationMS, ev.DurationAPIMS
 		r.costUSD = ev.TotalCost
@@ -671,6 +708,30 @@ func nearMatches(commands []string, cmd string) []string {
 		}
 	}
 	return near
+}
+
+// authFailure reports whether a run's final text is the CLI saying the API
+// refused its credentials.
+//
+// The match is anchored to the head of the message, not merely contained in
+// it, because a run that *quotes* a 401 is the likelier sight on this repo's
+// own backlog: an issue about OAuth, a run that then hits max turns, and a
+// final message repeating the error out of the issue body. Refusing that run
+// a retry and stopping the drain over a healthy token is a worse failure than
+// missing an unrecognised wrapper — which costs only the retries this code
+// already spent before. So, as with lacksCommand, every uncertainty resolves
+// toward "keep going".
+func authFailure(result string) bool {
+	head := strings.ToLower(strings.TrimLeft(strings.TrimSpace(result), "*# "))
+	return slices.ContainsFunc([]string{
+		"failed to authenticate",        // the CLI's own wrapper, and the one observed
+		"oauth token has expired",       // a credential it could not refresh
+		"oauth access token is invalid", // a revoked or corrupt stored one
+		"invalid api key",               // the ANTHROPIC_API_KEY spellings
+		"invalid x-api-key",
+		"api error: 401",       // the bare status, when no wrapper survives
+		"authentication_error", // the raw API envelope, unwrapped
+	}, func(sig string) bool { return strings.HasPrefix(head, sig) })
 }
 
 // execClaude runs one headless claude invocation with the shared streaming,
@@ -773,6 +834,13 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes strin
 	if rep.stalled {
 		return rep, fmt.Errorf("run stalled: no output events for %s", cfg.stall)
 	}
+	// Deliberately not gated on the exit code: the CLI reports this as a
+	// nonzero exit today, which is exactly what made it look like a crash
+	// worth resuming, but a clean exit carrying the same result would be no
+	// less of a dead end.
+	if rep.authFailed {
+		return rep, errAuth
+	}
 	if err == nil && rep.turns == 0 {
 		return rep, fmt.Errorf("%w: %q produced no work", errNoWork, prompt)
 	}
@@ -807,7 +875,13 @@ func logEvent(ev streamEvent) {
 		}
 		status := "ok"
 		if ev.IsError {
-			status = "ERROR: " + ev.Subtype
+			// is_error is the authority, not the subtype: the CLI reports an
+			// authentication failure as is_error with subtype "success",
+			// which rendered as the self-contradicting "ERROR: success".
+			status = "ERROR"
+			if ev.Subtype != "" && ev.Subtype != "success" {
+				status += ": " + ev.Subtype
+			}
 		}
 		log.Printf("[claude] finished (%s) — %d turns, %s, $%.2f", status, ev.NumTurns,
 			(time.Duration(ev.DurationMS) * time.Millisecond).Round(time.Second), ev.TotalCost)
@@ -942,6 +1016,9 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int) (string, 
 			if rerr := remediateConflicts(ctx, cfg, issue, prNumber); rerr != nil {
 				if ctx.Err() != nil {
 					return "", ctx.Err()
+				}
+				if errors.Is(rerr, errAuth) {
+					return "", authAdvice(rerr)
 				}
 				failures++
 				log.Printf("remediation attempt %d/%d failed (%v)", failures, cfg.retries, rerr)
