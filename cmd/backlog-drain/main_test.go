@@ -167,6 +167,13 @@ func fakeClaude(mode string) int {
 			return 1
 		}
 		return fakeClaude("stream")
+	case "fixreview":
+		// A review remediation that made the changes and pushed.
+		if err := fakeReviewFix(); err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		return fakeClaude("stream")
 	}
 	fmt.Fprintf(os.Stderr, "unknown fake claude mode %q\n", mode)
 	return 2
@@ -249,6 +256,30 @@ func fakeCIFix() error {
 		}
 		pr.Head += "+" // the push
 		pr.Checks = []string{"SUCCESS"}
+	}
+	return writeGhState(path, st)
+}
+
+// fakeReviewFix stands in for a review remediation that pushed: the branch head
+// moves and its newest commit is now younger than the review, which is the
+// whole of what such a run changes from `pr view`'s side. Like fakeCIFix it
+// fixes every PR with a review outstanding rather than the one this invocation
+// was dispatched for, because the prompt is prose carrying no issue number
+// promptIssue could pick out — and the tests using it have one PR.
+func fakeReviewFix() error {
+	path := os.Getenv(fakeGhEnv)
+	st, err := readGhState(path)
+	if err != nil {
+		return err
+	}
+	for _, pr := range st.PRs {
+		if !slices.ContainsFunc(pr.Reviews, func(r fakeReview) bool {
+			return r.State == reviewChangesRequested
+		}) {
+			continue
+		}
+		pr.Head += "+"                          // the push
+		pr.CommittedAt = "2026-08-20T12:00:00Z" // after every review the tests write
 	}
 	return writeGhState(path, st)
 }
@@ -502,6 +533,119 @@ func TestIssueLabelToolsStayPinnedToOneIssue(t *testing.T) {
 		if !strings.Contains(merged, want) {
 			t.Errorf("resolved allowlist is missing %q\ngot: %s", want, merged)
 		}
+	}
+}
+
+// The one read gh has no subcommand for, granted per run and pinned to the PR
+// that run was dispatched for. `Bash(gh api:*)` in defaultTools would hand a
+// prompt built out of attacker-supplied review text the whole GitHub API.
+func TestPRReviewToolsStayPinnedToOnePR(t *testing.T) {
+	got := prReviewTools("acme/widgets", 42)
+	if want := "Bash(gh api repos/acme/widgets/pulls/42/comments:*)"; got != want {
+		t.Errorf("prReviewTools = %q, want %q", got, want)
+	}
+	if strings.Contains(defaultTools, "gh api") {
+		t.Error("defaultTools grants gh api; it belongs in prReviewTools, where it is " +
+			"bounded to the comments of the PR the run is already working on")
+	}
+	// The pinned entry has to survive alongside an operator's own -add-tools,
+	// since that is how it reaches the run.
+	merged := resolveTools(defaultTools, resolveTools("Bash(bazel:*)", got))
+	for _, want := range []string{"Bash(bazel:*)", got} {
+		if !strings.Contains(merged, want) {
+			t.Errorf("resolved allowlist is missing %q\ngot: %s", want, merged)
+		}
+	}
+}
+
+// Whether a review is still owed an answer is decided from one `pr view`
+// payload alone, so that a drain restarted mid-flight reaches the same verdict
+// as the one that dispatched the run.
+func TestReviewOutstandingReadsOnePRView(t *testing.T) {
+	const (
+		old   = "2026-08-19T10:00:00Z"
+		newer = "2026-08-20T10:00:00Z"
+	)
+	// payload renders the review half of `pr view` the way the real thing does.
+	payload := func(decision, reviews, commits string) []byte {
+		return []byte(fmt.Sprintf(
+			`{"state":"OPEN","mergeable":"MERGEABLE","headRefOid":"abc","statusCheckRollup":[],`+
+				`"reviewDecision":%q,"latestReviews":[%s],"commits":[%s]}`, decision, reviews, commits))
+	}
+	review := func(state, at string) string {
+		return fmt.Sprintf(`{"state":%q,"submittedAt":%q}`, state, at)
+	}
+	commit := func(at string) string { return fmt.Sprintf(`{"committedDate":%q}`, at) }
+
+	cases := []struct {
+		name string
+		raw  []byte
+		want bool
+		note string
+	}{{
+		// The case the whole feature exists for, and the one this repository
+		// itself produces: no branch protection, so reviewDecision is empty and
+		// the review has to carry the verdict.
+		name: "changes requested after the last commit",
+		raw:  payload("", review(reviewChangesRequested, newer), commit(old)),
+		want: true,
+	}, {
+		name: "the branch moved after the review",
+		raw:  payload("", review(reviewChangesRequested, old), commit(newer)),
+		want: false,
+		note: ", changes requested and answered — waiting on a re-review",
+	}, {
+		// latestReviews holds only each reviewer's newest verdict, so a reviewer
+		// who asked for changes and then approved is no longer in the way.
+		name: "the reviewer came back and approved",
+		raw:  payload("APPROVED", review("APPROVED", newer), commit(old)),
+		want: false,
+	}, {
+		name: "one approval does not cancel another reviewer's changes",
+		raw: payload("", review("APPROVED", newer)+","+review(reviewChangesRequested, newer),
+			commit(old)),
+		want: true,
+	}, {
+		// A repository that does require reviews says so here even when its
+		// individual verdicts have been superseded. There is no date to hold the
+		// branch against, so this waits on a person rather than guessing.
+		name: "reviewDecision alone, with no review to date it",
+		raw:  payload(reviewChangesRequested, "", commit(old)),
+		want: false,
+		note: ", changes requested",
+	}, {
+		// Nothing to chase and nothing to say: the ordinary open PR.
+		name: "no reviews at all",
+		raw:  payload("", "", commit(old)),
+		want: false,
+	}, {
+		// An unreadable date must not be read as "reviewed at the epoch", which
+		// would make every branch look newer than every review.
+		name: "an unparseable review date",
+		raw:  payload("", review(reviewChangesRequested, "not a date"), commit(old)),
+		want: false,
+		note: ", changes requested",
+	}, {
+		// The mirror image: an unreadable commit date must not let a stale review
+		// look outstanding forever, but it cannot show the branch moved either.
+		name: "an unparseable commit date",
+		raw:  payload("", review(reviewChangesRequested, newer), commit("not a date")),
+		want: true,
+	}}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pr, err := parsePRStatus(tc.raw)
+			if err != nil {
+				t.Fatalf("parsePRStatus: %v", err)
+			}
+			if got := pr.reviewOutstanding(); got != tc.want {
+				t.Errorf("reviewOutstanding = %v, want %v", got, tc.want)
+			}
+			if got := pr.reviewNote(); got != tc.note {
+				t.Errorf("reviewNote = %q, want %q", got, tc.note)
+			}
+		})
 	}
 }
 
