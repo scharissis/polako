@@ -65,10 +65,27 @@ type fakePR struct {
 	Head   string   `json:"head"`
 	Checks []string `json:"checks"`
 
+	// The review half of `pr view`: the latest verdict per reviewer, and when
+	// the newest commit on the branch was made. Timestamps are literals rather
+	// than anything derived from the clock, so a test states outright whether
+	// the branch moved after the review — which is the whole of what the
+	// supervisor decides on. See the "fixreview" fake CLI for a run that pushes.
+	Reviews     []fakeReview `json:"reviews"`
+	CommittedAt string       `json:"committed_at"`
+
 	// MergeOnRead is a human merging the PR while the supervisor polls: it
 	// reports MERGED on the Nth `pr view` from now. Counted in reads rather
 	// than wall clock for the same reason as ReplyOnRead.
 	MergeOnRead int `json:"merge_on_read"`
+}
+
+// fakeReview is one entry of `pr view --json reviews`. Author is optional:
+// the tests here have a single reviewer, and the reduction to one verdict per
+// reviewer is exercised by name in main_test.go.
+type fakeReview struct {
+	Author      string `json:"author"`
+	State       string `json:"state"`
+	SubmittedAt string `json:"submitted_at"`
 }
 
 func readGhState(path string) (*ghState, error) {
@@ -232,8 +249,12 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			}
 			// The countdown has to be persisted even on the reads before the
 			// merge, or every read would start it over.
-			return fmt.Sprintf(`{"state":%q,"mergeable":%q,"headRefOid":%q,"statusCheckRollup":%s}`,
-				pr.State, pr.Mergeable, pr.Head, rollupJSON(pr.Checks)), merging, 0
+			return fmt.Sprintf(
+					`{"state":%q,"mergeable":%q,"headRefOid":%q,"statusCheckRollup":%s,`+
+						`"reviewDecision":"","reviews":%s,"commits":%s}`,
+					pr.State, pr.Mergeable, pr.Head, rollupJSON(pr.Checks),
+					reviewsJSON(pr.Reviews), commitsJSON(pr.CommittedAt)),
+				merging, 0
 		}
 		fmt.Fprintf(os.Stderr, "no PR #%s\n", at(2))
 		return "", false, 1
@@ -258,6 +279,29 @@ func rollupJSON(checks []string) string {
 			i+1, status, conclusion))
 	}
 	return "[" + strings.Join(nodes, ",") + "]"
+}
+
+// reviewsJSON renders the reviews half of `pr view --json`, oldest first. The
+// reviewDecision beside it is left empty, which is what GitHub reports on a
+// repository whose branch protection requires no review — the common case, and
+// the one where the reviews themselves have to carry the verdict.
+func reviewsJSON(reviews []fakeReview) string {
+	nodes := make([]string, 0, len(reviews))
+	for _, r := range reviews {
+		nodes = append(nodes, fmt.Sprintf(`{"author":{"login":%q},"state":%q,"submittedAt":%q}`,
+			r.Author, r.State, r.SubmittedAt))
+	}
+	return "[" + strings.Join(nodes, ",") + "]"
+}
+
+// commitsJSON renders the commits half. Only the newest date matters, so one
+// commit says everything two would; an empty date stands for a PR whose commits
+// GitHub did not report.
+func commitsJSON(committedAt string) string {
+	if committedAt == "" {
+		return "[]"
+	}
+	return fmt.Sprintf(`[{"committedDate":%q}]`, committedAt)
 }
 
 // listIssues renders `gh issue list --json number,labels` in ascending order,
@@ -314,6 +358,7 @@ func drainConfig(t *testing.T, mode string, st *ghState) (config, string) {
 		dir:            t.TempDir(), // not a checkout: worktree cleanup is best-effort
 		claudeBin:      os.Args[0],
 		ghBin:          os.Args[0],
+		repo:           st.Repo, // preflight fills this in; drain tests call drain directly
 		skill:          defaultSkill,
 		branchPrefix:   "issue-",
 		permissionMode: "acceptEdits",
@@ -787,6 +832,126 @@ func TestDrainWaitsOutChecksStillRunning(t *testing.T) {
 	}
 	if want := "checks: pending"; !strings.Contains(out, want) {
 		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+}
+
+// --- changes requested on an open PR ---
+
+// The point of issue #6: a human asking for changes used to be invisible to the
+// supervisor, which went on waiting for a merge nobody was going to perform. It
+// has to dispatch one remediation run — one, not one per poll — and the PR goes
+// on to merge once that run has pushed.
+func TestDrainRemediatesARequestedChange(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "fixreview", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		// The PR already exists, so restart safety sends the drain straight to
+		// supervising it: the only claude run here is the remediation. Green and
+		// mergeable, so the review is the only thing left to act on.
+		PRs: map[string]*fakePR{"issue-1": {
+			Number: 9, State: "OPEN", Mergeable: "MERGEABLE",
+			Head: "abc123", Checks: []string{"SUCCESS"},
+			Reviews:     []fakeReview{{State: reviewChangesRequested, SubmittedAt: "2026-08-20T10:00:00Z"}},
+			CommittedAt: "2026-08-19T10:00:00Z", // the review is newer: nobody has answered it
+			MergeOnRead: 3,
+		}},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if st.Issues["1"].Open {
+		t.Error("issue 1 should have been closed once the reworked PR merged")
+	}
+	if got := st.Issues["1"].Labels; slices.Contains(got, needsHumanLabel) {
+		t.Errorf("issue 1 labels = %v, want an answered review not to park the issue", got)
+	}
+
+	out := buf.String()
+	if want := "PR #9 has changes requested — dispatching remediation"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+	if got := strings.Count(out, "dispatching remediation"); got != 1 {
+		t.Errorf("dispatched %d remediation runs, want exactly 1 for one review\ngot:\n%s", got, out)
+	}
+}
+
+// A review a run cannot answer is not worth re-reading. Once a remediation has
+// finished and left the branch where it was, the same words against the same
+// commit land in the same place, so the issue parks for a human instead of
+// consuming a run per poll.
+func TestDrainParksWhenReviewRemediationChangesNothing(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		// "stream" leaves the pretend repository alone: the run ends cleanly
+		// having pushed nothing, which is the case worth pinning.
+		PRs: map[string]*fakePR{"issue-1": {
+			Number: 9, State: "OPEN", Mergeable: "MERGEABLE",
+			Head: "abc123", Checks: []string{"SUCCESS"},
+			Reviews:     []fakeReview{{State: reviewChangesRequested, SubmittedAt: "2026-08-20T10:00:00Z"}},
+			CommittedAt: "2026-08-19T10:00:00Z",
+		}},
+		Labels: []string{needsHumanLabel},
+	})
+
+	// Bounded, because the regression this guards is an unbounded wait: without
+	// the fix the drain never returns, and a hung suite says less than a failure.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("one unanswerable review must not end the drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if got := st.Issues["1"].Labels; !slices.Contains(got, needsHumanLabel) {
+		t.Errorf("issue 1 labels = %v, want it parked once remediation stopped helping", got)
+	}
+	if !st.Issues["1"].Open {
+		t.Error("parking must leave the issue open for a human")
+	}
+
+	out := buf.String()
+	if got := strings.Count(out, "dispatching remediation"); got != 1 {
+		t.Errorf("dispatched %d remediation runs, want 1 before giving up\ngot:\n%s", got, out)
+	}
+	if want := "changes are still requested on PR #9 and remediation left the branch unchanged"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+}
+
+// A review somebody has already pushed an answer to is waiting on the reviewer,
+// not on this process. Dispatching a run at it would rewrite code in response to
+// comments that have already been addressed, so the poll only says what is
+// holding the PR up.
+func TestDrainWaitsOutAnAnsweredReview(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		PRs: map[string]*fakePR{"issue-1": {
+			Number: 9, State: "OPEN", Mergeable: "MERGEABLE",
+			Head: "abc123", Checks: []string{"SUCCESS"},
+			Reviews:     []fakeReview{{State: reviewChangesRequested, SubmittedAt: "2026-08-19T10:00:00Z"}},
+			CommittedAt: "2026-08-20T10:00:00Z", // the branch moved after the review
+			MergeOnRead: 2,
+		}},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if st := finalGhState(t, path); st.Issues["1"].Open {
+		t.Error("issue 1 should have been closed once its PR merged")
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "dispatching remediation") {
+		t.Errorf("remediated a review that had already been answered\ngot:\n%s", out)
+	}
+	if want := "changes requested and answered — waiting on a re-review"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q, so the poll never says what holds the PR up\ngot:\n%s", want, out)
 	}
 }
 

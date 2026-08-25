@@ -47,6 +47,7 @@ const (
 	reasonAnswers   = "answers"   // fresh re-run after a human replied on the thread
 	reasonRemediate = "remediate" // conflict remediation while a PR is open
 	reasonChecks    = "checks"    // CI remediation while a PR is open
+	reasonReview    = "review"    // answering a reviewer who asked for changes
 )
 
 // What a run left behind. A remediation run pushes to a PR that already
