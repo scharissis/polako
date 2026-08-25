@@ -80,6 +80,11 @@ func runStats(args []string, out io.Writer, now time.Time) error {
 	if rest := fs.Args(); len(rest) > 0 {
 		return fmt.Errorf("unexpected argument %q — stats takes flags only", rest[0])
 	}
+	if opt.since < 0 {
+		// Silently ignoring it would report all of time to someone who asked
+		// for a window, with no line in the output to correct them.
+		return fmt.Errorf("-since %s is negative — it is how far back to look, e.g. -since 168h", opt.since)
+	}
 	if opt.by != "" && !slices.Contains([]string{byIssue, byModel, byTag}, opt.by) {
 		return fmt.Errorf("-by %q: choose one of %s, %s or %s", opt.by, byIssue, byModel, byTag)
 	}
@@ -115,6 +120,13 @@ func statsDir(spec string) (string, error) {
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
+	// Naming the record file itself is the easy mistake, and globbing inside
+	// it silently finds nothing — which reads as "you have no run data" when
+	// the data is in the very path just given.
+	if info, err := os.Stat(dir); err == nil && !info.IsDir() {
+		return "", fmt.Errorf("-metrics %s is a file, not a directory — pass the directory that holds the .jsonl files (%s)",
+			dir, filepath.Dir(dir))
+	}
 	return dir, nil
 }
 
@@ -131,7 +143,8 @@ type dataset struct {
 	runs    []runRecord
 	issues  []issueRecord // deduped latest-wins by (repo, issue)
 	files   int
-	skipped int // lines that were not usable JSON — a torn tail, or junk
+	skipped int      // lines that were not usable JSON — a torn tail, or junk
+	unread  []string // files that could not be opened at all
 }
 
 func loadRecords(dir string, opt statsOptions, now time.Time) (dataset, error) {
@@ -149,7 +162,11 @@ func loadRecords(dir string, opt statsOptions, now time.Time) (dataset, error) {
 	for _, path := range paths {
 		f, err := os.Open(path)
 		if err != nil {
-			return ds, err
+			// One file nobody can read is not a reason to report nothing.
+			// A -metrics directory shared with a team is full of files
+			// written 0600 by other people; the readable ones still count.
+			ds.unread = append(ds.unread, filepath.Base(path))
+			continue
 		}
 		ds.files++
 		sc := bufio.NewScanner(f)
@@ -374,6 +391,11 @@ func mergeSpan(is *issueStats) (time.Duration, bool) {
 func render(w io.Writer, ds dataset, opt statsOptions) {
 	if len(ds.runs) == 0 && len(ds.issues) == 0 {
 		fmt.Fprintf(w, "no run data in %s%s\n", ds.dir, scopeSuffix(opt))
+		if len(ds.unread) > 0 {
+			fmt.Fprintf(w, "%s there could not be opened: %s\n",
+				plural(len(ds.unread), "file"), strings.Join(ds.unread, ", "))
+			return
+		}
 		if ds.files == 0 {
 			fmt.Fprintln(w, "a drain records there automatically, unless it was run with -metrics off.")
 		}
@@ -419,6 +441,10 @@ func sourcePairs(ds dataset, opt statsOptions) [][2]string {
 		files += fmt.Sprintf(" (%s skipped)", plural(ds.skipped, "unreadable line"))
 	}
 	pairs := [][2]string{{"read", files}}
+	if len(ds.unread) > 0 {
+		pairs = append(pairs, [2]string{"could not open",
+			fmt.Sprintf("%s — %s", plural(len(ds.unread), "file"), strings.Join(ds.unread, ", "))})
+	}
 	from, to := window(ds)
 	if !from.IsZero() {
 		span := ""
@@ -503,10 +529,28 @@ func issuePairs(issues []*issueStats) [][2]string {
 		terminal += ", " + other
 	}
 
+	pairs := [][2]string{{"terminal", terminal}, {"in flight", strconv.Itoa(inFlight)}}
+
+	// Only issues whose runs are in scope can be priced. An issue that merged
+	// inside a -since window after running for two days outside it has a
+	// terminal record here and no runs, and averaging it in as $0 would drag
+	// every per-issue number toward zero — the one place a filter could
+	// quietly turn expensive work into cheap-looking work.
+	var priced []*issueStats
+	for _, is := range done {
+		if len(is.runs) > 0 {
+			priced = append(priced, is)
+		}
+	}
+	if len(priced) == 0 {
+		return append(pairs, [2]string{"per issue",
+			"nothing to price — no terminal issue has runs in this window"})
+	}
+
 	var runs, costs []float64
 	var tokens []int64
 	sum := tokenCounts{}
-	for _, is := range done {
+	for _, is := range priced {
 		runs = append(runs, float64(len(is.runs)))
 		costs = append(costs, is.cost)
 		tokens = append(tokens, is.total())
@@ -515,18 +559,23 @@ func issuePairs(issues []*issueStats) [][2]string {
 		sum.CacheRead += is.tokens.CacheRead
 		sum.CacheWrite += is.tokens.CacheWrite
 	}
-	n := int64(len(done))
-	pairs := [][2]string{
-		{"terminal", terminal},
-		{"in flight", strconv.Itoa(inFlight)},
+	n := int64(len(priced))
+	// Say what the averages are over whenever that is not every terminal
+	// issue, so a shrunken denominator can never pass for a cheap batch.
+	over := ""
+	if len(priced) != len(done) {
+		over = fmt.Sprintf(" (over the %d with runs in this window)", len(priced))
+	}
+	return append(pairs,
 		// Mean and median both, because one pathological issue drags a mean
 		// somewhere no real issue has ever been.
-		{"runs per issue", fmt.Sprintf("%s mean, %s median", trimZero(mean(runs)), trimZero(median(runs)))},
-		{"cost per issue", fmt.Sprintf("%s mean, %s median", usd(mean(costs)), usd(median(costs)))},
-		{"tokens per issue", fmt.Sprintf("%s mean, %s median (%s)",
+		[2]string{"runs per issue", fmt.Sprintf("%s mean, %s median%s",
+			trimZero(mean(runs)), trimZero(median(runs)), over)},
+		[2]string{"cost per issue", fmt.Sprintf("%s mean, %s median%s",
+			usd(mean(costs)), usd(median(costs)), over)},
+		[2]string{"tokens per issue", fmt.Sprintf("%s mean, %s median (%s)",
 			count(int64(mean(tokens))), count(median(tokens)), split(sum, n))},
-	}
-	return pairs
+	)
 }
 
 func runPairs(ds dataset) [][2]string {
@@ -573,9 +622,12 @@ func costPairs(ds dataset, issues []*issueStats) [][2]string {
 	if days := to.Sub(from).Hours() / 24; days >= 1.0/24 {
 		spend += fmt.Sprintf(" over %s (%s/day)", dur(to.Sub(from)), usd(total/days))
 	}
+	// Only merges with runs in scope belong in this denominator: one whose
+	// runs a -since window clipped away contributes nothing to the total
+	// above, so counting it here would price the tool below what it costs.
 	merged := 0
 	for _, is := range issues {
-		if is.terminal != nil && is.terminal.Outcome == issueMerged {
+		if is.terminal != nil && is.terminal.Outcome == issueMerged && len(is.runs) > 0 {
 			merged++
 		}
 	}
@@ -703,7 +755,7 @@ func printGroupTable(w io.Writer, ds dataset, issues []*issueStats, by string) {
 		return a.name < b.name
 	})
 
-	counted := 0
+	memberships := map[issueKey]int{}
 	rows := make([][]string, 0, len(order))
 	for _, name := range order {
 		g := groups[name]
@@ -713,7 +765,9 @@ func printGroupTable(w io.Writer, ds dataset, issues []*issueStats, by string) {
 				wins++
 			}
 		}
-		counted += len(g.issues)
+		for key := range g.issues {
+			memberships[key]++
+		}
 		perMerge := "—"
 		if wins > 0 {
 			perMerge = usd(g.cost / float64(wins))
@@ -725,20 +779,18 @@ func printGroupTable(w io.Writer, ds dataset, issues []*issueStats, by string) {
 	}
 	printTable(w, "by "+by,
 		[]string{by, "issues", "merged", "runs", "cost", "$/merged", "tokens"}, rows, 1)
-	if distinct := countIssuesWithRuns(issues); counted > distinct {
-		fmt.Fprintf(w, "  (%d issues span more than one %s and are counted under each)\n",
-			counted-distinct, by)
-	}
-}
-
-func countIssuesWithRuns(issues []*issueStats) int {
-	n := 0
-	for _, is := range issues {
-		if len(is.runs) > 0 {
-			n++
+	// How many issues span groups — not how many surplus memberships they add
+	// up to, which is a different and larger number whenever one spans three.
+	spanning := 0
+	for _, n := range memberships {
+		if n > 1 {
+			spanning++
 		}
 	}
-	return n
+	if spanning > 0 {
+		fmt.Fprintf(w, "  (%s more than one %s, and is counted under each)\n",
+			plural(spanning, "issue")+" spans", by)
+	}
 }
 
 // --- plain aligned text ---

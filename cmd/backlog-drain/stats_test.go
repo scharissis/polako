@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -254,7 +255,7 @@ func TestStatsNotesIssuesSpanningGroups(t *testing.T) {
 		t.Fatalf("writing fixture: %v", err)
 	}
 	out := stats(t, "-metrics", dir, "-by", byTag)
-	if !strings.Contains(out, "(1 issues span more than one tag and are counted under each)") {
+	if !strings.Contains(out, "(1 issue spans more than one tag, and is counted under each)") {
 		t.Errorf("want the overlap stated outright:\n%s", out)
 	}
 	// The headline must still count that issue once.
@@ -299,6 +300,7 @@ func TestStatsRejectsBadInput(t *testing.T) {
 		"-metrics off":       {"-metrics", "off"},
 		"an unknown flag":    {"-nope"},
 		"an unparseable dur": {"-since", "forever"},
+		"a negative -since":  {"-since", "-168h"},
 	}
 	for name, args := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -470,5 +472,105 @@ func TestStatsNeverWrites(t *testing.T) {
 	}
 	if len(before) != len(after) {
 		t.Errorf("stats changed the directory: %d entries before, %d after", len(before), len(after))
+	}
+}
+
+// One issue worked under three tags is one issue spanning groups, not two —
+// the surplus memberships add up faster than the issues do.
+func TestStatsCountsSpanningIssuesNotSurplusMemberships(t *testing.T) {
+	dir := t.TempDir()
+	var body strings.Builder
+	for i, tag := range []string{"a", "b", "c"} {
+		fmt.Fprintf(&body, `{"v":1,"kind":"run","ts":"2026-08-20T0%d:00:00Z","ended":"2026-08-20T0%d:30:00Z","repo":"r/r","issue":1,"reason":"implement","status":"ok","outcome":"nothing","cost_usd":1,"tag":"%s"}`+"\n", i+1, i+1, tag)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "r--r.jsonl"), []byte(body.String()), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	out := stats(t, "-metrics", dir, "-by", byTag)
+	if !strings.Contains(out, "(1 issue spans more than one tag") {
+		t.Errorf("one issue across three tags is one spanning issue:\n%s", out)
+	}
+}
+
+// A -since window can keep an issue's terminal record and drop every run that
+// produced it. Averaging that issue in at $0 is how a filter turns expensive
+// work into a cheap-looking batch.
+func TestStatsDoesNotPriceIssuesWithNoRunsInScope(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T18:00:00Z","repo":"r/r","issue":1,"reason":"implement","status":"ok","outcome":"opened_pr","pr":2,"cost_usd":9.99,"turns":50}
+{"v":1,"kind":"issue","ts":"2026-08-25T08:00:00Z","repo":"r/r","issue":1,"pr":2,"outcome":"merged"}
+{"v":1,"kind":"run","ts":"2026-08-25T07:00:00Z","ended":"2026-08-25T07:30:00Z","repo":"r/r","issue":2,"reason":"implement","status":"ok","outcome":"opened_pr","pr":3,"cost_usd":2.00,"turns":10}
+{"v":1,"kind":"issue","ts":"2026-08-25T08:30:00Z","repo":"r/r","issue":2,"pr":3,"outcome":"merged"}
+`
+	if err := os.WriteFile(filepath.Join(dir, "r--r.jsonl"), []byte(body), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	// fixtureNow is 2026-08-25T09:00Z: issue 1 merged inside the window but ran
+	// well outside it; issue 2 is wholly inside.
+	out := stats(t, "-metrics", dir, "-since", "24h")
+	if hasLine(out, "cost per issue $0.00") {
+		t.Errorf("an issue whose runs are out of scope must not be priced at zero:\n%s", out)
+	}
+	if !hasLine(out, "cost per issue $2.00 mean, $2.00 median (over the 1 with runs in this window)") {
+		t.Errorf("want the priced issue alone, and the denominator stated:\n%s", out)
+	}
+	// Both still reached a terminal state; only the pricing denominator shrank.
+	if !hasLine(out, "terminal 2 — merged 2 (100%)") {
+		t.Errorf("the merge rate counts every terminal record:\n%s", out)
+	}
+	// A merge whose runs were clipped away adds nothing to the total, so it
+	// must not be in the denominator that prices the tool either.
+	if !hasLine(out, "per merged PR $2.00 across 1 merge") {
+		t.Errorf("want the per-merge price over merges with runs in scope:\n%s", out)
+	}
+	// And when nothing at all can be priced, say so rather than printing zeros.
+	// A 1h window from fixtureNow keeps both issue records and no runs at all.
+	only := stats(t, "-metrics", dir, "-since", "1h")
+	if !hasLine(only, "per issue nothing to price") {
+		t.Errorf("want an explicit refusal to price, got:\n%s", only)
+	}
+	if hasLine(only, "per merged PR") {
+		t.Errorf("nothing priceable means no per-merge figure either:\n%s", only)
+	}
+}
+
+// The README suggests a shared -metrics directory for a team, and records are
+// written 0600 — so someone else's file is normally unreadable. Reporting
+// nothing at all in that case would make the shared setup useless.
+func TestStatsReportsAroundAnUnreadableFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits are not how Windows decides this")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root reads everything, so there is no unreadable file to make")
+	}
+	dir := fixtureDir(t)
+	blocked := filepath.Join(dir, "scharissis--other.jsonl")
+	if err := os.Chmod(blocked, 0o000); err != nil {
+		t.Fatalf("making a file unreadable: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(blocked, 0o600) })
+
+	out := stats(t, "-metrics", dir)
+	if !hasLine(out, "could not open 1 file — scharissis--other.jsonl") {
+		t.Errorf("want the unreadable file named, not swallowed:\n%s", out)
+	}
+	// The readable file still reports in full.
+	if !hasLine(out, "terminal 3 — merged 2 (67%), needs human 1") {
+		t.Errorf("the readable records must still count:\n%s", out)
+	}
+}
+
+// Naming the record file rather than its directory finds nothing, and "no run
+// data" would send someone hunting for records in the path they just named.
+func TestStatsRejectsAFileAsTheMetricsDirectory(t *testing.T) {
+	dir := fixtureDir(t)
+	var buf bytes.Buffer
+	err := runStats([]string{"-metrics", filepath.Join(dir, "scharissis--other.jsonl")}, &buf, fixtureNow)
+	if err == nil {
+		t.Fatalf("naming a file succeeded, reporting:\n%s", buf.String())
+	}
+	if !strings.Contains(err.Error(), "is a file, not a directory") {
+		t.Errorf("error = %v, want it to name the mistake and the fix", err)
 	}
 }

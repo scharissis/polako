@@ -314,6 +314,13 @@ human latency
 | `-metrics` | `~/.backlog-drain/metrics` | Directory to read records from — the same path the drain writes to. |
 | `-repo` | *(every repository)* | Only count records for one repository, `owner/name`. |
 | `-since` | *(all of it)* | Only count records newer than this, e.g. `-since 168h`. |
+
+A window can keep an issue's terminal record while clipping away the runs that
+produced it. Those issues still count toward the merge rate, but they cannot be
+priced, so the per-issue figures cover only issues with runs inside the window
+and say when that differs. Files in the directory that cannot be opened — the
+normal case in a shared one, since records are written `0600` — are named in
+the report rather than failing it.
 | `-by` | *(none)* | Add a breakdown table: `issue`, `model` or `tag`. |
 
 Every summable number is derived at read time from the run records — cost per
