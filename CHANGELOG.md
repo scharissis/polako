@@ -9,6 +9,29 @@ Entries carry an **Operator impact** line when a release changes what an
 unattended run does, rather than only what the code looks like. Those are the
 lines worth reading before upgrading a machine that drains a backlog overnight.
 
+## [0.6.0]
+
+### Added
+
+- Any flag can take its default from the environment: `BACKLOG_DRAIN_<FLAG>`,
+  e.g. `BACKLOG_DRAIN_POST_SUMMARY=1` or `BACKLOG_DRAIN_MODEL=claude-opus-5`.
+  Arguments still win, `-h` prints the defaults actually in force, and one
+  `BACKLOG_DRAIN_METRICS` points both the drain and `stats` at one directory.
+- Startup says when `-post-summary` is on, so a preference set once in a shell
+  profile never becomes a mystery about where PR comments are coming from.
+
+### Changed
+
+- `-version` is deliberately not settable from the environment.
+  `BACKLOG_DRAIN_VERSION` is what a Dockerfile or CI job pins an install with,
+  and honouring it would turn every drain on that machine into a version print.
+- A `BACKLOG_DRAIN_*` value a flag cannot parse stops the run and names both the
+  variable and the flag, rather than being ignored.
+
+**Operator impact:** if a `BACKLOG_DRAIN_*` variable is already set in an
+environment that runs this binary, it now changes that flag's default. Check
+`backlog-drain -h`, which prints the value each flag will actually use.
+
 ## [0.5.0]
 
 ### Added

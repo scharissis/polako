@@ -64,11 +64,50 @@ func hasLine(out, want string) bool { return strings.Contains(flat(out), flat(wa
 
 func stats(t *testing.T, args ...string) string {
 	t.Helper()
+	clearEnvDefaults(t)
 	var buf bytes.Buffer
 	if err := runStats(args, &buf, fixtureNow); err != nil {
 		t.Fatalf("stats %v: %v", args, err)
 	}
 	return buf.String()
+}
+
+// clearEnvDefaults keeps a test hermetic against the shell it runs in. Flags
+// take their defaults from BACKLOG_DRAIN_* now, so a maintainer who set one in
+// their profile would otherwise be running a different suite from CI.
+func clearEnvDefaults(t *testing.T) {
+	t.Helper()
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		if !strings.HasPrefix(name, envPrefix) {
+			continue
+		}
+		t.Setenv(name, "") // registers the restore this test needs
+		os.Unsetenv(name)  // then actually takes it out of the environment
+	}
+}
+
+// One variable points both halves at the same directory: the drain writes
+// there, and stats reads there, without either being told twice.
+func TestStatsReadsTheMetricsDirectoryFromTheEnvironment(t *testing.T) {
+	clearEnvDefaults(t)
+	t.Setenv("BACKLOG_DRAIN_METRICS", fixtureDir(t))
+
+	var buf bytes.Buffer
+	if err := runStats(nil, &buf, fixtureNow); err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if !hasLine(buf.String(), "terminal 4 — merged 3 (75%)") {
+		t.Errorf("stats did not read the directory the environment named:\n%s", buf.String())
+	}
+	// An argument is a decision about this run, and beats the preference.
+	var override bytes.Buffer
+	if err := runStats([]string{"-metrics", t.TempDir()}, &override, fixtureNow); err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if !strings.Contains(override.String(), "no run data in") {
+		t.Errorf("-metrics did not override the environment:\n%s", override.String())
+	}
 }
 
 // The whole report, pinned. Every number here was worked out by hand from the
@@ -304,6 +343,7 @@ func TestStatsRejectsBadInput(t *testing.T) {
 	}
 	for name, args := range cases {
 		t.Run(name, func(t *testing.T) {
+			clearEnvDefaults(t)
 			var buf bytes.Buffer
 			if err := runStats(args, &buf, fixtureNow); err == nil {
 				t.Errorf("runStats(%v) succeeded, want an error explaining what to do", args)
@@ -314,6 +354,7 @@ func TestStatsRejectsBadInput(t *testing.T) {
 
 // -h is how a person finds the flags; it is not a failure.
 func TestStatsHelpIsNotAnError(t *testing.T) {
+	clearEnvDefaults(t)
 	var buf bytes.Buffer
 	if err := runStats([]string{"-h"}, &buf, fixtureNow); err != nil {
 		t.Fatalf("stats -h: %v", err)

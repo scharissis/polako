@@ -267,6 +267,30 @@ backlog-drain stats
 | `-post-summary` | `false` | Comment one line of run numbers on each merged PR. The only thing that shows run data to anybody but you — see [Run data & cost tracking](#run-data--cost-tracking). |
 | `-version` | `false` | Print which release this binary is, then exit. Use it when startup warns that the binary and the skill disagree — see [Getting updates](#getting-updates). |
 
+### Setting defaults from the environment
+
+Any flag can take its default from `BACKLOG_DRAIN_<FLAG>`, so a preference you
+always want lives in your shell profile instead of on every command line:
+
+```bash
+export BACKLOG_DRAIN_POST_SUMMARY=1
+```
+
+The name uppercases and swaps `-` for `_`: `-post-summary` reads
+`BACKLOG_DRAIN_POST_SUMMARY`, `-retry-wait` reads `BACKLOG_DRAIN_RETRY_WAIT`.
+An argument always wins, so a single run can still go the other way with
+`-post-summary=false`, and `backlog-drain -h` prints the defaults actually in
+force — which is how you see what the environment is doing.
+
+`BACKLOG_DRAIN_METRICS` covers both halves at once: where a drain writes, and
+where `stats` reads. `-version` is deliberately *not* settable this way — it is
+an action rather than a preference, and `BACKLOG_DRAIN_VERSION` is exactly the
+variable a Dockerfile or CI job pins an install with.
+
+A value a flag cannot parse stops the run and names both the variable and the
+flag it was setting, rather than being skipped: a preference that was set,
+looks set, and quietly does nothing is worse than no preference at all.
+
 ## Run data & cost tracking
 
 Every run writes one line of numbers, so you can answer what a drained backlog
@@ -337,6 +361,12 @@ reported a cost, so when the tally holds one the comment says how many and that
 its tokens and dollars are undercounts. It covers the runs *this* drain supervised, and says so: a
 supervisor restarted mid-issue reports what it saw, and one that only waited on
 a PR an earlier process opened comments nothing rather than claiming a free PR.
+
+To make it your default without typing it, export
+`BACKLOG_DRAIN_POST_SUMMARY=1` — see
+[Setting defaults from the environment](#setting-defaults-from-the-environment).
+Startup says when it is on, so a variable you set months ago in a profile is
+never a mystery.
 
 It is independent of `-metrics`, so `-metrics off -post-summary` is the
 combination for wanting team visibility and no local files at all. Best-effort

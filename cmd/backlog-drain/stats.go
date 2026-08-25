@@ -68,8 +68,13 @@ func runStats(args []string, out io.Writer, now time.Time) error {
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: backlog-drain stats [flags]\n\n"+
 			"Reports on the run data recorded by previous drains. Reads only;\n"+
-			"nothing here changes what a drain does.\n\nFlags:\n")
+			"nothing here changes what a drain does.\n\n"+envUsage+"\nFlags:\n")
 		fs.PrintDefaults()
+	}
+	// The same environment defaults the drain honours, which is what lets one
+	// BACKLOG_DRAIN_METRICS point both halves at the same directory.
+	if err := applyEnvDefaults(fs); err != nil {
+		return err
 	}
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

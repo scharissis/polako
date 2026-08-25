@@ -206,8 +206,14 @@ func parseFlags() config {
 	flag.Usage = func() {
 		fmt.Fprint(flag.CommandLine.Output(),
 			"Usage: backlog-drain [flags]        drain the backlog, one issue at a time\n"+
-				"       backlog-drain stats [flags]  report on the run data already recorded\n\nFlags:\n")
+				"       backlog-drain stats [flags]  report on the run data already recorded\n\n"+
+				envUsage+"\nFlags:\n")
 		flag.PrintDefaults()
+	}
+	// Before Parse, so an argument on the command line always wins over a
+	// preference set in the environment.
+	if err := applyEnvDefaults(flag.CommandLine); err != nil {
+		log.Fatalf("%v", err)
 	}
 	flag.Parse()
 
@@ -227,6 +233,59 @@ func parseFlags() config {
 	}
 	cfg.dir = abs
 	return cfg
+}
+
+// envPrefix namespaces the variables that set flag defaults: -post-summary
+// reads BACKLOG_DRAIN_POST_SUMMARY.
+const envPrefix = "BACKLOG_DRAIN_"
+
+// envUsage is the one line of help that makes the mechanism discoverable. A
+// default nobody knows how to set is a default nobody sets.
+const envUsage = "Any flag below can take its default from the environment:\n" +
+	"BACKLOG_DRAIN_<FLAG>, e.g. BACKLOG_DRAIN_POST_SUMMARY=1. Arguments win.\n"
+
+// envExempt are the flags the environment may not set. -version is an action
+// rather than a preference, and BACKLOG_DRAIN_VERSION is exactly the variable
+// a Dockerfile or CI job pins an install with — where it would quietly turn
+// every drain into a version print that exits before doing any work.
+var envExempt = map[string]bool{"version": true}
+
+// applyEnvDefaults lets an operator set a per-machine default for any flag, so
+// a preference they always want lives in a shell profile instead of being
+// typed on every invocation. Call it before Parse: the command line is read
+// afterwards, so an argument always wins.
+//
+// A value the flag cannot parse stops the process rather than being skipped.
+// Ignoring it would leave a preference that was set, looks set, and does
+// nothing — which for an unattended run is the worst of the three outcomes.
+func applyEnvDefaults(fs *flag.FlagSet) error {
+	var err error
+	fs.VisitAll(func(f *flag.Flag) {
+		if err != nil || envExempt[f.Name] {
+			return
+		}
+		name := envVarName(f.Name)
+		v, ok := os.LookupEnv(name)
+		if !ok {
+			return
+		}
+		if serr := f.Value.Set(v); serr != nil {
+			// flag's own parse errors are terse ("parse error"), and this one
+			// stops a drain before it starts, so say what to do about it.
+			err = fmt.Errorf("%s=%q is not a valid -%s (%w) — fix the value or unset the variable",
+				name, v, f.Name, serr)
+			return
+		}
+		// Keep -h honest: PrintDefaults reports DefValue, and the default in
+		// force is now the one the environment set.
+		f.DefValue = f.Value.String()
+	})
+	return err
+}
+
+// envVarName is the variable that sets one flag's default.
+func envVarName(flagName string) string {
+	return envPrefix + strings.ToUpper(strings.ReplaceAll(flagName, "-", "_"))
 }
 
 // parseSkip reads a comma-separated issue list. Unparseable entries are
@@ -298,6 +357,12 @@ func preflight(ctx context.Context, cfg *config) error {
 	cfg.pluginVersion = pluginVersion(ctx, *cfg)
 	log.Printf("%s — running /%s per issue, polling every %s", cfg.repo, cfg.skill, cfg.poll)
 	warnOnVersionSkew(drainVersion(), *cfg)
+	if cfg.postSummary {
+		// The environment can set this, so say it out loud: an operator who
+		// forgot the variable is in their profile should not have to work out
+		// where the PR comments are coming from.
+		log.Printf("-post-summary is on — each merged PR gets one comment of run numbers")
+	}
 	if cfg.rec.enabled() {
 		// Say where the data goes, every time, unprompted: it is the whole of
 		// the answer to "what does this tool record".
