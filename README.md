@@ -8,22 +8,25 @@ It has two halves:
 | Half | What it does |
 | --- | --- |
 | **`/implement-issue` skill** | Takes a *single* issue from research → `PLAN.md` → implementation → code review → pull request. Usable on its own, interactively. |
-| **`backlog-drain` binary** | Supervises the *whole queue*: runs the skill on the lowest open issue, waits for that PR to merge, then advances. Stdlib-only Go, single binary, any platform. |
+| **`backlog-drain` binary** | Supervises the *whole queue*: runs the skill on the lowest open issue, waits for that PR to merge — or parks the issue for a human — then advances. Stdlib-only Go, single binary, any platform. |
 
-The binary never advances past an unmerged issue. Every run therefore branches
-from a default branch that already contains the previous merge, so sequential
-runs cannot conflict with each other.
+The binary never has two issues in flight: it advances only once the issue it is
+working is merged, or parked for a human. Every run therefore branches from a
+default branch that already contains the previous merge, so sequential runs
+cannot conflict with each other.
 
 ## How it works
 
 ```
-lowest open issue
+lowest open issue without a `needs-human` label
    ↓
 claude -p "/implement-issue N"        ← headless, streamed to your terminal
    ↓
 PR opened?  ──no──►  questions posted on the issue?  ──yes──►  wait for a human reply, re-run
    │                          │
    │                          └──no──►  crashed? resume the same session (-retries)
+   │                                       │
+   │                                       └──out of attempts──►  park it, advance to the next
    ↓ yes
 wait for merge (-poll)               ← rebases + re-pushes if GitHub reports CONFLICTING
    ↓
@@ -37,6 +40,23 @@ never re-runs Claude on that issue; it goes straight to waiting. (The one thing
 it writes locally is a line of numbers per run, which nothing reads back — see
 [Run data & cost tracking](#run-data--cost-tracking).)
 
+**One issue that cannot be finished does not end the run.** An issue whose run
+produced nothing, whose retries ran out, whose PR was closed unmerged, or whose
+conflicts could not be rebased away is *parked*: `backlog-drain` labels it
+`needs-human`, comments on the thread saying what happened, and moves on to the
+next issue. The label is what takes it out of the queue, so a later run does not
+pick it straight back up — remove the label to put it back in. The process exits
+0 and prints a summary of what merged, what parked and why:
+
+```
+summary: 3 issues merged, 1 issue parked, 6h12m of wall clock
+  merged  #14, #15, #17
+  parked  #16 — the run completed but produced no PR and no questions
+```
+
+Parking preserves the no-conflict guarantee: only one issue is ever in flight,
+and a parked issue is simply not in flight.
+
 **Refused credentials stop the drain immediately.** A resume cannot mint a new
 token, so retrying one spends `-retries` × several minutes reaching the
 identical 401 and then reports it as a crash. Instead the run ends the drain
@@ -49,6 +69,10 @@ exactly where it stopped.
 
 1. Answering clarification questions the skill posts on an issue thread.
 2. Merging the PR. Nothing merges itself.
+
+Neither one is on a clock: an unanswered question or an unmerged PR simply
+waits. A parked issue waits too, but out of the queue rather than in it, so it
+holds nothing else up.
 
 ## Requirements
 
@@ -218,8 +242,8 @@ Drain the whole backlog of the repository in the current directory:
 backlog-drain
 ```
 
-Drive a repository somewhere else, and stop after the first issue reaches
-merge — a good way to try it out:
+Drive a repository somewhere else, and stop after the first issue is done with
+— merged, or parked for a human. A good way to try it out:
 
 ```bash
 backlog-drain -dir ../my-project -once
@@ -260,8 +284,8 @@ backlog-drain stats
 | `-retries` | `3` | Resume attempts after a crashed run. A run the API refused to authenticate is never one of them — see below. |
 | `-retry-wait` | `30s` | Wait before each resume attempt. |
 | `-stall` | `15m` | Kill and resume a run that has emitted no events for this long (`0` disables). |
-| `-skip` | *(none)* | Comma-separated issue numbers to skip. |
-| `-once` | `false` | Process a single issue to merge, then exit. |
+| `-skip` | *(none)* | Comma-separated issue numbers to skip. Issues labelled `needs-human` are skipped anyway — see [How it works](#how-it-works). |
+| `-once` | `false` | Process a single issue to a merge or a park, then exit. |
 | `-run-tag` | *(none)* | Freeform label recorded with every run, so one batch can be compared against another. |
 | `-metrics` | `~/.backlog-drain/metrics` | Directory for run-data records, or `off` to write nothing. |
 | `-post-summary` | `false` | Comment one line of run numbers on each merged PR. The only thing that shows run data to anybody but you — see [Run data & cost tracking](#run-data--cost-tracking). |

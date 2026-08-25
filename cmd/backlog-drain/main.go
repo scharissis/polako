@@ -4,7 +4,9 @@
 // For each open issue it runs `claude -p "/implement-issue N"`, then waits on
 // GitHub until the resulting PR is merged before advancing — so every run
 // branches from a default branch that already contains the previous merge, and
-// sequential runs can't conflict with each other.
+// sequential runs can't conflict with each other. An issue that cannot be
+// finished is parked for a human instead of merged, which advances the queue
+// without ever putting two issues in flight.
 //
 // All state lives in GitHub (issues, comments, PRs, branches). This process
 // is stateless and restart-safe: kill it any time, rerun it later, and it
@@ -29,6 +31,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"maps"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -83,6 +86,38 @@ func authAdvice(err error) error {
 		"(or `claude setup-token` for an unattended host), and start the drain again", err)
 }
 
+// parkedError ends work on one issue without ending the drain. The distinction
+// is the whole point: an unimplementable issue is a fact about that issue, and
+// stopping the session over it strands every later issue too — typically hours
+// before anyone looks at the terminal. Fatal is reserved for conditions where
+// no further progress is possible at all: a bad -dir, a gh that cannot answer,
+// a -skill this installation does not have, a token the API refuses.
+type parkedError struct{ reason string }
+
+func (e *parkedError) Error() string { return e.reason }
+
+// park stops an issue and states why in terms a person can act on — the text
+// goes on the issue thread and into the exit summary, so it is written for a
+// reader who was not watching.
+func park(format string, a ...any) error {
+	return &parkedError{reason: fmt.Sprintf(format, a...)}
+}
+
+// parkReason reports whether an error parks its issue, and why.
+func parkReason(err error) (string, bool) {
+	var pe *parkedError
+	if errors.As(err, &pe) {
+		return pe.reason, true
+	}
+	return "", false
+}
+
+// needsHumanLabel takes a parked issue out of the queue. It is deliberately the
+// only durable trace of a park: the next drain re-derives its queue from
+// GitHub, and without the label it would pick the same unimplementable issue
+// straight back up. Removing the label is how an operator puts it back in.
+const needsHumanLabel = "needs-human"
+
 // defaultTools is the --allowedTools set for unattended runs: everything the
 // implement-issue skill needs, plus the build/test entry points of the common
 // ecosystems. Replace it with -tools, or extend it with -add-tools.
@@ -111,8 +146,12 @@ const defaultTools = "Bash(git:*)," +
 	"Bash(dotnet:*),Bash(mvn:*),Bash(gradle:*)"
 
 type config struct {
-	dir            string
-	claudeBin      string
+	dir       string
+	claudeBin string
+	// ghBin is a test seam, not an interface: the suite is hermetic and never
+	// calls a real gh, but the drain loop is mostly GitHub bookkeeping and is
+	// worth covering end to end. No flag sets it — parseFlags pins it to "gh".
+	ghBin          string
 	skill          string
 	branchPrefix   string
 	label          string
@@ -197,7 +236,7 @@ func parseFlags() config {
 	flag.DurationVar(&cfg.retryWait, "retry-wait", 30*time.Second, "wait before each resume attempt")
 	flag.DurationVar(&cfg.stall, "stall", 15*time.Minute, "kill and resume a run with no output events for this long (0 disables)")
 	flag.StringVar(&skip, "skip", "", "comma-separated issue numbers to skip (head-of-line escape hatch)")
-	flag.BoolVar(&cfg.once, "once", false, "process a single issue to merge, then exit")
+	flag.BoolVar(&cfg.once, "once", false, "process a single issue to a merge or a park, then exit")
 	flag.StringVar(&cfg.tag, "run-tag", "", "label recorded with every run, for comparing one batch against another")
 	flag.BoolVar(&cfg.postSummary, "post-summary", false,
 		"comment one line of run numbers on each merged PR (runs, tokens, dollars, wall time)")
@@ -226,6 +265,7 @@ func parseFlags() config {
 	}
 
 	cfg.rec = newRecorder(metrics)
+	cfg.ghBin = "gh"
 	cfg.skip = parseSkip(skip)
 	abs, err := filepath.Abs(cfg.dir)
 	if err != nil {
@@ -316,31 +356,133 @@ func run(ctx context.Context, cfg config) error {
 	if err := preflight(ctx, &cfg); err != nil {
 		return err
 	}
+	return drain(ctx, cfg)
+}
+
+// issueResult is one issue's fate, kept only long enough to print the summary
+// this process ends with. Nothing reads it back afterwards — the durable record
+// of a park is the label on GitHub.
+type issueResult struct {
+	issue  int
+	parked bool
+	reason string // why it parked; empty when it merged
+}
+
+// drain works the queue until it empties, an issue proves fatal, or -once says
+// stop. An issue that cannot be finished is parked rather than fatal, so a
+// backlog with one bad issue in it still drains overnight.
+func drain(ctx context.Context, cfg config) error {
+	started := time.Now()
+
+	// Parked issues leave the queue by their label, but labelling is a network
+	// call that can fail, and a park the label did not take would put this loop
+	// straight back on the same issue. Remembering them here is what guarantees
+	// it terminates. It is not state: nothing reads it after the process ends,
+	// and a restart re-derives the queue from GitHub alone.
+	skip := maps.Clone(cfg.skip)
+	if skip == nil {
+		skip = map[int]bool{}
+	}
+	cfg.skip = skip
+
+	var results []issueResult
+	// Every exit goes through finish, fatal ones included: a session that died
+	// on issue nine should still account for the eight before it. The issue it
+	// died on is not among them — unfinished is not an outcome — so a run that
+	// dies on its first issue has nothing to summarize and says nothing.
+	finish := func(err error) error {
+		for _, line := range drainSummary(results, time.Since(started)) {
+			log.Print(line)
+		}
+		return err
+	}
+
 	for {
 		issue, err := lowestOpenIssue(ctx, cfg)
 		if err != nil {
-			return err
+			return finish(err)
 		}
 		if issue == 0 {
 			log.Println("no open issues — backlog drained")
-			return nil
+			return finish(nil)
 		}
 		log.Printf("=== issue #%d ===", issue)
 
-		if err := processIssue(ctx, cfg, issue); err != nil {
-			return fmt.Errorf("issue #%d: %w", issue, err)
+		err = processIssue(ctx, cfg, issue)
+		switch reason, parked := parkReason(err); {
+		case parked:
+			skip[issue] = true
+			results = append(results, issueResult{issue: issue, parked: true, reason: reason})
+			log.Printf("issue #%d needs a human: %s — parking it and moving on", issue, reason)
+			parkIssue(ctx, cfg, issue, reason)
+		case err != nil:
+			return finish(fmt.Errorf("issue #%d: %w", issue, err))
+		default:
+			results = append(results, issueResult{issue: issue})
 		}
 		if cfg.once {
 			log.Println("-once set — exiting after one issue")
-			return nil
+			return finish(nil)
 		}
 	}
+}
+
+// parkIssue hands one issue back to a person: the label that takes it out of
+// the queue, and a comment saying what happened. Both are best-effort — a
+// GitHub call that fails must not end a drain that is otherwise healthy — but
+// a label that did not take means the next drain retries this issue, so that
+// one says so out loud rather than failing quietly.
+func parkIssue(ctx context.Context, cfg config, issue int, reason string) {
+	n := strconv.Itoa(issue)
+	_, err := gh(ctx, cfg, "issue", "edit", n, "--add-label", needsHumanLabel)
+	if err != nil {
+		// Far the likeliest cause is a repository that has never used the
+		// label: GitHub refuses to add one that does not exist yet.
+		if _, cerr := gh(ctx, cfg, "label", "create", needsHumanLabel, "--color", "D93F0B",
+			"--description", "backlog-drain parked this issue for a human"); cerr == nil {
+			_, err = gh(ctx, cfg, "issue", "edit", n, "--add-label", needsHumanLabel)
+		}
+	}
+	if err != nil {
+		log.Printf("could not label issue #%d %q (%v) — the next drain will pick it up again "+
+			"unless you label it yourself or close it", issue, needsHumanLabel, err)
+	}
+	body := fmt.Sprintf("**backlog-drain parked this issue.** %s\n\n"+
+		"Nothing will run on it again until the `%s` label is removed.", reason, needsHumanLabel)
+	if _, cerr := gh(ctx, cfg, "issue", "comment", n, "--body", body); cerr != nil {
+		log.Printf("could not comment on issue #%d (%v) — the reason is in this log and in the exit summary",
+			issue, cerr)
+	}
+}
+
+// drainSummary is what the process says on its way out: what merged, what was
+// parked and why, and how long it all took. Returned as lines rather than one
+// blob so each carries the log's own timestamp.
+func drainSummary(results []issueResult, elapsed time.Duration) []string {
+	if len(results) == 0 {
+		return nil
+	}
+	var merged []string
+	var parked []string
+	for _, r := range results {
+		if r.parked {
+			parked = append(parked, fmt.Sprintf("  parked  #%d — %s", r.issue, r.reason))
+			continue
+		}
+		merged = append(merged, "#"+strconv.Itoa(r.issue))
+	}
+	lines := []string{fmt.Sprintf("summary: %s merged, %s parked, %s of wall clock",
+		plural(len(merged), "issue"), plural(len(parked), "issue"), dur(elapsed))}
+	if len(merged) > 0 {
+		lines = append(lines, "  merged  "+strings.Join(merged, ", "))
+	}
+	return append(lines, parked...)
 }
 
 // preflight fails fast on a misconfigured environment, so an unattended run
 // can't die on its first gh call an hour after being started.
 func preflight(ctx context.Context, cfg *config) error {
-	for _, bin := range []string{cfg.claudeBin, "gh", "git"} {
+	for _, bin := range []string{cfg.claudeBin, cfg.ghBin, "git"} {
 		if _, err := exec.LookPath(bin); err != nil {
 			return fmt.Errorf("%q not found on PATH: %w", bin, err)
 		}
@@ -515,9 +657,10 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 	tally := &issueTally{}
 
 	// terminal marks how the issue ended, failures included — they are the
-	// most informative rows in the dataset, and every one of them exits the
-	// process. Transient GitHub errors and Ctrl+C are deliberately not
-	// outcomes: the issue is still open, and the next drain resumes it.
+	// most informative rows in the dataset, and every one of them ends this
+	// issue: merged, or parked for a human and left behind. Transient GitHub
+	// errors and Ctrl+C are deliberately not outcomes: the issue is still open
+	// and unparked, and the next drain resumes it.
 	terminal := func(prNumber int, outcome string) {
 		cfg.rec.recordIssue(cfg, issue, prNumber, outcome, lookupPRFacts(ctx, cfg, prNumber))
 	}
@@ -641,13 +784,13 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 				case runErr != nil:
 					record(0, outcomeNothing)
 					terminal(0, issueNeedsHuman)
-					return fmt.Errorf("claude crashed and %d resume attempts failed — needs a human", cfg.retries)
+					return park("claude crashed and %d resume attempts failed", cfg.retries)
 				default:
 					// Clean exit, yet no PR and no questions: Claude decided
 					// nothing, which a machine shouldn't paper over.
 					record(0, outcomeNothing)
 					terminal(0, issueNeedsHuman)
-					return errors.New("run completed but produced no PR and no questions — needs a human")
+					return park("the run completed but produced no PR and no questions")
 				}
 			}
 			record(pr.Number, outcomeOpenedPR)
@@ -675,10 +818,11 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 				return ensureIssueClosed(ctx, cfg, issue, pr.Number)
 			}
 			terminal(pr.Number, issueClosed)
-			return fmt.Errorf("PR #%d closed without merge — needs a human decision", pr.Number)
+			return park("PR #%d was closed without merging, which is a decision only a human can make",
+				pr.Number)
 		default:
 			terminal(pr.Number, issueNeedsHuman)
-			return fmt.Errorf("PR #%d in unexpected state %q", pr.Number, pr.State)
+			return park("PR #%d is in the unexpected state %q", pr.Number, pr.State)
 		}
 	}
 }
@@ -1151,7 +1295,7 @@ func pickLowest(numbers []int, skip map[int]bool) int {
 }
 
 func lowestOpenIssue(ctx context.Context, cfg config) (int, error) {
-	args := []string{"issue", "list", "--state", "open", "--limit", "200", "--json", "number"}
+	args := []string{"issue", "list", "--state", "open", "--limit", "200", "--json", "number,labels"}
 	if cfg.label != "" {
 		args = append(args, "--label", cfg.label)
 	}
@@ -1159,17 +1303,47 @@ func lowestOpenIssue(ctx context.Context, cfg config) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	var issues []struct {
-		Number int `json:"number"`
-	}
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return 0, fmt.Errorf("parsing issue list: %w", err)
-	}
-	numbers := make([]int, len(issues))
-	for i, is := range issues {
-		numbers[i] = is.Number
+	numbers, err := selectableIssues(out)
+	if err != nil {
+		return 0, err
 	}
 	return pickLowest(numbers, cfg.skip), nil
+}
+
+// selectableIssues reads a `gh issue list --json number,labels` payload and
+// keeps the issues still worth working: anything a previous drain parked is
+// dropped here, which is what stops the queue handing back the same
+// unimplementable issue on every pass. Labels are matched case-insensitively,
+// the way GitHub itself treats them.
+func selectableIssues(raw []byte) ([]int, error) {
+	var issues []ghIssue
+	if err := json.Unmarshal(raw, &issues); err != nil {
+		return nil, fmt.Errorf("parsing issue list: %w", err)
+	}
+	numbers := make([]int, 0, len(issues))
+	for _, is := range issues {
+		if !is.hasLabel(needsHumanLabel) {
+			numbers = append(numbers, is.Number)
+		}
+	}
+	return numbers, nil
+}
+
+// ghIssue is one row of `gh issue list --json number,labels`.
+type ghIssue struct {
+	Number int       `json:"number"`
+	Labels []ghLabel `json:"labels"`
+}
+
+type ghLabel struct {
+	Name string `json:"name"`
+}
+
+// hasLabel matches case-insensitively, the way GitHub treats label names.
+func (i ghIssue) hasLabel(name string) bool {
+	return slices.ContainsFunc(i.Labels, func(l ghLabel) bool {
+		return strings.EqualFold(l.Name, name)
+	})
 }
 
 func commentCount(ctx context.Context, cfg config, issue int) (int, error) {
@@ -1240,8 +1414,7 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, tally *is
 				failures++
 				log.Printf("remediation attempt %d/%d failed (%v)", failures, cfg.retries, rerr)
 				if failures >= cfg.retries {
-					return "", fmt.Errorf("conflict remediation for PR #%d failed %d times — needs a human",
-						prNumber, failures)
+					return "", park("conflict remediation for PR #%d failed %d times", prNumber, failures)
 				}
 			} else {
 				failures = 0
@@ -1425,7 +1598,7 @@ func cleanupWorktree(ctx context.Context, cfg config, issue int) {
 // --- plumbing ---
 
 func gh(ctx context.Context, cfg config, args ...string) ([]byte, error) {
-	return capture(ctx, cfg.dir, "gh", args...)
+	return capture(ctx, cfg.dir, cfg.ghBin, args...)
 }
 
 func git(ctx context.Context, cfg config, args ...string) ([]byte, error) {
