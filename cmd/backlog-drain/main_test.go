@@ -1161,6 +1161,68 @@ func TestPluginVersionIsEmptyWhenTheCLICannotAnswer(t *testing.T) {
 	}
 }
 
+// The list can hold the same plugin twice, and the entry that drives the run is
+// not always the first one. Fed straight to the selection so the shapes a real
+// `plugin list --json` produces can be written out literally.
+func TestPluginVersionPicksTheCopyThatWillRun(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		list string
+		want string
+		why  string
+	}{{
+		name: "sole match",
+		list: `[{"id":"some-other-plugin@elsewhere","version":"9.9.9","scope":"user"},
+		        {"id":"backlog-drain@scharissis","version":"0.3.0","scope":"user"}]`,
+		want: "0.3.0",
+		why:  "one copy installed, so there is nothing to choose between",
+	}, {
+		// The reason this issue exists: a --plugin-dir copy loaded alongside a
+		// user-scope install of the same name, which is how a tip skill gets
+		// tested against a tip binary. The session copy replaces the installed
+		// one outright, and it is listed second.
+		name: "session copy behind a user install",
+		list: `[{"id":"backlog-drain@scharissis","version":"0.1.0","scope":"user"},
+		        {"id":"backlog-drain@inline","version":"0.6.1","scope":"session"}]`,
+		want: "0.6.1",
+		why:  "the session copy is the one that drives the run",
+	}, {
+		name: "two copies with no scope to separate them",
+		list: `[{"id":"backlog-drain@scharissis","version":"0.1.0","scope":"user"},
+		        {"id":"backlog-drain@a-fork","version":"0.6.1","scope":"user"}]`,
+		why: "no honest answer, and a wrong version is worse than none",
+	}, {
+		name: "two session copies",
+		list: `[{"id":"backlog-drain@one","version":"0.1.0","scope":"session"},
+		        {"id":"backlog-drain@two","version":"0.6.1","scope":"session"}]`,
+		why: "narrowing to session scope did not get it down to one",
+	}, {
+		name: "duplicates that agree",
+		list: `[{"id":"backlog-drain@scharissis","version":"0.6.1","scope":"user"},
+		        {"id":"backlog-drain@a-mirror","version":"0.6.1","scope":"user"}]`,
+		want: "0.6.1",
+		why:  "whichever one wins reports the same version, so it is not a guess",
+	}, {
+		name: "no match",
+		list: `[{"id":"some-other-plugin@elsewhere","version":"9.9.9","scope":"user"}]`,
+		why:  "the plugin is not installed at all",
+	}, {
+		name: "empty list",
+		list: `[]`,
+		why:  "nothing installed",
+	}, {
+		name: "output that is not the list",
+		list: `not json`,
+		why:  "a CLI answering with something else is not a version",
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := installedVersion([]byte(tc.list), pluginName); got != tc.want {
+				t.Errorf("installedVersion = %q, want %q — %s", got, tc.want, tc.why)
+			}
+		})
+	}
+}
+
 func TestWarnOnVersionSkew(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
