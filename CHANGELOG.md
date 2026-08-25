@@ -43,6 +43,23 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
 
 ### Added
 
+- **Operator impact:** a red CI check on an open PR is now repaired the way a
+  merge conflict already was. The supervisor reads the PR's check rollup each
+  poll, and on a failure dispatches a run that reads the failing job logs, fixes
+  the cause, re-runs the suite locally and pushes. It waits while any check is
+  still running, and treats only conclusions a code change can fix as failures:
+  `NEUTRAL` and `SKIPPED` are green, and a check stopped on a person
+  (`CANCELLED`, or a deployment gate at `ACTION_REQUIRED`/`WAITING`) is reported
+  as `needs a human` — not dispatched at, and not counted as still running,
+  which would hide a real failure beside it. One run per observed failure,
+  bounded by `-retries`; a run that
+  finishes without moving the branch parks the issue rather than looping. Before
+  this, a failing check was invisible: the drain logged "still open" every poll,
+  forever. These runs record `checks` as their reason, so `backlog-drain stats`
+  tells them apart from conflict remediations. The allowlist gains three
+  read-only entries the diagnosis needs — `gh pr checks`, `gh run list` and
+  `gh run view`; `gh run` is still not granted wholesale, since that carries
+  `rerun`, `cancel` and `delete`.
 - `-strict-order`, which keeps the queue in strict ascending order: an issue
   awaiting an answer blocks every issue behind it until you reply.
 - `scripts/smoke.sh` (and `smoke.ps1`), run between tagging and publishing:
