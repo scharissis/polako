@@ -43,6 +43,29 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
 
 ### Added
 
+- **Operator impact:** requesting changes on an open PR now dispatches a
+  remediation run, the way a merge conflict and a red build already did. The
+  supervisor reads the PR's reviews each poll; on a request for changes it sends
+  a run that reads the review bodies and the comments left on individual lines of
+  the diff, makes the changes, gets the suite passing and pushes — then goes back
+  to waiting, because the re-review is yours. It may not dismiss or resolve the
+  review, and still may not merge. Before this, asking for changes was invisible:
+  the drain logged "still open" every poll until somebody re-ran the skill by
+  hand. Whether a review has been answered is derived from GitHub rather than
+  remembered, so a restarted drain agrees with the one that dispatched the run: a
+  review is outstanding until the branch carries a commit newer than it. That
+  makes a rebase read as an answer — including one the conflict remediation
+  performs — so a conflicting PR with a review open on it comes back for a fresh
+  look rather than being reworked against a diff that no longer exists. The
+  reviews themselves are the authority rather than GitHub's summary
+  `reviewDecision`, which is empty on any repository whose branch protection does
+  not require a review, so this works on the repositories most people have. One
+  run per review, bounded by `-retries`; a run that finishes without moving the
+  branch parks the issue rather than looping. These runs record `review` as their
+  reason, so `backlog-drain stats` tells them apart from the other two. The
+  allowlist gains one entry, minted per run and pinned to the one PR being fixed
+  — `Bash(gh api repos/OWNER/REPO/pulls/N/comments:*)` — because gh has no `pr`
+  subcommand that prints line comments; `gh api` is not granted wholesale.
 - **Operator impact:** a red CI check on an open PR is now repaired the way a
   merge conflict already was. The supervisor reads the PR's check rollup each
   poll, and on a failure dispatches a run that reads the failing job logs, fixes

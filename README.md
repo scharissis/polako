@@ -30,6 +30,7 @@ PR opened?  ──no──►  issue labelled `awaiting-answer`?  ──yes─�
    ↓ yes
 wait for merge (-poll)               ← rebases if GitHub reports CONFLICTING,
    ↓                                   fixes + re-pushes if the checks go red
+   ↓                                   or a reviewer requests changes
 close the issue, remove the worktree, advance to the next
 ```
 
@@ -115,10 +116,11 @@ re-reads the thread and stops again without re-asking if the answer is not there
 yet — and holds a baseline from then on.
 
 **An open PR that goes red is repaired, not just watched.** Each poll reads the
-PR's check rollup as well as its mergeability. A conflict gets a rebase; a
-failing check gets a run that reads the failing job logs, fixes the cause, runs
-the suite locally and pushes. Both are bounded by `-retries`, and neither may
-merge, open a second PR, or rerun the workflow it was sent to diagnose.
+PR's check rollup and its reviews as well as its mergeability. A conflict gets a
+rebase; a failing check gets a run that reads the failing job logs, fixes the
+cause, runs the suite locally and pushes. All three are bounded by `-retries`,
+and none may merge, open a second PR, or rerun the workflow it was sent to
+diagnose.
 
 Two rules keep that from turning into a treadmill. Nothing is dispatched while a
 check is still running — a suite that has not finished can only add to the list
@@ -131,6 +133,27 @@ stopped on a person (`CANCELLED`, or a deployment gate at `ACTION_REQUIRED` or
 `WAITING`) is reported as `needs a human` rather than dispatched at. That last
 distinction matters twice over: a gated check is not a suite still running, so a
 real failure sitting beside one is still seen.
+
+**Requesting changes on the PR is an instruction, not a dead end.** Review the
+PR as you would anyone's; if you ask for changes, the next poll dispatches a run
+that reads what you wrote — both the review bodies and the comments left on
+individual lines of the diff — makes the changes, gets the suite passing, and
+pushes. Then it goes back to waiting, because a re-review is yours to give: the
+run may not dismiss or resolve the review, and still may not merge.
+
+Whether a review has been answered yet is read off GitHub rather than remembered,
+so a drain restarted mid-flight reaches the same conclusion: a review counts as
+outstanding until the branch carries a commit newer than it. Two consequences
+worth knowing. A rebase — including one the conflict remediation performs — gives
+every commit a fresh date and so reads as an answer; that is deliberate, since
+the review then points at a diff that no longer exists, but it does mean a
+conflicting PR with a review open on it comes back to you for a fresh look. And
+the same treadmill rule applies: a run that finishes without moving the branch
+has said all it is going to, so the issue parks rather than re-reading the same
+comments every poll. If your project sets no branch-protection review
+requirement — most do not — this still works, because it reads the reviews
+themselves and not just GitHub's summary `reviewDecision`, which is empty in
+that case.
 
 **Refused credentials stop the drain immediately.** A resume cannot mint a new
 token, so retrying one spends `-retries` × several minutes reaching the
@@ -363,7 +386,7 @@ backlog-drain stats
 | `-permission-mode` | `acceptEdits` | Passed to `claude --permission-mode`. |
 | `-model` | *(the CLI's own default)* | Passed to `claude --model`. Vary it between batches to compare models — see [Run data & cost tracking](#run-data--cost-tracking). |
 | `-poll` | `5m` | Interval between GitHub checks while waiting. |
-| `-retries` | `3` | Resume attempts after a crashed run, and the bound on remediation runs against a conflicting or red open PR. A run the API refused to authenticate is never one of them — see below. |
+| `-retries` | `3` | Resume attempts after a crashed run, and the bound on remediation runs against an open PR that is conflicting, red, or carrying a request for changes. A run the API refused to authenticate is never one of them — see below. |
 | `-retry-wait` | `30s` | Wait before each resume attempt. |
 | `-stall` | `15m` | Kill and resume a run that has emitted no events for this long (`0` disables). |
 | `-skip` | *(none)* | Comma-separated issue numbers to skip. Issues labelled `needs-human` are skipped anyway — see [How it works](#how-it-works). |
@@ -663,6 +686,16 @@ edit` takes several numbers, and one appended *after* the flag still starts with
 the granted prefix. So read it as narrowing the blast radius from every issue in
 the repository to something an audit of the run's own commands would catch —
 which is what the rest of this section says about the allowlist generally.
+
+A review remediation gets one more, minted and pinned the same way. Most of a
+review's substance is in the comments left on individual lines of the diff, and
+gh has no `pr` subcommand that prints them, so that run alone is granted
+`Bash(gh api repos/you/project/pulls/42/comments:*)` — one PR of one repository,
+where a blanket `Bash(gh api:*)` would be the entire GitHub API, secrets and
+repository deletion included. Being a prefix rather than a signature, the honest
+worst case is writing or deleting a comment on that same PR. Granting nothing
+would not be safer: an unattended run that trips a permission prompt hangs in
+silence until the stall watchdog kills it.
 
 What the allowlist does *not* close, and cannot: `Bash(git:*)` includes
 `git push`, which is what opening a PR requires; the build commands run
