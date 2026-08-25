@@ -114,6 +114,20 @@ type config struct {
 }
 
 func main() {
+	// One subcommand, dispatched before any flag is parsed so that a bare
+	// invocation still drains and nothing existing changes. `stats` only
+	// reads the run data; it never touches GitHub or starts a run.
+	if len(os.Args) > 1 && os.Args[1] == "stats" {
+		log.SetFlags(0) // a report, not a log
+		if err := runStats(os.Args[2:], os.Stdout, time.Now()); err != nil {
+			if errors.Is(err, errFlagsReported) {
+				os.Exit(2) // the usage is already on screen
+			}
+			log.Fatalf("stats: %v", err)
+		}
+		return
+	}
+
 	cfg := parseFlags()
 
 	// Ctrl+C cancels the context: in-flight waits end promptly, and a running
@@ -154,6 +168,12 @@ func parseFlags() config {
 	flag.StringVar(&cfg.tag, "run-tag", "", "label recorded with every run, for comparing one batch against another")
 	flag.StringVar(&metrics, "metrics", "",
 		`directory for run-data records, or "off" (default ~/.backlog-drain/metrics)`)
+	flag.Usage = func() {
+		fmt.Fprint(flag.CommandLine.Output(),
+			"Usage: backlog-drain [flags]        drain the backlog, one issue at a time\n"+
+				"       backlog-drain stats [flags]  report on the run data already recorded\n\nFlags:\n")
+		flag.PrintDefaults()
+	}
 	flag.Parse()
 
 	cfg.rec = newRecorder(metrics)
