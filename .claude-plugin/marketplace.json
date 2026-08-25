@@ -14,7 +14,7 @@
       "source": {
         "source": "github",
         "repo": "scharissis/backlog-drain",
-        "ref": "backlog-drain--v0.4.0"
+        "ref": "backlog-drain--v0.6.1"
       }
     }
   ]
