@@ -643,16 +643,38 @@ commit, plus a separate commit that publishes it.
    workflow, which validates again on a clean machine with current tooling,
    cross-compiles the five targets with the tag stamped in, and attaches them to
    a GitHub release whose body is that changelog section.
-3. **Publish PR** — move the `ref` in
+3. **Smoke-test it**, while nobody is on it yet:
+
+   ```bash
+   ./scripts/smoke.sh
+   ```
+
+   ```powershell
+   .\scripts\smoke.ps1
+   ```
+
+   Everything CI cannot reach, because it needs the network, `gh` and a real
+   `claude`: both tags exist and name one commit that is on `main`; the release
+   is published with all five binaries and a body that is the changelog section,
+   not generated commit subjects; the downloaded binary reports the right
+   version, which is the only place the `-ldflags` stamp is ever exercised;
+   `go install ...@v0.4.0` resolves; the plugin installs with the `ref` moved
+   and reports the same version the binary does; and a session lists
+   `/backlog-drain:implement-issue`. It writes nothing outside a temporary
+   directory — the plugin installs into a throwaway `CLAUDE_CONFIG_DIR`, so
+   smoke-testing a release never moves *your* machine onto it.
+
+   It cannot exercise the skill, so **drive one real issue through the release
+   before publishing** — see [Smoke-testing the skill](#smoke-testing-the-skill).
+4. **Publish PR** — move the `ref` in
    [`marketplace.json`](.claude-plugin/marketplace.json) to the new tag.
    Merging that one line is the moment anybody is exposed to the release.
 
-Steps 2 and 3 are separate on purpose. A `ref` bumped in the release commit
+Steps 2 and 4 are separate on purpose. A `ref` bumped in the release commit
 would have `main` advertising a tag that does not exist from the moment it
 merges until the tag is pushed, and every install in that window fails.
-Splitting them also buys a window to smoke-test the built binaries before
-moving anyone. **Rolling back** is reverting the publish commit; tags never
-move.
+Splitting them is also what buys step 3 a window at all. **Rolling back** is
+reverting the publish commit; tags never move.
 
 **Installs resolve to a tag, not to `main`.** The marketplace entry is an
 explicit `github` source with a `ref`, so a version number identifies exactly
@@ -660,11 +682,43 @@ one commit and two people reporting `0.4.0` are running the same thing. This is
 also what keeps the two halves together: `go install ...@latest` resolves to the
 newest `vX.Y.Z` tag, so a plugin tracking `main` would drift from its binary by
 construction. A test holds the `ref` to never being *ahead* of `plugin.json` —
-lagging is the normal state between steps 2 and 3.
+lagging is the normal state between steps 2 and 4.
 
 To develop against `main` rather than a release, add the clone as a local
 marketplace (`claude plugin marketplace add ./`) or use the
 [hand install](#the-skill-by-hand).
+
+### Smoke-testing the skill
+
+`smoke.sh` proves the artefacts are real, installable and consistent. It proves
+nothing about whether the skill still takes an issue to a PR, and nothing ever
+will fully automate that: **nothing merges itself**, so the last link in the
+loop is a human. The cheapest honest test is therefore not a scratch repo and a
+seeded fake issue — it is to make the first issue you were going to drain
+anyway the smoke test.
+
+After step 3, install the release for real and run one issue, watched rather
+than unattended:
+
+```bash
+backlog-drain -once
+```
+
+What to watch for, in order:
+
+- Startup names the repository, `/backlog-drain:implement-issue`, and the same
+  version on both halves — no `version skew` line.
+- The skill opens a PR whose head branch is `issue-N`. That name is the
+  contract between the two halves; a change there breaks PR discovery.
+- The supervisor finds that PR and *waits* on it, rather than re-running the
+  skill over the top of it.
+- You merge. The supervisor notices and exits.
+- `backlog-drain stats` counts that issue as `merged`.
+
+Then open the publish PR, and say in its body which issue you drove. If the
+backlog is empty at release time, say **that** instead — "the skill half went
+unexercised" is worth recording rather than leaving to be inferred from
+silence.
 
 ### What to bump
 
@@ -696,7 +750,10 @@ go test ./...
 ```
 
 `check` runs `gofmt`, `go vet` and the full test suite — the same three things
-CI runs, on Linux, macOS and Windows. The plugin side has its own validator,
+CI runs, on Linux, macOS and Windows. `smoke` is its opposite number and is not
+part of this loop: it needs the network, `gh` and a real `claude`, and it only
+has anything to check once a release is tagged — see
+[Cutting a release](#cutting-a-release). The plugin side has its own validator,
 which `release.sh` and the release workflow both run for you:
 
 ```bash

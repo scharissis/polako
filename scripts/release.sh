@@ -84,5 +84,9 @@ if [ "$ref" = "backlog-drain--v$version" ]; then
 else
   echo
   echo "STEP 3 - nobody is on $version yet. The marketplace entry still pins $ref."
-  echo "Smoke-test the release, then open a PR moving that ref to backlog-drain--v$version."
+  echo "Smoke-test the release:"
+  echo
+  echo "  ./scripts/smoke.sh"
+  echo
+  echo "then open a PR moving that ref to backlog-drain--v$version."
 fi
