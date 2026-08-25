@@ -311,18 +311,29 @@ func newRecorder(spec string) *recorder {
 		return &recorder{}
 	}
 	if dir == "" {
-		home, err := os.UserHomeDir()
+		dflt, err := defaultMetricsDir()
 		if err != nil {
 			log.Printf("no home directory to record run data in (%v) — continuing without it; "+
 				"pass -metrics <dir> to choose a location, or -metrics off to stop asking", err)
 			return &recorder{}
 		}
-		dir = filepath.Join(home, ".backlog-drain", "metrics")
+		dir = dflt
 	}
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
 	return &recorder{dir: dir}
+}
+
+// defaultMetricsDir is where records live unless -metrics says otherwise, and
+// where `stats` looks for them. One documented path on every platform beats
+// per-OS idiom for a tool whose README promises "here is everything we write".
+func defaultMetricsDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".backlog-drain", "metrics"), nil
 }
 
 func (r *recorder) enabled() bool { return r != nil && r.dir != "" }

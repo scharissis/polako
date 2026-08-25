@@ -361,7 +361,16 @@ any A/B aids.
    summing double-counts every resumed session; `stats` then sums the
    per-session maximum instead, using the recorded `session` /
    `resumed_from` chain. One disposable resume against the real CLI answers
-   this.
+   this. **Still open after phase 2**, which sums exactly what each run
+   reported and names the exposure instead of hiding it: any report containing
+   resumed runs says how many, and the README carries the caveat. Switching to
+   a per-session maximum stays a change to the aggregation in `stats.go`
+   alone — nothing about the records has to change. The probe was attempted
+   on 2026-08-25 and could not run: every `claude` invocation returned
+   `401 OAuth access token is invalid`, from a clean shell as well as under
+   the supervisor, so no run reached a priced `result` event. One thing those
+   failed runs did settle: a `--resume`d run's init event reports the *same*
+   `session_id`, so a per-session grouping can key on `session` alone.
 2. **`modelUsage` availability.** Treat as optional everywhere; note the
    minimum CLI version once known.
 3. **Versioning.** New flags are a minor bump per the README's pre-1.0 rules:

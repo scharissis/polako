@@ -198,6 +198,12 @@ Skip an issue that is blocking the queue:
 backlog-drain -skip 12,17
 ```
 
+Ask what all of that cost, once some runs have been recorded:
+
+```bash
+backlog-drain stats
+```
+
 ## Flags
 
 | Flag | Default | Meaning |
@@ -263,6 +269,77 @@ what the supervisor does next — that is what keeps run data compatible with
 "all state lives in GitHub". Writes are best-effort: a failure warns once and
 the drain carries on.
 
+### Reading it back: `backlog-drain stats`
+
+`stats` is the binary's one subcommand, and the only thing that ever reads
+those files. A bare `backlog-drain` still drains; nothing about the report
+touches GitHub or starts a run.
+
+```bash
+backlog-drain stats
+```
+
+```
+run data from /Users/you/.backlog-drain/metrics
+  read    2 files, 11 records (1 unreadable line skipped)
+  window  2026-08-20T09:00:00Z → 2026-08-24T11:03:11Z (4.1d)
+  repos   scharissis/backlog-drain, scharissis/other
+
+issues
+  terminal          4 — merged 3 (75%), needs human 1
+  in flight         1
+  runs per issue    1.5 mean, 1.5 median
+  cost per issue    $1.92 mean, $2.00 median
+  tokens per issue  4.6M mean, 3.9M median (in 2.2k, out 35.2k, cache read 4.4M, cache write 220.5k)
+
+runs
+  total         7 — ok 5, no-turns 1, crash 1
+  reasons       implement 4, resume 1, answers 1, remediate 1
+  outcomes      opened pr 3, posted questions 1, nothing 3
+  work          131 turns, 115 tool uses
+  approximated  1 of 7 runs priced from the streamed tally, not a result event
+
+cost
+  total          $8.10 over 4.1d ($1.98/day)
+  per merged PR  $2.70 across 3 merges
+  tokens         19.1M (in 9.4k, out 145.9k, cache read 18.1M, cache write 912k)
+
+human latency
+  blocked on answers  1 span — 3h10m median, 3h10m max
+  pr open to merge    3 spans — 1h20m median, 2h max (human availability, not the tool)
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `-metrics` | `~/.backlog-drain/metrics` | Directory to read records from — the same path the drain writes to. |
+| `-repo` | *(every repository)* | Only count records for one repository, `owner/name`. |
+| `-since` | *(all of it)* | Only count records newer than this, e.g. `-since 168h`. |
+| `-by` | *(none)* | Add a breakdown table: `issue`, `model` or `tag`. |
+
+Every summable number is derived at read time from the run records — cost per
+issue, runs per issue, question rounds, the spans below. That is why an issue
+record carries no totals of its own: there are none to go stale, and none the
+supervisor has to keep across a restart.
+
+Two of the numbers measure people rather than the tool. **Blocked on answers**
+is the gap between the run that posted questions and the re-run that folded the
+reply in. **PR open to merge** ends whenever somebody got round to pressing the
+button — reported because it is part of the elapsed time, but it is not a
+property of the automation, and no change to the skill will move it.
+
+**On resumed sessions:** a crashed run and the `--resume` that finishes its
+work are two records, and `stats` sums both. If a resumed run's `result` event
+turns out to report the whole session's total rather than that invocation's,
+those two rows overlap and the sum reads high — so whenever a report contains
+resumes, it says how many.
+
+**On approximated runs:** a run that crashed, stalled or was interrupted never
+emitted a `result` event. Its tokens are the tally seen streaming past, an
+undercount, and its dollars read as zero, because pricing belongs to the CLI
+and this binary never guesses at it. Those runs are counted out separately
+rather than mixed in silently — a crash-prone configuration should not get to
+look cheap.
+
 ### Comparing configurations
 
 `-run-tag` labels a batch so you can price one setup against another later:
@@ -277,8 +354,22 @@ binary's version does not pin the skill's text: you can run any binary against
 any installed version of the plugin, so tag discipline is what makes
 skill-wording experiments mean anything.
 
-The files are JSONL, which jq, DuckDB and every spreadsheet already read. What
-a day cost:
+Then compare them:
+
+```bash
+backlog-drain stats -by tag
+```
+
+```
+by tag
+  tag         issues  merged  runs   cost  $/merged  tokens
+  baseline         3       2     5  $6.70     $3.35   16.9M
+  terse-plan       2       1     2  $1.40     $1.40    2.2M
+```
+
+An issue worked under two tags is counted under each, and the table says so
+when it happens. For anything `stats` does not answer, the files are JSONL,
+which jq, DuckDB and every spreadsheet already read. What a day cost:
 
 ```bash
 cat ~/.backlog-drain/metrics/*.jsonl | jq -s 'map(select(.kind=="run")) | map(.cost_usd) | add'
