@@ -34,6 +34,7 @@ func metricsConfig(t *testing.T, spec string) config {
 		retryWait:      30 * time.Second,
 		stall:          15 * time.Minute,
 		claudeVersion:  "2.1.34",
+		pluginVersion:  "0.3.0",
 		rec:            newRecorder(spec),
 	}
 }
@@ -103,6 +104,7 @@ func TestRunRecordIsSelfDescribing(t *testing.T) {
 		"permission_mode": "acceptEdits",
 		"tag":             "baseline",
 		"claude_version":  "2.1.34",
+		"plugin_version":  "0.3.0",
 		// The configuration under test, snapshotted so one line explains itself.
 		"poll_s":       float64(300),
 		"retries":      float64(3),

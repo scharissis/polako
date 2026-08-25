@@ -41,7 +41,14 @@ func moduleName(t *testing.T) string {
 	return ""
 }
 
-func TestPluginManifestMatchesTheModule(t *testing.T) {
+// pluginManifest decodes plugin.json, the single source of truth for the
+// version both release tags and the marketplace ref derive from.
+func pluginManifest(t *testing.T) struct {
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Description string `json:"description"`
+} {
+	t.Helper()
 	var manifest struct {
 		Name        string `json:"name"`
 		Version     string `json:"version"`
@@ -50,6 +57,16 @@ func TestPluginManifestMatchesTheModule(t *testing.T) {
 	if err := json.Unmarshal([]byte(readRepoFile(t, ".claude-plugin", "plugin.json")), &manifest); err != nil {
 		t.Fatalf("plugin.json is not valid JSON: %v", err)
 	}
+	return manifest
+}
+
+func pluginManifestVersion(t *testing.T) string {
+	t.Helper()
+	return pluginManifest(t).Version
+}
+
+func TestPluginManifestMatchesTheModule(t *testing.T) {
+	manifest := pluginManifest(t)
 	if want := moduleName(t); manifest.Name != want {
 		t.Errorf("plugin name = %q, want %q to match the module", manifest.Name, want)
 	}
@@ -63,15 +80,19 @@ func TestPluginManifestMatchesTheModule(t *testing.T) {
 	}
 }
 
-// The repo doubles as its own marketplace, so `/plugin marketplace add` works
-// straight from the clone.
-func TestMarketplaceManifestListsThisPlugin(t *testing.T) {
+// marketplaceEntry is this repo's own plugin entry. The source is left raw
+// because it is either a string or an object depending on how the plugin is
+// resolved, and only TestMarketplaceRefIsNotAheadOfTheVersion cares which.
+type marketplaceEntry struct {
+	Name   string          `json:"name"`
+	Source json.RawMessage `json:"source"`
+}
+
+func thisPluginEntry(t *testing.T) marketplaceEntry {
+	t.Helper()
 	var market struct {
-		Name    string `json:"name"`
-		Plugins []struct {
-			Name   string `json:"name"`
-			Source string `json:"source"`
-		} `json:"plugins"`
+		Name    string             `json:"name"`
+		Plugins []marketplaceEntry `json:"plugins"`
 	}
 	if err := json.Unmarshal([]byte(readRepoFile(t, ".claude-plugin", "marketplace.json")), &market); err != nil {
 		t.Fatalf("marketplace.json is not valid JSON: %v", err)
@@ -79,13 +100,66 @@ func TestMarketplaceManifestListsThisPlugin(t *testing.T) {
 	want := moduleName(t)
 	for _, p := range market.Plugins {
 		if p.Name == want {
-			if p.Source == "" {
-				t.Errorf("plugin %q needs a source", want)
-			}
-			return
+			return p
 		}
 	}
-	t.Errorf("marketplace.json does not list %q (got %+v)", want, market.Plugins)
+	t.Fatalf("marketplace.json does not list %q (got %+v)", want, market.Plugins)
+	return marketplaceEntry{}
+}
+
+// The repo doubles as its own marketplace, so `/plugin marketplace add` works
+// straight from the clone.
+func TestMarketplaceManifestListsThisPlugin(t *testing.T) {
+	if entry := thisPluginEntry(t); len(entry.Source) == 0 {
+		t.Errorf("plugin %q needs a source", entry.Name)
+	}
+}
+
+// Installs resolve to the tag this ref names, so the ref is what publishing
+// moves. It may lag plugin.json — between the release commit and the publish
+// commit it points at the previous release, which is the whole point of
+// keeping those two steps apart — but it must never lead it. A ref naming a
+// tag that does not exist yet is an install that fails for everyone.
+func TestMarketplaceRefIsNotAheadOfTheVersion(t *testing.T) {
+	entry := thisPluginEntry(t)
+	var source struct {
+		Source string `json:"source"`
+		Repo   string `json:"repo"`
+		Ref    string `json:"ref"`
+	}
+	if err := json.Unmarshal(entry.Source, &source); err != nil {
+		t.Fatalf("plugin source is not the pinned object form: %v\ngot: %s", err, entry.Source)
+	}
+	if source.Source != "github" || source.Repo == "" {
+		t.Errorf("plugin source = %+v, want a github repo so the ref can pin a release", source)
+	}
+	prefix := entry.Name + "--v"
+	rest, ok := strings.CutPrefix(source.Ref, prefix)
+	if !ok {
+		t.Fatalf("ref %q does not start with %q; that is the tag name `claude plugin tag` creates", source.Ref, prefix)
+	}
+	pinned, err := parseSemver(rest)
+	if err != nil {
+		t.Fatalf("ref %q does not name a release: %v", source.Ref, err)
+	}
+	current, err := parseSemver(pluginManifestVersion(t))
+	if err != nil {
+		t.Fatalf("plugin.json version: %v", err)
+	}
+	if slices.Compare(pinned[:], current[:]) > 0 {
+		t.Errorf("marketplace ref pins %s but plugin.json is %s: the ref names a tag that does not exist yet",
+			rest, pluginManifestVersion(t))
+	}
+}
+
+// Every release publishes its changelog section as the GitHub release body, so
+// a version with no section ships with an empty one.
+func TestChangelogHasASectionForThisVersion(t *testing.T) {
+	version := pluginManifestVersion(t)
+	heading := regexp.MustCompile(`(?m)^## \[?` + regexp.QuoteMeta(version) + `\]?`)
+	if !heading.MatchString(readRepoFile(t, "CHANGELOG.md")) {
+		t.Errorf("CHANGELOG.md has no `## %s` section; the release workflow publishes it as the release body", version)
+	}
 }
 
 // `claude plugin validate` rejects any root key it does not know, and that

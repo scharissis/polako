@@ -110,11 +110,7 @@ So to make every contributor to some project pick the skill up, run both
 commands with `--scope project` inside that project and commit the resulting
 `.claude/settings.json`. They still each need read access to this repo.
 
-To update later, and to remove:
-
-```bash
-claude plugin marketplace update scharissis && claude plugin update backlog-drain
-```
+To update, see [Getting updates](#getting-updates). To remove:
 
 ```bash
 claude plugin uninstall backlog-drain && claude plugin marketplace remove scharissis
@@ -163,7 +159,42 @@ go build -o backlog-drain ./cmd/backlog-drain
 ```
 
 Prebuilt binaries for Linux, macOS and Windows are attached to each tagged
-release, and are the easiest option on a machine without Go.
+release, and are the easiest option on a machine without Go. They are stamped
+with their tag, so `backlog-drain -version` tells you what you are running.
+
+### Getting updates
+
+**Nothing updates on its own by default.** Auto-update is off for third-party
+marketplaces, so an installed plugin stays exactly where it is until you ask:
+
+```bash
+claude plugin marketplace update scharissis && claude plugin update backlog-drain
+```
+
+Then `/reload-plugins`, or restart. **Upgrade the binary in the same breath** —
+the two halves are one release, and mixing them is not a supported combination:
+
+```bash
+GOPRIVATE=github.com/scharissis/* go install github.com/scharissis/backlog-drain/cmd/backlog-drain@latest
+```
+
+If they end up mismatched anyway, the supervisor says so at startup and names
+both versions. It is a warning, not a refusal — but the supervisor finds a PR by
+the branch name the skill chooses, so a mismatched pair is a bug waiting for a
+confusing moment.
+
+To let it happen automatically instead: `/plugin` → **Marketplaces** →
+`scharissis` → **Enable auto-update**. Claude Code then checks after a session
+starts, with a random delay of up to ten minutes, and the new version loads on
+`/reload-plugins` or at the next launch — never mid-session. The binary is not
+covered; that is still yours to run.
+
+To hold a machine at one release, pin the marketplace itself and it stops
+moving:
+
+```bash
+claude plugin marketplace add scharissis/backlog-drain#backlog-drain--v0.4.0
+```
 
 ### Access
 
@@ -233,6 +264,7 @@ backlog-drain stats
 | `-once` | `false` | Process a single issue to merge, then exit. |
 | `-run-tag` | *(none)* | Freeform label recorded with every run, so one batch can be compared against another. |
 | `-metrics` | `~/.backlog-drain/metrics` | Directory for run-data records, or `off` to write nothing. |
+| `-version` | `false` | Print which release this binary is, then exit. Use it when startup warns that the binary and the skill disagree — see [Getting updates](#getting-updates). |
 
 ## Run data & cost tracking
 
@@ -245,7 +277,8 @@ behind (a PR, questions, or neither), its status and exit code, turns, tool-use
 count, wall and API duration, tokens (in / out / cache read / cache write, plus
 the per-model split), dollars, and the configuration under test — skill, model,
 permission mode, `-run-tag`, a hash of the tool allowlist, the strategy knobs,
-and both CLI versions. One more object per issue records how it ended:
+and the three versions in play (this binary, the installed skill, and the
+Claude CLI). One more object per issue records how it ended:
 `merged`, `closed_unmerged` or `needs_human`.
 
 **What is never written:** issue titles, issue bodies, PR titles, comment text,
@@ -473,49 +506,85 @@ one version number, the `version` field in
 [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json). That field is the
 source of truth; everything else is derived from it.
 
+The plugin is the versioned unit and the skill versions with it — skill
+frontmatter carries no version of its own, and should not grow one. The binary
+takes the same number. **One number, one commit, two artefacts.**
+
+That version is also the *update signal*: Claude Code caches an installed plugin
+under its version and skips anything that resolves to the same string. Commits
+that land on `main` without a bump reach nobody. Bumping the field is the only
+thing that moves an installed user.
+
+### Cutting a release
+
 A release is that number, bumped and committed, plus two tags on the same
-commit:
+commit, plus a separate commit that publishes it.
 
 | Tag | Who needs it |
 | --- | --- |
-| `backlog-drain--v0.2.0` | The Claude plugin tooling. `claude plugin tag` creates it, and refuses if `plugin.json` and the marketplace entry disagree. |
-| `v0.2.0` | Go modules — `go install ...@v0.2.0` only resolves semver tags — and the trigger for the binary release workflow. |
+| `backlog-drain--v0.4.0` | The Claude plugin tooling. `claude plugin tag` creates it, and refuses if `plugin.json` and the marketplace entry disagree. It is also what the marketplace entry's `ref` pins to, and what a `dependencies` range would resolve against. |
+| `v0.4.0` | Go modules — `go install ...@v0.4.0` only resolves semver tags — and the trigger for the binary release workflow. |
 
-Two tags for one release is a footgun, so a script does both:
+1. **Release PR** — a `chore(release): 0.4.0` commit that bumps
+   [`plugin.json`](.claude-plugin/plugin.json) and writes the
+   [`CHANGELOG.md`](CHANGELOG.md) section, and does nothing else. That is what
+   makes the tag boundary mean something; a bump folded into a feature commit
+   leaves no commit that means "this is 0.4.0".
+2. **Tag it**, which two tags for one release makes worth scripting:
 
-```bash
-./scripts/release.sh
-```
+   ```bash
+   ./scripts/release.sh
+   ```
 
-```powershell
-.\scripts\release.ps1
-```
+   ```powershell
+   .\scripts\release.ps1
+   ```
 
-Each refuses to run on a dirty tree, so the version bump has to be committed
-first, and each runs `claude plugin validate .` before either tag exists —
-both tags are pushed before CI sees them, so a manifest the plugin tooling
-rejects has to be caught locally or not at all. Pushing `v0.2.0` starts the
-release workflow, which validates the manifests again on a clean machine with
-current tooling, then cross-compiles the five targets and attaches them to a
-GitHub release with generated notes.
+   Each refuses on a dirty tree, on a missing changelog section, and on a
+   Claude Code too old for `claude plugin tag`; each runs
+   `claude plugin validate .` before either tag exists, because both tags are
+   pushed before CI sees them, so a manifest the plugin tooling rejects has to
+   be caught locally or not at all. Pushing `v0.4.0` starts the release
+   workflow, which validates again on a clean machine with current tooling,
+   cross-compiles the five targets with the tag stamped in, and attaches them to
+   a GitHub release whose body is that changelog section.
+3. **Publish PR** — move the `ref` in
+   [`marketplace.json`](.claude-plugin/marketplace.json) to the new tag.
+   Merging that one line is the moment anybody is exposed to the release.
 
-**Installs track the default branch, not tags.** The marketplace entry uses
-`"source": "./"` — the plugin lives in the same repo as the marketplace — so
-`claude plugin marketplace update` fetches whatever is on `main`. The tags are
-release markers and rollback points, not what the installer resolves. If you
-ever want installs pinned to a reviewed release instead, change the entry in
-`marketplace.json` from `"./"` to an explicit git source with a `ref`, and
-moving that `ref` becomes the act of publishing.
+Steps 2 and 3 are separate on purpose. A `ref` bumped in the release commit
+would have `main` advertising a tag that does not exist from the moment it
+merges until the tag is pushed, and every install in that window fails.
+Splitting them also buys a window to smoke-test the built binaries before
+moving anyone. **Rolling back** is reverting the publish commit; tags never
+move.
 
-What to bump, pre-1.0:
+**Installs resolve to a tag, not to `main`.** The marketplace entry is an
+explicit `github` source with a `ref`, so a version number identifies exactly
+one commit and two people reporting `0.4.0` are running the same thing. This is
+also what keeps the two halves together: `go install ...@latest` resolves to the
+newest `vX.Y.Z` tag, so a plugin tracking `main` would drift from its binary by
+construction. A test holds the `ref` to never being *ahead* of `plugin.json` —
+lagging is the normal state between steps 2 and 3.
+
+To develop against `main` rather than a release, add the clone as a local
+marketplace (`claude plugin marketplace add ./`) or use the
+[hand install](#the-skill-by-hand).
+
+### What to bump
+
+Pre-1.0, **minor is the breaking axis**. That is the npm-semver reading —
+`^0.3.0` means `0.3.x` — and plugin `dependencies` ranges resolve with npm
+semver against `backlog-drain--v*` tags, so it is the reading that makes a
+constraint on this plugin behave.
 
 - **Patch** — bug fixes, doc changes, anything invisible to a caller.
 - **Minor** — new flags, changed defaults, changes to the skill's phases. The
   `-tools` default counts: widening it changes what unattended runs may do.
-- **Major** — deferred until the skill's contract with the supervisor settles.
+- **Major** — `1.0.0` when the skill's contract with the supervisor settles.
   The coupling to watch is the branch name: the supervisor finds a PR by its
   head branch, so if the skill ever stops naming branches `issue-N`, that is a
-  breaking change on both sides at once.
+  breaking change on both sides at once. After 1.0, that is what major means.
 
 ## Development
 

@@ -19,6 +19,11 @@ import (
 // execClaude be exercised end to end on every platform, with no shell scripts.
 const fakeClaudeEnv = "BACKLOG_DRAIN_FAKE_CLAUDE"
 
+// fakePluginEnv is the version `claude plugin list --json` should report for
+// the installed backlog-drain plugin. Unset means the subcommand fails, which
+// is what a CLI too old to have it does.
+const fakePluginEnv = "BACKLOG_DRAIN_FAKE_PLUGIN_VERSION"
+
 func TestMain(m *testing.M) {
 	if mode := os.Getenv(fakeClaudeEnv); mode != "" {
 		os.Exit(fakeClaude(mode))
@@ -30,6 +35,18 @@ func TestMain(m *testing.M) {
 func fakeClaude(mode string) int {
 	emit := func(line string) {
 		fmt.Fprintln(os.Stdout, line)
+	}
+	// `claude plugin list --json` is a different call on the same binary, so it
+	// dispatches on argv rather than on mode: any run can make it.
+	if len(os.Args) > 2 && os.Args[1] == "plugin" && os.Args[2] == "list" {
+		v := os.Getenv(fakePluginEnv)
+		if v == "" {
+			return 1 // no such subcommand on this CLI
+		}
+		// Two entries, so the match is proved to be by name and not by luck.
+		emit(`[{"id":"some-other-plugin@elsewhere","version":"9.9.9"},` +
+			`{"id":"backlog-drain@scharissis","version":"` + v + `","scope":"user","enabled":true}]`)
+		return 0
 	}
 	switch mode {
 	case "stream":
@@ -839,5 +856,106 @@ func TestAuthFailureMatchesTheWaysTheCLIReportsIt(t *testing.T) {
 		if authFailure(r) {
 			t.Errorf("should not read as refused credentials: %s", clip(r, 80))
 		}
+	}
+}
+
+// --- version skew between the two halves ---
+
+func TestPluginVersionReadsTheInstalledPlugin(t *testing.T) {
+	cfg := fakeClaudeConfig(t, "stream")
+	t.Setenv(fakePluginEnv, "0.3.0")
+
+	if got := pluginVersion(context.Background(), cfg); got != "0.3.0" {
+		t.Errorf("pluginVersion = %q, want the installed plugin's version", got)
+	}
+}
+
+// A -skill with no plugin prefix names a skill copied into ~/.claude/skills.
+// It carries no version, and asking the CLI about a plugin by that name would
+// answer about something else.
+func TestPluginVersionIsEmptyForAHandInstalledSkill(t *testing.T) {
+	cfg := fakeClaudeConfig(t, "stream")
+	cfg.skill = skillDir
+	t.Setenv(fakePluginEnv, "0.3.0")
+
+	if got := pluginVersion(context.Background(), cfg); got != "" {
+		t.Errorf("pluginVersion = %q, want empty: a hand-installed skill has no version", got)
+	}
+}
+
+func TestPluginVersionIsEmptyWhenTheCLICannotAnswer(t *testing.T) {
+	cfg := fakeClaudeConfig(t, "stream")
+
+	if got := pluginVersion(context.Background(), cfg); got != "" {
+		t.Errorf("pluginVersion = %q, want empty rather than a guess", got)
+	}
+}
+
+func TestWarnOnVersionSkew(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		skill          string
+		binary, plugin string
+		warn           bool
+	}{
+		{name: "matched release", binary: "0.4.0", plugin: "0.4.0"},
+		{name: "matched despite the module's v prefix", binary: "v0.4.0", plugin: "0.4.0"},
+		{name: "skewed", binary: "0.4.0", plugin: "0.3.0", warn: true},
+		// A build from a clone reports a revision. That is an unreleased
+		// binary, not a skew, and warning every time would train the operator
+		// to ignore the message that matters.
+		{name: "unreleased binary", binary: "a1b2c3d4e5f6", plugin: "0.3.0"},
+		{name: "dirty clone build", binary: "a1b2c3d4e5f6+dirty", plugin: "0.3.0"},
+		{name: "nothing to compare", binary: "", plugin: "0.3.0"},
+		{name: "no plugin installed", binary: "0.4.0", plugin: ""},
+		// -skill may name another plugin entirely, which has its own version
+		// line. Comparing it against this binary would warn on every run of a
+		// deliberate configuration, and name the wrong plugin doing it.
+		{name: "another plugin's skill", skill: "my-fork:implement-issue", binary: "0.4.0", plugin: "1.2.0"},
+		{name: "hand-installed skill", skill: skillDir, binary: "0.4.0", plugin: "1.2.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			buf := captureLog(t)
+			skill := tc.skill
+			if skill == "" {
+				skill = defaultSkill
+			}
+			warnOnVersionSkew(tc.binary, config{skill: skill, pluginVersion: tc.plugin})
+
+			got := strings.Contains(buf.String(), "version skew")
+			if got != tc.warn {
+				t.Errorf("warned = %v, want %v\nlog: %s", got, tc.warn, buf.String())
+			}
+			if tc.warn && !strings.Contains(buf.String(), tc.plugin) {
+				t.Errorf("the warning has to name both versions, got: %s", buf.String())
+			}
+		})
+	}
+}
+
+// The manifests are the source of truth for the version, so a release binary
+// and the plugin it drives compare equal only if this holds.
+func TestParseSemverRejectsWhatIsNotARelease(t *testing.T) {
+	for _, ok := range []string{"0.0.0", "0.4.0", "10.20.30"} {
+		if _, err := parseSemver(ok); err != nil {
+			t.Errorf("parseSemver(%q) = %v, want it accepted", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "0.4", "0.4.0.1", "v0.4.0", "0.4.0-rc1", "01.4.0", "-1.4.0", "a.b.c"} {
+		if _, err := parseSemver(bad); err == nil {
+			t.Errorf("parseSemver(%q) succeeded, want it rejected", bad)
+		}
+	}
+}
+
+// The pseudo-version a plain `go build` inside a module records is the shape
+// most likely to be mistaken for a release, and warning on it would fire on
+// every developer build.
+func TestReleaseVersionRejectsAPseudoVersion(t *testing.T) {
+	if v, ok := releaseVersion("v0.0.0-20260825064232-a0aabd243c60"); ok {
+		t.Errorf("releaseVersion accepted a pseudo-version as %q", v)
+	}
+	if v, ok := releaseVersion("v0.4.0"); !ok || v != "0.4.0" {
+		t.Errorf("releaseVersion(v0.4.0) = %q, %v; want the bare version", v, ok)
 	}
 }
