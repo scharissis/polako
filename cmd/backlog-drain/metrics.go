@@ -164,6 +164,7 @@ type runRecord struct {
 
 	DrainVersion  string `json:"drain_version"`
 	ClaudeVersion string `json:"claude_version"`
+	PluginVersion string `json:"plugin_version"`
 }
 
 // issueRecord marks an issue reaching a terminal state. It deliberately holds
@@ -228,6 +229,7 @@ func newRunRecord(cfg config, rc runContext, rep runReport) runRecord {
 
 		DrainVersion:  drainVersion(),
 		ClaudeVersion: cfg.claudeVersion,
+		PluginVersion: cfg.pluginVersion,
 	}
 	// No result event: the run died mid-flight. Report what was seen going
 	// past, flagged as the approximation it is, and time it from the clock
@@ -264,10 +266,19 @@ func toolsHash(tools string) string {
 	return fmt.Sprintf("%08x", h.Sum32())
 }
 
-// drainVersion is the module version when installed with `go install`, and the
-// short VCS revision when built from a clone. Empty if the binary carries
-// neither — a `go run` of the package, or a test.
+// drainVersion is the release tag when the binary was stamped at build time,
+// the module version when installed with `go install`, and the short VCS
+// revision when built from a clone. Empty if the binary carries none of them —
+// a `go run` of the package, or a test.
+//
+// The stamp comes first because it is the only one a cross-compiled release
+// binary has: `go build` from a checkout records the revision but leaves the
+// module version at "(devel)", so without it every published binary would
+// report a bare SHA and no run could be attributed to a release.
 var drainVersion = sync.OnceValue(func() string {
+	if version != "" {
+		return version
+	}
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return ""

@@ -11,7 +11,11 @@
       "name": "backlog-drain",
       "description": "Drain a GitHub issue backlog one issue at a time, from issue to merged PR.",
       "category": "workflow",
-      "source": "./"
+      "source": {
+        "source": "github",
+        "repo": "scharissis/backlog-drain",
+        "ref": "backlog-drain--v0.4.0"
+      }
     }
   ]
 }

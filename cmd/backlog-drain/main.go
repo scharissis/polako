@@ -50,6 +50,17 @@ const skillDir = "implement-issue"
 // workflow with the same supervisor.
 const defaultSkill = "backlog-drain:" + skillDir
 
+// pluginName is the half of defaultSkill that names the plugin: the id
+// `claude plugin list` reports an installed copy under, and the prefix of the
+// release tag the plugin tooling creates.
+var pluginName, _, _ = strings.Cut(defaultSkill, ":")
+
+// version is stamped at build time with -ldflags "-X main.version=$tag", which
+// is how a prebuilt release binary knows which release it is. A `go install`
+// learns the same thing from the module version, and a build from a clone falls
+// back to the revision — see drainVersion in metrics.go.
+var version string
+
 // errNoWork marks a run whose prompt never resolved to a skill — almost
 // always a -skill naming a slash command this installation does not have.
 // Two detections funnel here: the init event listing the session's commands
@@ -122,9 +133,12 @@ type config struct {
 	rec *recorder
 
 	// Filled in by preflight, recorded with every run: which repository this
-	// is, and which CLI produced its numbers.
+	// is, which CLI produced its numbers, and which release of the skill it
+	// drove. pluginVersion is empty when -skill names a hand-installed skill,
+	// which has no plugin to report a version.
 	repo          string
 	claudeVersion string
+	pluginVersion string
 }
 
 func main() {
@@ -162,6 +176,8 @@ func main() {
 func parseFlags() config {
 	var cfg config
 	var skip, metrics string
+	var showVersion bool
+	flag.BoolVar(&showVersion, "version", false, "print the version of this binary and exit")
 	flag.StringVar(&cfg.dir, "dir", ".", "path to the repository's main checkout")
 	flag.StringVar(&cfg.claudeBin, "claude", "claude", "claude binary to invoke")
 	flag.StringVar(&cfg.skill, "skill", defaultSkill, "skill to run per issue")
@@ -189,6 +205,14 @@ func parseFlags() config {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	// Answered before anything else a flag implies, so it stays usable on a
+	// machine where -dir points nowhere: this is the flag an operator reaches
+	// for when the startup warning says the two halves disagree.
+	if showVersion {
+		fmt.Println(describeVersion())
+		os.Exit(0)
+	}
 
 	cfg.rec = newRecorder(metrics)
 	cfg.skip = parseSkip(skip)
@@ -266,7 +290,9 @@ func preflight(ctx context.Context, cfg *config) error {
 	}
 	cfg.repo = strings.TrimSpace(string(out))
 	cfg.claudeVersion = claudeVersion(ctx, *cfg)
+	cfg.pluginVersion = pluginVersion(ctx, *cfg)
 	log.Printf("%s — running /%s per issue, polling every %s", cfg.repo, cfg.skill, cfg.poll)
+	warnOnVersionSkew(drainVersion(), *cfg)
 	if cfg.rec.enabled() {
 		// Say where the data goes, every time, unprompted: it is the whole of
 		// the answer to "what does this tool record".
@@ -288,6 +314,119 @@ func claudeVersion(ctx context.Context, cfg config) string {
 		return fields[0]
 	}
 	return ""
+}
+
+// pluginVersion reports which release of the skill this run will drive, by
+// asking the CLI what it has installed. Best-effort in the same way as
+// claudeVersion, and empty rather than wrong in the two cases where there is no
+// honest answer: a -skill with no plugin prefix names a hand-installed skill,
+// which carries no version at all, and a CLI too old for `plugin list --json`
+// fails the call.
+func pluginVersion(ctx context.Context, cfg config) string {
+	plugin, _, ok := strings.Cut(cfg.skill, ":")
+	if !ok || plugin == "" {
+		return ""
+	}
+	out, err := capture(ctx, cfg.dir, cfg.claudeBin, "plugin", "list", "--json")
+	if err != nil {
+		return ""
+	}
+	var installed []struct {
+		ID      string `json:"id"`
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(out, &installed); err != nil {
+		return ""
+	}
+	// The id is <plugin>@<marketplace>; the marketplace is whatever the
+	// operator named it when they added it, so only the plugin half is ours to
+	// match on.
+	for _, p := range installed {
+		if name, _, _ := strings.Cut(p.ID, "@"); name == plugin {
+			return p.Version
+		}
+	}
+	return ""
+}
+
+// warnOnVersionSkew reports a binary and a skill that did not ship together.
+// The two halves share one version number by design — the supervisor finds a
+// PR by the head branch the skill names, so a mismatched pair fails later and
+// far less legibly than this. It stays a warning: an operator testing a new
+// binary against an installed release is doing something deliberate, and
+// nothing here is safe to guess about.
+func warnOnVersionSkew(binary string, cfg config) {
+	// Only this repo's own plugin shares a version line with this binary.
+	// -skill is documented as pointing anywhere, and another plugin's versions
+	// mean nothing here — comparing them would warn on every run of a
+	// deliberate configuration, and name the wrong plugin while doing it.
+	if name, _, _ := strings.Cut(cfg.skill, ":"); name != pluginName {
+		return
+	}
+	self, selfIsRelease := releaseVersion(binary)
+	plugin, pluginIsRelease := releaseVersion(cfg.pluginVersion)
+	// A binary built from a clone reports a revision, not a release. That is
+	// not skew, it is an unreleased build, and warning about it every time
+	// would train an operator to ignore the one message that matters.
+	if !selfIsRelease || !pluginIsRelease || self == plugin {
+		return
+	}
+	log.Printf("version skew: this binary is %s but the installed %s plugin is %s — "+
+		"they are meant to ship together, and the supervisor finds a PR by the "+
+		"branch name the skill chooses. Bring both to the current release: "+
+		"`claude plugin marketplace update && claude plugin update %s`, then "+
+		"`go install github.com/scharissis/backlog-drain/cmd/backlog-drain@latest`",
+		self, pluginName, plugin, pluginName)
+}
+
+// releaseVersion normalizes a version that names a release, and reports false
+// for anything that does not — an empty string, or the revision a build from a
+// clone carries. The `v` prefix is optional because the binary picks one up
+// from a module version and none from an -ldflags stamp.
+func releaseVersion(s string) (string, bool) {
+	s = strings.TrimPrefix(s, "v")
+	if _, err := parseSemver(s); err != nil {
+		return "", false
+	}
+	return s, true
+}
+
+// parseSemver reads the plain major.minor.patch this project releases under —
+// no pre-release or build metadata, which is what the manifest test already
+// holds plugin.json to. The parts come back in order so two versions can be
+// compared without pulling in a module to do it.
+func parseSemver(s string) ([3]int, error) {
+	var out [3]int
+	parts := strings.Split(s, ".")
+	if len(parts) != 3 {
+		return out, fmt.Errorf("%q is not major.minor.patch", s)
+	}
+	for i, p := range parts {
+		// Digits only: Atoi alone would accept the sign in "-1" and the "+1"
+		// that a build-metadata suffix leaves behind, and a leading zero is
+		// not a version this project ever tags.
+		if p == "" || (len(p) > 1 && p[0] == '0') || strings.ContainsFunc(p, func(r rune) bool {
+			return r < '0' || r > '9'
+		}) {
+			return out, fmt.Errorf("%q is not major.minor.patch", s)
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return out, fmt.Errorf("%q is not major.minor.patch", s)
+		}
+		out[i] = n
+	}
+	return out, nil
+}
+
+// describeVersion answers -version: which release this binary is, or an honest
+// account of why it is not one.
+func describeVersion() string {
+	v := drainVersion()
+	if v == "" {
+		return pluginName + " (unknown version: built without module or VCS information)"
+	}
+	return pluginName + " " + v
 }
 
 // processIssue advances one issue all the way to merged, however many

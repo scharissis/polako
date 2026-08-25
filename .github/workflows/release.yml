@@ -47,11 +47,46 @@ jobs:
             if [ "$goos" = "windows" ]; then
               out="${out}.exe"
             fi
-            GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags "-s -w" -o "$out" ./cmd/backlog-drain
+            # Stamped with the tag: `go build` from a checkout records the
+            # revision but leaves the module version at "(devel)", so without
+            # this every published binary reports a bare SHA and no recorded
+            # run can be attributed to a release.
+            GOOS=$goos GOARCH=$goarch go build -trimpath \
+              -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
+              -o "$out" ./cmd/backlog-drain
           done
           ls -l dist
+
+      # The changelog section is what says whether a release changes anything an
+      # operator has to know about before upgrading a machine that drains
+      # overnight; a list of commit subjects buries exactly that. Falling back to
+      # generated notes rather than failing, because a release that is already
+      # tagged and built should not be held up by its own prose.
+      - name: extract release notes
+        shell: bash
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          : > notes.md
+          # Guarded rather than relied upon: this step runs under `set -eo
+          # pipefail`, so a tag pushed by hand onto a commit with no changelog
+          # would fail here instead of falling back — after both tags are
+          # public and the binaries are built.
+          if [ -f CHANGELOG.md ]; then
+            # Drop the section's own heading and the next one the range pulled
+            # in. Both are conditional so the oldest section, which no later
+            # heading terminates, does not lose its last line.
+            sed -n "/^## \[*${version}\]*/,/^## /p" CHANGELOG.md \
+              | sed -e '1{/^## /d;}' -e '${/^## /d;}' > notes.md
+          fi
+          if [ -s notes.md ]; then
+            echo "NOTES_ARG=--notes-file=notes.md" >> "$GITHUB_ENV"
+            cat notes.md
+          else
+            echo "no CHANGELOG.md section for $version; falling back to generated notes"
+            echo "NOTES_ARG=--generate-notes" >> "$GITHUB_ENV"
+          fi
 
       - name: publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" dist/* "$NOTES_ARG"
