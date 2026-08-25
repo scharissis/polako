@@ -44,6 +44,14 @@ in the PR body rather than doing it quietly.
   may not merge them, and it may not commit to the default branch. Merging is
   one of the two deliberate human touchpoints; answering questions on an issue
   thread is the other.
+- **The main checkout mirrors origin; it is never authored in.** A drain
+  fast-forwards `-dir`'s default branch before it picks up an issue and after a
+  merge it saw, because everything that resolves "this branch's base" reads that
+  local ref — and a drain never pulls, so it falls a commit behind on every
+  merge. `--ff-only` is the whole of it: refuse rather than rebase, reset or
+  commit. That is not an exception to *nothing merges itself* — advancing a
+  mirror to a state a human already created on the remote decides nothing. Both
+  halves do this, because the skill also runs with no supervisor anywhere.
 - **Stdlib-only Go.** No third-party modules. It has to cross-compile to a
   single binary for five targets with nothing but the Go toolchain, and CI
   enforces that.
