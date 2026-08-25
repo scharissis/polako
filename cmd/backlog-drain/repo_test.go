@@ -224,6 +224,30 @@ func TestShippedSkillMatchesTheDefaultFlag(t *testing.T) {
 	}
 }
 
+// The review gate runs as a forked agent that starts in the session's cwd, not
+// in the worktree — the skill's own `cd` does not move it. Invoked with no
+// target it reviews the main checkout instead, which on a clean default branch
+// means reviewing an already-merged change and writing the fixes there. Naming
+// the branch is the entire defence, and it is one word easy to drop.
+func TestReviewGateNamesTheBranch(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	invoked := false
+	for _, line := range strings.Split(skill, "\n") {
+		if !strings.Contains(line, "/code-review") {
+			continue
+		}
+		invoked = true
+		if !strings.Contains(line, "issue-$issue") {
+			t.Errorf("the review gate names no branch, so it would review the main checkout"+
+				" and apply its fixes there — add the issue-$issue target:\n\t%s", strings.TrimSpace(line))
+		}
+	}
+	if !invoked {
+		t.Error("SKILL.md no longer invokes /code-review; the mandatory review gate before a PR is gone")
+	}
+}
+
 // Every flag is part of the interface, so every flag has to appear in the
 // README. This is the check that catches a new flag shipped undocumented.
 func TestReadmeDocumentsEveryFlag(t *testing.T) {
