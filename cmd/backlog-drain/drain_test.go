@@ -324,17 +324,18 @@ func TestDrainParksADeadIssueAndKeepsGoing(t *testing.T) {
 	}
 }
 
-// The whole question round, end to end: a run that asks something flags the
-// issue, the drain waits on that flag, and the re-run that finds the answer
-// clears it and ships. The claude invocation is checked too — the run can only
-// raise the flag if the allowlist it was handed permits it, pinned to this
-// issue and no other.
+// The whole question round, end to end, under -strict-order: a run that asks
+// something flags the issue, the drain waits on that flag in place, and the
+// re-run that finds the answer clears it and ships. The claude invocation is
+// checked too — the run can only raise the flag if the allowlist it was handed
+// permits it, pinned to this issue and no other.
 func TestDrainWaitsForAnAnswerThenFoldsItIn(t *testing.T) {
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "asks", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 		Labels: []string{awaitingAnswerLabel},
 	})
+	cfg.strictOrder = true
 
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("drain: %v", err)
@@ -405,9 +406,130 @@ func TestDrainDoesNotWaitTwiceOnOneQuestion(t *testing.T) {
 			t.Errorf("log is missing %q\ngot:\n%s", want, out)
 		}
 	}
-	// One question, one wait. A second would be the bug.
-	if got := strings.Count(out, "waiting for a reply on the thread"); got != 1 {
-		t.Errorf("waited on the flag %d times, want exactly 1\ngot:\n%s", got, out)
+	// One question, one hand-off. A second would be the bug.
+	if got := strings.Count(out, "leaving it for a human"); got != 1 {
+		t.Errorf("put the issue down %d times, want exactly 1\ngot:\n%s", got, out)
+	}
+}
+
+// The point of parking a blocked issue: issue 1 stops to ask something, and the
+// drain has to work issue 2 rather than sitting on the thread. Issue 1 is
+// picked back up once nothing else is left and the reply has landed, so both
+// still ship — and only ever one at a time.
+func TestDrainWorksALaterIssueWhileOneAwaitsAnAnswer(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "asks", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}, "2": {Open: true}},
+		// Issue 2's PR is already merged, so it advances without a claude run
+		// — the fake CLI only knows how to work whichever issue it is handed.
+		PRs:    map[string]*fakePR{"issue-2": {Number: 9, State: "MERGED"}},
+		Labels: []string{awaitingAnswerLabel},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	for _, n := range []string{"1", "2"} {
+		if st.Issues[n].Open {
+			t.Errorf("issue %s should have been closed after its PR merged", n)
+		}
+		if got := st.Issues[n].Labels; slices.Contains(got, needsHumanLabel) {
+			t.Errorf("issue %s labels = %v, want a question round not to park anything", n, got)
+		}
+	}
+	if got := st.Issues["1"].Labels; slices.Contains(got, awaitingAnswerLabel) {
+		t.Errorf("issue 1 labels = %v, want %s cleared once the answer landed", got, awaitingAnswerLabel)
+	}
+
+	out := buf.String()
+	// Issue 2 has to be reached *after* issue 1 is put down: reaching it first
+	// would prove nothing, and never reaching it is the bug this fixes.
+	putDown := strings.Index(out, "issue #1 is labelled \"awaiting-answer\" — leaving it for a human")
+	second := strings.Index(out, "=== issue #2 ===")
+	if putDown < 0 || second < 0 || second < putDown {
+		t.Errorf("want issue 2 worked after issue 1 was put down (put down at %d, issue 2 at %d)\ngot:\n%s",
+			putDown, second, out)
+	}
+	for _, want := range []string{
+		"nothing else to work — waiting for a reply on #1",
+		"new activity on #1 — re-running to fold the answers in",
+		"summary: 2 issues merged, 0 issues parked",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
+	}
+}
+
+// Restart safety: the comment baseline a wait compares against dies with the
+// process, and nothing on GitHub says whether the reply already landed. So an
+// issue found already flagged is re-run rather than waited on — the skill
+// re-reads the thread, and stops again without re-asking if there is nothing
+// new. Waiting instead would sit forever on an answer given while this drain
+// was not running.
+func TestDrainRetriesAnIssueFlaggedBeforeItStarted(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "asks", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true, Labels: []string{awaitingAnswerLabel}, Comments: 2}},
+		Labels: []string{awaitingAnswerLabel},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	if st := finalGhState(t, path); st.Issues["1"].Open {
+		t.Error("issue 1 should have been closed after the answer was folded in and its PR merged")
+	}
+	out := buf.String()
+	if want := "was already labelled \"awaiting-answer\" when this drain reached it"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+	if strings.Contains(out, "nothing else to work") {
+		t.Errorf("a flag this drain did not raise must be re-run, not waited on\ngot:\n%s", out)
+	}
+}
+
+// -once is "one issue, then give me my terminal back", and an issue waiting on
+// a person is as done with as this process can make it. It must not spend the
+// night polling a thread, and it must say what it left behind.
+func TestDrainOnceExitsOnAQuestion(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "asks", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}, "2": {Open: true}},
+		Labels: []string{awaitingAnswerLabel},
+	})
+	cfg.once = true
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if got := st.Issues["1"].Labels; !slices.Contains(got, awaitingAnswerLabel) {
+		t.Errorf("issue 1 labels = %v, want the question left flagged for a human", got)
+	}
+	if got := st.Issues["1"].Labels; slices.Contains(got, needsHumanLabel) {
+		t.Errorf("issue 1 labels = %v, want a question not to park the issue", got)
+	}
+	if got := st.Issues["2"].Comments; got != 0 {
+		t.Errorf("issue 2 comments = %d, want -once to have stopped before reaching it", got)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"summary: 0 issues merged, 0 issues parked, 1 issue awaiting an answer",
+		"waiting #1 — reply on the thread and the next drain picks them up",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
 	}
 }
 
@@ -508,18 +630,43 @@ func TestSelectableIssuesDropsParkedOnes(t *testing.T) {
 		{"number":6,"labels":[]},
 		{"number":7,"labels":[{"name":"bug"},{"name":"needs-human"}]}]`)
 
-	got, err := selectableIssues(raw)
+	ready, blocked, err := selectableIssues(raw)
 	if err != nil {
 		t.Fatalf("selectableIssues: %v", err)
 	}
 	// 5 proves the match ignores case, the way GitHub treats label names.
-	if want := []int{4, 6}; !slices.Equal(got, want) {
-		t.Errorf("selectable = %v, want %v", got, want)
+	if want := []int{4, 6}; !slices.Equal(ready, want) {
+		t.Errorf("ready = %v, want %v", ready, want)
+	}
+	if len(blocked) != 0 {
+		t.Errorf("blocked = %v, want nothing waiting on an answer", blocked)
+	}
+}
+
+// The two queues are separate: a flagged issue is not ready, but it is not
+// parked either, so it has to come back as something the drain can revisit.
+func TestSelectableIssuesSeparatesBlockedOnes(t *testing.T) {
+	raw := []byte(`[{"number":9,"labels":[{"name":"Awaiting-Answer"}]},
+		{"number":4,"labels":[{"name":"awaiting-answer"}]},
+		{"number":6,"labels":[]},
+		{"number":7,"labels":[{"name":"awaiting-answer"},{"name":"needs-human"}]}]`)
+
+	ready, blocked, err := selectableIssues(raw)
+	if err != nil {
+		t.Fatalf("selectableIssues: %v", err)
+	}
+	if want := []int{6}; !slices.Equal(ready, want) {
+		t.Errorf("ready = %v, want %v", ready, want)
+	}
+	// Ascending, because the drain revisits the lowest first and gh guarantees
+	// no order. 7 is parked as well as flagged, and parked wins.
+	if want := []int{4, 9}; !slices.Equal(blocked, want) {
+		t.Errorf("blocked = %v, want %v", blocked, want)
 	}
 }
 
 func TestSelectableIssuesRejectsJunk(t *testing.T) {
-	if _, err := selectableIssues([]byte("not json")); err == nil {
+	if _, _, err := selectableIssues([]byte("not json")); err == nil {
 		t.Fatal("a payload that is not an issue list must be an error, not an empty queue")
 	}
 }
@@ -539,23 +686,52 @@ func TestParkedErrorsSurviveWrapping(t *testing.T) {
 	if _, parked := parkReason(nil); parked {
 		t.Error("no error is not a park")
 	}
+	// The two have to stay apart: a question is not a decision, so reading one
+	// as the other would label a perfectly workable issue needs-human.
+	if _, deferred := deferReason(park("PR #12 was closed")); deferred {
+		t.Error("a park is not a deferral")
+	}
+	if _, parked := parkReason(&deferredError{}); parked {
+		t.Error("a deferral is not a park")
+	}
+	de, deferred := deferReason(fmt.Errorf("issue #3: %w", &deferredError{baseline: 4}))
+	if !deferred {
+		t.Fatal("a deferral should survive wrapping")
+	}
+	if de.baseline != 4 {
+		t.Errorf("baseline = %d, want 4", de.baseline)
+	}
 }
 
-func TestDrainSummaryReportsBothOutcomes(t *testing.T) {
+func TestDrainSummaryReportsEveryOutcome(t *testing.T) {
 	got := strings.Join(drainSummary([]issueResult{
 		{issue: 1, parked: true, reason: "no PR and no questions"},
 		{issue: 2},
 		{issue: 5},
+		{issue: 3, awaiting: true},
 	}, 90*time.Minute), "\n")
 
 	for _, want := range []string{
-		"summary: 2 issues merged, 1 issue parked, 1h30m of wall clock",
+		"summary: 2 issues merged, 1 issue parked, 1 issue awaiting an answer, 1h30m of wall clock",
 		"merged  #2, #5",
+		"waiting #3 — reply on the thread",
 		"parked  #1 — no PR and no questions",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("summary is missing %q\ngot:\n%s", want, got)
 		}
+	}
+}
+
+// Most drains have nothing waiting, and a bucket that reads "0 issues awaiting
+// an answer" on every ordinary run is noise in the one line anybody reads.
+func TestDrainSummaryOmitsAnEmptyWaitingBucket(t *testing.T) {
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, time.Minute), "\n")
+	if want := "summary: 1 issue merged, 0 issues parked, 1m of wall clock"; !strings.Contains(got, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
+	}
+	if strings.Contains(got, "waiting") {
+		t.Errorf("nothing is waiting, so the summary should not mention it\ngot:\n%s", got)
 	}
 }
 

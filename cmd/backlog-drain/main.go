@@ -1,12 +1,15 @@
 // Command backlog-drain drives Claude Code through a repository's GitHub
-// issues, strictly in ascending order, one at a time.
+// issues, in ascending order, one at a time.
 //
 // For each open issue it runs `claude -p "/implement-issue N"`, then waits on
 // GitHub until the resulting PR is merged before advancing — so every run
 // branches from a default branch that already contains the previous merge, and
 // sequential runs can't conflict with each other. An issue that cannot be
-// finished is parked for a human instead of merged, which advances the queue
-// without ever putting two issues in flight.
+// finished is parked for a human instead of merged, and an issue whose run
+// stopped to ask something is put down until somebody replies; both advance the
+// queue without ever putting two issues in flight. -strict-order turns the
+// second one off, at the price of one blocked issue holding up every issue
+// behind it.
 //
 // All state lives in GitHub (issues, comments, PRs, branches). This process
 // is stateless and restart-safe: kill it any time, rerun it later, and it
@@ -84,6 +87,28 @@ var errAuth = errors.New("claude could not authenticate")
 func authAdvice(err error) error {
 	return fmt.Errorf("%w — check `claude auth status`, then `claude auth login` "+
 		"(or `claude setup-token` for an unattended host), and start the drain again", err)
+}
+
+// deferredError puts an issue down without giving it up: a run asked something,
+// the question is flagged on GitHub, and there is nothing more to do here until
+// a person replies. It is the one non-terminal way a run can end — not a park,
+// because nobody has decided anything, and not fatal, because every issue
+// behind it is still perfectly workable.
+//
+// baseline is the number of comments on the thread when the question was
+// flagged, so a later check can tell a reply from silence.
+type deferredError struct{ baseline int }
+
+func (e *deferredError) Error() string { return "waiting for an answer on the issue thread" }
+
+// deferReason reports whether an error leaves its issue waiting on a human,
+// and what the thread looked like at that point.
+func deferReason(err error) (*deferredError, bool) {
+	var de *deferredError
+	if errors.As(err, &de) {
+		return de, true
+	}
+	return nil, false
 }
 
 // parkedError ends work on one issue without ending the drain. The distinction
@@ -177,6 +202,11 @@ type config struct {
 	stall          time.Duration
 	skip           map[int]bool
 	once           bool
+	// strictOrder keeps the queue in strict ascending order, so an issue
+	// waiting on a human answer holds up every issue behind it. Off by
+	// default: the no-conflict guarantee comes from one issue being in flight
+	// at a time, and an issue nobody is working is not in flight.
+	strictOrder bool
 
 	// Run-data capture. tag labels a batch of runs so configurations can be
 	// compared later; rec is the sink, and writes nothing when -metrics is off.
@@ -248,7 +278,10 @@ func parseFlags() config {
 	flag.DurationVar(&cfg.retryWait, "retry-wait", 30*time.Second, "wait before each resume attempt")
 	flag.DurationVar(&cfg.stall, "stall", 15*time.Minute, "kill and resume a run with no output events for this long (0 disables)")
 	flag.StringVar(&skip, "skip", "", "comma-separated issue numbers to skip (head-of-line escape hatch)")
-	flag.BoolVar(&cfg.once, "once", false, "process a single issue to a merge or a park, then exit")
+	flag.BoolVar(&cfg.once, "once", false,
+		"process a single issue to a merge, a park or a question, then exit")
+	flag.BoolVar(&cfg.strictOrder, "strict-order", false,
+		"work issues in strict ascending order: wait on one that asked a question instead of moving past it")
 	flag.StringVar(&cfg.tag, "run-tag", "", "label recorded with every run, for comparing one batch against another")
 	flag.BoolVar(&cfg.postSummary, "post-summary", false,
 		"comment one line of run numbers on each merged PR (runs, tokens, dollars, wall time)")
@@ -373,16 +406,36 @@ func run(ctx context.Context, cfg config) error {
 
 // issueResult is one issue's fate, kept only long enough to print the summary
 // this process ends with. Nothing reads it back afterwards — the durable record
-// of a park is the label on GitHub.
+// of a park is the label on GitHub, and of an unanswered question the other one.
 type issueResult struct {
-	issue  int
-	parked bool
-	reason string // why it parked; empty when it merged
+	issue    int
+	parked   bool
+	awaiting bool   // put down waiting on a human answer, not finished
+	reason   string // why it parked; empty otherwise
+}
+
+// issueState is what one drain remembers between the runs it dispatches for a
+// single issue. Like the skip map it sits beside, it is not state: nothing
+// reads it once the process ends, and a restart re-derives everything that
+// matters from GitHub. What it buys is not having to re-derive it *within* a
+// process — most of all the tally, which is what -post-summary reports and
+// which would otherwise be lost every time an issue is put down for an answer.
+type issueState struct {
+	tally    issueTally
+	answered bool // a reply landed, so the next run folds it in
+	awaiting bool // this drain left it flagged for a human
+	baseline int  // comments on the thread when the question was flagged
+	// session is the resume target: the last session any run on this issue
+	// reported. It outlives a single processIssue call so that a run dispatched
+	// once an answer lands, and then dying before it reports a session of its
+	// own, still has one to resume rather than starting over from nothing.
+	session string
 }
 
 // drain works the queue until it empties, an issue proves fatal, or -once says
-// stop. An issue that cannot be finished is parked rather than fatal, so a
-// backlog with one bad issue in it still drains overnight.
+// stop. An issue that cannot be finished is parked rather than fatal, and an
+// issue waiting on a human answer is put down rather than waited on, so neither
+// one stops a backlog draining overnight.
 func drain(ctx context.Context, cfg config) error {
 	started := time.Now()
 
@@ -396,6 +449,7 @@ func drain(ctx context.Context, cfg config) error {
 		skip = map[int]bool{}
 	}
 	cfg.skip = skip
+	states := map[int]*issueState{}
 
 	var results []issueResult
 	// Every exit goes through finish, fatal ones included: a session that died
@@ -403,33 +457,57 @@ func drain(ctx context.Context, cfg config) error {
 	// died on is not among them — unfinished is not an outcome — so a run that
 	// dies on its first issue has nothing to summarize and says nothing.
 	finish := func(err error) error {
-		for _, line := range drainSummary(results, time.Since(started)) {
+		for _, line := range drainSummary(append(results, stillWaiting(states)...), time.Since(started)) {
 			log.Print(line)
 		}
 		return err
 	}
 
 	for {
-		issue, err := lowestOpenIssue(ctx, cfg)
+		ready, blocked, err := openIssues(ctx, cfg)
 		if err != nil {
 			return finish(err)
 		}
+		issue := pickLowest(ready, skip)
 		if issue == 0 {
-			log.Println("no open issues — backlog drained")
-			return finish(nil)
+			blocked = slices.DeleteFunc(blocked, func(n int) bool { return skip[n] })
+			if len(blocked) == 0 {
+				log.Println("no open issues — backlog drained")
+				return finish(nil)
+			}
+			// Nothing else is workable, so the only way forward is an issue
+			// somebody owes an answer on.
+			if issue, err = awaitAnswer(ctx, cfg, blocked, states); err != nil {
+				return finish(err)
+			}
+			if issue == 0 {
+				continue // the queue moved while waiting — ask GitHub again
+			}
 		}
 		log.Printf("=== issue #%d ===", issue)
 
-		err = processIssue(ctx, cfg, issue)
-		switch reason, parked := parkReason(err); {
+		st := states[issue]
+		if st == nil {
+			st = &issueState{}
+			states[issue] = st
+		}
+		err = processIssue(ctx, cfg, issue, st)
+		reason, parked := parkReason(err)
+		switch deferred, isDeferred := deferReason(err); {
+		case isDeferred:
+			st.awaiting, st.baseline = true, deferred.baseline
+			log.Printf("issue #%d is labelled %q — leaving it for a human and working the queue behind it",
+				issue, awaitingAnswerLabel)
 		case parked:
 			skip[issue] = true
+			delete(states, issue)
 			results = append(results, issueResult{issue: issue, parked: true, reason: reason})
 			log.Printf("issue #%d needs a human: %s — parking it and moving on", issue, reason)
 			parkIssue(ctx, cfg, issue, reason)
 		case err != nil:
 			return finish(fmt.Errorf("issue #%d: %w", issue, err))
 		default:
+			delete(states, issue)
 			results = append(results, issueResult{issue: issue})
 		}
 		if cfg.once {
@@ -437,6 +515,63 @@ func drain(ctx context.Context, cfg config) error {
 			return finish(nil)
 		}
 	}
+}
+
+// awaitAnswer decides which of the issues waiting on a human is worth running
+// now, and blocks until one of them is. It returns 0 when the queue itself
+// moved instead — a label removed by hand, a new issue opened — because
+// re-deriving the queue outranks going on waiting.
+//
+// An issue this drain did not flag itself is run straight away. Its answer may
+// already be sitting on the thread — left before this process started, or while
+// an earlier one was down — and nothing on GitHub says whether it is. One run
+// settles it for a price the skill keeps low: it re-reads the thread and stops
+// again without re-asking when the answer is not there. From then on this drain
+// holds a comment count to compare against, so the question is only paid for
+// once.
+func awaitAnswer(ctx context.Context, cfg config, blocked []int, states map[int]*issueState) (int, error) {
+	for _, issue := range blocked {
+		if st := states[issue]; st == nil || !st.awaiting {
+			log.Printf("issue #%d was already labelled %q when this drain reached it — re-running it "+
+				"to see whether the answer is on the thread", issue, awaitingAnswerLabel)
+			return issue, nil
+		}
+	}
+	log.Printf("nothing else to work — waiting for a reply on %s, next check in %s",
+		issueRefs(blocked), cfg.poll)
+	if err := sleep(ctx, cfg.poll); err != nil {
+		return 0, err
+	}
+	for _, issue := range blocked {
+		n, err := commentCount(ctx, cfg, issue)
+		if err != nil {
+			if ctx.Err() != nil {
+				return 0, ctx.Err()
+			}
+			log.Printf("transient: checking #%d comments failed (%v) — will retry", issue, err)
+			continue
+		}
+		if n > states[issue].baseline {
+			log.Printf("new activity on #%d — re-running to fold the answers in", issue)
+			states[issue].answered = true
+			return issue, nil
+		}
+	}
+	return 0, nil
+}
+
+// stillWaiting is what the summary owes an operator about the issues this drain
+// put down: each one is flagged on GitHub and waiting on them, and an exit that
+// does not name them reads as though they were never reached.
+func stillWaiting(states map[int]*issueState) []issueResult {
+	var out []issueResult
+	for issue, st := range states {
+		if st.awaiting {
+			out = append(out, issueResult{issue: issue, awaiting: true})
+		}
+	}
+	slices.SortFunc(out, func(a, b issueResult) int { return a.issue - b.issue })
+	return out
 }
 
 // parkIssue hands one issue back to a person: the label that takes it out of
@@ -485,28 +620,55 @@ func ensureLabel(ctx context.Context, cfg config, name, color, description strin
 	return err
 }
 
-// drainSummary is what the process says on its way out: what merged, what was
-// parked and why, and how long it all took. Returned as lines rather than one
-// blob so each carries the log's own timestamp.
+// drainSummary is what the process says on its way out: what merged, what is
+// still waiting on an answer, what was parked and why, and how long it all
+// took. Returned as lines rather than one blob so each carries the log's own
+// timestamp.
+//
+// The waiting clause appears only when there is something in it. Most drains
+// have nothing waiting, and a bucket that is empty on every ordinary run is
+// noise in the one line an operator actually reads.
 func drainSummary(results []issueResult, elapsed time.Duration) []string {
 	if len(results) == 0 {
 		return nil
 	}
 	var merged []string
+	var waiting []string
 	var parked []string
 	for _, r := range results {
-		if r.parked {
+		switch {
+		case r.awaiting:
+			waiting = append(waiting, "#"+strconv.Itoa(r.issue))
+		case r.parked:
 			parked = append(parked, fmt.Sprintf("  parked  #%d — %s", r.issue, r.reason))
-			continue
+		default:
+			merged = append(merged, "#"+strconv.Itoa(r.issue))
 		}
-		merged = append(merged, "#"+strconv.Itoa(r.issue))
 	}
-	lines := []string{fmt.Sprintf("summary: %s merged, %s parked, %s of wall clock",
-		plural(len(merged), "issue"), plural(len(parked), "issue"), dur(elapsed))}
+	head := fmt.Sprintf("summary: %s merged, %s parked",
+		plural(len(merged), "issue"), plural(len(parked), "issue"))
+	if len(waiting) > 0 {
+		head += ", " + plural(len(waiting), "issue") + " awaiting an answer"
+	}
+	lines := []string{head + ", " + dur(elapsed) + " of wall clock"}
 	if len(merged) > 0 {
 		lines = append(lines, "  merged  "+strings.Join(merged, ", "))
 	}
+	if len(waiting) > 0 {
+		lines = append(lines, "  waiting "+strings.Join(waiting, ", ")+
+			" — reply on the thread and the next drain picks them up")
+	}
 	return append(lines, parked...)
+}
+
+// issueRefs renders a list of issue numbers the way the rest of the output
+// spells them.
+func issueRefs(numbers []int) string {
+	refs := make([]string, len(numbers))
+	for i, n := range numbers {
+		refs[i] = "#" + strconv.Itoa(n)
+	}
+	return strings.Join(refs, ", ")
 }
 
 // preflight fails fast on a misconfigured environment, so an unattended run
@@ -678,20 +840,23 @@ func describeVersion() string {
 	return pluginName + " " + v
 }
 
-// processIssue advances one issue all the way to merged, however many
-// implement/wait cycles that takes.
-func processIssue(ctx context.Context, cfg config, issue int) error {
+// processIssue advances one issue as far as it will go: to merged, to a park,
+// or — the one way back out that is neither — to a question a human owes an
+// answer to, returned as a *deferredError for the caller to put down.
+//
+// st carries what the drain already knows about this issue, and collects what
+// this call learns. Everything durable is on GitHub; st only saves re-deriving
+// it within one process.
+func processIssue(ctx context.Context, cfg config, issue int, st *issueState) error {
 	branch := fmt.Sprintf("%s%d", cfg.branchPrefix, issue)
-	attempt := 0      // 0 = fresh skill run; >0 = retry after a crash
-	sessionID := ""   // from the run's init event; resume target for retries
-	answered := false // a human replied, so the next run folds the answers in
+	attempt := 0 // 0 = fresh skill run; >0 = retry after a crash
 
-	// tally is what -post-summary reports, and the only thing this function
-	// carries across runs besides the resume target. Nothing reads it back
-	// once the process ends, so it stays telemetry rather than state: a
-	// supervisor restarted mid-issue starts a fresh one, and the comment it
-	// feeds says it covers this drain.
-	tally := &issueTally{}
+	// tally is what -post-summary reports. It lives on the state rather than
+	// here so an issue put down for an answer and picked up later still reports
+	// every run behind it. Nothing reads it back once the process ends, so it
+	// stays telemetry rather than state: a supervisor restarted mid-issue starts
+	// a fresh one, and the comment it feeds says it covers this drain.
+	tally := &st.tally
 
 	// terminal marks how the issue ended, failures included — they are the
 	// most informative rows in the dataset, and every one of them ends this
@@ -723,12 +888,12 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 			resumeTarget, reason := "", reasonImplement
 			switch {
 			case attempt > 0:
-				resumeTarget = sessionID // empty if the crashed run never got a session
+				resumeTarget = st.session // empty if the crashed run never got a session
 				reason = reasonResume
-			case answered:
+			case st.answered:
 				reason = reasonAnswers
 			}
-			answered = false
+			st.answered = false
 
 			started := time.Now()
 			rep, runErr := runClaude(ctx, cfg, issue, resumeTarget)
@@ -737,7 +902,7 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 				resumedFrom: resumeTarget, started: started, ended: time.Now(),
 			}
 			if rep.sessionID != "" {
-				sessionID = rep.sessionID
+				st.session = rep.sessionID
 			}
 			// record closes over the run; the outcome is whatever the checks
 			// below turn out to find, so every exit from here on passes one.
@@ -803,21 +968,28 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 				switch {
 				case asked:
 					// Questions were posted and flagged (even if the run then
-					// crashed): wait for a human reply, then fold it in with a
-					// fresh run. The baseline for "a reply arrived" is read
-					// now, so it already counts the question itself.
+					// crashed). The baseline for "a reply arrived" is read now,
+					// so it already counts the question itself.
 					record(0, outcomeQuestions)
-					log.Printf("issue #%d is labelled %q — waiting for a reply on the thread",
-						issue, awaitingAnswerLabel)
 					baseline, err := commentCount(ctx, cfg, issue)
 					if err != nil {
 						return err
 					}
+					if !cfg.strictOrder {
+						// The question is flagged on GitHub, which is durable
+						// and is all a later drain needs. Hand the issue back
+						// so the queue behind it can be worked: an issue
+						// nobody is working is not one in flight, so the
+						// no-conflict guarantee is untouched.
+						return &deferredError{baseline: baseline}
+					}
+					log.Printf("issue #%d is labelled %q — waiting for a reply on the thread",
+						issue, awaitingAnswerLabel)
 					if err := waitForComments(ctx, cfg, issue, baseline); err != nil {
 						return err
 					}
 					log.Printf("new activity on #%d — re-running to fold the answers in", issue)
-					attempt, answered = 0, true
+					attempt, st.answered = 0, true
 					continue
 				case runErr != nil && attempt < cfg.retries:
 					// Crash (API drop, stall, tool failure): resume the exact
@@ -826,8 +998,8 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 					record(0, outcomeNothing)
 					attempt++
 					mode := "restarting fresh"
-					if sessionID != "" {
-						mode = "resuming session " + sessionID
+					if st.session != "" {
+						mode = "resuming session " + st.session
 					}
 					log.Printf("%s (attempt %d/%d) in %s",
 						mode, attempt, cfg.retries, cfg.retryWait)
@@ -1375,39 +1547,56 @@ func pickLowest(numbers []int, skip map[int]bool) int {
 	return lowest
 }
 
-func lowestOpenIssue(ctx context.Context, cfg config) (int, error) {
+// openIssues asks GitHub what there is to work: the issues ready now, and the
+// ones a run already flagged for a human. -strict-order folds the second list
+// back into the first, which is the whole of what the flag does — a flagged
+// issue keeps its place in the queue, and everything behind it waits.
+func openIssues(ctx context.Context, cfg config) (ready, blocked []int, err error) {
 	args := []string{"issue", "list", "--state", "open", "--limit", "200", "--json", "number,labels"}
 	if cfg.label != "" {
 		args = append(args, "--label", cfg.label)
 	}
 	out, err := gh(ctx, cfg, args...)
 	if err != nil {
-		return 0, err
+		return nil, nil, err
 	}
-	numbers, err := selectableIssues(out)
+	ready, blocked, err = selectableIssues(out)
 	if err != nil {
-		return 0, err
+		return nil, nil, err
 	}
-	return pickLowest(numbers, cfg.skip), nil
+	if cfg.strictOrder {
+		return append(ready, blocked...), nil, nil
+	}
+	return ready, blocked, nil
 }
 
 // selectableIssues reads a `gh issue list --json number,labels` payload and
-// keeps the issues still worth working: anything a previous drain parked is
-// dropped here, which is what stops the queue handing back the same
-// unimplementable issue on every pass. Labels are matched case-insensitively,
-// the way GitHub itself treats them.
-func selectableIssues(raw []byte) ([]int, error) {
+// sorts what is worth working into the two queues the drain keeps: issues ready
+// now, and issues already waiting on a human answer. Anything a previous drain
+// parked is dropped from both, which is what stops the queue handing back the
+// same unimplementable issue on every pass. Labels are matched
+// case-insensitively, the way GitHub itself treats them.
+//
+// The blocked list comes back ascending because the drain works it lowest
+// first, and `gh issue list` guarantees no order of its own.
+func selectableIssues(raw []byte) (ready, blocked []int, err error) {
 	var issues []ghIssue
 	if err := json.Unmarshal(raw, &issues); err != nil {
-		return nil, fmt.Errorf("parsing issue list: %w", err)
+		return nil, nil, fmt.Errorf("parsing issue list: %w", err)
 	}
-	numbers := make([]int, 0, len(issues))
+	ready = make([]int, 0, len(issues))
 	for _, is := range issues {
-		if !is.hasLabel(needsHumanLabel) {
-			numbers = append(numbers, is.Number)
+		switch {
+		case is.hasLabel(needsHumanLabel):
+			// Parked: out of both queues until a human removes the label.
+		case is.hasLabel(awaitingAnswerLabel):
+			blocked = append(blocked, is.Number)
+		default:
+			ready = append(ready, is.Number)
 		}
 	}
-	return numbers, nil
+	slices.Sort(blocked)
+	return ready, blocked, nil
 }
 
 // ghIssue is one row of `gh issue list --json number,labels`.
