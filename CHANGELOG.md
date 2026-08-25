@@ -9,6 +9,18 @@ Entries carry an **Operator impact** line when a release changes what an
 unattended run does, rather than only what the code looks like. Those are the
 lines worth reading before upgrading a machine that drains a backlog overnight.
 
+## [0.6.1]
+
+### Fixed
+
+- The skill's review gate names the branch it is reviewing. It invoked
+  `/code-review high --fix` with no target, and the review forks a fresh agent
+  that starts in the session's working directory — which the skill's own `cd`
+  into the worktree does not move. A run driven from the main checkout reviewed
+  whatever was there, so on a clean default branch it reviewed the change
+  someone had already merged and wrote its fixes into that checkout, while the
+  branch heading for a PR went unreviewed.
+
 ## [0.6.0]
 
 ### Added
