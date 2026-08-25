@@ -18,12 +18,12 @@ cannot conflict with each other.
 ## How it works
 
 ```
-lowest open issue without a `needs-human` label
+lowest open issue without a `needs-human` or `awaiting-answer` label
    ↓
 claude -p "/implement-issue N"        ← headless, streamed to your terminal
    ↓
-PR opened?  ──no──►  issue labelled `awaiting-answer`?  ──yes──►  wait for a reply, re-run
-   │                          │
+PR opened?  ──no──►  issue labelled `awaiting-answer`?  ──yes──►  put it down, advance to the next
+   │                          │                                  (re-run it when the reply lands)
    │                          └──no──►  crashed? resume the same session (-retries)
    │                                       │
    │                                       └──out of attempts──►  park it, advance to the next
@@ -58,7 +58,7 @@ Parking preserves the no-conflict guarantee: only one issue is ever in flight,
 and a parked issue is simply not in flight.
 
 **A run that has to ask something labels the issue `awaiting-answer`**, and the
-supervisor waits on that label rather than on the thread getting busier. The
+supervisor keys off that label rather than off the thread getting busier. The
 distinction matters because plenty of things comment on an issue that are not
 answers to anything — CI, a linked-PR notice, a bot, a passer-by — and treating
 those as a question left the drain waiting on a reply nobody knew was expected.
@@ -68,6 +68,39 @@ label on startup if the repository does not have it yet, and the run that folds
 your answer in is what removes it — or the park, if the issue is handed back
 before anyone gets that far, since a parked issue waits on a decision rather
 than on a reply.
+
+**A question does not hold up the queue either.** A flagged issue is put down
+and the next one is worked, exactly the way a park advances past an
+unimplementable issue. It is picked back up when the reply lands and nothing
+else is left to work, or straight away once you remove the label by hand. The
+guarantee that runs cannot conflict is that only one issue is ever *in flight*,
+not that they are worked in strict numeric order — and an issue nobody is
+working is not in flight.
+
+One thing does weaken, and it is the reason `-strict-order` exists. A put-down
+issue keeps the worktree and branch its first run created, so when work resumes
+it resumes from the base that run started on — not from the merges that landed
+while it waited. A textual clash with one of those shows up as a `CONFLICTING`
+PR and is rebased automatically; a semantic one — a helper renamed by a merge in
+between — is not, and lands as a PR that passed its own tests and breaks the
+default branch.
+
+Pass `-strict-order` to turn all of that off and get the old behaviour: the
+queue stays in strict ascending order, an issue awaiting an answer blocks every
+issue behind it until you reply, and nothing merges under a waiting branch. A
+drain that ends with issues still waiting says so:
+
+```
+summary: 3 issues merged, 0 issues parked, 1 issue awaiting an answer, 4h02m of wall clock
+  merged  #14, #15, #17
+  waiting #16 — reply on the thread and the next drain picks them up
+```
+
+One caveat worth knowing: the comment count a wait compares against lives in
+memory, so a restarted drain cannot tell whether a reply arrived while it was
+down. It spends one run per already-flagged issue finding out — the skill
+re-reads the thread and stops again without re-asking if the answer is not there
+yet — and holds a baseline from then on.
 
 **Refused credentials stop the drain immediately.** A resume cannot mint a new
 token, so retrying one spends `-retries` × several minutes reaching the
@@ -83,8 +116,8 @@ exactly where it stopped.
 2. Merging the PR. Nothing merges itself.
 
 Neither one is on a clock: an unanswered question or an unmerged PR simply
-waits. A parked issue waits too, but out of the queue rather than in it, so it
-holds nothing else up.
+waits. Both wait out of the queue rather than in it, as a parked issue does, so
+none of them holds anything else up.
 
 ## Requirements
 
@@ -267,10 +300,17 @@ Only work issues carrying a label, and check GitHub more often:
 backlog-drain -label ready-for-claude -poll 90s
 ```
 
-Skip an issue that is blocking the queue:
+Leave a couple of issues alone this time round:
 
 ```bash
 backlog-drain -skip 12,17
+```
+
+Work strictly lowest-first, waiting on any issue that stops to ask you
+something:
+
+```bash
+backlog-drain -strict-order
 ```
 
 Ask what all of that cost, once some runs have been recorded:
@@ -297,7 +337,8 @@ backlog-drain stats
 | `-retry-wait` | `30s` | Wait before each resume attempt. |
 | `-stall` | `15m` | Kill and resume a run that has emitted no events for this long (`0` disables). |
 | `-skip` | *(none)* | Comma-separated issue numbers to skip. Issues labelled `needs-human` are skipped anyway — see [How it works](#how-it-works). |
-| `-once` | `false` | Process a single issue to a merge or a park, then exit. |
+| `-once` | `false` | Process a single issue to a merge, a park or a question for you, then exit. |
+| `-strict-order` | `false` | Work issues in strict ascending order: wait in place on an issue awaiting an answer instead of moving past it. |
 | `-run-tag` | *(none)* | Freeform label recorded with every run, so one batch can be compared against another. |
 | `-metrics` | `~/.backlog-drain/metrics` | Directory for run-data records, or `off` to write nothing. |
 | `-post-summary` | `false` | Comment one line of run numbers on each merged PR. The only thing that shows run data to anybody but you — see [Run data & cost tracking](#run-data--cost-tracking). |

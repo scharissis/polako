@@ -13,6 +13,21 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
 
 ### Changed
 
+- **Operator impact:** an issue labelled `awaiting-answer` no longer holds up
+  the queue behind it. The drain puts it down and works the next issue, the way
+  it already advances past a parked one, and picks it back up when the reply
+  lands and nothing else is left — or straight away once the label is removed by
+  hand. Only one issue is ever in flight, so two runs still cannot collide. What
+  this does weaken is the base a put-down issue resumes from: it keeps the
+  worktree its first run created, so merges that landed while it waited are not
+  under it. A textual clash with one of those is rebased automatically as a
+  `CONFLICTING` PR; a semantic one is not. `-strict-order` restores the old
+  behaviour in full. Two smaller consequences: `-once` now exits on a question
+  as it does on a merge or a park, and a drain that ends with issues still
+  waiting names them in its summary. A restarted drain cannot know whether a
+  reply arrived while it was down, so it spends one run per already-flagged
+  issue finding out; the skill re-reads the thread and stops again without
+  re-asking when it has not.
 - **Operator impact:** a run that stops to ask a question now labels the issue
   `awaiting-answer`, and the supervisor waits on that label instead of on the
   issue's comment count rising across the run. A comment from CI, a bot, a
@@ -28,6 +43,8 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
 
 ### Added
 
+- `-strict-order`, which keeps the queue in strict ascending order: an issue
+  awaiting an answer blocks every issue behind it until you reply.
 - `scripts/smoke.sh` (and `smoke.ps1`), run between tagging and publishing:
   checks the tags, the published release and its five binaries, the changelog
   section against the release body, `go install ...@vX.Y.Z`, and the plugin
