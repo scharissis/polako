@@ -26,6 +26,11 @@ const fakeClaudeEnv = "BACKLOG_DRAIN_FAKE_CLAUDE"
 const fakePluginEnv = "BACKLOG_DRAIN_FAKE_PLUGIN_VERSION"
 
 func TestMain(m *testing.M) {
+	// A drain test exports both fake-CLI variables, and every child process
+	// inherits both, so argv is what decides which CLI this invocation is.
+	if state := os.Getenv(fakeGhEnv); state != "" && len(os.Args) > 1 && slices.Contains(ghSubcommands, os.Args[1]) {
+		os.Exit(fakeGh(state, os.Args[1:]))
+	}
 	if mode := os.Getenv(fakeClaudeEnv); mode != "" {
 		os.Exit(fakeClaude(mode))
 	}

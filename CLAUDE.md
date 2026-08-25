@@ -2,7 +2,7 @@
 
 Two halves that ship and version together: the `implement-issue` skill takes a
 single GitHub issue from plan to PR, and the `backlog-drain` binary supervises a
-whole backlog of them unattended, never advancing past an unmerged issue.
+whole backlog of them unattended, never putting two issues in flight at once.
 
 ## Invariants
 
@@ -29,6 +29,14 @@ in the PR body rather than doing it quietly.
   default-on, anything carrying text — is the change to argue for out loud.
 - **Restart safety.** If a PR already exists for an issue's branch, never re-run
   the skill for that issue — go straight to waiting on the PR.
+- **The `needs-human` label is orchestration state.** It is the only durable
+  trace of a parked issue, and the queue is derived by excluding it. A park that
+  fails to apply the label means the next drain works that issue again, so the
+  failure is reported rather than swallowed. One issue that cannot be finished
+  parks; it never ends the session, because every later issue is still workable.
+  Fatal is for conditions where nothing further can succeed at all — a bad
+  `-dir`, a `gh` that cannot answer, a `-skill` this installation lacks, a token
+  the API refuses.
 - **`issue-N` branch naming is a contract.** The supervisor finds a PR by its
   head branch; the skill is what names the branch. Changing either side means
   changing both, and `-branch-prefix` has to keep working.
