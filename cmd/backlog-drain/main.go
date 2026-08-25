@@ -129,8 +129,11 @@ type config struct {
 
 	// Run-data capture. tag labels a batch of runs so configurations can be
 	// compared later; rec is the sink, and writes nothing when -metrics is off.
-	tag string
-	rec *recorder
+	// postSummary is the one opt-in that shows those numbers to anybody else:
+	// a numbers-only comment on each merged PR.
+	tag         string
+	rec         *recorder
+	postSummary bool
 
 	// Filled in by preflight, recorded with every run: which repository this
 	// is, which CLI produced its numbers, and which release of the skill it
@@ -196,6 +199,8 @@ func parseFlags() config {
 	flag.StringVar(&skip, "skip", "", "comma-separated issue numbers to skip (head-of-line escape hatch)")
 	flag.BoolVar(&cfg.once, "once", false, "process a single issue to merge, then exit")
 	flag.StringVar(&cfg.tag, "run-tag", "", "label recorded with every run, for comparing one batch against another")
+	flag.BoolVar(&cfg.postSummary, "post-summary", false,
+		"comment one line of run numbers on each merged PR (runs, tokens, dollars, wall time)")
 	flag.StringVar(&metrics, "metrics", "",
 		`directory for run-data records, or "off" (default ~/.backlog-drain/metrics)`)
 	flag.Usage = func() {
@@ -437,12 +442,19 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 	sessionID := ""   // from the run's init event; resume target for retries
 	answered := false // a human replied, so the next run folds the answers in
 
+	// tally is what -post-summary reports, and the only thing this function
+	// carries across runs besides the resume target. Nothing reads it back
+	// once the process ends, so it stays telemetry rather than state: a
+	// supervisor restarted mid-issue starts a fresh one, and the comment it
+	// feeds says it covers this drain.
+	tally := &issueTally{}
+
 	// terminal marks how the issue ended, failures included — they are the
 	// most informative rows in the dataset, and every one of them exits the
 	// process. Transient GitHub errors and Ctrl+C are deliberately not
 	// outcomes: the issue is still open, and the next drain resumes it.
 	terminal := func(prNumber int, outcome string) {
-		cfg.rec.recordIssue(cfg, issue, prNumber, outcome)
+		cfg.rec.recordIssue(cfg, issue, prNumber, outcome, lookupPRFacts(ctx, cfg, prNumber))
 	}
 
 	for {
@@ -482,7 +494,7 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 			// below turn out to find, so every exit from here on passes one.
 			record := func(prNumber int, outcome string) {
 				rc.pr, rc.outcome = prNumber, outcome
-				cfg.rec.recordRun(cfg, rc, rep)
+				tally.add(cfg.rec.recordRun(cfg, rc, rep))
 			}
 
 			if runErr != nil {
@@ -580,7 +592,7 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 		switch pr.State {
 		case "OPEN":
 			log.Printf("PR #%d open — waiting for merge (%s)", pr.Number, pr.URL)
-			state, err := supervisePR(ctx, cfg, issue, pr.Number)
+			state, err := supervisePR(ctx, cfg, issue, pr.Number, tally)
 			if err != nil {
 				if ctx.Err() == nil { // not Ctrl+C: remediation ran out of attempts
 					terminal(pr.Number, issueNeedsHuman)
@@ -594,6 +606,7 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 				log.Printf("PR #%d merged — cleaning up and advancing", pr.Number)
 				cleanupWorktree(ctx, cfg, issue)
 				terminal(pr.Number, issueMerged)
+				postSummary(ctx, cfg, pr.Number, *tally)
 				return ensureIssueClosed(ctx, cfg, issue, pr.Number)
 			}
 			terminal(pr.Number, issueClosed)
@@ -1138,7 +1151,7 @@ func prForBranch(ctx context.Context, cfg config, branch string) (*pullRequest, 
 // supervisePR waits on an open PR until it leaves the OPEN state, dispatching
 // a conflict-remediation run whenever GitHub reports the branch CONFLICTING.
 // Status is checked immediately on entry, then once per poll interval.
-func supervisePR(ctx context.Context, cfg config, issue, prNumber int) (string, error) {
+func supervisePR(ctx context.Context, cfg config, issue, prNumber int, tally *issueTally) (string, error) {
 	failures := 0
 	for {
 		state, mergeable, err := prStatus(ctx, cfg, prNumber)
@@ -1152,7 +1165,7 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int) (string, 
 			return state, nil
 		case mergeable == "CONFLICTING":
 			log.Printf("PR #%d has merge conflicts — dispatching remediation", prNumber)
-			if rerr := remediateConflicts(ctx, cfg, issue, prNumber); rerr != nil {
+			if rerr := remediateConflicts(ctx, cfg, issue, prNumber, tally); rerr != nil {
 				if ctx.Err() != nil {
 					return "", ctx.Err()
 				}
@@ -1181,7 +1194,7 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int) (string, 
 
 // remediateConflicts dispatches a self-contained Claude run that rebases the
 // PR branch onto the current default branch and force-pushes the result.
-func remediateConflicts(ctx context.Context, cfg config, issue, prNumber int) error {
+func remediateConflicts(ctx context.Context, cfg config, issue, prNumber int, tally *issueTally) error {
 	branch := fmt.Sprintf("%s%d", cfg.branchPrefix, issue)
 	prompt := fmt.Sprintf(
 		"PR #%d (branch %s) has merge conflicts with the remote default branch. "+
@@ -1198,10 +1211,10 @@ func remediateConflicts(ctx context.Context, cfg config, issue, prNumber int) er
 	rep, err := execClaude(ctx, cfg, prompt, "", "")
 	// A remediation run pushes to a PR that already exists, so it leaves
 	// behind neither a new PR nor questions.
-	cfg.rec.recordRun(cfg, runContext{
+	tally.add(cfg.rec.recordRun(cfg, runContext{
 		issue: issue, pr: prNumber, reason: reasonRemediate, outcome: outcomeNothing,
 		started: started, ended: time.Now(),
-	}, rep)
+	}, rep))
 	return err
 }
 
@@ -1218,6 +1231,83 @@ func prStatus(ctx context.Context, cfg config, prNumber int) (state, mergeable s
 		return "", "", fmt.Errorf("parsing PR status: %w", err)
 	}
 	return v.State, v.Mergeable, nil
+}
+
+// lookupPRFacts asks GitHub what a PR turned out to be: how large the change
+// was, how much review it drew, and when it opened and merged. Those are the
+// numbers no event stream can know, and the two timestamps are authoritative
+// where a record's own are inferred.
+//
+// It exists for the issue record alone, so a drain with -metrics off makes no
+// call at all, and a lookup that fails records the outcome without it — losing
+// the record over an enrichment would drop exactly the terminal rows the
+// dataset is for.
+func lookupPRFacts(ctx context.Context, cfg config, prNumber int) prFacts {
+	if prNumber == 0 || !cfg.rec.enabled() || ctx.Err() != nil {
+		return prFacts{}
+	}
+	out, err := gh(ctx, cfg, "pr", "view", strconv.Itoa(prNumber),
+		"--json", "additions,deletions,changedFiles,createdAt,mergedAt,reviews")
+	var facts prFacts
+	if err == nil {
+		facts, err = parsePRFacts(out)
+	}
+	if err != nil {
+		log.Printf("run data: GitHub could not say what PR #%d changed (%v) — recording the outcome without it",
+			prNumber, err)
+		return prFacts{}
+	}
+	return facts
+}
+
+// parsePRFacts keeps the numbers and drops the rest: the reviews gh returns
+// carry their authors and their bodies, and a record counts them rather than
+// quoting them.
+func parsePRFacts(raw []byte) (prFacts, error) {
+	var v struct {
+		Additions    int               `json:"additions"`
+		Deletions    int               `json:"deletions"`
+		ChangedFiles int               `json:"changedFiles"`
+		CreatedAt    string            `json:"createdAt"`
+		MergedAt     string            `json:"mergedAt"`
+		Reviews      []json.RawMessage `json:"reviews"`
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return prFacts{}, fmt.Errorf("parsing PR facts: %w", err)
+	}
+	return prFacts{
+		Additions:    v.Additions,
+		Deletions:    v.Deletions,
+		ChangedFiles: v.ChangedFiles,
+		Reviews:      len(v.Reviews),
+		Opened:       v.CreatedAt,
+		Merged:       v.MergedAt,
+	}, nil
+}
+
+// postSummary puts one line of numbers on a merged PR, if -post-summary asked
+// for it. This is the only thing in the program that shows run data to anybody
+// but the operator, which is why it is off by default, carries numbers only,
+// and goes no further than the PR it describes — to exactly the people who
+// could already see that PR.
+//
+// Best-effort like the rest of run data: a comment that could not be posted is
+// a log line, never a failed drain.
+func postSummary(ctx context.Context, cfg config, prNumber int, tally issueTally) {
+	if !cfg.postSummary || prNumber == 0 {
+		return
+	}
+	if tally.runs == 0 {
+		// This drain only waited on a PR an earlier one opened, so it has
+		// nothing to report — and "0 runs, $0.00" would read as a free PR.
+		log.Printf("-post-summary: no runs for PR #%d in this drain — leaving it uncommented", prNumber)
+		return
+	}
+	if _, err := gh(ctx, cfg, "pr", "comment", strconv.Itoa(prNumber), "--body", summaryComment(tally)); err != nil {
+		log.Printf("could not comment the run summary on PR #%d (%v) — the drain continues", prNumber, err)
+		return
+	}
+	log.Printf("commented the run summary on PR #%d", prNumber)
 }
 
 func waitForComments(ctx context.Context, cfg config, issue, baseline int) error {

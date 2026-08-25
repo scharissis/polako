@@ -222,7 +222,7 @@ func TestRunStatusPrecedence(t *testing.T) {
 func TestIssueRecordHoldsOnlyTheTerminalOutcome(t *testing.T) {
 	dir := t.TempDir()
 	cfg := metricsConfig(t, dir)
-	cfg.rec.recordIssue(cfg, 12, 34, issueMerged)
+	cfg.rec.recordIssue(cfg, 12, 34, issueMerged, prFacts{})
 
 	lines := readRecords(t, dir, cfg.repo)
 	if len(lines) != 1 {
@@ -266,7 +266,7 @@ func TestRecorderAppendsOneLinePerRecord(t *testing.T) {
 
 	cfg.rec.recordRun(cfg, rc, sampleReport())
 	cfg.rec.recordRun(cfg, rc, sampleReport())
-	cfg.rec.recordIssue(cfg, 12, 34, issueMerged)
+	cfg.rec.recordIssue(cfg, 12, 34, issueMerged, prFacts{})
 
 	lines := readRecords(t, dir, cfg.repo)
 	if len(lines) != 3 {
@@ -293,11 +293,11 @@ func TestRecorderAppendsOneLinePerRecord(t *testing.T) {
 func TestRecorderRecreatesADeletedDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "metrics")
 	cfg := metricsConfig(t, dir)
-	cfg.rec.recordIssue(cfg, 1, 0, issueMerged)
+	cfg.rec.recordIssue(cfg, 1, 0, issueMerged, prFacts{})
 	if err := os.RemoveAll(dir); err != nil {
 		t.Fatalf("removing the directory mid-drain: %v", err)
 	}
-	cfg.rec.recordIssue(cfg, 2, 0, issueMerged)
+	cfg.rec.recordIssue(cfg, 2, 0, issueMerged, prFacts{})
 
 	if lines := readRecords(t, dir, cfg.repo); len(lines) != 1 {
 		t.Errorf("wrote %d lines after the delete, want 1", len(lines))
@@ -311,7 +311,7 @@ func TestRecorderOffWritesNothing(t *testing.T) {
 		t.Fatal("-metrics off must disable the recorder")
 	}
 	cfg.rec.recordRun(cfg, runContext{issue: 1, started: time.Now(), ended: time.Now()}, sampleReport())
-	cfg.rec.recordIssue(cfg, 1, 2, issueMerged)
+	cfg.rec.recordIssue(cfg, 1, 2, issueMerged, prFacts{})
 
 	entries, err := os.ReadDir(home)
 	if err != nil {
@@ -327,7 +327,7 @@ func TestRecorderOffWritesNothing(t *testing.T) {
 func TestNilRecorderIsSafe(t *testing.T) {
 	var cfg config
 	cfg.rec.recordRun(cfg, runContext{started: time.Now(), ended: time.Now()}, runReport{})
-	cfg.rec.recordIssue(cfg, 1, 2, issueMerged)
+	cfg.rec.recordIssue(cfg, 1, 2, issueMerged, prFacts{})
 	if cfg.rec.enabled() {
 		t.Error("a nil recorder is disabled")
 	}
@@ -359,7 +359,7 @@ func TestRecorderFailsQuietlyAndOnlyOnce(t *testing.T) {
 	}
 	cfg := metricsConfig(t, blocked)
 	for range 3 {
-		cfg.rec.recordIssue(cfg, 1, 0, issueMerged)
+		cfg.rec.recordIssue(cfg, 1, 0, issueMerged, prFacts{})
 	}
 	if n := strings.Count(buf.String(), "run data not recorded"); n != 1 {
 		t.Errorf("warned %d times, want exactly 1\ngot:\n%s", n, buf.String())
@@ -374,7 +374,7 @@ func TestRecordsAreNotWorldReadable(t *testing.T) {
 	}
 	dir := filepath.Join(t.TempDir(), "metrics")
 	cfg := metricsConfig(t, dir)
-	cfg.rec.recordIssue(cfg, 1, 2, issueMerged)
+	cfg.rec.recordIssue(cfg, 1, 2, issueMerged, prFacts{})
 
 	for _, path := range []string{dir, filepath.Join(dir, recordFile(cfg.repo))} {
 		info, err := os.Stat(path)
@@ -414,5 +414,127 @@ func TestToolsHashDistinguishesAllowlists(t *testing.T) {
 	}
 	if len(a) != 8 {
 		t.Errorf("tools hash %q should be 8 hex digits", a)
+	}
+}
+
+// The enrichment is the one thing an issue record holds that no run record
+// could reconstruct: what GitHub says the PR turned out to be.
+func TestIssueRecordCarriesTheGitHubEnrichment(t *testing.T) {
+	dir := t.TempDir()
+	cfg := metricsConfig(t, dir)
+	cfg.rec.recordIssue(cfg, 12, 34, issueMerged, prFacts{
+		Additions: 412, Deletions: 38, ChangedFiles: 7, Reviews: 2,
+		Opened: "2026-08-24T10:34:02Z", Merged: "2026-08-24T14:02:00Z",
+	})
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(readRecords(t, dir, cfg.repo)[0]), &got); err != nil {
+		t.Fatalf("record is not JSON: %v", err)
+	}
+	for key, want := range map[string]any{
+		"additions": float64(412), "deletions": float64(38), "changed_files": float64(7),
+		"reviews":   float64(2),
+		"pr_opened": "2026-08-24T10:34:02Z", "pr_merged": "2026-08-24T14:02:00Z",
+	} {
+		if got[key] != want {
+			t.Errorf("record[%q] = %v, want %v", key, got[key], want)
+		}
+	}
+	// The reviews are counted, never quoted: whatever a reviewer wrote is
+	// exactly the text these files do not carry.
+	if _, ok := got["review_bodies"]; ok {
+		t.Error("a record must not carry review text")
+	}
+}
+
+// A PR that never existed, a lookup that failed, a drain with -metrics off:
+// the outcome is recorded either way, in the shape every reader written before
+// the enrichment already knows.
+func TestIssueRecordOmitsAnEnrichmentItNeverGot(t *testing.T) {
+	dir := t.TempDir()
+	cfg := metricsConfig(t, dir)
+	cfg.rec.recordIssue(cfg, 12, 0, issueNeedsHuman, prFacts{})
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(readRecords(t, dir, cfg.repo)[0]), &got); err != nil {
+		t.Fatalf("record is not JSON: %v", err)
+	}
+	if got["outcome"] != issueNeedsHuman {
+		t.Errorf("outcome = %v, want the record written regardless", got["outcome"])
+	}
+	for _, key := range []string{"additions", "deletions", "changed_files", "reviews", "pr_opened", "pr_merged"} {
+		if _, ok := got[key]; ok {
+			t.Errorf("record carries %q with nothing to put in it", key)
+		}
+	}
+}
+
+func TestIssueTallySumsTheRunsThisDrainSaw(t *testing.T) {
+	var tally issueTally
+	tally.add(runRecord{Outcome: outcomeQuestions, CostUSD: 1.25, WallMS: 1200000,
+		Tokens: tokenCounts{In: 2000, Out: 30000, CacheRead: 4000000, CacheWrite: 200000}})
+	tally.add(runRecord{Outcome: outcomeOpenedPR, CostUSD: 2.50, WallMS: 1800000,
+		Tokens: tokenCounts{In: 3000, Out: 50000, CacheRead: 6000000, CacheWrite: 300000}})
+
+	if tally.runs != 2 || tally.questions != 1 {
+		t.Errorf("tally = %d runs / %d question rounds, want 2 and 1", tally.runs, tally.questions)
+	}
+	if tally.costUSD != 3.75 || tally.wallMS != 3000000 {
+		t.Errorf("tally = $%v over %dms, want $3.75 over 3000000ms", tally.costUSD, tally.wallMS)
+	}
+	if want := int64(10585000); tally.tokens.total() != want {
+		t.Errorf("tokens = %d, want %d", tally.tokens.total(), want)
+	}
+}
+
+// -post-summary works with -metrics off — the escape hatch for an operator who
+// wants no local files at all — so the record has to be built whether or not
+// anything is written.
+func TestRecordRunReturnsTheRecordEvenWithMetricsOff(t *testing.T) {
+	cfg := metricsConfig(t, metricsOff)
+	rec := cfg.rec.recordRun(cfg, runContext{issue: 12, reason: reasonImplement,
+		outcome: outcomeOpenedPR, started: time.Now(), ended: time.Now()}, sampleReport())
+	if rec.CostUSD != 4.12 || rec.Outcome != outcomeOpenedPR {
+		t.Errorf("record = $%v / %q, want the run's numbers back", rec.CostUSD, rec.Outcome)
+	}
+}
+
+func TestSummaryCommentReportsTheNumbersAndSaysWhatTheyCover(t *testing.T) {
+	got := summaryComment(issueTally{runs: 3, questions: 1, costUSD: 6.12, wallMS: 8040000,
+		tokens: tokenCounts{In: 2000, Out: 40000, CacheRead: 12000000, CacheWrite: 400000}})
+	for _, want := range []string{"3 runs", "1 question round", "12.4M tokens", "$6.12", "2h14m"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary is missing %q:\n%s", want, got)
+		}
+	}
+	// It is posted where other people read it, so it says which runs it
+	// covers and that the dollars are the CLI's pricing rather than a bill.
+	for _, want := range []string{"this drain supervised", "API-equivalent pricing"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary does not say %q:\n%s", want, got)
+		}
+	}
+	// Every run reported a result, so there is nothing to qualify.
+	if strings.Contains(got, "undercount") {
+		t.Errorf("summary hedges numbers that came from result events:\n%s", got)
+	}
+}
+
+// The bias this guards against is the same one the recorder guards against,
+// one audience further out: a run that crashed, stalled or was interrupted
+// reports no cost at all, and an unqualified $0.00 on a PR reads as free work.
+func TestSummaryCommentSaysWhenItsNumbersAreUndercounts(t *testing.T) {
+	var tally issueTally
+	tally.add(runRecord{Outcome: outcomeNothing, UsageSource: usageObserved,
+		Tokens: tokenCounts{In: 500, Out: 6000}})
+	tally.add(runRecord{Outcome: outcomeOpenedPR, UsageSource: usageResult, CostUSD: 3.00,
+		Tokens: tokenCounts{In: 2500, Out: 42000}})
+
+	got := summaryComment(tally)
+	if !strings.Contains(got, "1 of them never reported a cost") {
+		t.Errorf("summary does not own up to the crashed run:\n%s", got)
+	}
+	if !strings.Contains(got, "undercounts") {
+		t.Errorf("summary does not say the numbers are low:\n%s", got)
 	}
 }

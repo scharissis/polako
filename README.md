@@ -264,6 +264,7 @@ backlog-drain stats
 | `-once` | `false` | Process a single issue to merge, then exit. |
 | `-run-tag` | *(none)* | Freeform label recorded with every run, so one batch can be compared against another. |
 | `-metrics` | `~/.backlog-drain/metrics` | Directory for run-data records, or `off` to write nothing. |
+| `-post-summary` | `false` | Comment one line of run numbers on each merged PR. The only thing that shows run data to anybody but you — see [Run data & cost tracking](#run-data--cost-tracking). |
 | `-version` | `false` | Print which release this binary is, then exit. Use it when startup warns that the binary and the skill disagree — see [Getting updates](#getting-updates). |
 
 ## Run data & cost tracking
@@ -278,13 +279,17 @@ count, wall and API duration, tokens (in / out / cache read / cache write, plus
 the per-model split), dollars, and the configuration under test — skill, model,
 permission mode, `-run-tag`, a hash of the tool allowlist, the strategy knobs,
 and the three versions in play (this binary, the installed skill, and the
-Claude CLI). One more object per issue records how it ended:
-`merged`, `closed_unmerged` or `needs_human`.
+Claude CLI). One more object per issue records how it ended —
+`merged`, `closed_unmerged` or `needs_human` — and, when GitHub could be asked,
+what the PR turned out to be: additions, deletions, changed files, how many
+reviews it drew, and when it opened and merged. That is one extra `gh pr view`
+as each issue ends, and none at all under `-metrics off`.
 
 **What is never written:** issue titles, issue bodies, PR titles, comment text,
-diffs, or anything the model said. Records hold numbers, identifiers and labels
-you chose. That is what makes one of these files safe to hand to a teammate, or
-paste into an analysis session, without re-reading it first.
+review text, diffs, or anything the model said. Reviews are counted, never
+quoted. Records hold numbers, identifiers and labels you chose. That is what
+makes one of these files safe to hand to a teammate, or paste into an analysis
+session, without re-reading it first.
 
 **Where it goes:** `~/.backlog-drain/metrics/<owner>--<repo>.jsonl`, one
 append-only file per repository — so deleting one project's data is `rm` on one
@@ -292,11 +297,13 @@ file, and aggregating across projects is a glob. Created `0700`, so on a shared
 machine the records stay yours. Never inside your checkout: the skill commits
 things there, and cost data must not become committable by accident.
 
-**Nothing leaves your machine.** There is no telemetry endpoint, no phone-home,
-and no network path out of the recorder — the binary is the only thing that
-meters anything, and it writes to your disk and nowhere else. The skill half,
-the part you can install from a marketplace, carries no data collection at all:
-it is a prompt.
+**Nothing leaves your machine unless you ask it to.** There is no telemetry
+endpoint, no phone-home, and no network path out of the recorder — the binary is
+the only thing that meters anything, and it writes to your disk. The single
+exception is [`-post-summary`](#putting-it-on-the-pr--post-summary), off unless
+you turn it on, which puts one line of numbers on your own merged PR. The skill
+half, the part you can install from a marketplace, carries no data collection at
+all: it is a prompt.
 
 To write nothing at all:
 
@@ -309,6 +316,32 @@ depends on them, and deleting the directory mid-drain changes nothing about
 what the supervisor does next — that is what keeps run data compatible with
 "all state lives in GitHub". Writes are best-effort: a failure warns once and
 the drain carries on.
+
+### Putting it on the PR: `-post-summary`
+
+Off by default. Turned on, each merged PR gets one comment:
+
+```bash
+backlog-drain -post-summary
+```
+
+> **backlog-drain** — 3 runs, 1 question round, 12.4M tokens, $6.12, 2h14m of
+> run time.
+>
+> <sub>Recorded by backlog-drain v0.5.0, covering the runs this drain
+> supervised. Dollars are the Claude CLI's API-equivalent pricing.</sub>
+
+Numbers only, on the PR they describe, readable by exactly the people who can
+already see that PR. A run that crashed, stalled or was interrupted never
+reported a cost, so when the tally holds one the comment says how many and that
+its tokens and dollars are undercounts. It covers the runs *this* drain supervised, and says so: a
+supervisor restarted mid-issue reports what it saw, and one that only waited on
+a PR an earlier process opened comments nothing rather than claiming a free PR.
+
+It is independent of `-metrics`, so `-metrics off -post-summary` is the
+combination for wanting team visibility and no local files at all. Best-effort
+like the rest of run data: a comment that cannot be posted is a log line, never
+a failed drain.
 
 ### Reading it back: `backlog-drain stats`
 
@@ -355,6 +388,7 @@ human latency
 | `-metrics` | `~/.backlog-drain/metrics` | Directory to read records from — the same path the drain writes to. |
 | `-repo` | *(every repository)* | Only count records for one repository, `owner/name`. |
 | `-since` | *(all of it)* | Only count records newer than this, e.g. `-since 168h`. |
+| `-by` | *(none)* | Add a breakdown table: `issue`, `model` or `tag`. |
 
 A window can keep an issue's terminal record while clipping away the runs that
 produced it. Those issues still count toward the merge rate, but they cannot be
@@ -362,7 +396,6 @@ priced, so the per-issue figures cover only issues with runs inside the window
 and say when that differs. Files in the directory that cannot be opened — the
 normal case in a shared one, since records are written `0600` — are named in
 the report rather than failing it.
-| `-by` | *(none)* | Add a breakdown table: `issue`, `model` or `tag`. |
 
 Every summable number is derived at read time from the run records — cost per
 issue, runs per issue, question rounds, the spans below. That is why an issue
@@ -374,6 +407,14 @@ is the gap between the run that posted questions and the re-run that folded the
 reply in. **PR open to merge** ends whenever somebody got round to pressing the
 button — reported because it is part of the elapsed time, but it is not a
 property of the automation, and no change to the skill will move it.
+
+**On PR size:** an issue whose terminal record carries GitHub's answer about
+its PR adds a **change per issue** line — the median additions, deletions,
+changed files and reviews. Records written before that enrichment existed carry
+none, and neither does one whose lookup failed, so the line counts its own
+issues and says how many. The same two timestamps give **PR open to merge** the
+authoritative span, which is right even when the run that opened the PR falls
+outside the window or belonged to a drain on another machine.
 
 **On resumed sessions:** a crashed run and the `--resume` that finishes its
 work are two records, and `stats` sums both. If a resumed run's `result` event

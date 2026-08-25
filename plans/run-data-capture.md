@@ -349,6 +349,19 @@ terminal state, folded into the `issue` record. `-post-summary` (default
 off): one compact comment on the merged PR — runs, question rounds, tokens,
 dollars, wall time.
 
+*Shipped in 0.5.0, with three things worth writing down.* The summary is
+built from an in-memory tally that `processIssue` keeps while it works one
+issue — **not** by reading the record files back, which would have turned
+telemetry into state for the sake of a comment. The cost is that the comment
+covers the runs one process supervised rather than the issue's whole history,
+so it says exactly that, and a drain that only waited on a PR an earlier
+process opened comments nothing rather than reporting a free PR. The
+enrichment call is made only when a record is going to be written, so
+`-metrics off` still makes no extra GitHub call; reviews are counted, never
+quoted. `stats` reports the medians as a *change per issue* line, and takes
+GitHub's `createdAt`/`mergedAt` over its own inference for open-to-merge —
+those are right even when the run that opened the PR is outside the window.
+
 **Phase 4 — deferred until pulled for.** External sinks; `stats` CSV/day
 groupings; `gh` backfill for issues merged while the supervisor was down;
 any A/B aids.

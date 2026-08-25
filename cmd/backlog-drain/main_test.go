@@ -959,3 +959,74 @@ func TestReleaseVersionRejectsAPseudoVersion(t *testing.T) {
 		t.Errorf("releaseVersion(v0.4.0) = %q, %v; want the bare version", v, ok)
 	}
 }
+
+func TestParsePRFactsCountsReviewsWithoutQuotingThem(t *testing.T) {
+	// The shape `gh pr view --json additions,deletions,changedFiles,createdAt,mergedAt,reviews`
+	// returns, reviews and all.
+	raw := []byte(`{"additions":412,"deletions":38,"changedFiles":7,` +
+		`"createdAt":"2026-08-24T10:34:02Z","mergedAt":"2026-08-24T14:02:00Z",` +
+		`"reviews":[{"author":{"login":"someone"},"state":"APPROVED","body":"ship it"},` +
+		`{"author":{"login":"else"},"state":"COMMENTED","body":"one nit, otherwise fine"}]}`)
+
+	got, err := parsePRFacts(raw)
+	if err != nil {
+		t.Fatalf("parsePRFacts: %v", err)
+	}
+	want := prFacts{Additions: 412, Deletions: 38, ChangedFiles: 7, Reviews: 2,
+		Opened: "2026-08-24T10:34:02Z", Merged: "2026-08-24T14:02:00Z"}
+	if got != want {
+		t.Errorf("facts = %+v, want %+v", got, want)
+	}
+	// prFacts has nowhere to put a review body, and that is the point: what a
+	// reviewer wrote is text, and text never reaches a record.
+	if strings.Contains(fmt.Sprintf("%+v", got), "nit") {
+		t.Errorf("facts carry review text: %+v", got)
+	}
+}
+
+func TestParsePRFactsToleratesAPRThatNeverMerged(t *testing.T) {
+	// mergedAt is null on a closed-unmerged PR, and a PR nobody reviewed comes
+	// back with an empty list.
+	got, err := parsePRFacts([]byte(`{"additions":3,"deletions":1,"changedFiles":1,` +
+		`"createdAt":"2026-08-24T10:34:02Z","mergedAt":null,"reviews":[]}`))
+	if err != nil {
+		t.Fatalf("parsePRFacts: %v", err)
+	}
+	if got.Merged != "" || got.Reviews != 0 || got.Additions != 3 {
+		t.Errorf("facts = %+v, want the numbers with no merge timestamp", got)
+	}
+	if _, err := parsePRFacts([]byte("not json")); err == nil {
+		t.Error("junk from gh must be an error, so the outcome is recorded without it")
+	}
+}
+
+// -post-summary is the one path that shows run data to anybody but the
+// operator, so it keeps the discipline the records keep: what the run said
+// never reaches it. The recorder is off here, which is also the combination
+// the README offers to an operator who wants no local files at all.
+func TestSummaryCommentNeverCarriesWhatTheRunSaid(t *testing.T) {
+	captureLog(t)
+	cfg := fakeClaudeConfig(t, "stream")
+	cfg.repo, cfg.rec = "owner/repo", newRecorder(metricsOff)
+
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue")
+	if err != nil {
+		t.Fatalf("execClaude: %v", err)
+	}
+	var tally issueTally
+	tally.add(cfg.rec.recordRun(cfg, runContext{issue: 7, reason: reasonImplement,
+		outcome: outcomeOpenedPR, started: time.Now(), ended: time.Now()}, rep))
+
+	body := summaryComment(tally)
+	for _, leaked := range []string{"Reading the issue", "go test ./...", "Bash", "compact", "Opened a PR"} {
+		if strings.Contains(body, leaked) {
+			t.Errorf("summary carries %q from the stream:\n%s", leaked, body)
+		}
+	}
+	// The numbers the canned result reported, which is all it may carry.
+	for _, want := range []string{"1 run", "$0.50"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("summary is missing %q:\n%s", want, body)
+		}
+	}
+}

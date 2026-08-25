@@ -258,6 +258,14 @@ func recTime(s string) time.Time {
 	return t.UTC()
 }
 
+// enriched reports whether GitHub's answer about the PR reached this record.
+// Records written before the enrichment existed carry none, and neither does
+// one whose lookup failed, so every number derived from it counts its own
+// issues rather than assuming zeros.
+func (r issueRecord) enriched() bool {
+	return r.ChangedFiles > 0 || r.Additions > 0 || r.Deletions > 0 || r.PROpened != ""
+}
+
 // endOf is when a run stopped, falling back to when it started: a record
 // written by a path that never learned an end time is still worth a span.
 func endOf(r runRecord) time.Time {
@@ -276,10 +284,6 @@ type issueStats struct {
 	cost     float64
 	tokens   tokenCounts
 	wallMS   int64
-}
-
-func (is *issueStats) total() int64 {
-	return is.tokens.In + is.tokens.Out + is.tokens.CacheRead + is.tokens.CacheWrite
 }
 
 func (is *issueStats) questions() int {
@@ -316,10 +320,7 @@ func rollUpIssues(ds dataset) []*issueStats {
 		is := get(issueKey{r.Repo, r.Issue})
 		is.runs = append(is.runs, r) // ds.runs is already in timestamp order
 		is.cost += r.CostUSD
-		is.tokens.In += r.Tokens.In
-		is.tokens.Out += r.Tokens.Out
-		is.tokens.CacheRead += r.Tokens.CacheRead
-		is.tokens.CacheWrite += r.Tokens.CacheWrite
+		is.tokens.addCounts(r.Tokens)
 		is.wallMS += r.WallMS
 	}
 	for i := range ds.issues {
@@ -364,6 +365,15 @@ func answerSpans(is *issueStats) []time.Duration {
 func mergeSpan(is *issueStats) (time.Duration, bool) {
 	if is.terminal == nil || is.terminal.Outcome != issueMerged {
 		return 0, false
+	}
+	// GitHub's own timestamps when the enrichment got them: they measure the
+	// PR rather than the runs around it, and they are there even when the run
+	// that opened it fell outside the window — or belonged to another drain,
+	// on another machine.
+	if opened, merged := recTime(is.terminal.PROpened), recTime(is.terminal.PRMerged); !opened.IsZero() && !merged.IsZero() {
+		if d := merged.Sub(opened); d > 0 {
+			return d, true
+		}
 	}
 	var opened time.Time
 	for _, r := range is.runs {
@@ -542,9 +552,11 @@ func issuePairs(issues []*issueStats) [][2]string {
 			priced = append(priced, is)
 		}
 	}
+	change := changePairs(done)
 	if len(priced) == 0 {
-		return append(pairs, [2]string{"per issue",
+		pairs = append(pairs, [2]string{"per issue",
 			"nothing to price — no terminal issue has runs in this window"})
+		return append(pairs, change...)
 	}
 
 	var runs, costs []float64
@@ -553,11 +565,8 @@ func issuePairs(issues []*issueStats) [][2]string {
 	for _, is := range priced {
 		runs = append(runs, float64(len(is.runs)))
 		costs = append(costs, is.cost)
-		tokens = append(tokens, is.total())
-		sum.In += is.tokens.In
-		sum.Out += is.tokens.Out
-		sum.CacheRead += is.tokens.CacheRead
-		sum.CacheWrite += is.tokens.CacheWrite
+		tokens = append(tokens, is.tokens.total())
+		sum.addCounts(is.tokens)
 	}
 	n := int64(len(priced))
 	// Say what the averages are over whenever that is not every terminal
@@ -566,7 +575,7 @@ func issuePairs(issues []*issueStats) [][2]string {
 	if len(priced) != len(done) {
 		over = fmt.Sprintf(" (over the %d with runs in this window)", len(priced))
 	}
-	return append(pairs,
+	pairs = append(pairs,
 		// Mean and median both, because one pathological issue drags a mean
 		// somewhere no real issue has ever been.
 		[2]string{"runs per issue", fmt.Sprintf("%s mean, %s median%s",
@@ -576,6 +585,38 @@ func issuePairs(issues []*issueStats) [][2]string {
 		[2]string{"tokens per issue", fmt.Sprintf("%s mean, %s median (%s)",
 			count(int64(mean(tokens))), count(median(tokens)), split(sum, n))},
 	)
+	return append(pairs, change...)
+}
+
+// changePairs summarizes what the work actually changed, from the GitHub
+// enrichment folded into terminal records — every issue that ended with a PR,
+// abandoned ones included, which is the same set the lines above it count.
+// Medians, over their own
+// denominator: a record written before the enrichment existed carries none,
+// and neither does one whose lookup failed, so this line covers a different
+// set of issues from the ones above it and says which.
+func changePairs(done []*issueStats) [][2]string {
+	var adds, dels, files, reviews []int
+	for _, is := range done {
+		if !is.terminal.enriched() {
+			continue
+		}
+		adds = append(adds, is.terminal.Additions)
+		dels = append(dels, is.terminal.Deletions)
+		files = append(files, is.terminal.ChangedFiles)
+		reviews = append(reviews, is.terminal.Reviews)
+	}
+	if len(adds) == 0 {
+		return nil
+	}
+	line := fmt.Sprintf("+%d -%d across %s", median(adds), median(dels), plural(median(files), "file"))
+	// A repository whose PRs are merged without a formal review reports zero
+	// every time, and a column of zeros is noise rather than a finding.
+	if slices.Max(reviews) > 0 {
+		line += ", " + plural(median(reviews), "review")
+	}
+	return [][2]string{{"change per issue",
+		fmt.Sprintf("%s (medians over %s with PR data)", line, plural(len(adds), "issue"))}}
 }
 
 func runPairs(ds dataset) [][2]string {
@@ -612,10 +653,7 @@ func costPairs(ds dataset, issues []*issueStats) [][2]string {
 	total, tokens := 0.0, tokenCounts{}
 	for _, r := range ds.runs {
 		total += r.CostUSD
-		tokens.In += r.Tokens.In
-		tokens.Out += r.Tokens.Out
-		tokens.CacheRead += r.Tokens.CacheRead
-		tokens.CacheWrite += r.Tokens.CacheWrite
+		tokens.addCounts(r.Tokens)
 	}
 	spend := usd(total)
 	from, to := window(ds)
@@ -638,8 +676,7 @@ func costPairs(ds dataset, issues []*issueStats) [][2]string {
 		pairs = append(pairs, [2]string{"per merged PR",
 			fmt.Sprintf("%s across %s", usd(total/float64(merged)), plural(merged, "merge"))})
 	}
-	sum := tokens.In + tokens.Out + tokens.CacheRead + tokens.CacheWrite
-	pairs = append(pairs, [2]string{"tokens", fmt.Sprintf("%s (%s)", count(sum), split(tokens, 1))})
+	pairs = append(pairs, [2]string{"tokens", fmt.Sprintf("%s (%s)", count(tokens.total()), split(tokens, 1))})
 	return pairs
 }
 
@@ -701,7 +738,7 @@ func printIssueTable(w io.Writer, issues []*issueStats) {
 			strconv.Itoa(len(is.runs)),
 			strconv.Itoa(is.questions()),
 			usd(is.cost),
-			count(is.total()),
+			count(is.tokens.total()),
 			dur(time.Duration(is.wallMS) * time.Millisecond),
 		})
 	}
@@ -738,7 +775,7 @@ func printGroupTable(w io.Writer, ds dataset, issues []*issueStats, by string) {
 		}
 		g.runs++
 		g.cost += r.CostUSD
-		g.tokens += r.Tokens.In + r.Tokens.Out + r.Tokens.CacheRead + r.Tokens.CacheWrite
+		g.tokens += r.Tokens.total()
 		g.issues[issueKey{r.Repo, r.Issue}] = true
 	}
 	merged := map[issueKey]bool{}
