@@ -200,7 +200,8 @@ func TestRunStatusPrecedence(t *testing.T) {
 		rep  runReport
 		want string
 	}{
-		{"interrupt beats everything", runReport{interrupted: true, stalled: true, exitCode: -1}, "interrupted"},
+		{"no-skill beats an interrupt", runReport{skillMissing: true, interrupted: true, stalled: true, exitCode: -1}, "no-skill"},
+		{"interrupt beats a stall and the exit code", runReport{interrupted: true, stalled: true, exitCode: -1}, "interrupted"},
 		{"stall beats the exit code", runReport{stalled: true, exitCode: -1}, "stalled"},
 		{"crash", runReport{exitCode: 7}, "crash"},
 		{"result error", runReport{hasResult: true, isError: true, subtype: "error_max_turns"}, "error"},
