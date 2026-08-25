@@ -745,10 +745,11 @@ func claudeVersion(ctx context.Context, cfg config) string {
 
 // pluginVersion reports which release of the skill this run will drive, by
 // asking the CLI what it has installed. Best-effort in the same way as
-// claudeVersion, and empty rather than wrong in the two cases where there is no
+// claudeVersion, and empty rather than wrong in every case where there is no
 // honest answer: a -skill with no plugin prefix names a hand-installed skill,
-// which carries no version at all, and a CLI too old for `plugin list --json`
-// fails the call.
+// which carries no version at all, a CLI too old for `plugin list --json` fails
+// the call, and a list that holds the plugin more than once may not say which
+// copy wins.
 func pluginVersion(ctx context.Context, cfg config) string {
 	plugin, _, ok := strings.Cut(cfg.skill, ":")
 	if !ok || plugin == "" {
@@ -758,22 +759,70 @@ func pluginVersion(ctx context.Context, cfg config) string {
 	if err != nil {
 		return ""
 	}
-	var installed []struct {
-		ID      string `json:"id"`
-		Version string `json:"version"`
-	}
-	if err := json.Unmarshal(out, &installed); err != nil {
+	return installedVersion(out, plugin)
+}
+
+// installedPlugin is the part of a `plugin list --json` entry this reads.
+// Enabled is a pointer because the list holds disabled plugins too, and a CLI
+// that omits the field must not be read as "everything is off" — absent means
+// enabled, which is what every CLI without the field meant.
+type installedPlugin struct {
+	ID      string `json:"id"`
+	Version string `json:"version"`
+	Scope   string `json:"scope"`
+	Enabled *bool  `json:"enabled"`
+}
+
+// loadable reports whether a session would pick this copy up at all.
+func (p installedPlugin) loadable() bool { return p.Enabled == nil || *p.Enabled }
+
+// installedVersion picks the copy of plugin a session started now would load,
+// out of `plugin list --json` output. The list can hold the same plugin twice,
+// and the first entry is not the one that drives the run.
+func installedVersion(list []byte, plugin string) string {
+	var installed []installedPlugin
+	if err := json.Unmarshal(list, &installed); err != nil {
 		return ""
 	}
 	// The id is <plugin>@<marketplace>; the marketplace is whatever the
 	// operator named it when they added it, so only the plugin half is ours to
-	// match on.
+	// match on. A disabled copy is listed but never loaded, so it is not a
+	// candidate — counting it would both report a version no session ran and
+	// let a stale disabled duplicate wash out an otherwise unambiguous answer.
+	var matches []installedPlugin
 	for _, p := range installed {
-		if name, _, _ := strings.Cut(p.ID, "@"); name == plugin {
-			return p.Version
+		if name, _, _ := strings.Cut(p.ID, "@"); name == plugin && p.loadable() {
+			matches = append(matches, p)
 		}
 	}
-	return ""
+	// A --plugin-dir copy is loaded for that session alone and replaces the
+	// installed one outright — the way anyone testing a tip skill against a tip
+	// binary runs. Nothing else has a precedence this can be sure of, so a tie
+	// between any other pair of scopes stays a tie.
+	if len(matches) > 1 {
+		var session []installedPlugin
+		for _, p := range matches {
+			if p.Scope == "session" {
+				session = append(session, p)
+			}
+		}
+		if len(session) > 0 {
+			matches = session
+		}
+	}
+	if len(matches) == 0 {
+		return ""
+	}
+	// Several copies still in the running. Report a version only if they agree
+	// on one, because picking between them would be a guess, and a wrong
+	// identifier in the run data is worse than an absent one: nothing reading it
+	// later can tell that it is wrong.
+	for _, p := range matches[1:] {
+		if p.Version != matches[0].Version {
+			return ""
+		}
+	}
+	return matches[0].Version
 }
 
 // warnOnVersionSkew reports a binary and a skill that did not ship together.
