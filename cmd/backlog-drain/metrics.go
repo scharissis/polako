@@ -14,7 +14,10 @@ package main
 // accepts outside issues it is attacker-controllable. That is also what makes
 // a record file safe to hand to a teammate without re-reading it first.
 //
-// Nothing here leaves the machine. There is no network path out of this file.
+// Nothing here reaches the network. The one path that ever shows these numbers
+// to anybody else is -post-summary, off unless an operator asks for it: it puts
+// a numbers-only comment on their own merged PR, visible to exactly the people
+// who could already see that PR. Nothing goes anywhere else, ever.
 
 import (
 	"encoding/json"
@@ -89,6 +92,18 @@ func (t *tokenCounts) add(u streamUsage) {
 	t.CacheRead += u.CacheRead
 	t.CacheWrite += u.CacheWrite
 }
+
+// addCounts folds one already-counted block into another — what every rollup
+// over runs does, whether it is summing an issue or a whole window.
+func (t *tokenCounts) addCounts(o tokenCounts) {
+	t.In += o.In
+	t.Out += o.Out
+	t.CacheRead += o.CacheRead
+	t.CacheWrite += o.CacheWrite
+}
+
+// total is the four ways a run spends tokens, added up.
+func (t tokenCounts) total() int64 { return t.In + t.Out + t.CacheRead + t.CacheWrite }
 
 // modelTokens is one model's share of a run. A single run routinely spans
 // models — a cheap one for the small stuff — so "which model is cheapest per
@@ -181,6 +196,86 @@ type issueRecord struct {
 	PR      int    `json:"pr"`
 	Outcome string `json:"outcome"`
 	Tag     string `json:"tag"`
+
+	// What GitHub knew about the PR when the issue ended, folded in at
+	// terminal state. Absent when there was no PR, when -metrics is off, or
+	// when the lookup failed: the outcome is recorded either way, since
+	// dropping a record over a failed enrichment would lose exactly the
+	// failures this dataset exists to keep.
+	Additions    int    `json:"additions,omitempty"`
+	Deletions    int    `json:"deletions,omitempty"`
+	ChangedFiles int    `json:"changed_files,omitempty"`
+	Reviews      int    `json:"reviews,omitempty"`
+	PROpened     string `json:"pr_opened,omitempty"`
+	PRMerged     string `json:"pr_merged,omitempty"`
+}
+
+// prFacts is what GitHub knows about a PR that the event stream cannot: how
+// large the change turned out to be, how much review it drew, and the two
+// authoritative timestamps for how long it sat open. Reviews are counted,
+// never quoted — the same rule the rest of these records keep.
+type prFacts struct {
+	Additions    int
+	Deletions    int
+	ChangedFiles int
+	Reviews      int
+	Opened       string
+	Merged       string
+}
+
+// issueTally is what one process saw while working one issue: the numbers
+// -post-summary reports. It is not state — nothing reads it back once the
+// process ends, and a supervisor restarted mid-issue simply starts a fresh
+// one. That is why the comment it feeds says it covers this drain, rather
+// than claiming to cover the issue's whole history.
+type issueTally struct {
+	runs         int
+	questions    int
+	approximated int // runs whose numbers came from the streamed tally
+	costUSD      float64
+	tokens       tokenCounts
+	wallMS       int64
+}
+
+func (t *issueTally) add(rec runRecord) {
+	t.runs++
+	if rec.Outcome == outcomeQuestions {
+		t.questions++
+	}
+	if rec.UsageSource == usageObserved {
+		t.approximated++
+	}
+	t.costUSD += rec.CostUSD
+	t.tokens.addCounts(rec.Tokens)
+	t.wallMS += rec.WallMS
+}
+
+// summaryComment is the body -post-summary posts: one line of numbers for the
+// work behind a merged PR, and a footnote saying where they came from. Numbers
+// only, like every record — but this is the one line of them anybody other
+// than the operator ever sees, so it says what it covers and what it does not.
+func summaryComment(t issueTally) string {
+	tool := pluginName
+	if v := drainVersion(); v != "" {
+		tool += " " + v
+	}
+	// A run that crashed, stalled or was interrupted never emitted a result
+	// event: its tokens are the tally seen streaming past, and its cost is
+	// zero because pricing belongs to the CLI and this binary never guesses at
+	// it. Saying so matters more here than in a local report — this line is
+	// read by people who did not watch the drain, and an unqualified $0.00
+	// reads as a PR that was free.
+	caveat := ""
+	if t.approximated > 0 {
+		caveat = fmt.Sprintf(" %d of them never reported a cost (crash, stall or interrupt), "+
+			"so tokens and dollars are undercounts.", t.approximated)
+	}
+	return fmt.Sprintf("**%s** — %s, %s, %s tokens, %s, %s of run time.\n\n"+
+		"<sub>Recorded by %s, covering the runs this drain supervised.%s "+
+		"Dollars are the Claude CLI's API-equivalent pricing.</sub>",
+		pluginName, plural(t.runs, "run"), plural(t.questions, "question round"),
+		count(t.tokens.total()), usd(t.costUSD),
+		dur(time.Duration(t.wallMS)*time.Millisecond), tool, caveat)
 }
 
 // newRunRecord folds one run's report together with the supervisor's context.
@@ -349,11 +444,17 @@ func defaultMetricsDir() (string, error) {
 
 func (r *recorder) enabled() bool { return r != nil && r.dir != "" }
 
-func (r *recorder) recordRun(cfg config, rc runContext, rep runReport) {
-	r.append(cfg.repo, newRunRecord(cfg, rc, rep))
+// recordRun returns the record it wrote, so a caller can tally the same
+// numbers it recorded. The record is built whether or not anything is written:
+// -post-summary works with -metrics off, which is the escape hatch for an
+// operator who wants no local files at all.
+func (r *recorder) recordRun(cfg config, rc runContext, rep runReport) runRecord {
+	rec := newRunRecord(cfg, rc, rep)
+	r.append(cfg.repo, rec)
+	return rec
 }
 
-func (r *recorder) recordIssue(cfg config, issue, pr int, outcome string) {
+func (r *recorder) recordIssue(cfg config, issue, pr int, outcome string, facts prFacts) {
 	r.append(cfg.repo, issueRecord{
 		V:       recordVersion,
 		Kind:    "issue",
@@ -363,6 +464,13 @@ func (r *recorder) recordIssue(cfg config, issue, pr int, outcome string) {
 		PR:      pr,
 		Outcome: outcome,
 		Tag:     cfg.tag,
+
+		Additions:    facts.Additions,
+		Deletions:    facts.Deletions,
+		ChangedFiles: facts.ChangedFiles,
+		Reviews:      facts.Reviews,
+		PROpened:     facts.Opened,
+		PRMerged:     facts.Merged,
 	})
 }
 

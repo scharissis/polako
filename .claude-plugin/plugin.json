@@ -1,6 +1,6 @@
 {
   "name": "backlog-drain",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Drain a GitHub issue backlog one issue at a time: /implement-issue takes a single issue from plan to PR, and the backlog-drain binary supervises the whole queue unattended.",
   "author": {
     "name": "Stefano Charissis"

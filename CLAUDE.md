@@ -23,7 +23,10 @@ in the PR body rather than doing it quietly.
   directory mid-drain changes no behavior. A read from those files anywhere
   outside `stats` would turn telemetry back into state. Records hold numbers,
   identifiers and operator-chosen labels only — never issue, comment or PR
-  text — and nothing is ever sent off the machine.
+  text. Nothing goes off the machine except by explicit request: `-post-summary`,
+  default off, comments those same numbers on the operator's own merged PR. That
+  one flag is the whole outward path, and widening it — a second destination, a
+  default-on, anything carrying text — is the change to argue for out loud.
 - **Restart safety.** If a PR already exists for an issue's branch, never re-run
   the skill for that issue — go straight to waiting on the PR.
 - **`issue-N` branch naming is a contract.** The supervisor finds a PR by its

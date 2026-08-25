@@ -574,3 +574,60 @@ func TestStatsRejectsAFileAsTheMetricsDirectory(t *testing.T) {
 		t.Errorf("error = %v, want it to name the mistake and the fix", err)
 	}
 }
+
+// Enriched terminal records: what GitHub said each PR turned out to be. The
+// run records deliberately imply a different open-to-merge span, so the report
+// proves it takes GitHub's timestamps over its own inference.
+const fixtureEnriched = `{"v":1,"kind":"run","ts":"2026-08-20T12:00:00Z","ended":"2026-08-20T13:00:00Z","repo":"r/r","issue":20,"pr":40,"reason":"implement","status":"ok","outcome":"opened_pr","turns":10,"wall_ms":3600000,"cost_usd":2.00,"usage_source":"result","tokens":{"in":100,"out":1000},"model":"claude-opus-5"}
+{"v":1,"kind":"issue","ts":"2026-08-20T15:00:00Z","repo":"r/r","issue":20,"pr":40,"outcome":"merged","additions":412,"deletions":38,"changed_files":7,"reviews":2,"pr_opened":"2026-08-20T10:00:00Z","pr_merged":"2026-08-20T14:30:00Z"}
+{"v":1,"kind":"run","ts":"2026-08-21T08:00:00Z","ended":"2026-08-21T08:30:00Z","repo":"r/r","issue":21,"pr":41,"reason":"implement","status":"ok","outcome":"opened_pr","turns":8,"wall_ms":1800000,"cost_usd":1.00,"usage_source":"result","tokens":{"in":100,"out":900},"model":"claude-opus-5"}
+{"v":1,"kind":"issue","ts":"2026-08-21T12:00:00Z","repo":"r/r","issue":21,"pr":41,"outcome":"merged","additions":200,"deletions":20,"changed_files":3,"pr_opened":"2026-08-21T09:00:00Z","pr_merged":"2026-08-21T10:30:00Z"}
+`
+
+func enrichedDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "r--r.jsonl"), []byte(fixtureEnriched), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	return dir
+}
+
+func TestStatsReportsWhatTheMergedWorkChanged(t *testing.T) {
+	out := stats(t, "-metrics", enrichedDir(t))
+	if !hasLine(out, "change per issue +306 -29 across 5 files, 1 review (medians over 2 issues with PR data)") {
+		t.Errorf("no change line built from the enrichment:\n%s", out)
+	}
+	// 4h30m and 1h30m, from GitHub's timestamps — not the 2h and 3h30m the
+	// run records and terminal timestamps would have implied.
+	if !hasLine(out, "pr open to merge 2 spans — 3h median, 4h30m max") {
+		t.Errorf("open-to-merge spans are not GitHub's:\n%s", out)
+	}
+}
+
+// Every record written before the enrichment existed still reads, and reports
+// exactly what it did before: the line simply does not appear.
+func TestStatsOmitsTheChangeLineWithoutEnrichment(t *testing.T) {
+	out := stats(t, "-metrics", fixtureDir(t))
+	if strings.Contains(out, "change per issue") {
+		t.Errorf("unenriched records produced a change line:\n%s", out)
+	}
+}
+
+func TestMergeSpanPrefersGitHubsTimestamps(t *testing.T) {
+	merged := issueRecord{TS: "2026-08-20T15:00:00Z", PR: 34, Outcome: issueMerged,
+		PROpened: "2026-08-20T09:00:00Z", PRMerged: "2026-08-20T14:00:00Z"}
+	is := &issueStats{terminal: &merged, runs: []runRecord{
+		{TS: "2026-08-20T12:00:00Z", Ended: "2026-08-20T13:00:00Z", Outcome: outcomeOpenedPR, PR: 34},
+	}}
+	if got, ok := mergeSpan(is); !ok || got != 5*time.Hour {
+		t.Errorf("mergeSpan = %s (%v), want 5h from GitHub, not the 2h the records imply", got, ok)
+	}
+	// A record enriched with an opening but no merge — the supervisor recorded
+	// the merge before GitHub had stamped it — falls back rather than guessing.
+	half := merged
+	half.PRMerged = ""
+	if got, ok := mergeSpan(&issueStats{terminal: &half, runs: is.runs}); !ok || got != 2*time.Hour {
+		t.Errorf("mergeSpan = %s (%v), want the 2h the run records imply", got, ok)
+	}
+}
