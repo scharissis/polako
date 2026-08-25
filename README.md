@@ -518,8 +518,11 @@ and in the exit summary, the same as any other park:
 `-max-session-cost` is checked between issues rather than inside one, because
 ending a drain cleanly means declining to take on more work rather than killing
 a run part-way and having to park a healthy issue over it. So one issue can
-carry the total past the budget — by up to its own `-max-cost`, if you set
-both. Nothing is parked when it trips: the drain logs what it spent, prints its
+carry the total past the budget, by whatever that issue costs. `-max-cost` does
+not bound the overrun to itself, either: it gates the *next* run rather than the
+one in flight, so an issue can end at its `-max-cost` plus the whole of the run
+that carried it over. Size the budget with a run's worth of headroom under it.
+Nothing is parked when it trips: the drain logs what it spent, prints its
 summary and exits 0, and since all state is on GitHub, raising the budget and
 starting it again picks up exactly where it stopped.
 

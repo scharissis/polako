@@ -561,7 +561,9 @@ func drain(ctx context.Context, cfg config) error {
 		// Read between issues and never inside one: ending a drain cleanly means
 		// declining to take on more work, not killing a run part-way through an
 		// issue that would then have to be parked. One issue can therefore carry
-		// the total past the budget — by its own -max-cost, where both are set.
+		// the total past the budget by whatever that issue costs — and -max-cost
+		// does not bound that to itself, since it gates the next run rather than
+		// the one in flight.
 		if spent := sessionSpend(results, states); cfg.maxSessionCost > 0 && spent >= cfg.maxSessionCost {
 			log.Printf("this drain has spent %s of its -max-session-cost of %s — stopping here; "+
 				"everything is on GitHub, so raise the budget and start it again to carry on",
@@ -1238,6 +1240,16 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					// session by ID, keeping its research context. If no
 					// session was ever created, retry as a fresh run instead.
 					record(0, outcomeNothing)
+					// The run that just died is what carried the issue over, so
+					// the resume this branch is about to announce would be
+					// refused by the gate at the top of the loop anyway. Say so
+					// here: an unattended log that promises a resume it never
+					// makes, after sleeping -retry-wait for it, is a worse
+					// diagnosis than the park it is really doing.
+					if reason := overBudget(cfg, *tally); reason != "" {
+						terminal(0, issueNeedsHuman)
+						return park("%s", reason)
+					}
 					attempt++
 					mode := "restarting fresh"
 					if st.session != "" {

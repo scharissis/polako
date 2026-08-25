@@ -1219,6 +1219,12 @@ func TestDrainParksAnIssueOverItsCostCap(t *testing.T) {
 	if got := strings.Count(out, "session started"); got != 1 {
 		t.Errorf("%d runs dispatched, want 1 — the cap must be read before the resume", got)
 	}
+	// And the park has to be reported instead of the resume, not after it: an
+	// unattended log that announces a resume, sleeps -retry-wait for it and
+	// then parks anyway is a worse diagnosis than the park on its own.
+	if strings.Contains(out, "resuming session") || strings.Contains(out, "restarting fresh") {
+		t.Errorf("the log promises a resume the cap will refuse\ngot:\n%s", out)
+	}
 }
 
 // The gap -stall leaves: this run is not silent, it just never stops. The
