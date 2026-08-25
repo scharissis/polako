@@ -115,8 +115,11 @@ of failures, and diagnosing half of one wastes the run. And a run that finishes
 without moving the branch has said all it is going to: the same logs against the
 same commit reach the same place, so the issue parks for a human instead of
 going round again. Only conclusions a change to the branch could plausibly fix
-count as failures at all; `CANCELLED`, `ACTION_REQUIRED`, `NEUTRAL` and
-`SKIPPED` are a human's business and are left alone.
+count as failures at all — `NEUTRAL` and `SKIPPED` are green, and a check
+stopped on a person (`CANCELLED`, or a deployment gate at `ACTION_REQUIRED` or
+`WAITING`) is reported as `needs a human` rather than dispatched at. That last
+distinction matters twice over: a gated check is not a suite still running, so a
+real failure sitting beside one is still seen.
 
 **Refused credentials stop the drain immediately.** A resume cannot mint a new
 token, so retrying one spends `-retries` × several minutes reaching the

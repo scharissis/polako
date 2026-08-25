@@ -1842,13 +1842,26 @@ const (
 	checksPending = "pending"
 	checksPassing = "passing"
 	checksFailing = "failing"
+	checksHuman   = "needs a human"
 )
 
 // checkFailures are the conclusions that mean the branch itself is broken and a
-// run has something to fix. CANCELLED, ACTION_REQUIRED, NEUTRAL, SKIPPED and
-// STALE are deliberately absent: none of them is something a change to the
-// branch can repair, so dispatching at one burns an attempt on healthy code.
+// run has something to fix. NEUTRAL, SKIPPED and STALE are deliberately absent:
+// none of them is something a change to the branch can repair, so dispatching
+// at one burns an attempt on healthy code.
 var checkFailures = []string{"FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ERROR"}
+
+// checkStuck is where a check stops until a person moves it. A change to the
+// branch cannot repair one of these either, so none is dispatched at — but none
+// is green, and a required check sitting here is a PR that will never merge.
+// It gets a verdict of its own so the poll log says which kind of "not red" it
+// saw, rather than reporting "passing" at a build nobody can merge.
+var checkStuck = []string{"CANCELLED", "ACTION_REQUIRED"}
+
+// checkWaiting is the status a run gated on a deployment protection rule sits
+// at before it becomes the ACTION_REQUIRED conclusion beside it. It is in
+// flight in name only: nothing moves it but an approval.
+const checkWaiting = "WAITING"
 
 // checkNode is one entry of `gh pr view --json statusCheckRollup`. The array
 // mixes two GraphQL types: a CheckRun reports status plus conclusion and is
@@ -1865,15 +1878,23 @@ type checkNode struct {
 
 // classifyChecks reduces a rollup to one verdict and the names that earned it.
 // Pending outranks failing: a suite still running can only add to the list of
-// failures, and remediating half of one wastes the run.
+// failures, and remediating half of one wastes the run. A check stuck on a
+// person does not, because nothing it is waiting for will ever arrive on its
+// own — counting one as pending would hide a genuine failure beside it for as
+// long as nobody approves, which is the silent forever-wait a red build used
+// to be.
 func classifyChecks(nodes []checkNode) (verdict string, failing []string) {
-	pending := false
+	pending, stuck := false, false
 	for _, n := range nodes {
 		switch {
+		case n.Status == checkWaiting:
+			stuck = true
 		case n.Status != "" && n.Status != "COMPLETED", n.State == "PENDING", n.State == "EXPECTED":
 			pending = true
 		case slices.Contains(checkFailures, cmp.Or(n.Conclusion, n.State)):
 			failing = append(failing, cmp.Or(n.Name, n.Context))
+		case slices.Contains(checkStuck, n.Conclusion):
+			stuck = true
 		}
 	}
 	switch {
@@ -1881,6 +1902,8 @@ func classifyChecks(nodes []checkNode) (verdict string, failing []string) {
 		return checksPending, nil
 	case len(failing) > 0:
 		return checksFailing, failing
+	case stuck:
+		return checksHuman, nil
 	case len(nodes) == 0:
 		return checksNone, nil
 	}

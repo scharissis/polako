@@ -588,13 +588,26 @@ func TestClassifyChecks(t *testing.T) {
 		}, checksPending, nil},
 		{"a pending status context", []checkNode{ctxNode("PENDING", "ci/travis")}, checksPending, nil},
 		// Nothing a change to the branch can fix, so none of these is a failure
-		// worth spending an attempt on.
+		// worth spending an attempt on — but a cancelled or unapproved check
+		// still blocks the merge, so the verdict may not read "passing".
 		{"cancelled, skipped and awaiting a human", []checkNode{
 			run("COMPLETED", "CANCELLED", "test"),
 			run("COMPLETED", "SKIPPED", "deploy"),
 			run("COMPLETED", "NEUTRAL", "advisory"),
 			run("COMPLETED", "ACTION_REQUIRED", "approve"),
+		}, checksHuman, nil},
+		{"skipped and neutral alone are green", []checkNode{
+			run("COMPLETED", "SKIPPED", "deploy"),
+			run("COMPLETED", "NEUTRAL", "advisory"),
 		}, checksPassing, nil},
+		// A deployment gate never finishes on its own, so it must not be read as
+		// a suite still running: that would hide the real failure beside it for
+		// as long as nobody approves.
+		{"red behind a deployment gate", []checkNode{
+			run("COMPLETED", "FAILURE", "test"),
+			run("WAITING", "", "deploy"),
+		}, checksFailing, []string{"test"}},
+		{"only a deployment gate", []checkNode{run("WAITING", "", "deploy")}, checksHuman, nil},
 		{"the other ways a build breaks", []checkNode{
 			run("COMPLETED", "TIMED_OUT", "slow"),
 			run("COMPLETED", "STARTUP_FAILURE", "broken-yaml"),

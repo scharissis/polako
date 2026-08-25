@@ -47,9 +47,12 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   merge conflict already was. The supervisor reads the PR's check rollup each
   poll, and on a failure dispatches a run that reads the failing job logs, fixes
   the cause, re-runs the suite locally and pushes. It waits while any check is
-  still running, and treats only conclusions a code change can fix as failures
-  — `CANCELLED`, `ACTION_REQUIRED`, `NEUTRAL` and `SKIPPED` are left for a
-  human. One run per observed failure, bounded by `-retries`; a run that
+  still running, and treats only conclusions a code change can fix as failures:
+  `NEUTRAL` and `SKIPPED` are green, and a check stopped on a person
+  (`CANCELLED`, or a deployment gate at `ACTION_REQUIRED`/`WAITING`) is reported
+  as `needs a human` — not dispatched at, and not counted as still running,
+  which would hide a real failure beside it. One run per observed failure,
+  bounded by `-retries`; a run that
   finishes without moving the branch parks the issue rather than looping. Before
   this, a failing check was invisible: the drain logged "still open" every poll,
   forever. These runs record `checks` as their reason, so `backlog-drain stats`
