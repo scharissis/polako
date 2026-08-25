@@ -64,6 +64,13 @@ them, none of the above applies: leave the label where it is, don't post the
 questions a second time, and stop. Removing the label would tell the
 supervisor to carry on without an answer.
 
+The flag is not particular to planning. Any time you stop to ask something on
+the issue thread — mid-implementation, at the review gate, anywhere past this
+phase — post the question and raise the label the same way before stopping. An
+unflagged question is one nobody waits for: the supervisor reads the run as
+having produced nothing and parks the issue, leaving your question sitting
+unanswered on the thread.
+
 ## Phase 3 — Implement (only when PLAN.md exists and isn't blocked)
 1. Implement the plan, committing in logical increments following the
    repo's commit conventions. Run the test suite, typecheck, and lint.

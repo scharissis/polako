@@ -65,7 +65,9 @@ those as a question left the drain waiting on a reply nobody knew was expected.
 The label is also the only sign on GitHub that an issue is waiting on *you*;
 reply on the thread and the next check picks it up. `backlog-drain` declares the
 label on startup if the repository does not have it yet, and the run that folds
-your answer in is what removes it.
+your answer in is what removes it — or the park, if the issue is handed back
+before anyone gets that far, since a parked issue waits on a decision rather
+than on a reply.
 
 **Refused credentials stop the drain immediately.** A resume cannot mint a new
 token, so retrying one spends `-retries` × several minutes reaching the
@@ -580,8 +582,13 @@ The skill does need one label command, to raise `awaiting-answer` when it stops
 to ask something. Rather than granting `gh issue edit` at large, the supervisor
 mints that grant per run and pins it to the issue number that run was
 dispatched for — `Bash(gh issue edit 42 --add-label:*)` and its `--remove-label`
-twin. The furthest attacker-supplied issue text can then reach is the issue the
-run is already working on, where the worst it can do is park or unpark itself.
+twin. Ordinarily the furthest attacker-supplied issue text can then reach is the
+issue the run is already working on, where the worst it can do is park or unpark
+itself. Like every entry in the list this is a prefix, not a signature: `gh issue
+edit` takes several numbers, and one appended *after* the flag still starts with
+the granted prefix. So read it as narrowing the blast radius from every issue in
+the repository to something an audit of the run's own commands would catch —
+which is what the rest of this section says about the allowlist generally.
 
 What the allowlist does *not* close, and cannot: `Bash(git:*)` includes
 `git push`, which is what opening a PR requires; the build commands run

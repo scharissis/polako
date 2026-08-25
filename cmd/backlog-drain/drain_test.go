@@ -364,6 +364,53 @@ func TestDrainWaitsForAnAnswerThenFoldsItIn(t *testing.T) {
 	}
 }
 
+// The flag is durable, so "it is up after the run" is not the same as "this run
+// raised it". A re-run dispatched to fold an answer in, dying before it can
+// clear the flag, leaves the asking run's flag standing — and waiting on that
+// one waits for the reply that already arrived, which is to say forever. The
+// crash has to be treated as a crash: resume it, and park when the resumes run
+// out, the same as any other run that dies with nothing to show.
+func TestDrainDoesNotWaitTwiceOnOneQuestion(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "askscrash", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		Labels: []string{awaitingAnswerLabel},
+	})
+	cfg.retries = 1
+
+	// Bounded, because the regression this guards is an unbounded wait: without
+	// the fix the drain never returns, and a hung suite says less than a failure.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if got := st.Issues["1"].Labels; !slices.Contains(got, needsHumanLabel) {
+		t.Errorf("issue 1 labels = %v, want it parked once the resumes ran out", got)
+	}
+	if got := st.Issues["1"].Labels; slices.Contains(got, awaitingAnswerLabel) {
+		t.Errorf("issue 1 labels = %v, want the park to clear %s — what it waits on "+
+			"now is a decision, not a reply", got, awaitingAnswerLabel)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"new activity on #1 — re-running to fold the answers in",
+		"resuming session sess-xyz",
+		"claude crashed and 1 resume attempts failed",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
+	}
+	// One question, one wait. A second would be the bug.
+	if got := strings.Count(out, "waiting for a reply on the thread"); got != 1 {
+		t.Errorf("waited on the flag %d times, want exactly 1\ngot:\n%s", got, out)
+	}
+}
+
 // The bug this label replaced: "the skill asked a question" was inferred from
 // the comment count rising across a run, so CI, a bot or a passer-by commenting
 // mid-run left the drain waiting forever on a reply nobody knew was expected.

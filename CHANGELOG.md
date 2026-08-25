@@ -21,7 +21,10 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   blocked state is visible on GitHub rather than only in the terminal. The label
   is declared at startup if the repository does not have it, so nothing needs
   setting up first; a run may add and remove labels only on the issue it was
-  dispatched for.
+  dispatched for. The label is read before the run as well as after, so a run
+  that dies on its way to folding your answer in is resumed rather than waited
+  on a second time for a reply you already gave; parking an issue clears the
+  label too, since what it waits on then is a decision, not a reply.
 
 ### Added
 

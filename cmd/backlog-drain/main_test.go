@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -131,7 +132,7 @@ func fakeClaude(mode string) int {
 		emit(`{"type":"system","subtype":"init","session_id":"sess-hang","model":"claude-opus-5"}`)
 		time.Sleep(30 * time.Second) // the stall watchdog is expected to kill this
 		return 0
-	case "asks", "noisy":
+	case "asks", "noisy", "askscrash":
 		// A run that leaves something behind on the thread. Both then stream
 		// like a healthy one, because the supervisor's whole reading of what
 		// happened comes from GitHub afterwards, not from the events.
@@ -144,6 +145,10 @@ func fakeClaude(mode string) int {
 	fmt.Fprintf(os.Stderr, "unknown fake claude mode %q\n", mode)
 	return 2
 }
+
+// errFakeCrash is a simulated death, not a broken harness: the run exits
+// nonzero having changed nothing on the pretend repository.
+var errFakeCrash = errors.New("died before it could clear the flag")
 
 // fakeSkillEffect is what a run leaves on the pretend repository, written
 // through the same fake gh the supervisor talks to — so a label the repository
@@ -174,6 +179,10 @@ func fakeSkillEffect(mode string) error {
 		// CI, a bot, a linked-PR notice: a comment the run did not write, and
 		// one nobody is waiting for an answer to.
 		err = call("comment", n, "--body", "Build #1234 passed.")
+	case slices.Contains(is.Labels, awaitingAnswerLabel) && mode == "askscrash":
+		// Dispatched to fold the answer in and dies on the way, leaving the
+		// asking run's flag standing.
+		return errFakeCrash
 	case slices.Contains(is.Labels, awaitingAnswerLabel):
 		// The question has been answered, so this run folds it in and ships.
 		// `gh pr create` is not in the fake's repertoire, so the PR is planted
@@ -197,17 +206,21 @@ func fakeSkillEffect(mode string) error {
 }
 
 // promptIssue is the issue number this invocation was dispatched for, taken
-// from the prompt the supervisor built.
+// from the prompt the supervisor built. The last number rather than the last
+// word, because a resume is dispatched as a sentence ("Continue the
+// /implement-issue 1 workflow…") rather than as "/implement-issue 1".
 func promptIssue() string {
 	i := slices.Index(os.Args, "-p")
 	if i < 0 || i+1 >= len(os.Args) {
 		return ""
 	}
-	fields := strings.Fields(os.Args[i+1])
-	if len(fields) == 0 {
-		return ""
+	n := ""
+	for _, f := range strings.Fields(os.Args[i+1]) {
+		if _, err := strconv.Atoi(f); err == nil {
+			n = f
+		}
 	}
-	return fields[len(fields)-1]
+	return n
 }
 
 // captureLog redirects the standard logger for one test and returns the buffer.

@@ -461,6 +461,12 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string) {
 		log.Printf("could not label issue #%d %q (%v) — the next drain will pick it up again "+
 			"unless you label it yourself or close it", issue, needsHumanLabel, err)
 	}
+	// Parking supersedes any question still flagged on the issue: what it now
+	// waits on is a decision, not a reply. Left up, the flag would also outlive
+	// the park — the drain that follows an operator removing needs-human would
+	// read it as a question of its own and sit waiting for a comment nobody
+	// owes it. Best-effort and silent: the issue is already parked either way.
+	_, _ = gh(ctx, cfg, "issue", "edit", n, "--remove-label", awaitingAnswerLabel)
 	body := fmt.Sprintf("**backlog-drain parked this issue.** %s\n\n"+
 		"Nothing will run on it again until the `%s` label is removed.", reason, needsHumanLabel)
 	if _, cerr := gh(ctx, cfg, "issue", "comment", n, "--body", body); cerr != nil {
@@ -705,6 +711,15 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 		}
 
 		if pr == nil {
+			// The label is durable, so "it is up after the run" does not by
+			// itself mean this run raised it. Read it before the run too, and
+			// the two readings tell a question apart from an earlier one's
+			// flag that this run died before clearing.
+			wasBlocked, err := issueHasLabel(ctx, cfg, issue, awaitingAnswerLabel)
+			if err != nil {
+				return err
+			}
+
 			resumeTarget, reason := "", reasonImplement
 			switch {
 			case attempt > 0:
@@ -778,8 +793,15 @@ func processIssue(ctx context.Context, cfg config, issue int) error {
 					record(0, outcomeUnknown)
 					return err
 				}
+				// A flag this run raised means it asked something, crash or
+				// not. A flag that was already up and is still up after a
+				// crash proves nothing: the run is far likelier to have died
+				// before clearing it, and the reply that flag waits for is the
+				// one that dispatched this very run — so waiting on it waits
+				// forever, while a resume is exactly what unsticks it.
+				asked := blocked && (!wasBlocked || runErr == nil)
 				switch {
-				case blocked:
+				case asked:
 					// Questions were posted and flagged (even if the run then
 					// crashed): wait for a human reply, then fold it in with a
 					// fresh run. The baseline for "a reply arrived" is read
@@ -885,9 +907,12 @@ func runClaude(ctx context.Context, cfg config, issue int, resumeID string) (run
 // A single `Bash(gh issue edit:*)` in defaultTools would cover both and is
 // exactly what that list refuses to grant: it would let attacker-supplied issue
 // text label some *other* issue, which on a -label-gated queue is enough to
-// queue work no maintainer triaged. Pinned to one number, the furthest it
-// reaches is the issue the run is already working on — where the worst it can
-// do is park or unpark itself, neither of which is an escalation.
+// queue work no maintainer triaged. Pinned to one number, the ordinary reach is
+// the issue the run is already working on — where the worst it can do is park
+// or unpark itself, neither of which is an escalation. It is a prefix and not a
+// signature, so a second issue number appended after the flag would still match
+// it; this narrows the blast radius rather than sealing it, the same caveat the
+// README puts on the allowlist as a whole.
 //
 // The number comes first because that is how the skill is told to spell the
 // command and how anyone would write it by hand; a prefix that did not match
