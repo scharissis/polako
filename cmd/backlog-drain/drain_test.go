@@ -79,8 +79,11 @@ type fakePR struct {
 	MergeOnRead int `json:"merge_on_read"`
 }
 
-// fakeReview is one entry of `pr view --json latestReviews`.
+// fakeReview is one entry of `pr view --json reviews`. Author is optional:
+// the tests here have a single reviewer, and the reduction to one verdict per
+// reviewer is exercised by name in main_test.go.
 type fakeReview struct {
+	Author      string `json:"author"`
 	State       string `json:"state"`
 	SubmittedAt string `json:"submitted_at"`
 }
@@ -248,7 +251,7 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			// merge, or every read would start it over.
 			return fmt.Sprintf(
 					`{"state":%q,"mergeable":%q,"headRefOid":%q,"statusCheckRollup":%s,`+
-						`"reviewDecision":"","latestReviews":%s,"commits":%s}`,
+						`"reviewDecision":"","reviews":%s,"commits":%s}`,
 					pr.State, pr.Mergeable, pr.Head, rollupJSON(pr.Checks),
 					reviewsJSON(pr.Reviews), commitsJSON(pr.CommittedAt)),
 				merging, 0
@@ -278,14 +281,15 @@ func rollupJSON(checks []string) string {
 	return "[" + strings.Join(nodes, ",") + "]"
 }
 
-// reviewsJSON renders the latestReviews half of `pr view --json`. The
+// reviewsJSON renders the reviews half of `pr view --json`, oldest first. The
 // reviewDecision beside it is left empty, which is what GitHub reports on a
 // repository whose branch protection requires no review — the common case, and
 // the one where the reviews themselves have to carry the verdict.
 func reviewsJSON(reviews []fakeReview) string {
 	nodes := make([]string, 0, len(reviews))
 	for _, r := range reviews {
-		nodes = append(nodes, fmt.Sprintf(`{"state":%q,"submittedAt":%q}`, r.State, r.SubmittedAt))
+		nodes = append(nodes, fmt.Sprintf(`{"author":{"login":%q},"state":%q,"submittedAt":%q}`,
+			r.Author, r.State, r.SubmittedAt))
 	}
 	return "[" + strings.Join(nodes, ",") + "]"
 }

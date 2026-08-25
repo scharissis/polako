@@ -563,17 +563,19 @@ func TestPRReviewToolsStayPinnedToOnePR(t *testing.T) {
 // as the one that dispatched the run.
 func TestReviewOutstandingReadsOnePRView(t *testing.T) {
 	const (
-		old   = "2026-08-19T10:00:00Z"
-		newer = "2026-08-20T10:00:00Z"
+		old    = "2026-08-19T10:00:00Z"
+		newer  = "2026-08-20T10:00:00Z"
+		newest = "2026-08-21T10:00:00Z"
 	)
-	// payload renders the review half of `pr view` the way the real thing does.
+	// payload renders the review half of `pr view` the way the real thing does:
+	// every review on the PR, oldest first.
 	payload := func(decision, reviews, commits string) []byte {
 		return []byte(fmt.Sprintf(
 			`{"state":"OPEN","mergeable":"MERGEABLE","headRefOid":"abc","statusCheckRollup":[],`+
-				`"reviewDecision":%q,"latestReviews":[%s],"commits":[%s]}`, decision, reviews, commits))
+				`"reviewDecision":%q,"reviews":[%s],"commits":[%s]}`, decision, reviews, commits))
 	}
-	review := func(state, at string) string {
-		return fmt.Sprintf(`{"state":%q,"submittedAt":%q}`, state, at)
+	review := func(author, state, at string) string {
+		return fmt.Sprintf(`{"author":{"login":%q},"state":%q,"submittedAt":%q}`, author, state, at)
 	}
 	commit := func(at string) string { return fmt.Sprintf(`{"committedDate":%q}`, at) }
 
@@ -587,23 +589,39 @@ func TestReviewOutstandingReadsOnePRView(t *testing.T) {
 		// itself produces: no branch protection, so reviewDecision is empty and
 		// the review has to carry the verdict.
 		name: "changes requested after the last commit",
-		raw:  payload("", review(reviewChangesRequested, newer), commit(old)),
+		raw:  payload("", review("ann", reviewChangesRequested, newer), commit(old)),
 		want: true,
 	}, {
 		name: "the branch moved after the review",
-		raw:  payload("", review(reviewChangesRequested, old), commit(newer)),
+		raw:  payload("", review("ann", reviewChangesRequested, old), commit(newer)),
 		want: false,
 		note: ", changes requested and answered — waiting on a re-review",
 	}, {
-		// latestReviews holds only each reviewer's newest verdict, so a reviewer
-		// who asked for changes and then approved is no longer in the way.
+		// Only each reviewer's newest verdict stands, so a reviewer who asked
+		// for changes and then approved is no longer in the way.
 		name: "the reviewer came back and approved",
-		raw:  payload("APPROVED", review("APPROVED", newer), commit(old)),
+		raw: payload("APPROVED", review("ann", reviewChangesRequested, newer)+","+
+			review("ann", reviewApproved, newest), commit(old)),
+		want: false,
+	}, {
+		// The bug the `reviews` field exists to avoid: an ordinary comment is
+		// not a verdict, so it cannot clear the request for changes under it.
+		// gh's `latestReviews` would report this reviewer as COMMENTED and the
+		// supervisor would go back to waiting for a merge nobody will perform.
+		name: "a comment left after the request for changes",
+		raw: payload("", review("ann", reviewChangesRequested, newer)+","+
+			review("ann", "COMMENTED", newest), commit(old)),
+		want: true,
+	}, {
+		// A dismissal is a verdict, and it is the one that stands.
+		name: "the request for changes was dismissed",
+		raw: payload("", review("ann", reviewChangesRequested, newer)+","+
+			review("ann", reviewDismissed, newest), commit(old)),
 		want: false,
 	}, {
 		name: "one approval does not cancel another reviewer's changes",
-		raw: payload("", review("APPROVED", newer)+","+review(reviewChangesRequested, newer),
-			commit(old)),
+		raw: payload("", review("ann", reviewApproved, newer)+","+
+			review("bob", reviewChangesRequested, newer), commit(old)),
 		want: true,
 	}, {
 		// A repository that does require reviews says so here even when its
@@ -622,14 +640,14 @@ func TestReviewOutstandingReadsOnePRView(t *testing.T) {
 		// An unreadable date must not be read as "reviewed at the epoch", which
 		// would make every branch look newer than every review.
 		name: "an unparseable review date",
-		raw:  payload("", review(reviewChangesRequested, "not a date"), commit(old)),
+		raw:  payload("", review("ann", reviewChangesRequested, "not a date"), commit(old)),
 		want: false,
 		note: ", changes requested",
 	}, {
 		// The mirror image: an unreadable commit date must not let a stale review
 		// look outstanding forever, but it cannot show the branch moved either.
 		name: "an unparseable commit date",
-		raw:  payload("", review(reviewChangesRequested, newer), commit("not a date")),
+		raw:  payload("", review("ann", reviewChangesRequested, newer), commit("not a date")),
 		want: true,
 	}}
 

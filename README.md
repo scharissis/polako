@@ -692,10 +692,14 @@ review's substance is in the comments left on individual lines of the diff, and
 gh has no `pr` subcommand that prints them, so that run alone is granted
 `Bash(gh api repos/you/project/pulls/42/comments:*)` — one PR of one repository,
 where a blanket `Bash(gh api:*)` would be the entire GitHub API, secrets and
-repository deletion included. Being a prefix rather than a signature, the honest
-worst case is writing or deleting a comment on that same PR. Granting nothing
-would not be safer: an unattended run that trips a permission prompt hangs in
-silence until the stall watchdog kills it.
+repository deletion included. Ordinarily the furthest it reaches is the comment
+thread of that one PR. The same caveat as above applies, and harder: this is a
+prefix, not a signature, so anything appended after `comments` still matches —
+a `--method DELETE`, or a `../..` the API host resolves back out of the path.
+Read it, like the label grant, as narrowing the blast radius to something an
+audit of the run's own commands would catch, not as a boundary. Granting nothing
+would not be safer either: an unattended run that trips a permission prompt hangs
+in silence until the stall watchdog kills it.
 
 What the allowlist does *not* close, and cannot: `Bash(git:*)` includes
 `git push`, which is what opening a PR requires; the build commands run

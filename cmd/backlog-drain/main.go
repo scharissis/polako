@@ -1984,11 +1984,12 @@ func remediateReview(ctx context.Context, cfg config, issue, prNumber int, tally
 // standing list would hand attacker-supplied text the whole GitHub API, secrets
 // and repository deletion included. Pinned this far down, the ordinary reach is
 // the comment thread of the PR the run was dispatched to fix. It is a prefix
-// and not a signature, so a `--method` appended after the path would still
-// match — which bounds the worst case at writing or deleting a comment on that
-// same PR, not at reaching anything else. Granting nothing at all is not the
-// safer option: an unattended run that trips a permission prompt hangs in
-// silence until the stall watchdog kills it.
+// and not a signature, though, so anything appended after the path still
+// matches — a `--method DELETE`, or a `../..` the API host resolves back out of
+// the path. Like issueLabelTools this narrows the blast radius to something an
+// audit of the run's own commands would catch; it does not seal it. Granting
+// nothing at all is not the safer option either: an unattended run that trips a
+// permission prompt hangs in silence until the stall watchdog kills it.
 func prReviewTools(repo string, prNumber int) string {
 	return fmt.Sprintf("Bash(gh api repos/%s/pulls/%d/comments:*)", repo, prNumber)
 }
@@ -2070,9 +2071,51 @@ func classifyChecks(nodes []checkNode) (verdict string, failing []string) {
 	return checksPassing, nil
 }
 
-// reviewChangesRequested is the verdict, spelled the same way by a single
-// review's state and by the whole PR's reviewDecision.
-const reviewChangesRequested = "CHANGES_REQUESTED"
+// The review states that carry a verdict, spelled the same way by a single
+// review's state and — for CHANGES_REQUESTED — by the whole PR's
+// reviewDecision. A review in any other state (COMMENTED, PENDING) says
+// nothing about whether its author is still in the way, which is what
+// latestVerdicts turns on.
+const (
+	reviewChangesRequested = "CHANGES_REQUESTED"
+	reviewApproved         = "APPROVED"
+	reviewDismissed        = "DISMISSED"
+)
+
+// prReview is one submitted review, reduced to what decides whether its author
+// is still in the way.
+type prReview struct {
+	Author struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	State       string `json:"state"`
+	SubmittedAt string `json:"submittedAt"`
+}
+
+// latestVerdicts reduces every review on a PR to the standing verdict of each
+// reviewer: their most recent APPROVED, CHANGES_REQUESTED or DISMISSED.
+// Anything else — an ordinary comment, an unsubmitted draft — is skipped
+// rather than counted, because GitHub does not let a comment clear a request
+// for changes.
+//
+// That skip is the whole reason this reads `reviews` rather than gh's
+// `latestReviews`, which is the latest review per user including comment-only
+// ones: a reviewer who asks for changes and then leaves one more comment drops
+// out of `latestReviews` while still blocking the PR, and a supervisor reading
+// it would go back to waiting for a merge nobody was going to perform.
+//
+// Ordering is GitHub's own — reviews come back oldest first — so a later entry
+// simply replaces an earlier one from the same reviewer.
+func latestVerdicts(reviews []prReview) map[string]prReview {
+	latest := make(map[string]prReview, len(reviews))
+	for _, r := range reviews {
+		switch r.State {
+		case reviewApproved, reviewChangesRequested, reviewDismissed:
+			latest[r.Author.Login] = r
+		}
+	}
+	return latest
+}
 
 // prView is what one poll of a PR tells the supervisor.
 type prView struct {
@@ -2100,9 +2143,9 @@ type prView struct {
 // instead, and it is evidence any drain can read — including one restarted
 // after the run that pushed it, which is why this is not a note kept in memory.
 //
-// Dates rather than the commit a review names: latestReviews carries a
-// commit.oid, but gh reports it empty, so the only thing tying a review to a
-// point in the branch's history is when it was submitted.
+// Dates rather than the commit a review names: a review carries a commit.oid,
+// but gh reports it empty, so the only thing tying a review to a point in the
+// branch's history is when it was submitted.
 //
 // A rebase counts as an answer, since it rewrites the commits with fresh
 // committer dates. That is the right way round: the review is then against a
@@ -2132,7 +2175,7 @@ func (p prView) reviewNote() string {
 
 func prStatus(ctx context.Context, cfg config, prNumber int) (prView, error) {
 	out, err := gh(ctx, cfg, "pr", "view", strconv.Itoa(prNumber),
-		"--json", "state,mergeable,headRefOid,statusCheckRollup,reviewDecision,latestReviews,commits")
+		"--json", "state,mergeable,headRefOid,statusCheckRollup,reviewDecision,reviews,commits")
 	if err != nil {
 		return prView{}, err
 	}
@@ -2152,13 +2195,17 @@ func parsePRStatus(raw []byte) (prView, error) {
 		HeadRefOid     string      `json:"headRefOid"`
 		Rollup         []checkNode `json:"statusCheckRollup"`
 		ReviewDecision string      `json:"reviewDecision"`
-		// latestReviews is one entry per reviewer, carrying only their most
-		// recent verdict — so a reviewer who asked for changes and later
-		// approved is no longer in the way.
-		LatestReviews []struct {
-			State       string `json:"state"`
-			SubmittedAt string `json:"submittedAt"`
-		} `json:"latestReviews"`
+		// Every review on the PR, oldest first, which is what latestVerdicts
+		// reduces to one verdict per reviewer. Not gh's `latestReviews`: that
+		// is the latest review per user *including* comment-only ones, so a
+		// reviewer who asked for changes and then left an ordinary comment
+		// drops out of it while still blocking the PR.
+		Reviews []prReview `json:"reviews"`
+		// gh asks for the first 100 of each of these, oldest first. A PR
+		// carrying more reviews or more commits than that reads as one whose
+		// branch stopped moving, so its reviews look permanently outstanding
+		// and it parks after -retries runs. Nothing this drain opens comes
+		// close, and parking is the safe direction to be wrong in.
 		Commits []struct {
 			CommittedDate string `json:"committedDate"`
 		} `json:"commits"`
@@ -2176,7 +2223,7 @@ func parsePRStatus(raw []byte) (prView, error) {
 	// repository that does require reviews is honoured even if its individual
 	// verdicts have since been superseded.
 	pr.changesRequested = v.ReviewDecision == reviewChangesRequested
-	for _, r := range v.LatestReviews {
+	for _, r := range latestVerdicts(v.Reviews) {
 		if r.State != reviewChangesRequested {
 			continue
 		}
