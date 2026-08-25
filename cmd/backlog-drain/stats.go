@@ -593,7 +593,7 @@ func runPairs(ds dataset) [][2]string {
 	}
 	pairs := [][2]string{
 		{"total", fmt.Sprintf("%d — %s", len(ds.runs),
-			breakdown(statuses, []string{"ok", "error", "no-turns", "crash", "stalled", "interrupted", "no-skill"}))},
+			breakdown(statuses, []string{"ok", "error", "no-turns", "crash", "stalled", "interrupted", "no-skill", "auth"}))},
 		{"reasons", breakdown(reasons, []string{reasonImplement, reasonResume, reasonAnswers, reasonRemediate})},
 		{"outcomes", breakdown(outcomes, []string{outcomeOpenedPR, outcomeQuestions, outcomeNothing, outcomeUnknown})},
 		{"work", fmt.Sprintf("%s, %s", plural(turns, "turn"), plural(tools, "tool use"))},

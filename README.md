@@ -37,6 +37,14 @@ never re-runs Claude on that issue; it goes straight to waiting. (The one thing
 it writes locally is a line of numbers per run, which nothing reads back — see
 [Run data & cost tracking](#run-data--cost-tracking).)
 
+**Refused credentials stop the drain immediately.** A resume cannot mint a new
+token, so retrying one spends `-retries` × several minutes reaching the
+identical 401 and then reports it as a crash. Instead the run ends the drain
+with the fix in the last line: check `claude auth status`, then
+`claude auth login` — or `claude setup-token`, on an unattended host. State
+lives in GitHub, so starting the drain again once the token works picks up
+exactly where it stopped.
+
 **Human touchpoints are deliberately just two**, both on GitHub:
 
 1. Answering clarification questions the skill posts on an issue thread.
@@ -218,7 +226,7 @@ backlog-drain stats
 | `-permission-mode` | `acceptEdits` | Passed to `claude --permission-mode`. |
 | `-model` | *(the CLI's own default)* | Passed to `claude --model`. Vary it between batches to compare models — see [Run data & cost tracking](#run-data--cost-tracking). |
 | `-poll` | `5m` | Interval between GitHub checks while waiting. |
-| `-retries` | `3` | Resume attempts after a crashed run. |
+| `-retries` | `3` | Resume attempts after a crashed run. A run the API refused to authenticate is never one of them — see below. |
 | `-retry-wait` | `30s` | Wait before each resume attempt. |
 | `-stall` | `15m` | Kill and resume a run that has emitted no events for this long (`0` disables). |
 | `-skip` | *(none)* | Comma-separated issue numbers to skip. |
