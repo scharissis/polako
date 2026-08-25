@@ -9,6 +9,27 @@ Entries carry an **Operator impact** line when a release changes what an
 unattended run does, rather than only what the code looks like. Those are the
 lines worth reading before upgrading a machine that drains a backlog overnight.
 
+## [0.5.0]
+
+### Added
+
+- Terminal issue records carry what GitHub knows about the PR: additions,
+  deletions, changed files, a count of reviews, and when it opened and merged.
+  One `gh pr view` as each issue ends, and none at all under `-metrics off`.
+- `-post-summary` (default off) comments one line of run numbers on each merged
+  PR — runs, question rounds, tokens, dollars, wall time. Numbers only, on the
+  PR they describe. Independent of `-metrics`, so `-metrics off -post-summary`
+  is team visibility with no local files at all.
+- `backlog-drain stats` reports a `change per issue` line from that enrichment,
+  and takes GitHub's own timestamps for PR-open-to-merge, which are right even
+  when the run that opened the PR falls outside the window.
+
+**Operator impact:** `-post-summary` is the first thing this tool can send off
+the machine, and it stays off unless you ask for it. The invariant in CLAUDE.md
+now says so explicitly: records never leave your disk; that one flag posts the
+same numbers to your own merged PR, where exactly the people who can already
+see the PR can read them.
+
 ## [0.4.0]
 
 ### Added
