@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -1028,5 +1029,104 @@ func TestSummaryCommentNeverCarriesWhatTheRunSaid(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("summary is missing %q:\n%s", want, body)
 		}
+	}
+}
+
+// --- environment defaults ---
+
+func TestEnvVarNameMapsAFlagToItsVariable(t *testing.T) {
+	cases := map[string]string{
+		"post-summary": "BACKLOG_DRAIN_POST_SUMMARY",
+		"metrics":      "BACKLOG_DRAIN_METRICS",
+		"retry-wait":   "BACKLOG_DRAIN_RETRY_WAIT",
+	}
+	for flagName, want := range cases {
+		if got := envVarName(flagName); got != want {
+			t.Errorf("envVarName(%q) = %q, want %q", flagName, got, want)
+		}
+	}
+}
+
+// A flag set shaped like the drain's: one of each kind the environment has to
+// be able to carry.
+func envFlagSet() (*flag.FlagSet, *bool, *string, *time.Duration) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	post := fs.Bool("post-summary", false, "")
+	model := fs.String("model", "", "")
+	poll := fs.Duration("poll", 5*time.Minute, "")
+	return fs, post, model, poll
+}
+
+func TestEnvDefaultsSetWhatWasNotPassed(t *testing.T) {
+	t.Setenv("BACKLOG_DRAIN_POST_SUMMARY", "1")
+	t.Setenv("BACKLOG_DRAIN_MODEL", "claude-opus-5")
+	t.Setenv("BACKLOG_DRAIN_POLL", "90s")
+
+	fs, post, model, poll := envFlagSet()
+	if err := applyEnvDefaults(fs); err != nil {
+		t.Fatalf("applyEnvDefaults: %v", err)
+	}
+	if err := fs.Parse(nil); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !*post || *model != "claude-opus-5" || *poll != 90*time.Second {
+		t.Errorf("flags = %v / %q / %s, want the environment's values", *post, *model, *poll)
+	}
+	// -h prints DefValue, so the default it reports has to be the one in force.
+	if got := fs.Lookup("poll").DefValue; got != "1m30s" {
+		t.Errorf("printed default = %q, want the environment's 1m30s", got)
+	}
+}
+
+// The environment is a preference; an argument is a decision about this run.
+func TestCommandLineBeatsTheEnvironment(t *testing.T) {
+	t.Setenv("BACKLOG_DRAIN_MODEL", "claude-opus-5")
+	t.Setenv("BACKLOG_DRAIN_POST_SUMMARY", "1")
+
+	fs, post, model, _ := envFlagSet()
+	if err := applyEnvDefaults(fs); err != nil {
+		t.Fatalf("applyEnvDefaults: %v", err)
+	}
+	if err := fs.Parse([]string{"-model", "claude-haiku-4-5", "-post-summary=false"}); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if *model != "claude-haiku-4-5" || *post {
+		t.Errorf("flags = %q / %v, want the arguments to win", *model, *post)
+	}
+}
+
+// A preference that was set, looks set, and silently does nothing is the worst
+// outcome for a run nobody is watching.
+func TestEnvDefaultsRejectAValueTheFlagCannotParse(t *testing.T) {
+	t.Setenv("BACKLOG_DRAIN_POLL", "banana")
+
+	fs, _, _, _ := envFlagSet()
+	err := applyEnvDefaults(fs)
+	if err == nil {
+		t.Fatal("an unparseable value must stop the process, not be skipped")
+	}
+	// The message has to name both halves: the variable to fix, and the flag
+	// it was trying to set.
+	for _, want := range []string{"BACKLOG_DRAIN_POLL", "banana", "-poll"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
+// BACKLOG_DRAIN_VERSION is what a Dockerfile or CI job pins an install with.
+// Honouring it would turn every drain on that machine into a version print.
+func TestEnvDefaultsIgnoreVersion(t *testing.T) {
+	t.Setenv("BACKLOG_DRAIN_VERSION", "0.6.0")
+
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	showVersion := fs.Bool("version", false, "")
+	if err := applyEnvDefaults(fs); err != nil {
+		t.Fatalf("applyEnvDefaults: %v", err)
+	}
+	if *showVersion {
+		t.Error("-version must not be settable from the environment")
 	}
 }
