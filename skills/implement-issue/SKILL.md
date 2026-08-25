@@ -51,11 +51,18 @@ If PLAN.md doesn't exist in the worktree, or new answers have appeared:
 1. Implement the plan, committing in logical increments following the
    repo's commit conventions. Run the test suite, typecheck, and lint.
 2. MANDATORY GATE — do not create a PR until this step has run:
-   invoke `/code-review high --fix` and address its findings. If the
-   code-review skill is not invocable in this session, say so explicitly,
-   then perform a substitute review pass: re-read the full diff
-   critically for correctness, edge cases, and convention violations,
-   and fix what you find.
+   invoke `/code-review high --fix issue-$issue` and address its
+   findings. Name the branch every time. The review forks a fresh agent
+   that starts in the session's cwd, which the Phase 1 `cd` does not
+   move; with no target it reviews whatever the main checkout holds —
+   on a clean default branch, the change someone already merged — and
+   writes its fixes there. Before accepting the gate as run, check the
+   result describes this branch's change; if it names another commit or
+   branch, invoke it again with the target.
+   If the code-review skill is not invocable in this session, say so
+   explicitly, then perform a substitute review pass: re-read the full
+   diff critically for correctness, edge cases, and convention
+   violations, and fix what you find.
 3. Open the PR with a real title and description — never bare --fill:
    - Title: one line in the repo's commit convention, stating the
      user-visible change (usually the primary commit subject).
