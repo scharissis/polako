@@ -28,8 +28,8 @@ PR opened?  ──no──►  issue labelled `awaiting-answer`?  ──yes─�
    │                                       │
    │                                       └──out of attempts──►  park it, advance to the next
    ↓ yes
-wait for merge (-poll)               ← rebases + re-pushes if GitHub reports CONFLICTING
-   ↓
+wait for merge (-poll)               ← rebases if GitHub reports CONFLICTING,
+   ↓                                   fixes + re-pushes if the checks go red
 close the issue, remove the worktree, advance to the next
 ```
 
@@ -41,8 +41,9 @@ it writes locally is a line of numbers per run, which nothing reads back — see
 [Run data & cost tracking](#run-data--cost-tracking).)
 
 **One issue that cannot be finished does not end the run.** An issue whose run
-produced nothing, whose retries ran out, whose PR was closed unmerged, or whose
-conflicts could not be rebased away is *parked*: `backlog-drain` labels it
+produced nothing, whose retries ran out, whose PR was closed unmerged, whose
+conflicts could not be rebased away, or whose CI stayed red is *parked*:
+`backlog-drain` labels it
 `needs-human`, comments on the thread saying what happened, and moves on to the
 next issue. The label is what takes it out of the queue, so a later run does not
 pick it straight back up — remove the label to put it back in. The process exits
@@ -101,6 +102,21 @@ memory, so a restarted drain cannot tell whether a reply arrived while it was
 down. It spends one run per already-flagged issue finding out — the skill
 re-reads the thread and stops again without re-asking if the answer is not there
 yet — and holds a baseline from then on.
+
+**An open PR that goes red is repaired, not just watched.** Each poll reads the
+PR's check rollup as well as its mergeability. A conflict gets a rebase; a
+failing check gets a run that reads the failing job logs, fixes the cause, runs
+the suite locally and pushes. Both are bounded by `-retries`, and neither may
+merge, open a second PR, or rerun the workflow it was sent to diagnose.
+
+Two rules keep that from turning into a treadmill. Nothing is dispatched while a
+check is still running — a suite that has not finished can only add to the list
+of failures, and diagnosing half of one wastes the run. And a run that finishes
+without moving the branch has said all it is going to: the same logs against the
+same commit reach the same place, so the issue parks for a human instead of
+going round again. Only conclusions a change to the branch could plausibly fix
+count as failures at all; `CANCELLED`, `ACTION_REQUIRED`, `NEUTRAL` and
+`SKIPPED` are a human's business and are left alone.
 
 **Refused credentials stop the drain immediately.** A resume cannot mint a new
 token, so retrying one spends `-retries` × several minutes reaching the
@@ -333,7 +349,7 @@ backlog-drain stats
 | `-permission-mode` | `acceptEdits` | Passed to `claude --permission-mode`. |
 | `-model` | *(the CLI's own default)* | Passed to `claude --model`. Vary it between batches to compare models — see [Run data & cost tracking](#run-data--cost-tracking). |
 | `-poll` | `5m` | Interval between GitHub checks while waiting. |
-| `-retries` | `3` | Resume attempts after a crashed run. A run the API refused to authenticate is never one of them — see below. |
+| `-retries` | `3` | Resume attempts after a crashed run, and the bound on remediation runs against a conflicting or red open PR. A run the API refused to authenticate is never one of them — see below. |
 | `-retry-wait` | `30s` | Wait before each resume attempt. |
 | `-stall` | `15m` | Kill and resume a run that has emitted no events for this long (`0` disables). |
 | `-skip` | *(none)* | Comma-separated issue numbers to skip. Issues labelled `needs-human` are skipped anyway — see [How it works](#how-it-works). |
@@ -614,8 +630,11 @@ model declining a request. gh is granted per subcommand — `Bash(gh issue
 view:*)`, `Bash(gh pr create:*)` and a few more — rather than as a blanket
 `Bash(gh:*)`, which would also permit `gh api`, `gh secret set` and `gh repo
 delete`. Even a per-verb grant is too wide: `Bash(gh pr:*)` includes
-`gh pr merge`, and `Bash(gh issue:*)` includes `gh issue edit --add-label`,
-which is enough to pull an unlabelled issue into a `-label`-gated queue. If
+`gh pr merge`, `Bash(gh issue:*)` includes `gh issue edit --add-label`, which is
+enough to pull an unlabelled issue into a `-label`-gated queue, and
+`Bash(gh run:*)` includes `gh run rerun`, `gh run cancel` and `gh run delete` —
+so a red build is diagnosed with `gh pr checks`, `gh run list` and
+`gh run view`, which only read. If
 your project genuinely needs more, add it explicitly with `-add-tools` rather
 than widening back to a whole verb.
 
