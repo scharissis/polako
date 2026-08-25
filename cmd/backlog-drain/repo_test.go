@@ -248,6 +248,27 @@ func TestReviewGateNamesTheBranch(t *testing.T) {
 	}
 }
 
+// Naming the branch is only half of aiming the review. It resolves that
+// branch's base from the *local* default branch, and a drain never pulls — it
+// merges on GitHub — so that ref falls one commit behind per merged PR. Review
+// against a stale one and somebody else's merged PR is inside the diff, where
+// `--fix` will happily rewrite it into this branch. The refresh has to come
+// before the invocation, so check the order too.
+func TestReviewGateRefreshesTheBaseBeforeReviewing(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	refresh := strings.Index(skill, "merge --ff-only")
+	if refresh < 0 {
+		t.Fatal("the review gate never brings the local default branch up to date, so it will" +
+			" review this branch against a base that is one commit stale per merged PR —" +
+			" add a `git merge --ff-only` against the origin ref before the invocation")
+	}
+	if review := strings.Index(skill, "/code-review"); review >= 0 && refresh > review {
+		t.Error("the base refresh comes after the review is invoked, which is too late to" +
+			" affect what it diffs against — move it before the invocation")
+	}
+}
+
 // Every flag is part of the interface, so every flag has to appear in the
 // README. This is the check that catches a new flag shipped undocumented.
 func TestReadmeDocumentsEveryFlag(t *testing.T) {

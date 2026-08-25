@@ -73,6 +73,18 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   both halves of a release smoke test — the script, and the one real issue that
   has to be driven through the skill by hand.
 
+### Fixed
+
+- The skill's review gate brings the local default branch up to date before it
+  reviews. It resolves the branch's base from that local ref, and a drain never
+  pulls — it merges on GitHub — so the ref falls one commit behind per merged
+  PR. Reviewing against a stale one silently pulled an earlier merged PR into
+  the diff, where `--fix` rewrote that already-merged code inside the branch
+  under review. **Operator impact:** a run now fast-forwards the main checkout's
+  default branch, which is the only thing it does outside its own worktree. It
+  is `--ff-only`, so it refuses rather than moving anything it cannot advance
+  cleanly, and it is skipped when that checkout sits on another branch.
+
 ## [0.6.1]
 
 ### Fixed
