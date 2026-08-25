@@ -160,6 +160,13 @@ func fakeClaude(mode string) int {
 			return 1
 		}
 		return fakeClaude("stream")
+	case "fixci":
+		// A CI remediation that found the cause and pushed.
+		if err := fakeCIFix(); err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		return fakeClaude("stream")
 	}
 	fmt.Fprintf(os.Stderr, "unknown fake claude mode %q\n", mode)
 	return 2
@@ -220,6 +227,28 @@ func fakeSkillEffect(mode string) error {
 	}
 	if err != nil {
 		return err
+	}
+	return writeGhState(path, st)
+}
+
+// fakeCIFix stands in for a remediation run that pushed: the branch head moves
+// and the re-run of CI comes back green, which is the whole of what such a run
+// changes from `pr view`'s side. It fixes every red PR rather than the one this
+// invocation was dispatched for, because the remediation prompt is prose and
+// carries no issue number promptIssue could pick out — and the tests that use
+// this mode have one PR.
+func fakeCIFix() error {
+	path := os.Getenv(fakeGhEnv)
+	st, err := readGhState(path)
+	if err != nil {
+		return err
+	}
+	for _, pr := range st.PRs {
+		if !slices.Contains(pr.Checks, "FAILURE") {
+			continue
+		}
+		pr.Head += "+" // the push
+		pr.Checks = []string{"SUCCESS"}
 	}
 	return writeGhState(path, st)
 }
@@ -428,11 +457,23 @@ func TestDefaultToolsDoNotGrantGhWholesale(t *testing.T) {
 		"Bash(gh:*)":       "gh api, gh secret set and gh repo delete",
 		"Bash(gh pr:*)":    "gh pr merge — nothing may merge itself",
 		"Bash(gh issue:*)": "gh issue edit --add-label — that reopens a -label-gated queue",
+		"Bash(gh run:*)":   "gh run rerun, gh run cancel and gh run delete — a CI remediation only reads",
 	} {
 		if slices.Contains(have, entry) {
 			t.Errorf("defaultTools grants %s, which permits %s; grant the subcommands the "+
 				"skill needs and leave -add-tools as the escape hatch for projects that need more",
 				entry, why)
+		}
+	}
+}
+
+// A CI remediation reads the failing job logs, and a gh call that raises a
+// prompt hangs an unattended run silently.
+func TestDefaultToolsCoverDiagnosingARedBuild(t *testing.T) {
+	have := strings.Split(defaultTools, ",")
+	for _, want := range []string{"Bash(gh pr checks:*)", "Bash(gh run list:*)", "Bash(gh run view:*)"} {
+		if !slices.Contains(have, want) {
+			t.Errorf("defaultTools is missing %q, so remediateChecks cannot read why CI failed", want)
 		}
 	}
 }
@@ -509,6 +550,66 @@ func TestPickPRPrefersOpenThenMerged(t *testing.T) {
 	}
 	if pickPR(nil) != nil {
 		t.Error("no PRs should yield nil, so the caller runs the skill")
+	}
+}
+
+// The rollup is the one GitHub answer the supervisor reduces itself, and every
+// verdict costs something to get wrong: a false "failing" spends a Claude run
+// on healthy code, a false "passing" is the silent forever-wait issue #5 is
+// about. Both node shapes GitHub can put in the array are exercised, because
+// the CheckRun/StatusContext split is decoded by which fields came back empty.
+func TestClassifyChecks(t *testing.T) {
+	run := func(status, conclusion, name string) checkNode {
+		return checkNode{Name: name, Status: status, Conclusion: conclusion}
+	}
+	ctxNode := func(state, context string) checkNode {
+		return checkNode{Context: context, State: state}
+	}
+	cases := []struct {
+		name    string
+		nodes   []checkNode
+		want    string
+		failing []string
+	}{
+		{"nothing reported yet", nil, checksNone, nil},
+		{"all green", []checkNode{run("COMPLETED", "SUCCESS", "test")}, checksPassing, nil},
+		{"one red", []checkNode{
+			run("COMPLETED", "SUCCESS", "lint"),
+			run("COMPLETED", "FAILURE", "test"),
+		}, checksFailing, []string{"test"}},
+		{"a legacy status context", []checkNode{ctxNode("FAILURE", "ci/travis")}, checksFailing, []string{"ci/travis"}},
+		{"a green status context", []checkNode{ctxNode("SUCCESS", "ci/travis")}, checksPassing, nil},
+		{"a queued run", []checkNode{run("QUEUED", "", "test")}, checksPending, nil},
+		// Pending outranks failing: the suite can only add to the list, and
+		// diagnosing half of one wastes the run.
+		{"red while another is still going", []checkNode{
+			run("COMPLETED", "FAILURE", "test"),
+			run("IN_PROGRESS", "", "build"),
+		}, checksPending, nil},
+		{"a pending status context", []checkNode{ctxNode("PENDING", "ci/travis")}, checksPending, nil},
+		// Nothing a change to the branch can fix, so none of these is a failure
+		// worth spending an attempt on.
+		{"cancelled, skipped and awaiting a human", []checkNode{
+			run("COMPLETED", "CANCELLED", "test"),
+			run("COMPLETED", "SKIPPED", "deploy"),
+			run("COMPLETED", "NEUTRAL", "advisory"),
+			run("COMPLETED", "ACTION_REQUIRED", "approve"),
+		}, checksPassing, nil},
+		{"the other ways a build breaks", []checkNode{
+			run("COMPLETED", "TIMED_OUT", "slow"),
+			run("COMPLETED", "STARTUP_FAILURE", "broken-yaml"),
+		}, checksFailing, []string{"slow", "broken-yaml"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, failing := classifyChecks(c.nodes)
+			if got != c.want {
+				t.Errorf("verdict = %q, want %q", got, c.want)
+			}
+			if !slices.Equal(failing, c.failing) {
+				t.Errorf("failing = %v, want %v", failing, c.failing)
+			}
+		})
 	}
 }
 

@@ -58,6 +58,17 @@ type fakePR struct {
 	Number    int    `json:"number"`
 	State     string `json:"state"`
 	Mergeable string `json:"mergeable"`
+
+	// Head is the commit `pr view` reports, and Checks the conclusions of its
+	// rollup — "PENDING" for one that has not finished yet. A remediation run
+	// that pushes moves Head and turns Checks green; see the "fixci" fake CLI.
+	Head   string   `json:"head"`
+	Checks []string `json:"checks"`
+
+	// MergeOnRead is a human merging the PR while the supervisor polls: it
+	// reports MERGED on the Nth `pr view` from now. Counted in reads rather
+	// than wall clock for the same reason as ReplyOnRead.
+	MergeOnRead int `json:"merge_on_read"`
 }
 
 func readGhState(path string) (*ghState, error) {
@@ -209,15 +220,44 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 
 	case "pr view":
 		for _, pr := range st.PRs {
-			if strconv.Itoa(pr.Number) == at(2) {
-				return fmt.Sprintf(`{"state":%q,"mergeable":%q}`, pr.State, pr.Mergeable), false, 0
+			if strconv.Itoa(pr.Number) != at(2) {
+				continue
 			}
+			merging := pr.MergeOnRead > 0
+			if merging {
+				pr.MergeOnRead--
+				if pr.MergeOnRead == 0 {
+					pr.State = "MERGED" // the human merges it on this read
+				}
+			}
+			// The countdown has to be persisted even on the reads before the
+			// merge, or every read would start it over.
+			return fmt.Sprintf(`{"state":%q,"mergeable":%q,"headRefOid":%q,"statusCheckRollup":%s}`,
+				pr.State, pr.Mergeable, pr.Head, rollupJSON(pr.Checks)), merging, 0
 		}
 		fmt.Fprintf(os.Stderr, "no PR #%s\n", at(2))
 		return "", false, 1
 	}
 	fmt.Fprintf(os.Stderr, "fake gh: unhandled call %q\n", strings.Join(args, " "))
 	return "", false, 1
+}
+
+// rollupJSON renders the statusCheckRollup half of `pr view --json`. Every
+// entry is a CheckRun, which is what a GitHub Actions workflow produces; the
+// StatusContext shape the array can also carry is covered by the classifier's
+// own tests, where both can be written out literally.
+func rollupJSON(checks []string) string {
+	nodes := make([]string, 0, len(checks))
+	for i, c := range checks {
+		status, conclusion := "COMPLETED", c
+		if c == "PENDING" {
+			status, conclusion = "IN_PROGRESS", ""
+		}
+		nodes = append(nodes, fmt.Sprintf(
+			`{"__typename":"CheckRun","name":"check-%d","status":%q,"conclusion":%q}`,
+			i+1, status, conclusion))
+	}
+	return "[" + strings.Join(nodes, ",") + "]"
 }
 
 // listIssues renders `gh issue list --json number,labels` in ascending order,
@@ -632,6 +672,121 @@ func TestDrainDoesNotReadStrayCommentsAsQuestions(t *testing.T) {
 	}
 	if want := "the run completed but produced no PR and no questions"; !strings.Contains(buf.String(), want) {
 		t.Errorf("log is missing %q\ngot:\n%s", want, buf.String())
+	}
+}
+
+// --- red CI on an open PR ---
+
+// The point of issue #5: a failing check used to be invisible to the
+// supervisor, logged as "still open" every poll until a human noticed. It has
+// to dispatch one remediation run — one, not one per poll — and the PR goes on
+// to merge once that run has pushed.
+func TestDrainRemediatesAFailingCheck(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "fixci", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		// The PR already exists, so restart safety sends the drain straight to
+		// supervising it: the only claude run here is the remediation.
+		PRs: map[string]*fakePR{"issue-1": {
+			Number: 9, State: "OPEN", Mergeable: "MERGEABLE",
+			Head: "abc123", Checks: []string{"SUCCESS", "FAILURE"},
+			MergeOnRead: 3,
+		}},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if st.Issues["1"].Open {
+		t.Error("issue 1 should have been closed once the fixed PR merged")
+	}
+	if got := st.Issues["1"].Labels; slices.Contains(got, needsHumanLabel) {
+		t.Errorf("issue 1 labels = %v, want a repaired build not to park the issue", got)
+	}
+
+	out := buf.String()
+	// The name has to come from the node that failed, not from the rollup: a
+	// remediation told to fix "check-1" would go looking at the green one.
+	if want := "PR #9 has 1 check failing (check-2)"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+	if got := strings.Count(out, "dispatching remediation"); got != 1 {
+		t.Errorf("dispatched %d remediation runs, want exactly 1 for one observed failure\ngot:\n%s", got, out)
+	}
+	if want := "checks: passing"; !strings.Contains(out, want) {
+		t.Errorf("the poll after the fix should report %q\ngot:\n%s", want, out)
+	}
+}
+
+// A remediation that finishes without pushing has diagnosed all it is going to.
+// Running it again reads the same logs against the same commit and lands in the
+// same place, so the issue parks rather than looping until someone notices.
+func TestDrainParksWhenCIRemediationChangesNothing(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		// "stream" leaves the pretend repository alone: the run ends cleanly
+		// having pushed nothing, which is the case worth pinning.
+		PRs: map[string]*fakePR{"issue-1": {
+			Number: 9, State: "OPEN", Mergeable: "MERGEABLE",
+			Head: "abc123", Checks: []string{"FAILURE"},
+		}},
+		Labels: []string{needsHumanLabel},
+	})
+
+	// Bounded, because the regression this guards is an unbounded wait: without
+	// the fix the drain never returns, and a hung suite says less than a failure.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("one unfixable build must not end the drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if got := st.Issues["1"].Labels; !slices.Contains(got, needsHumanLabel) {
+		t.Errorf("issue 1 labels = %v, want it parked once remediation stopped helping", got)
+	}
+	if !st.Issues["1"].Open {
+		t.Error("parking must leave the issue open for a human")
+	}
+
+	out := buf.String()
+	if got := strings.Count(out, "dispatching remediation"); got != 1 {
+		t.Errorf("dispatched %d remediation runs, want 1 before giving up\ngot:\n%s", got, out)
+	}
+	if want := "CI on PR #9 is still red and remediation left the branch unchanged"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+}
+
+// Half a suite is not a diagnosis: a job still running can only add to the list
+// of failures, so a rollup with anything pending in it waits.
+func TestDrainWaitsOutChecksStillRunning(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		PRs: map[string]*fakePR{"issue-1": {
+			Number: 9, State: "OPEN", Mergeable: "MERGEABLE",
+			Head: "abc123", Checks: []string{"FAILURE", "PENDING"},
+			MergeOnRead: 2,
+		}},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if st := finalGhState(t, path); st.Issues["1"].Open {
+		t.Error("issue 1 should have been closed once its PR merged")
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "dispatching remediation") {
+		t.Errorf("remediated a suite that had not finished\ngot:\n%s", out)
+	}
+	if want := "checks: pending"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
 	}
 }
 
