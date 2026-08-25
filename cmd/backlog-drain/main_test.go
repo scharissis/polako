@@ -881,7 +881,7 @@ func TestExecClaudeStreamsEventsAndCapturesSession(t *testing.T) {
 	buf := captureLog(t)
 	cfg := fakeClaudeConfig(t, "stream")
 
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0)
 	if err != nil {
 		t.Fatalf("execClaude: %v", err)
 	}
@@ -899,7 +899,7 @@ func TestExecClaudeReportsCrashesWithTheSessionToResume(t *testing.T) {
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "crash")
 
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0)
 	if err == nil {
 		t.Fatal("a nonzero exit must surface as an error")
 	}
@@ -922,7 +922,7 @@ func TestExecClaudeKillsAStalledRun(t *testing.T) {
 	cfg.stall = 300 * time.Millisecond
 
 	start := time.Now()
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0)
 	if err == nil || !strings.Contains(err.Error(), "stalled") {
 		t.Fatalf("a silent run should be killed as stalled, got err=%v", err)
 	}
@@ -947,7 +947,7 @@ func TestExecClaudeStopsWhenTheContextIsCancelled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	if _, err := execClaude(ctx, cfg, "/implement-issue 7", "", "implement-issue"); err == nil {
+	if _, err := execClaude(ctx, cfg, "/implement-issue 7", "", "implement-issue", 0); err == nil {
 		t.Fatal("cancelling the context should end the run with an error")
 	}
 	if elapsed := time.Since(start); elapsed > 10*time.Second {
@@ -959,7 +959,7 @@ func TestRunClaudeResumesRatherThanRestartingTheSkill(t *testing.T) {
 	buf := captureLog(t)
 	cfg := fakeClaudeConfig(t, "stream")
 
-	if _, err := runClaude(context.Background(), cfg, 12, ""); err != nil {
+	if _, err := runClaude(context.Background(), cfg, 12, "", 0); err != nil {
 		t.Fatalf("fresh run: %v", err)
 	}
 	want := fmt.Sprintf("-p /%s 12", defaultSkill)
@@ -968,7 +968,7 @@ func TestRunClaudeResumesRatherThanRestartingTheSkill(t *testing.T) {
 	}
 
 	buf.Reset()
-	if _, err := runClaude(context.Background(), cfg, 12, "sess-old"); err != nil {
+	if _, err := runClaude(context.Background(), cfg, 12, "sess-old", 0); err != nil {
 		t.Fatalf("resumed run: %v", err)
 	}
 	out := buf.String()
@@ -988,7 +988,7 @@ func TestExecClaudeFlagsARunThatTookNoTurns(t *testing.T) {
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "noturns")
 
-	_, err := execClaude(context.Background(), cfg, "/nope 1", "", "nope")
+	_, err := execClaude(context.Background(), cfg, "/nope 1", "", "nope", 0)
 	if !errors.Is(err, errNoWork) {
 		t.Fatalf("a clean exit at 0 turns should report errNoWork, got %v", err)
 	}
@@ -1001,7 +1001,7 @@ func TestExecClaudeFlagsASkillTheSessionDoesNotList(t *testing.T) {
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "unknownskill")
 
-	rep, err := execClaude(context.Background(), cfg, "/"+defaultSkill+" 1", "", defaultSkill)
+	rep, err := execClaude(context.Background(), cfg, "/"+defaultSkill+" 1", "", defaultSkill, 0)
 	if !errors.Is(err, errNoWork) {
 		t.Fatalf("a session that does not list the skill should report errNoWork, got %v", err)
 	}
@@ -1022,7 +1022,7 @@ func TestExecClaudeLeavesPlainPromptsAloneWhenTheSkillIsMissing(t *testing.T) {
 	cfg := fakeClaudeConfig(t, "unknownskill")
 
 	if _, err := execClaude(context.Background(), cfg,
-		"PR #3 has merge conflicts with the remote default branch.", "", ""); err != nil {
+		"PR #3 has merge conflicts with the remote default branch.", "", "", 0); err != nil {
 		t.Fatalf("a plain prompt must not trip the missing-skill check, got %v", err)
 	}
 }
@@ -1069,7 +1069,7 @@ func TestExecClaudeCapturesTheResultUsage(t *testing.T) {
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "stream")
 
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0)
 	if err != nil {
 		t.Fatalf("execClaude: %v", err)
 	}
@@ -1103,7 +1103,7 @@ func TestExecClaudeSalvagesTheSessionFromAnUnparseableLine(t *testing.T) {
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "oddshape")
 
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0)
 	if err == nil {
 		t.Fatal("a nonzero exit must surface as an error")
 	}
@@ -1118,7 +1118,7 @@ func TestExecClaudeToleratesAResultWithoutModelUsage(t *testing.T) {
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "oldcli")
 
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0)
 	if err != nil {
 		t.Fatalf("execClaude: %v", err)
 	}
@@ -1140,7 +1140,7 @@ func TestExecClaudeKeepsTheUsageObservedBeforeACrash(t *testing.T) {
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "partial")
 
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0)
 	if err == nil {
 		t.Fatal("a nonzero exit must surface as an error")
 	}
@@ -1173,7 +1173,7 @@ func TestRecordsNeverCarryWhatTheRunSaid(t *testing.T) {
 	dir := t.TempDir()
 	cfg.repo, cfg.rec = "owner/repo", newRecorder(dir)
 
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0)
 	if err != nil {
 		t.Fatalf("execClaude: %v", err)
 	}
@@ -1198,7 +1198,7 @@ func TestExecClaudeStopsOnRefusedCredentials(t *testing.T) {
 	buf := captureLog(t)
 	cfg := fakeClaudeConfig(t, "authfail")
 
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 2", "", "implement-issue")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 2", "", "implement-issue", 0)
 	if !errors.Is(err, errAuth) {
 		t.Fatalf("a refused token should report errAuth, got %v", err)
 	}
@@ -1518,7 +1518,7 @@ func TestSummaryCommentNeverCarriesWhatTheRunSaid(t *testing.T) {
 	cfg := fakeClaudeConfig(t, "stream")
 	cfg.repo, cfg.rec = "owner/repo", newRecorder(metricsOff)
 
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue")
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0)
 	if err != nil {
 		t.Fatalf("execClaude: %v", err)
 	}

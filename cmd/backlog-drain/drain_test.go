@@ -414,9 +414,12 @@ func TestDrainParksADeadIssueAndKeepsGoing(t *testing.T) {
 	for _, want := range []string{
 		"issue #1 needs a human: the run completed but produced no PR and no questions",
 		"=== issue #2 ===",
-		"summary: 1 issue merged, 1 issue parked",
-		"merged  #2",
-		"parked  #1 — the run completed but produced no PR and no questions",
+		// The run cost something, so the summary prices the drain and each
+		// issue in it — including the issue this drain only waited on, whose
+		// honest share of the bill is nothing.
+		"summary: 1 issue merged, 1 issue parked, $0.50 spent",
+		"merged  #2 ($0.00)",
+		"parked  #1 ($0.50) — the run completed but produced no PR and no questions",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log is missing %q\ngot:\n%s", want, out)
@@ -683,8 +686,10 @@ func TestDrainOnceExitsOnAQuestion(t *testing.T) {
 
 	out := buf.String()
 	for _, want := range []string{
-		"summary: 0 issues merged, 0 issues parked, 1 issue awaiting an answer",
-		"waiting #1 — reply on the thread and the next drain picks them up",
+		"summary: 0 issues merged, 0 issues parked, 1 issue awaiting an answer, $0.50 spent",
+		// An issue put down for an answer keeps its tally, so the summary can
+		// still say what the round of questions cost.
+		"waiting #1 ($0.50) — reply on the thread and the next drain picks them up",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log is missing %q\ngot:\n%s", want, out)

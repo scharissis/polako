@@ -82,6 +82,12 @@ var errNoWork = errors.New("the prompt never resolved to a skill")
 // wall clock. Runs carrying it stop the drain rather than retry it.
 var errAuth = errors.New("claude could not authenticate")
 
+// errBudget marks a run one of the per-issue caps killed. Like errAuth it is a
+// dead end rather than a crash: resuming would spend the same budget over
+// again on the same issue and reach the same kill, so a run carrying it parks
+// its issue instead of being retried.
+var errBudget = errors.New("the issue's budget is spent")
+
 // authAdvice attaches the fix to an authentication failure. This process runs
 // unattended, so its last log line is usually the whole diagnosis a human
 // gets, and "needs a human" without the remedy wastes the trip.
@@ -136,6 +142,65 @@ func parkReason(err error) (string, bool) {
 		return pe.reason, true
 	}
 	return "", false
+}
+
+// overBudget reports which per-issue cap an issue has reached, in the words the
+// park comment and the exit summary go on to carry — or "" while both caps are
+// off, which is the default, or while neither has been reached.
+//
+// It gates work about to be dispatched and never work already done. A run that
+// overspent and opened a PR leaves an issue this process has finished with, and
+// waiting for a human to merge costs nothing more; parking there would hand
+// back an issue whose work is sitting on GitHub ready to go.
+//
+// Both figures undercount, in the one direction that matters: a run that
+// crashed, stalled or was interrupted never emitted a result event, so it
+// reports no cost at all and its duration is timed from the clock instead. A
+// cap is therefore a ceiling on what was *observed*, and a drain that keeps
+// dying spends more than either number admits.
+func overBudget(cfg config, t issueTally) string {
+	if cfg.maxCost > 0 && t.costUSD >= cfg.maxCost {
+		return fmt.Sprintf("this drain has spent %s on it, the whole of its -max-cost of %s",
+			usd(t.costUSD), usd(cfg.maxCost))
+	}
+	if cfg.maxIssueTime > 0 && runTime(t) >= cfg.maxIssueTime {
+		return fmt.Sprintf("its runs have taken %s, the whole of its -max-issue-time of %s",
+			dur(runTime(t)), dur(cfg.maxIssueTime))
+	}
+	return ""
+}
+
+// runLimit is how long a run dispatched now may take before -max-issue-time is
+// spent. Zero means unbounded — the default, and what every run got before the
+// cap existed.
+//
+// The floor is defensive only: every caller asks overBudget first, and an issue
+// with nothing left to spend parks there rather than reaching this.
+func runLimit(cfg config, t issueTally) time.Duration {
+	if cfg.maxIssueTime <= 0 {
+		return 0
+	}
+	return max(cfg.maxIssueTime-runTime(t), time.Millisecond)
+}
+
+// runTime is how long this drain's runs on one issue have taken.
+func runTime(t issueTally) time.Duration { return time.Duration(t.wallMS) * time.Millisecond }
+
+// capNotes names the caps in force, for the startup line. Worth saying out
+// loud because the environment can set any flag: a park whose reason names a
+// -max-cost nobody typed is a mystery, and this is where it stops being one.
+func capNotes(cfg config) string {
+	var parts []string
+	if cfg.maxCost > 0 {
+		parts = append(parts, "-max-cost "+usd(cfg.maxCost)+" per issue")
+	}
+	if cfg.maxIssueTime > 0 {
+		parts = append(parts, "-max-issue-time "+dur(cfg.maxIssueTime)+" of run time per issue")
+	}
+	if cfg.maxSessionCost > 0 {
+		parts = append(parts, "-max-session-cost "+usd(cfg.maxSessionCost)+" for this drain")
+	}
+	return strings.Join(parts, ", ")
 }
 
 // needsHumanLabel takes a parked issue out of the queue. It is deliberately the
@@ -205,6 +270,19 @@ type config struct {
 	retries        int
 	retryWait      time.Duration
 	stall          time.Duration
+	// The spend caps, all zero — off — unless an operator asks for them.
+	// maxCost and maxIssueTime bound one issue and park it when it breaches;
+	// maxSessionCost bounds the whole drain and ends it cleanly instead. They
+	// are what -stall is not: that watchdog catches silence, and a run that
+	// loops productively but uselessly for hours emits events the whole way.
+	//
+	// maxIssueTime counts the run time this drain spent on the issue, not the
+	// wall clock since it was picked up: an issue spends most of its life
+	// waiting for a person to merge its PR, and parking issues over how long
+	// that took would punish nobody's slowness but the reviewer's.
+	maxCost        float64
+	maxIssueTime   time.Duration
+	maxSessionCost float64
 	skip           map[int]bool
 	once           bool
 	// strictOrder keeps the queue in strict ascending order, so an issue
@@ -282,6 +360,12 @@ func parseFlags() config {
 	flag.IntVar(&cfg.retries, "retries", 3, "resume attempts after a crashed claude run (nonzero exit)")
 	flag.DurationVar(&cfg.retryWait, "retry-wait", 30*time.Second, "wait before each resume attempt")
 	flag.DurationVar(&cfg.stall, "stall", 15*time.Minute, "kill and resume a run with no output events for this long (0 disables)")
+	flag.Float64Var(&cfg.maxCost, "max-cost", 0,
+		"park an issue once this drain's runs on it have cost this many dollars (0 disables)")
+	flag.DurationVar(&cfg.maxIssueTime, "max-issue-time", 0,
+		"park an issue once this drain's runs on it have taken this much run time (0 disables)")
+	flag.Float64Var(&cfg.maxSessionCost, "max-session-cost", 0,
+		"end the drain between issues once its runs have cost this many dollars (0 disables)")
 	flag.StringVar(&skip, "skip", "", "comma-separated issue numbers to skip (head-of-line escape hatch)")
 	flag.BoolVar(&cfg.once, "once", false,
 		"process a single issue to a merge, a park or a question, then exit")
@@ -417,6 +501,11 @@ type issueResult struct {
 	parked   bool
 	awaiting bool   // put down waiting on a human answer, not finished
 	reason   string // why it parked; empty otherwise
+	// What this drain's runs on the issue cost, and how many of them reported
+	// no cost at all. Both come off the tally the issue was carrying, so an
+	// issue this process only waited on contributes an honest zero.
+	cost         float64
+	approximated int
 }
 
 // issueState is what one drain remembers between the runs it dispatches for a
@@ -469,6 +558,16 @@ func drain(ctx context.Context, cfg config) error {
 	}
 
 	for {
+		// Read between issues and never inside one: ending a drain cleanly means
+		// declining to take on more work, not killing a run part-way through an
+		// issue that would then have to be parked. One issue can therefore carry
+		// the total past the budget — by its own -max-cost, where both are set.
+		if spent := sessionSpend(results, states); cfg.maxSessionCost > 0 && spent >= cfg.maxSessionCost {
+			log.Printf("this drain has spent %s of its -max-session-cost of %s — stopping here; "+
+				"everything is on GitHub, so raise the budget and start it again to carry on",
+				usd(spent), usd(cfg.maxSessionCost))
+			return finish(nil)
+		}
 		ready, blocked, err := openIssues(ctx, cfg)
 		if err != nil {
 			return finish(err)
@@ -516,21 +615,43 @@ func drain(ctx context.Context, cfg config) error {
 				issue, awaitingAnswerLabel)
 		case parked:
 			skip[issue] = true
+			results = append(results, spend(st, issueResult{issue: issue, parked: true, reason: reason}))
 			delete(states, issue)
-			results = append(results, issueResult{issue: issue, parked: true, reason: reason})
 			log.Printf("issue #%d needs a human: %s — parking it and moving on", issue, reason)
 			parkIssue(ctx, cfg, issue, reason)
 		case err != nil:
 			return finish(fmt.Errorf("issue #%d: %w", issue, err))
 		default:
+			results = append(results, spend(st, issueResult{issue: issue}))
 			delete(states, issue)
-			results = append(results, issueResult{issue: issue})
 		}
 		if cfg.once {
 			log.Println("-once set — exiting after one issue")
 			return finish(nil)
 		}
 	}
+}
+
+// spend carries an issue's tally into the result the summary is built from —
+// the last moment it is readable, since the state is dropped immediately after.
+func spend(st *issueState, r issueResult) issueResult {
+	r.cost, r.approximated = st.tally.costUSD, st.tally.approximated
+	return r
+}
+
+// sessionSpend is what this drain's runs have cost so far: the issues it has
+// finished with, plus the ones it put down still holding a tally. The two sets
+// are disjoint — an issue leaves states exactly as it enters results — so
+// nothing here is counted twice.
+func sessionSpend(results []issueResult, states map[int]*issueState) float64 {
+	total := 0.0
+	for _, r := range results {
+		total += r.cost
+	}
+	for _, st := range states {
+		total += st.tally.costUSD
+	}
+	return total
 }
 
 // awaitAnswer decides which of the issues waiting on a human is worth running
@@ -583,7 +704,7 @@ func stillWaiting(states map[int]*issueState) []issueResult {
 	var out []issueResult
 	for issue, st := range states {
 		if st.awaiting {
-			out = append(out, issueResult{issue: issue, awaiting: true})
+			out = append(out, spend(st, issueResult{issue: issue, awaiting: true}))
 		}
 	}
 	slices.SortFunc(out, func(a, b issueResult) int { return a.issue - b.issue })
@@ -643,10 +764,26 @@ func ensureLabel(ctx context.Context, cfg config, name, color, description strin
 //
 // The waiting clause appears only when there is something in it. Most drains
 // have nothing waiting, and a bucket that is empty on every ordinary run is
-// noise in the one line an operator actually reads.
+// noise in the one line an operator actually reads. Dollars come and go the
+// same way: a drain that spent nothing — one that only waited on a PR an
+// earlier process opened — would otherwise report "$0.00 spent", which reads
+// as a free backlog rather than as an absent number.
 func drainSummary(results []issueResult, elapsed time.Duration) []string {
 	if len(results) == 0 {
 		return nil
+	}
+	total, approximated := 0.0, 0
+	for _, r := range results {
+		total += r.cost
+		approximated += r.approximated
+	}
+	// Per issue only once there is a total to break down, so an uncosted drain
+	// prints exactly what it always printed.
+	price := func(c float64) string {
+		if total <= 0 {
+			return ""
+		}
+		return " (" + usd(c) + ")"
 	}
 	var merged []string
 	var waiting []string
@@ -654,17 +791,29 @@ func drainSummary(results []issueResult, elapsed time.Duration) []string {
 	for _, r := range results {
 		switch {
 		case r.awaiting:
-			waiting = append(waiting, "#"+strconv.Itoa(r.issue))
+			waiting = append(waiting, "#"+strconv.Itoa(r.issue)+price(r.cost))
 		case r.parked:
-			parked = append(parked, fmt.Sprintf("  parked  #%d — %s", r.issue, r.reason))
+			parked = append(parked, fmt.Sprintf("  parked  #%d%s — %s", r.issue, price(r.cost), r.reason))
 		default:
-			merged = append(merged, "#"+strconv.Itoa(r.issue))
+			merged = append(merged, "#"+strconv.Itoa(r.issue)+price(r.cost))
 		}
 	}
 	head := fmt.Sprintf("summary: %s merged, %s parked",
 		plural(len(merged), "issue"), plural(len(parked), "issue"))
 	if len(waiting) > 0 {
 		head += ", " + plural(len(waiting), "issue") + " awaiting an answer"
+	}
+	if total > 0 {
+		head += ", " + usd(total) + " spent"
+		// A run that crashed, stalled or was interrupted never emitted a result
+		// event, and pricing belongs to the CLI rather than to this binary — so
+		// it contributed nothing to the figure above. Unqualified, the total
+		// would read as the whole bill, and the caps that read the same number
+		// would look broken rather than conservative.
+		if approximated > 0 {
+			head += fmt.Sprintf(" (%s reported none, so that is an undercount)",
+				plural(approximated, "run"))
+		}
 	}
 	lines := []string{head + ", " + dur(elapsed) + " of wall clock"}
 	if len(merged) > 0 {
@@ -714,6 +863,9 @@ func preflight(ctx context.Context, cfg *config) error {
 	cfg.pluginVersion = pluginVersion(ctx, *cfg)
 	log.Printf("%s — running /%s per issue, polling every %s", cfg.repo, cfg.skill, cfg.poll)
 	warnOnVersionSkew(drainVersion(), *cfg)
+	if notes := capNotes(*cfg); notes != "" {
+		log.Printf("spend caps in force: %s", notes)
+	}
 	if cfg.postSummary {
 		// The environment can set this, so say it out loud: an operator who
 		// forgot the variable is in their profile should not have to work out
@@ -947,6 +1099,15 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 		}
 
 		if pr == nil {
+			// Asked before another run is dispatched rather than after one
+			// returns, which is the only place a cost cap can be enforced at
+			// all: cost arrives on the result event, so it can bound the next
+			// run and never the one that spent it.
+			if reason := overBudget(cfg, *tally); reason != "" {
+				terminal(0, issueNeedsHuman)
+				return park("%s", reason)
+			}
+
 			// The label is durable, so "it is up after the run" does not by
 			// itself mean this run raised it. Read it before the run too, and
 			// the two readings tell a question apart from an earlier one's
@@ -967,7 +1128,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 			st.answered = false
 
 			started := time.Now()
-			rep, runErr := runClaude(ctx, cfg, issue, resumeTarget)
+			rep, runErr := runClaude(ctx, cfg, issue, resumeTarget, runLimit(cfg, *tally))
 			rc := runContext{
 				issue: issue, reason: reason, attempt: attempt,
 				resumedFrom: resumeTarget, started: started, ended: time.Now(),
@@ -1023,6 +1184,16 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					record(0, outcomeNothing)
 					terminal(0, issueNeedsHuman)
 					return authAdvice(runErr)
+				}
+				// A cap killed this run, so it is a dead end for the same reason
+				// a refused token is: a resume would spend the same budget over
+				// again on the same issue and be killed at the same point. The
+				// record comes first, because this run's own numbers are what
+				// carried the issue over the line and the reason quotes them.
+				if errors.Is(runErr, errBudget) {
+					record(0, outcomeNothing)
+					terminal(0, issueNeedsHuman)
+					return park("%s", cmp.Or(overBudget(cfg, *tally), runErr.Error()))
 				}
 				blocked, err := issueHasLabel(ctx, cfg, issue, awaitingAnswerLabel)
 				if err != nil {
@@ -1131,8 +1302,9 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 // --- Claude ---
 
 // runClaude executes one headless skill run. A non-empty resumeID continues
-// that exact session instead of starting the skill fresh.
-func runClaude(ctx context.Context, cfg config, issue int, resumeID string) (runReport, error) {
+// that exact session instead of starting the skill fresh, and a nonzero limit
+// is what -max-issue-time has left for this issue.
+func runClaude(ctx context.Context, cfg config, issue int, resumeID string, limit time.Duration) (runReport, error) {
 	// cfg is a copy, so the widened allowlist reaches this invocation and
 	// nothing else: the recorder's tools_hash goes on identifying the operator's
 	// -tools/-add-tools, which is the thing worth grouping runs by, rather than
@@ -1145,7 +1317,7 @@ func runClaude(ctx context.Context, cfg config, issue int, resumeID string) (run
 		// holds the skill's context and never re-resolves the command.
 		prompt, invokes = fmt.Sprintf("Continue the /%s %d workflow exactly where it stopped.", cfg.skill, issue), ""
 	}
-	return execClaude(ctx, cfg, prompt, resumeID, invokes)
+	return execClaude(ctx, cfg, prompt, resumeID, invokes, limit)
 }
 
 // issueLabelTools grants a run the two commands it needs to raise and lower
@@ -1300,16 +1472,20 @@ type runReport struct {
 	interrupted  bool
 	skillMissing bool // the session's command list lacks the skill the prompt invokes
 	authFailed   bool // the result text is the CLI reporting refused credentials
+	overBudget   bool // -max-issue-time ran out while this run was still going
 }
 
 // status maps a run to exactly one value, most specific first: a run stopped
-// over a missing skill was killed deliberately, an interrupted run is a
-// nonzero exit too, and so is a stalled one — and so is a run the API refused
-// to authenticate, which is the one worth telling apart from a crash.
+// over a missing skill was killed deliberately, so was one the budget stopped,
+// an interrupted run is a nonzero exit too, and so is a stalled one — and so is
+// a run the API refused to authenticate, which is the one worth telling apart
+// from a crash.
 func (r runReport) status() string {
 	switch {
 	case r.skillMissing:
 		return "no-skill"
+	case r.overBudget:
+		return "budget"
 	case r.interrupted:
 		return "interrupted"
 	case r.stalled:
@@ -1428,11 +1604,12 @@ func authFailure(result string) bool {
 // prompt starts with — "" for a plain-text prompt — so a session whose init
 // inventory lacks it can be stopped instead of run; the caller states it
 // outright because re-deriving it from the prompt would make "never start a
-// plain prompt with /" a load-bearing rule enforced nowhere. The report it
-// returns is valid on every path, error included: the retry logic needs the
-// session ID to resume, and the run burned real tokens whether or not it
-// lived to report them.
-func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes string) (runReport, error) {
+// plain prompt with /" a load-bearing rule enforced nowhere. limit is what
+// -max-issue-time has left for the issue this run is part of, or 0 for no
+// bound at all. The report it returns is valid on every path, error included:
+// the retry logic needs the session ID to resume, and the run burned real
+// tokens whether or not it lived to report them.
+func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes string, limit time.Duration) (runReport, error) {
 	rep := runReport{sessionID: resumeID, turns: -1, exitCode: -1}
 	args := buildArgs(cfg, prompt, resumeID)
 	log.Printf("running: %s %s", cfg.claudeBin, strings.Join(args, " "))
@@ -1476,6 +1653,22 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes strin
 		}()
 	}
 
+	// Budget watchdog. Deliberately separate from the one above and blind to
+	// what it watches: -stall samples for silence, and the run this exists for
+	// is never silent — it emits events the whole way through the three hours
+	// it spends going nowhere. A timer is all it takes, because unlike idleness
+	// there is nothing to sample.
+	var overspent atomic.Bool
+	if limit > 0 {
+		budget := time.AfterFunc(limit, func() {
+			log.Printf("this run has used the %s of -max-issue-time the issue had left — killing it",
+				dur(limit))
+			overspent.Store(true)
+			_ = cmd.Process.Kill()
+		})
+		defer budget.Stop()
+	}
+
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 64*1024), 32*1024*1024) // events carrying file contents can be large
 	missing := ""                                  // the diagnosis, once the inventory rules the prompt's command out
@@ -1517,8 +1710,15 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes strin
 	}
 	rep.stalled = stalled.Load()
 	rep.interrupted = ctx.Err() != nil
+	rep.overBudget = overspent.Load()
 	if rep.skillMissing {
 		return rep, fmt.Errorf("%w: %s", errNoWork, missing)
+	}
+	// Ahead of the stall and crash reports, because the kill produced both: the
+	// caller has to see the deliberate stop rather than the crash it looks like.
+	if rep.overBudget {
+		return rep, fmt.Errorf("%w: the run used the %s of -max-issue-time this issue had left",
+			errBudget, dur(limit))
 	}
 	if rep.stalled {
 		return rep, fmt.Errorf("run stalled: no output events for %s", cfg.stall)
@@ -1774,6 +1974,10 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, tally *is
 	var remediatedReviewHead string
 	for {
 		pr, err := prStatus(ctx, cfg, prNumber)
+		// A remediation is another run charged to this issue, so the caps gate
+		// all three of them at once. They never gate the waiting: a PR nobody
+		// has to fix is still free to merge, whatever it has already cost.
+		overspent := overBudget(cfg, *tally)
 		switch {
 		case err != nil:
 			if ctx.Err() != nil {
@@ -1782,6 +1986,8 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, tally *is
 			log.Printf("transient: checking PR #%d failed (%v) — will retry", prNumber, err)
 		case pr.state != "OPEN":
 			return pr.state, nil
+		case overspent != "" && pr.remediable():
+			return "", park("%s", overspent)
 		case pr.mergeable == "CONFLICTING":
 			log.Printf("PR #%d has merge conflicts — dispatching remediation", prNumber)
 			if rerr := remediateConflicts(ctx, cfg, issue, prNumber, tally); rerr != nil {
@@ -1893,7 +2099,7 @@ func remediateConflicts(ctx context.Context, cfg config, issue, prNumber int, ta
 			"Do not open a new PR, do not merge anything, and do not commit to the default branch.",
 		prNumber, branch, branch)
 	started := time.Now()
-	rep, err := execClaude(ctx, cfg, prompt, "", "")
+	rep, err := execClaude(ctx, cfg, prompt, "", "", runLimit(cfg, *tally))
 	// A remediation run pushes to a PR that already exists, so it leaves
 	// behind neither a new PR nor questions.
 	tally.add(cfg.rec.recordRun(cfg, runContext{
@@ -1924,7 +2130,7 @@ func remediateChecks(ctx context.Context, cfg config, issue, prNumber int, faili
 			"branch, and do not rerun or cancel workflows.",
 		prNumber, branch, strings.Join(failing, ", "), prNumber, branch)
 	started := time.Now()
-	rep, err := execClaude(ctx, cfg, prompt, "", "")
+	rep, err := execClaude(ctx, cfg, prompt, "", "", runLimit(cfg, *tally))
 	// Like a conflict remediation, this pushes to a PR that already exists, so
 	// it leaves behind neither a new PR nor questions.
 	tally.add(cfg.rec.recordRun(cfg, runContext{
@@ -1964,7 +2170,7 @@ func remediateReview(ctx context.Context, cfg config, issue, prNumber int, tally
 	runCfg := cfg
 	runCfg.addTools = resolveTools(cfg.addTools, prReviewTools(cfg.repo, prNumber))
 	started := time.Now()
-	rep, err := execClaude(ctx, runCfg, prompt, "", "")
+	rep, err := execClaude(ctx, runCfg, prompt, "", "", runLimit(cfg, *tally))
 	// Like the other two remediations, this pushes to a PR that already exists,
 	// so it leaves behind neither a new PR nor questions.
 	tally.add(cfg.rec.recordRun(cfg, runContext{
@@ -2152,6 +2358,15 @@ type prView struct {
 // diff that no longer exists, and re-reading it would address code nobody has.
 func (p prView) reviewOutstanding() bool {
 	return p.changesRequested && p.reviewedAt.After(p.branchAt)
+}
+
+// remediable reports whether a poll of this PR would dispatch a run. It names
+// the three conditions supervisePR's switch acts on, once, so the spend caps
+// can be asked about all of them together instead of at each — and so that a
+// fourth kind of remediation has one more place to be added rather than a
+// silent hole in the budget. A test holds the two in step.
+func (p prView) remediable() bool {
+	return p.mergeable == "CONFLICTING" || p.checks == checksFailing || p.reviewOutstanding()
 }
 
 // reviewNote explains a PR that is merely waiting on a person. Without it the

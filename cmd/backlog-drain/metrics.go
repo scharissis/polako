@@ -178,6 +178,12 @@ type runRecord struct {
 	Retries    int `json:"retries"`
 	RetryWaitS int `json:"retry_wait_s"`
 	StallS     int `json:"stall_s"`
+	// The spend caps, omitted while they are off — which is the default, so an
+	// uncapped drain writes the line it always wrote. Present, they are what
+	// explains a `budget` status or a run that is the last one on its issue.
+	MaxCostUSD        float64 `json:"max_cost_usd,omitempty"`
+	MaxIssueTimeS     int     `json:"max_issue_time_s,omitempty"`
+	MaxSessionCostUSD float64 `json:"max_session_cost_usd,omitempty"`
 
 	DrainVersion  string `json:"drain_version"`
 	ClaudeVersion string `json:"claude_version"`
@@ -323,6 +329,10 @@ func newRunRecord(cfg config, rc runContext, rep runReport) runRecord {
 		Retries:    cfg.retries,
 		RetryWaitS: seconds(cfg.retryWait),
 		StallS:     seconds(cfg.stall),
+
+		MaxCostUSD:        cfg.maxCost,
+		MaxIssueTimeS:     seconds(cfg.maxIssueTime),
+		MaxSessionCostUSD: cfg.maxSessionCost,
 
 		DrainVersion:  drainVersion(),
 		ClaudeVersion: cfg.claudeVersion,
