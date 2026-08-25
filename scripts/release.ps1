@@ -54,5 +54,9 @@ if ($ref -eq "backlog-drain--v$version") {
 } else {
   Write-Host ''
   Write-Host "STEP 3 - nobody is on $version yet. The marketplace entry still pins $ref."
-  Write-Host "Smoke-test the release, then open a PR moving that ref to backlog-drain--v$version."
+  Write-Host 'Smoke-test the release:'
+  Write-Host ''
+  Write-Host '  .\scripts\smoke.ps1'
+  Write-Host ''
+  Write-Host "then open a PR moving that ref to backlog-drain--v$version."
 }

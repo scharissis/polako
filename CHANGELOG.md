@@ -9,6 +9,21 @@ Entries carry an **Operator impact** line when a release changes what an
 unattended run does, rather than only what the code looks like. Those are the
 lines worth reading before upgrading a machine that drains a backlog overnight.
 
+## [Unreleased]
+
+### Added
+
+- `scripts/smoke.sh` (and `smoke.ps1`), run between tagging and publishing:
+  checks the tags, the published release and its five binaries, the changelog
+  section against the release body, `go install ...@vX.Y.Z`, and the plugin
+  installing with the `ref` moved — everything CI cannot reach because it needs
+  the network, `gh` and a real `claude`. It installs into a throwaway
+  `CLAUDE_CONFIG_DIR`, so it never moves the machine running it onto the
+  release under test.
+- The release scripts' STEP 3 message names that command, and the README covers
+  both halves of a release smoke test — the script, and the one real issue that
+  has to be driven through the skill by hand.
+
 ## [0.6.1]
 
 ### Fixed
