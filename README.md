@@ -75,13 +75,20 @@ unimplementable issue. It is picked back up when the reply lands and nothing
 else is left to work, or straight away once you remove the label by hand. The
 guarantee that runs cannot conflict is that only one issue is ever *in flight*,
 not that they are worked in strict numeric order — and an issue nobody is
-working is not in flight. When work does resume, the branch is created fresh
-from the current default branch, so it still starts from a base containing every
-merge before it.
+working is not in flight.
 
-Pass `-strict-order` to turn that off and get the old behaviour: the queue stays
-in strict ascending order, and an issue awaiting an answer blocks every issue
-behind it until you reply. A drain that ends with issues still waiting says so:
+One thing does weaken, and it is the reason `-strict-order` exists. A put-down
+issue keeps the worktree and branch its first run created, so when work resumes
+it resumes from the base that run started on — not from the merges that landed
+while it waited. A textual clash with one of those shows up as a `CONFLICTING`
+PR and is rebased automatically; a semantic one — a helper renamed by a merge in
+between — is not, and lands as a PR that passed its own tests and breaks the
+default branch.
+
+Pass `-strict-order` to turn all of that off and get the old behaviour: the
+queue stays in strict ascending order, an issue awaiting an answer blocks every
+issue behind it until you reply, and nothing merges under a waiting branch. A
+drain that ends with issues still waiting says so:
 
 ```
 summary: 3 issues merged, 0 issues parked, 1 issue awaiting an answer, 4h02m of wall clock

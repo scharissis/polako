@@ -132,6 +132,25 @@ func fakeClaude(mode string) int {
 		emit(`{"type":"system","subtype":"init","session_id":"sess-hang","model":"claude-opus-5"}`)
 		time.Sleep(30 * time.Second) // the stall watchdog is expected to kill this
 		return 0
+	case "asksthenauth":
+		// Asks on the first run, and is refused credentials on the run
+		// dispatched once the answer lands. That second run is the one exit
+		// after an issue is picked back up that is neither a merge nor a park,
+		// and so the only one that can leave the drain's summary describing a
+		// question nobody is waiting on any more.
+		flagged, err := issueFlagged()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		if flagged {
+			return fakeClaude("authfail")
+		}
+		if err := fakeSkillEffect("asks"); err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		return fakeClaude("stream")
 	case "asks", "noisy", "askscrash":
 		// A run that leaves something behind on the thread. Both then stream
 		// like a healthy one, because the supervisor's whole reading of what
@@ -203,6 +222,23 @@ func fakeSkillEffect(mode string) error {
 		return err
 	}
 	return writeGhState(path, st)
+}
+
+// issueFlagged reports whether the issue this invocation was dispatched for is
+// already carrying awaitingAnswerLabel — the same reading fakeSkillEffect uses
+// to tell the run that asks a question from the one dispatched once it was
+// answered, for a mode that has to answer differently before the run rather
+// than after it.
+func issueFlagged() (bool, error) {
+	st, err := readGhState(os.Getenv(fakeGhEnv))
+	if err != nil {
+		return false, err
+	}
+	is := st.Issues[promptIssue()]
+	if is == nil {
+		return false, fmt.Errorf("no issue #%q to work on", promptIssue())
+	}
+	return slices.Contains(is.Labels, awaitingAnswerLabel), nil
 }
 
 // promptIssue is the issue number this invocation was dispatched for, taken

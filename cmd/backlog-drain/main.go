@@ -472,6 +472,12 @@ func drain(ctx context.Context, cfg config) error {
 		if issue == 0 {
 			blocked = slices.DeleteFunc(blocked, func(n int) bool { return skip[n] })
 			if len(blocked) == 0 {
+				// Nothing open and unparked means nothing is waiting on a reply
+				// either: a flag this drain raised and can no longer see was
+				// closed, parked or cleared by hand while it worked elsewhere.
+				// Naming those in the summary would send an operator to a thread
+				// with nothing left to do on it.
+				clear(states)
 				log.Println("no open issues — backlog drained")
 				return finish(nil)
 			}
@@ -491,6 +497,11 @@ func drain(ctx context.Context, cfg config) error {
 			st = &issueState{}
 			states[issue] = st
 		}
+		// Working it is the end of waiting on it. Left standing, the flag would
+		// have every exit from here that is neither a merge nor a park — Ctrl+C
+		// while its PR is open, a fatal error — end by telling the operator to
+		// reply on a thread nobody is waiting on any more.
+		st.awaiting = false
 		err = processIssue(ctx, cfg, issue, st)
 		reason, parked := parkReason(err)
 		switch deferred, isDeferred := deferReason(err); {

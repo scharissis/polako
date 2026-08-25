@@ -47,6 +47,11 @@ type fakeIssue struct {
 	// reads rather than wall clock keeps the test deterministic — the drain
 	// unblocks because the thread moved, never because a timer went off.
 	ReplyOnRead int `json:"reply_on_read"`
+
+	// CloseOnList is a human dealing with the issue themselves while the
+	// supervisor is off working another one: it disappears from the Nth
+	// `issue list` from now. Counted the same way and for the same reason.
+	CloseOnList int `json:"close_on_list"`
 }
 
 type fakePR struct {
@@ -116,7 +121,8 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 		return st.Repo + "\n", false, 0
 
 	case "issue list":
-		return listIssues(st, flagVal("--label")), false, 0
+		out, changed := listIssues(st, flagVal("--label"))
+		return out, changed, 0
 
 	case "issue view":
 		is := issue()
@@ -215,8 +221,10 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 }
 
 // listIssues renders `gh issue list --json number,labels` in ascending order,
-// which is the order the real thing is only relied on not to guarantee.
-func listIssues(st *ghState, label string) string {
+// which is the order the real thing is only relied on not to guarantee. It also
+// ticks the countdowns that stand in for a human acting on the repository
+// between one listing and the next, so it reports whether it changed anything.
+func listIssues(st *ghState, label string) (out string, changed bool) {
 	numbers := make([]int, 0, len(st.Issues))
 	for k := range st.Issues {
 		n, err := strconv.Atoi(k)
@@ -230,6 +238,13 @@ func listIssues(st *ghState, label string) string {
 	var rows []string
 	for _, n := range numbers {
 		is := st.Issues[strconv.Itoa(n)]
+		if is.CloseOnList > 0 {
+			is.CloseOnList--
+			if is.CloseOnList == 0 {
+				is.Open = false // the human closes it on this listing
+			}
+			changed = true
+		}
 		if !is.Open || (label != "" && !slices.Contains(is.Labels, label)) {
 			continue
 		}
@@ -239,7 +254,7 @@ func listIssues(st *ghState, label string) string {
 		}
 		rows = append(rows, fmt.Sprintf(`{"number":%d,"labels":[%s]}`, n, strings.Join(labels, ",")))
 	}
-	return "[" + strings.Join(rows, ",") + "]"
+	return "[" + strings.Join(rows, ",") + "]", changed
 }
 
 // --- the drain loop, end to end ---
@@ -491,6 +506,65 @@ func TestDrainRetriesAnIssueFlaggedBeforeItStarted(t *testing.T) {
 	}
 	if strings.Contains(out, "nothing else to work") {
 		t.Errorf("a flag this drain did not raise must be re-run, not waited on\ngot:\n%s", out)
+	}
+}
+
+// Working an issue is the end of waiting on it. An exit that is neither a merge
+// nor a park — refused credentials here — must not sign off by sending the
+// operator to a thread they have already replied on.
+func TestDrainStopsCallingAnIssueWaitingOnceItIsPickedBackUp(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "asksthenauth", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		Labels: []string{awaitingAnswerLabel},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); !errors.Is(err, errAuth) {
+		t.Fatalf("drain error = %v, want it to carry %v", err, errAuth)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "new activity on #1") {
+		t.Fatalf("the answer never landed, so this proves nothing\ngot:\n%s", out)
+	}
+	if strings.Contains(out, "awaiting an answer") || strings.Contains(out, "waiting #1") {
+		t.Errorf("issue 1 was picked back up, so it is not waiting on a reply any more\ngot:\n%s", out)
+	}
+}
+
+// A drained backlog means nothing is waiting either. An issue this drain put
+// down and a human then closed themselves is gone from the queue, and naming it
+// in the summary would send somebody to a thread with nothing left to do on it.
+func TestDrainForgetsAQuestionAHumanClosedInstead(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "asks", &ghState{
+		// Issue 1 asks something, and is closed by hand on the third listing —
+		// by which time the drain has moved on to issue 2 and finished it.
+		Issues: map[string]*fakeIssue{"1": {Open: true, CloseOnList: 3}, "2": {Open: true}},
+		PRs:    map[string]*fakePR{"issue-2": {Number: 9, State: "MERGED"}},
+		Labels: []string{awaitingAnswerLabel},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"leaving it for a human", // it really was put down
+		"=== issue #2 ===",       // and the queue behind it really was worked
+		"no open issues — backlog drained",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("log is missing %q, so this proves nothing\ngot:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "awaiting an answer") || strings.Contains(out, "waiting #1") {
+		t.Errorf("issue 1 is closed, so nothing is waiting on a reply\ngot:\n%s", out)
 	}
 }
 
