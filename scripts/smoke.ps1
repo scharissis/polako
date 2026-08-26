@@ -349,10 +349,12 @@ try {
     claude plugin marketplace add "$tmp\mkt" *> "$tmp\marketplace.log"
     if ($LASTEXITCODE -ne 0) {
         Bad "could not add a marketplace pinning $pluginTag" (LastLine "$tmp\marketplace.log")
+        Get-Content "$tmp\marketplace.log" | ForEach-Object { Write-Host "        $_" }
     } else {
         claude plugin install "$name@$marketplace" --yes *> "$tmp\install.log"
         if ($LASTEXITCODE -ne 0) {
             Bad "could not install $name@$marketplace from $pluginTag" (LastLine "$tmp\install.log")
+            Get-Content "$tmp\install.log" | ForEach-Object { Write-Host "        $_" }
         } else {
             $pluginInstalled = $true
             Ok "the plugin installs with the ref moved to $pluginTag"

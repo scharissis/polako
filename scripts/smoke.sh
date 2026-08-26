@@ -344,10 +344,16 @@ marketplace=$(sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
   .claude-plugin/marketplace.json | head -1)
 pluginInstalled=false
 
+# On failure these two print their whole log, not just its last line: the
+# install shells out to git, whose errors put the useful part — which URL,
+# which transport, which refusal — several lines up, and this check's one CI
+# home is a runner nobody can shell into after the fact.
 if ! claude plugin marketplace add "$tmp/mkt" >"$tmp/marketplace.log" 2>&1; then
   bad "could not add a marketplace pinning $pluginTag" "$(lastLine "$tmp/marketplace.log")"
+  sed 's/^/        /' "$tmp/marketplace.log"
 elif ! claude plugin install "$name@$marketplace" --yes >"$tmp/install.log" 2>&1; then
   bad "could not install $name@$marketplace from $pluginTag" "$(lastLine "$tmp/install.log")"
+  sed 's/^/        /' "$tmp/install.log"
 else
   pluginInstalled=true
   ok "the plugin installs with the ref moved to $pluginTag"

@@ -324,8 +324,11 @@ with their tag, so `polako -version` tells you what you are running.
 marketplaces, so an installed plugin stays exactly where it is until you ask:
 
 ```bash
-claude plugin marketplace update scharissis && claude plugin update polako
+claude plugin marketplace update scharissis && claude plugin update polako@scharissis
 ```
+
+(`update` wants the full `plugin@marketplace` id; the bare name it reports as
+not found, even installed.)
 
 Then `/reload-plugins`, or restart. **Upgrade the binary in the same breath** —
 the two halves are one release, and mixing them is not a supported combination:
