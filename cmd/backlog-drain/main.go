@@ -45,6 +45,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -259,7 +260,18 @@ type config struct {
 	// ghBin is a test seam, not an interface: the suite is hermetic and never
 	// calls a real gh, but the drain loop is mostly GitHub bookkeeping and is
 	// worth covering end to end. No flag sets it — parseFlags pins it to "gh".
-	ghBin          string
+	ghBin string
+	// ghRetryWait is how long retryRead waits between attempts at a GitHub read
+	// that failed. A seam like ghBin rather than a flag: what it is really
+	// waiting for is a network coming back after a wake, which is not a
+	// preference anyone has, and the suite sets it low so a proved retry costs
+	// no wall clock. parseFlags pins it to ghRetryDelay.
+	ghRetryWait time.Duration
+	// resumeCeiling is the backstop below, and a seam for the same reason
+	// ghRetryWait is: reaching it costs one process per resume, and the suite
+	// proves the ceiling stops the loop rather than proving its size.
+	// parseFlags pins it to defaultResumeCeiling.
+	resumeCeiling  int
 	skill          string
 	branchPrefix   string
 	label          string
@@ -334,19 +346,39 @@ func main() {
 
 	cfg := parseFlags()
 
-	// Ctrl+C cancels the context: in-flight waits end promptly, and a running
-	// claude process receives the interrupt through CommandContext.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	// A shutdown signal cancels the context: in-flight waits end promptly, and a
+	// running claude process is killed through CommandContext.
+	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 	defer stop()
 
 	log.SetFlags(log.Ldate | log.Ltime)
 	if err := run(ctx, cfg); err != nil {
 		if errors.Is(err, context.Canceled) {
+			// 130 for every shutdown signal, not only SIGINT. Telling them apart
+			// would mean hand-rolling NotifyContext to record which one arrived,
+			// and what an operator does about it — rerun, everything is on
+			// GitHub — is the same in all three cases.
 			log.Println("interrupted — state is on GitHub; rerun to resume")
 			os.Exit(130)
 		}
 		log.Fatalf("stopping: %v", err)
 	}
+}
+
+// shutdownSignals are every way a host says "stop now". All of them have to
+// cancel the context, because the claude child is killed through it and nothing
+// else kills it: a supervisor that dies without cancelling leaves that child
+// running with acceptEdits and the whole --allowedTools set, free to go on
+// editing, commit, push the branch and open a PR nobody is supervising. The
+// next drain then finds no PR yet, starts a second run on the same issue and the
+// same worktree, and one issue in flight at a time is no longer true.
+//
+// SIGINT is the operator at the keyboard; SIGTERM is a service manager stopping
+// the unit, a shutdown, or a plain `pkill`; SIGHUP is the terminal going away.
+// Both POSIX names are declared in syscall on Windows as well, so naming them
+// costs the cross-compile nothing — they are simply never delivered there.
+func shutdownSignals() []os.Signal {
+	return []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
 }
 
 func parseFlags() config {
@@ -419,6 +451,8 @@ func parseFlags() config {
 	}
 	cfg.rec = newRecorder(metrics)
 	cfg.ghBin = "gh"
+	cfg.ghRetryWait = ghRetryDelay
+	cfg.resumeCeiling = defaultResumeCeiling
 	cfg.skip = parseSkip(skip)
 	abs, err := filepath.Abs(cfg.dir)
 	if err != nil {
@@ -1238,6 +1272,17 @@ func describeVersion() string {
 	return pluginName + " " + v
 }
 
+// defaultResumeCeiling bounds how many times one issue may be resumed in total,
+// however much each of those runs got done. -retries bounds the consecutive
+// fruitless ones, which is the loop worth giving up on quickly; this is the
+// backstop for the other shape, a run that gets a little further every time,
+// dies again, and so keeps resetting the counter that was supposed to stop it.
+//
+// Crude and generous on purpose. What one issue may really consume is -max-cost
+// and -max-issue-time, and #7 is where a proper ceiling belongs; this only has
+// to guarantee the loop ends.
+const defaultResumeCeiling = 20
+
 // processIssue advances one issue as far as it will go: to merged, to a park,
 // or — the one way back out that is neither — to a question a human owes an
 // answer to, returned as a *deferredError for the caller to put down.
@@ -1247,7 +1292,19 @@ func describeVersion() string {
 // it within one process.
 func processIssue(ctx context.Context, cfg config, issue int, st *issueState) error {
 	branch := fmt.Sprintf("%s%d", cfg.branchPrefix, issue)
-	attempt := 0 // 0 = fresh skill run; >0 = retry after a crash
+	// fruitless counts consecutive crashes that got nothing done, and is what
+	// -retries bounds. resumes counts every retry this issue has had, fruitful
+	// ones included, and is what resumeCeiling bounds. Two counters because they
+	// guard two different failures: a session that dies straight back on every
+	// resume, and a run that inches a little further each time and never
+	// arrives.
+	//
+	// retrying is a third thing again: whether the last time round this loop was
+	// a crash retry, which is what decides that the session is worth resuming.
+	// Neither counter can answer that — fruitless is zeroed by a crash that got
+	// work done, and reading the resume off it would silently turn every such
+	// retry into a fresh run that threw the crashed session away.
+	fruitless, resumes, retrying := 0, 0, false
 
 	// Before the run, not only after the last merge: the gap this closes is also
 	// opened by a teammate's push and by a drain restarted days later, and the
@@ -1300,8 +1357,12 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 
 			resumeTarget, reason := "", reasonImplement
 			switch {
-			case attempt > 0:
-				resumeTarget = st.session // empty if the crashed run never got a session
+			// A retry with no session to resume — the crashed run never got
+			// one, or the one it got turned out to be unresumable — is a fresh
+			// skill run in everything but name, so it is recorded as one. The
+			// skill re-derives where it got to from the worktree.
+			case retrying && st.session != "":
+				resumeTarget = st.session
 				reason = reasonResume
 			case st.answered:
 				reason = reasonAnswers
@@ -1311,11 +1372,31 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 			started := time.Now()
 			rep, runErr := runClaude(ctx, cfg, issue, resumeTarget, runLimit(cfg, *tally))
 			rc := runContext{
-				issue: issue, reason: reason, attempt: attempt,
+				issue: issue, reason: reason, attempt: resumes,
 				resumedFrom: resumeTarget, started: started, ended: time.Now(),
 			}
 			if rep.sessionID != "" {
 				st.session = rep.sessionID
+			}
+			// A resume that never started is a dead session, not a crashed run:
+			// its JSONL was truncated by a hard kill mid-append, or it has aged
+			// out of the CLI's retention. execClaude seeds the report's session
+			// from the one it was asked to resume, so the id survives a run that
+			// emitted nothing at all — and every later attempt then fails the
+			// same way in seconds, parking a workable issue as "claude crashed
+			// and 3 resume attempts failed". Forget the session instead and let
+			// the next attempt go fresh, which is the run that would have worked.
+			//
+			// Only when the run also failed on its own: a resume that answered
+			// cleanly without an init event is not a shape any CLI produces, and
+			// as with lacksCommand every uncertainty here resolves toward
+			// carrying on. A shutdown signal is the other exclusion — it kills
+			// the child through the context, so a resume interrupted before its
+			// first event looks exactly like a dead session and is not one.
+			if resumeTarget != "" && runErr != nil && ctx.Err() == nil && !rep.started {
+				log.Printf("session %s could not be resumed — the next attempt starts a fresh run, "+
+					"which re-derives where the last one got to from the worktree", resumeTarget)
+				st.session = ""
 			}
 			// record closes over the run; the outcome is whatever the checks
 			// below turn out to find, so every exit from here on passes one.
@@ -1419,9 +1500,9 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 						return err
 					}
 					log.Printf("new activity on #%d — re-running to fold the answers in", issue)
-					attempt, st.answered = 0, true
+					fruitless, retrying, st.answered = 0, false, true
 					continue
-				case runErr != nil && attempt < cfg.retries:
+				case runErr != nil && fruitless < cfg.retries && resumes < cfg.resumeCeiling:
 					// Crash (API drop, stall, tool failure): resume the exact
 					// session by ID, keeping its research context. If no
 					// session was ever created, retry as a fresh run instead.
@@ -1436,13 +1517,26 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 						terminal(0, issueNeedsHuman)
 						return park("%s", reason)
 					}
-					attempt++
+					resumes++
+					retrying = true
 					mode := "restarting fresh"
 					if st.session != "" {
 						mode = "resuming session " + st.session
 					}
-					log.Printf("%s (attempt %d/%d) in %s",
-						mode, attempt, cfg.retries, cfg.retryWait)
+					if rep.progressed() {
+						// This run did real work before it died — an hour of it,
+						// for all anyone here knows — so it was not the crash
+						// loop -retries exists to stop. A host that sleeps four
+						// times across one long issue must not park it.
+						fruitless = 0
+						log.Printf("%s (retry %d/%d; the last run got work done before it "+
+							"ended, so the -retries budget starts over) in %s",
+							mode, resumes, cfg.resumeCeiling, cfg.retryWait)
+					} else {
+						fruitless++
+						log.Printf("%s (attempt %d/%d) in %s",
+							mode, fruitless, cfg.retries, cfg.retryWait)
+					}
 					if err := sleep(ctx, cfg.retryWait); err != nil {
 						return err
 					}
@@ -1450,6 +1544,14 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 				case runErr != nil:
 					record(0, outcomeNothing)
 					terminal(0, issueNeedsHuman)
+					if resumes >= cfg.resumeCeiling {
+						// "retried" rather than "resumed": most of these are
+						// resumes, but a dead session turns one into a fresh
+						// restart, and the count covers both.
+						return park("claude has been retried %d times on this issue and still has "+
+							"not finished it — each run gets somewhere and then dies, which needs "+
+							"a human", resumes)
+					}
 					return park("claude crashed and %d resume attempts failed", cfg.retries)
 				default:
 					// Clean exit, yet no PR and no questions: Claude decided
@@ -1460,7 +1562,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 				}
 			}
 			record(pr.Number, outcomeOpenedPR)
-			attempt = 0
+			fruitless, retrying = 0, false
 		}
 
 		switch pr.State {
@@ -1682,6 +1784,12 @@ type runReport struct {
 	observed      tokenCounts
 	observedTurns int
 
+	// started says the session got going at all: the CLI announces itself with
+	// an init event before it does anything else, so a run that emitted none
+	// never reached a model. On a --resume that is the tell for a session the
+	// CLI cannot honour — see processIssue, which stops resuming it.
+	started bool
+
 	exitCode     int
 	stalled      bool
 	interrupted  bool
@@ -1717,6 +1825,17 @@ func (r runReport) status() string {
 	return "ok"
 }
 
+// progressed reports whether a run got real work done before it ended. Only
+// the observed counters can answer that: a run that crashed, stalled or was
+// interrupted never emitted a result event, so its own turns and cost stay at
+// nothing however long it actually ran.
+//
+// What it decides is whether a crash spent the -retries budget. That budget
+// exists for a session that resumes and dies straight back; a run that worked
+// for an hour and was cut off by a host going to sleep is not that, and
+// charging it for one is how a healthy issue gets parked after four naps.
+func (r runReport) progressed() bool { return r.observedTurns > 0 || r.toolUses > 0 }
+
 // observe folds one event into the report.
 func (r *runReport) observe(ev streamEvent) {
 	if ev.SessionID != "" {
@@ -1724,8 +1843,11 @@ func (r *runReport) observe(ev streamEvent) {
 	}
 	switch ev.Type {
 	case "system":
-		if ev.Subtype == "init" && ev.Model != "" {
-			r.model = ev.Model
+		if ev.Subtype == "init" {
+			r.started = true
+			if ev.Model != "" {
+				r.model = ev.Model
+			}
 		}
 	case "assistant":
 		r.observedTurns++
@@ -2065,7 +2187,9 @@ func openIssues(ctx context.Context, cfg config) (ready, blocked []int, err erro
 	if cfg.label != "" {
 		args = append(args, "--label", cfg.label)
 	}
-	out, err := gh(ctx, cfg, args...)
+	out, err := retryRead(ctx, cfg, "listing open issues", func() ([]byte, error) {
+		return gh(ctx, cfg, args...)
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2128,7 +2252,9 @@ func (i ghIssue) hasLabel(name string) bool {
 // issueHasLabel asks GitHub whether one issue carries one label. Matched
 // case-insensitively, the way GitHub itself treats label names.
 func issueHasLabel(ctx context.Context, cfg config, issue int, name string) (bool, error) {
-	out, err := gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "labels")
+	out, err := retryRead(ctx, cfg, fmt.Sprintf("checking #%d's labels", issue), func() ([]byte, error) {
+		return gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "labels")
+	})
 	if err != nil {
 		return false, err
 	}
@@ -2146,7 +2272,9 @@ func issueHasLabel(ctx context.Context, cfg config, issue int, name string) (boo
 // only ever compared against a baseline taken once the issue is already known
 // to be blocked, where any new comment is worth re-reading the thread for.
 func commentCount(ctx context.Context, cfg config, issue int) (int, error) {
-	out, err := gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "comments")
+	out, err := retryRead(ctx, cfg, fmt.Sprintf("counting #%d's comments", issue), func() ([]byte, error) {
+		return gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "comments")
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -2174,8 +2302,10 @@ func pickPR(prs []pullRequest) *pullRequest {
 }
 
 func prForBranch(ctx context.Context, cfg config, branch string) (*pullRequest, error) {
-	out, err := gh(ctx, cfg, "pr", "list", "--head", branch, "--state", "all",
-		"--json", "number,state,url")
+	out, err := retryRead(ctx, cfg, "looking up the PR on branch "+branch, func() ([]byte, error) {
+		return gh(ctx, cfg, "pr", "list", "--head", branch, "--state", "all",
+			"--json", "number,state,url")
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -2784,7 +2914,10 @@ func waitForComments(ctx context.Context, cfg config, issue, baseline int) error
 }
 
 func ensureIssueClosed(ctx context.Context, cfg config, issue, prNumber int) error {
-	out, err := gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "state")
+	// The read is retried; the close below is not. Reads only — see retryRead.
+	out, err := retryRead(ctx, cfg, fmt.Sprintf("reading #%d's state", issue), func() ([]byte, error) {
+		return gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "state")
+	})
 	if err != nil {
 		return err
 	}
@@ -2872,6 +3005,58 @@ func cleanupWorktree(ctx context.Context, cfg config, issue int) {
 
 func gh(ctx context.Context, cfg config, args ...string) ([]byte, error) {
 	return capture(ctx, cfg.dir, cfg.ghBin, args...)
+}
+
+// ghReads is how many times a read-only GitHub lookup is attempted before its
+// failure is taken for real.
+//
+// The paths that wait on something — supervisePR, waitForComments — have always
+// shrugged a failed gh call off and tried again. The lookups that decide what to
+// work next never did: one of them failing ends the whole drain, and waking from
+// sleep is exactly when a gh call fails for a few seconds because the network
+// has not reassociated yet. A backlog that stops overnight for that is the
+// failure; this is the same tolerance the wait paths have, bounded.
+//
+// "A gh that cannot answer" stays fatal. preflight catches the permanent cases
+// at startup, and this only ever covers failing a few times in a row.
+const ghReads = 3
+
+// ghRetryDelay is the wait between those attempts. Sized for the thing it is
+// really waiting on: a laptop's network reassociating after the lid opens,
+// which takes seconds rather than milliseconds. Three attempts spread over it
+// cost a healthy drain nothing, because a healthy drain never reaches the
+// second one.
+const ghRetryDelay = 3 * time.Second
+
+// retryRead repeats a read-only GitHub lookup until it answers, at most ghReads
+// times. what names the lookup in the log, in the same "transient: … — will
+// retry" words the waiting paths use, so one drain reads the same way wherever
+// the flakiness lands.
+//
+// Reads only, deliberately. A retried write is a write that can happen twice —
+// a second park comment on a thread, a duplicate close — and none of the writes
+// here is idempotent enough to be worth that.
+func retryRead[T any](ctx context.Context, cfg config, what string, read func() (T, error)) (T, error) {
+	var zero T
+	for attempt := 1; ; attempt++ {
+		v, err := read()
+		if err == nil {
+			return v, nil
+		}
+		// Ctrl+C is not flakiness, and neither is a lookup that has now failed
+		// as often as it is allowed to.
+		if ctx.Err() != nil {
+			return zero, ctx.Err()
+		}
+		if attempt >= ghReads {
+			return zero, err
+		}
+		log.Printf("transient: %s failed (%v) — will retry in %s (%d of %d)",
+			what, err, dur(cfg.ghRetryWait), attempt, ghReads)
+		if err := sleep(ctx, cfg.ghRetryWait); err != nil {
+			return zero, err
+		}
+	}
 }
 
 func git(ctx context.Context, cfg config, args ...string) ([]byte, error) {

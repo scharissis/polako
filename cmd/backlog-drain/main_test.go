@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -113,6 +114,31 @@ func fakeClaude(mode string) int {
 		// because what it is there to prove is that the supervisor resumed a
 		// session instead of starting one over.
 		if !slices.Contains(os.Args, "--resume") {
+			return fakeClaude("crash")
+		}
+		if err := plantPR("MERGED"); err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		return fakeClaude("stream")
+	case "deadsession":
+		// A --resume the CLI cannot honour: the session's JSONL was truncated by
+		// a hard kill mid-append, or it has aged out of retention. It says so on
+		// stderr and exits without emitting a single event — no init, so nothing
+		// ever started, which is the whole tell the supervisor has.
+		if slices.Contains(os.Args, "--resume") {
+			fmt.Fprintln(os.Stderr, "No conversation found with the given session ID")
+			return 1
+		}
+		// Which fresh run this is has to come off the pretend repository: the
+		// first one dies leaving a session behind, and the fallback the
+		// supervisor is supposed to reach is the one that finishes the job.
+		n, err := countClaudeRun()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		if n == 1 {
 			return fakeClaude("crash")
 		}
 		if err := plantPR("MERGED"); err != nil {
@@ -285,6 +311,20 @@ func plantPRIn(st *ghState, issue, state string) {
 	st.PRs["issue-"+issue] = &fakePR{Number: 42, State: state}
 }
 
+// countClaudeRun records that another claude invocation happened and reports
+// which one this is. A fake CLI whose answer depends on how far the supervisor
+// has got needs a counter, and the pretend repository is the one scratchpad
+// every invocation can see — each of them is a separate process.
+func countClaudeRun() (int, error) {
+	path := os.Getenv(fakeGhEnv)
+	st, err := readGhState(path)
+	if err != nil {
+		return 0, err
+	}
+	st.ClaudeRuns++
+	return st.ClaudeRuns, writeGhState(path, st)
+}
+
 // plantPR is the same against the state file, for a fake CLI that is not
 // already holding it open — it reads and writes rather than mutating in place.
 func plantPR(state string) error {
@@ -389,6 +429,21 @@ func captureLog(t *testing.T) *bytes.Buffer {
 	log.SetOutput(&buf)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 	return &buf
+}
+
+// Only SIGINT used to cancel the run. A SIGTERM — a machine shutting down, a
+// service manager stopping the unit, a plain pkill — killed the supervisor
+// outright, so the context never cancelled and exec.CommandContext never killed
+// the child. That orphan keeps acceptEdits and the whole --allowedTools set: it
+// can go on editing, commit, push the branch and open a PR, and a restarted
+// drain sees no PR yet and starts a second run on the same issue.
+func TestShutdownSignalsCoverMoreThanCtrlC(t *testing.T) {
+	got := shutdownSignals()
+	for _, want := range []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP} {
+		if !slices.Contains(got, want) {
+			t.Errorf("shutdownSignals() = %v, want it to carry %v", got, want)
+		}
+	}
 }
 
 func TestLogEventRendersProgressLines(t *testing.T) {

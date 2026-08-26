@@ -35,6 +35,16 @@ type ghState struct {
 	Issues map[string]*fakeIssue `json:"issues"`
 	PRs    map[string]*fakePR    `json:"prs"`    // keyed by head branch
 	Labels []string              `json:"labels"` // labels the repo has defined
+
+	// FailReads is a network that has not come back yet after the host woke:
+	// the next N calls of a kind ("issue list", "pr list") fail the way gh does
+	// when it cannot reach GitHub, and then it answers normally again. Keyed by
+	// the two-word call so a test can be flaky about exactly one lookup.
+	FailReads map[string]int `json:"fail_reads"`
+
+	// ClaudeRuns counts the invocations a fake CLI has made, for the modes whose
+	// answer depends on how far the supervisor has got. See countClaudeRun.
+	ClaudeRuns int `json:"claude_runs"`
 }
 
 type fakeIssue struct {
@@ -144,7 +154,17 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 	}
 	issue := func() *fakeIssue { return st.Issues[at(2)] }
 
-	switch at(0) + " " + at(1) {
+	call := at(0) + " " + at(1)
+	// Ahead of everything, so a test can be flaky about a call whatever it would
+	// otherwise have answered. The countdown has to be persisted even though
+	// nothing else changed, or every invocation would start it over.
+	if n := st.FailReads[call]; n > 0 {
+		st.FailReads[call] = n - 1
+		fmt.Fprintf(os.Stderr, "could not connect to api.github.com\n")
+		return "", true, 1
+	}
+
+	switch call {
 	case "repo view":
 		return st.Repo + "\n", false, 0
 
@@ -365,6 +385,8 @@ func drainConfig(t *testing.T, mode string, st *ghState) (config, string) {
 		tools:          "Read",
 		poll:           10 * time.Millisecond,
 		stall:          10 * time.Second,
+		ghRetryWait:    time.Millisecond,
+		resumeCeiling:  defaultResumeCeiling,
 	}, path
 }
 
@@ -1291,6 +1313,58 @@ func TestDrainStopsCleanlyOnTheSessionBudget(t *testing.T) {
 	}
 }
 
+// Waking from sleep is exactly when a gh call fails for a few seconds, because
+// the network has not reassociated yet. The paths that wait on something always
+// shrugged that off and tried again; the lookups that decide what to work next
+// did not, and one of them failing ended the whole backlog.
+func TestDrainSurvivesAFlakyGh(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		// Already merged, so the issue advances with no claude run at all and
+		// every gh call the drain makes is one of the lookups under test.
+		PRs: map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
+		FailReads: map[string]int{
+			"issue list": 1, // deciding what to work
+			"pr list":    1, // restart safety, the first thing an issue is put through
+			"issue view": 1, // reading whether the merge closed the issue
+		},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("one failed gh call must not end the drain: %v", err)
+	}
+
+	if st := finalGhState(t, path); st.Issues["1"].Open {
+		t.Error("issue 1 should have been closed after its PR merged")
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"transient: listing open issues failed",
+		"transient: looking up the PR on branch issue-1 failed",
+		"transient: reading #1's state failed",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
+	}
+}
+
+// Bounded, though. "A gh that cannot answer" is one of the few conditions that
+// is meant to be fatal: every issue behind this one would hit the same wall, so
+// parking them one at a time would only bury the cause.
+func TestDrainStopsWhenGhKeepsFailing(t *testing.T) {
+	captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues:    map[string]*fakeIssue{"1": {Open: true}},
+		FailReads: map[string]int{"issue list": ghReads},
+	})
+
+	if err := drain(context.Background(), cfg); err == nil {
+		t.Fatal("a gh that never answers must still stop the drain")
+	}
+}
+
 // --- one issue, decision by decision ---
 
 // processIssue holds the switch that decides resume against wait against give
@@ -1304,6 +1378,11 @@ func TestDrainStopsCleanlyOnTheSessionBudget(t *testing.T) {
 // invocation, and the resume is read out of the same log — no state the fakes
 // would have to keep just to be asked about.
 func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
+	// Every resume the ceiling allows costs a fake claude process and the gh
+	// calls around it, so the shipped 20 spends over a minute under -race and
+	// ran the bound below out on CI. Three proves the same thing: it is past
+	// -retries 1, so only the reset can reach it and only the ceiling stops it.
+	const ceiling = 3
 	open := func() map[string]*fakeIssue { return map[string]*fakeIssue{"1": {Open: true}} }
 	parkedFor := func(t *testing.T, err error) string {
 		t.Helper()
@@ -1385,6 +1464,69 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 				}
 				if st.Issues["1"].Open {
 					t.Error("issue 1 should have been closed once its PR merged")
+				}
+			},
+		},
+		{
+			// The resume target is not a fact about the world: the session can
+			// be gone — its JSONL truncated by a hard kill, or aged out of the
+			// CLI's retention — and then every attempt fails on it identically
+			// in seconds and the issue parks with the wrong diagnosis. The fresh
+			// run is the one that would have worked, so it has to be reached.
+			name:  "a session that cannot be resumed falls back to a fresh run",
+			mode:  "deadsession",
+			state: &ghState{Issues: open()},
+			tune:  func(cfg *config) { cfg.retries = 3 },
+			// Two init events: the fresh run that crashes, and the fresh run
+			// that ships. The dead resume between them emits none — which is
+			// exactly what the supervisor reads it by.
+			runs: 2,
+			check: func(t *testing.T, err error, st *ghState, out string) {
+				if err != nil {
+					t.Errorf("err = %v, want the fresh fallback to finish the issue", err)
+				}
+				if !strings.Contains(out, "session sess-crash could not be resumed") {
+					t.Errorf("want the dead session named and given up on\ngot:\n%s", out)
+				}
+				if !strings.Contains(out, "restarting fresh") {
+					t.Errorf("want the attempt after it announced as a fresh run\ngot:\n%s", out)
+				}
+				if st.Issues["1"].Open {
+					t.Error("issue 1 should have been closed once its PR merged")
+				}
+			},
+		},
+		{
+			// -retries is there to stop a session that resumes and dies straight
+			// back. A run cut off after real work — a laptop that slept, a
+			// network that dropped — is not that, and charging it for one parks
+			// perfectly healthy issues. So progress resets the budget, and a
+			// separate ceiling is what guarantees the loop still ends.
+			name:  "a crash that got work done first does not spend the retry budget",
+			mode:  "partial",
+			state: &ghState{Issues: open()},
+			tune:  func(cfg *config) { cfg.retries, cfg.resumeCeiling = 1, ceiling },
+			// One fresh run and every resume the ceiling allows. The old counter
+			// would have stopped at two.
+			runs: 1 + ceiling,
+			check: func(t *testing.T, err error, st *ghState, out string) {
+				want := fmt.Sprintf("claude has been retried %d times on this issue and still has "+
+					"not finished it — each run gets somewhere and then dies, which needs a human",
+					ceiling)
+				if got := parkedFor(t, err); got != want {
+					t.Errorf("park reason = %q, want %q", got, want)
+				}
+				if !strings.Contains(out, "the -retries budget starts over") {
+					t.Errorf("want the reset said out loud, since -retries 1 would not explain "+
+						"%d runs on its own\ngot:\n%s", 1+ceiling, out)
+				}
+				// The invocation, not only the announcement. Reading "resume this
+				// session or start fresh" off the same counter the reset zeroes
+				// makes every one of these retries a silent fresh run: the log
+				// still promises the resume, and the crashed session's context is
+				// thrown away on the one path that exists to keep it.
+				if !strings.Contains(out, "--resume sess-partial") {
+					t.Errorf("want the announced resume actually made\ngot:\n%s", out)
 				}
 			},
 		},

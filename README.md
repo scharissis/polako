@@ -52,6 +52,17 @@ never re-runs Claude on that issue; it goes straight to waiting. (The one thing
 it writes locally is a line of numbers per run, which nothing reads back — see
 [Run data & cost tracking](#run-data--cost-tracking).)
 
+**Being interrupted is not the same as failing, and is not treated as one.**
+Ctrl+C, a service manager stopping the unit, a shutdown, a terminal going away:
+all of them take the running `claude` down with the supervisor, so no orphaned
+run is left editing, pushing and opening PRs behind a restarted drain's back.
+A laptop that sleeps mid-issue costs the run, not the issue — `-retries` bounds
+crashes that got *nothing* done, so a run cut off after real work resets it
+rather than spending it. If the crashed session turns out to be unresumable, the
+next attempt starts fresh instead of failing on it three more times. And a `gh`
+call that fails because the network has not come back yet is retried a few times
+before it is believed, rather than ending a backlog that was draining fine.
+
 **One issue that cannot be finished does not end the run.** An issue whose run
 produced nothing, whose retries ran out, whose PR was closed unmerged, whose
 conflicts could not be rebased away, whose CI stayed red, or which ran past a
@@ -404,7 +415,7 @@ backlog-drain stats
 | `-permission-mode` | `acceptEdits` | Passed to `claude --permission-mode`. |
 | `-model` | *(the CLI's own default)* | Passed to `claude --model`. Vary it between batches to compare models — see [Run data & cost tracking](#run-data--cost-tracking). |
 | `-poll` | `5m` | Interval between GitHub checks while waiting. |
-| `-retries` | `3` | Resume attempts after a crashed run, and the bound on remediation runs against an open PR that is conflicting, red, or carrying a request for changes. A run the API refused to authenticate is never one of them — see below. |
+| `-retries` | `3` | Consecutive *fruitless* resume attempts after a crashed run — a crash that got real work done first resets the count rather than spending it — and the bound on remediation runs against an open PR that is conflicting, red, or carrying a request for changes. A run the API refused to authenticate is never one of them — see below. |
 | `-retry-wait` | `30s` | Wait before each resume attempt. |
 | `-stall` | `15m` | Kill and resume a run that has emitted no events for this long (`0` disables). |
 | `-max-cost` | *(no limit)* | Park an issue once this drain's runs on it have cost this many dollars — see [Capping what a drain spends](#capping-what-a-drain-spends). |
