@@ -34,6 +34,15 @@ Detect the current phase from what you found and resume from there.
   `git worktree list`), fetch, and `git worktree add` a sibling folder
   `<repo>-issue-$issue` with branch issue-$issue.
 
+Whichever case applies, branch issue-$issue may already exist — locally from a
+run that was killed, or on the remote from one that pushed and died before
+`gh pr create`. Check both (`git branch --list issue-$issue`, and
+`git branch -r --list '*/issue-$issue'` after the fetch) before creating
+anything. If it exists, check it out and continue from the commits already on
+it; never recreate it from the default branch, which would discard them. A
+worktree you create for an existing branch takes the branch as-is
+(`git worktree add <path> issue-$issue`) rather than with `-b`.
+
 ## Phase 2 — Plan
 If PLAN.md doesn't exist in the worktree, or new answers have appeared:
 1. Study the issue and relevant code. Write PLAN.md BEFORE implementing —
