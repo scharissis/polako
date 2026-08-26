@@ -317,7 +317,13 @@ type config struct {
 	// compared later; rec is the sink, and writes nothing when -metrics is off.
 	// postSummary is the one opt-in that shows those numbers to anybody else:
 	// a numbers-only comment on each merged PR.
+	//
+	// drainID stamps every record this process writes, so `stats -drain` can
+	// report on one drain rather than on whatever a time window happens to
+	// catch. Generated per process and persisted nowhere but the records
+	// themselves: nothing reads it back, so telemetry stays write-only.
 	tag         string
+	drainID     string
 	rec         *recorder
 	postSummary bool
 
@@ -451,6 +457,7 @@ func parseFlags() config {
 		metrics = metricsOff
 	}
 	cfg.rec = newRecorder(metrics)
+	cfg.drainID = newDrainID()
 	cfg.ghBin = "gh"
 	cfg.ghRetryWait = ghRetryDelay
 	cfg.resumeCeiling = defaultResumeCeiling
@@ -1077,6 +1084,11 @@ func preflight(ctx context.Context, cfg *config) error {
 		// the answer to "what does this tool record".
 		log.Printf("recording run data in %s — numbers only, never leaves this machine (-metrics off to disable)",
 			cfg.rec.dir)
+		// The one place the id is ever shown. Nothing reads it back, so a
+		// report on this drain alone is unaskable unless this line is where an
+		// operator finds it — including while the drain is still running.
+		log.Printf("this drain is %s — `backlog-drain stats -drain %s` reports on it alone",
+			cfg.drainID, cfg.drainID)
 	}
 	return nil
 }

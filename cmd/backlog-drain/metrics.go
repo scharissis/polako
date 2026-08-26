@@ -20,6 +20,8 @@ package main
 // who could already see that PR. Nothing goes anywhere else, ever.
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
@@ -79,6 +81,24 @@ const (
 	usageObserved = "observed"
 )
 
+// newDrainID names one process's records, so a report can single out the drain
+// that wrote them. Random rather than derived from the clock or the pid,
+// because the two drains hardest to tell apart are the ones a timestamp cannot
+// separate: two started in the same second, and one holding a pid the kernel
+// has just reused.
+//
+// Four bytes. The id is only ever compared against the handful of drains whose
+// records share a directory, and it has to be short enough to retype from a
+// startup line.
+func newDrainID() string {
+	var b [4]byte
+	// crypto/rand.Read fills the buffer or crashes the program; there is no
+	// half-filled outcome to guard against, and no fallback worth writing for
+	// a machine whose randomness has failed.
+	rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
 // tokenCounts is the token block, shared by the run total and each per-model
 // entry.
 type tokenCounts struct {
@@ -137,6 +157,13 @@ type runRecord struct {
 	Kind  string `json:"kind"`
 	TS    string `json:"ts"`
 	Ended string `json:"ended"`
+
+	// Drain is the process that wrote this record. Every record one drain
+	// writes carries the same id and no two drains share one, which is what
+	// makes "what did last night's batch do" answerable at all: records from
+	// overlapping and back-to-back drains interleave in one file, and a time
+	// window cannot separate them.
+	Drain string `json:"drain"`
 
 	Repo  string `json:"repo"`
 	Issue int    `json:"issue"`
@@ -199,6 +226,7 @@ type issueRecord struct {
 	V       int    `json:"v"`
 	Kind    string `json:"kind"`
 	TS      string `json:"ts"`
+	Drain   string `json:"drain"`
 	Repo    string `json:"repo"`
 	Issue   int    `json:"issue"`
 	PR      int    `json:"pr"`
@@ -294,6 +322,7 @@ func newRunRecord(cfg config, rc runContext, rep runReport) runRecord {
 		TS:    stamp(rc.started),
 		Ended: stamp(rc.ended),
 
+		Drain: cfg.drainID,
 		Repo:  cfg.repo,
 		Issue: rc.issue,
 		PR:    rc.pr,
@@ -471,6 +500,7 @@ func (r *recorder) recordIssue(cfg config, issue, pr int, outcome string, facts 
 		V:       recordVersion,
 		Kind:    "issue",
 		TS:      stamp(time.Now()),
+		Drain:   cfg.drainID,
 		Repo:    cfg.repo,
 		Issue:   issue,
 		PR:      pr,
