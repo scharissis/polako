@@ -54,7 +54,9 @@ it writes locally is a line of numbers per run, which nothing reads back — see
 
 **One issue that cannot be finished does not end the run.** An issue whose run
 produced nothing, whose retries ran out, whose PR was closed unmerged, whose
-conflicts could not be rebased away, or whose CI stayed red is *parked*:
+conflicts could not be rebased away, whose CI stayed red, or which ran past a
+cap you set on it — see [Capping what a drain
+spends](#capping-what-a-drain-spends) — is *parked*:
 `backlog-drain` labels it
 `needs-human`, comments on the thread saying what happened, and moves on to the
 next issue. The label is what takes it out of the queue, so a later run does not
@@ -62,10 +64,14 @@ pick it straight back up — remove the label to put it back in. The process exi
 0 and prints a summary of what merged, what parked and why:
 
 ```
-summary: 3 issues merged, 1 issue parked, 6h12m of wall clock
-  merged  #14, #15, #17
-  parked  #16 — the run completed but produced no PR and no questions
+summary: 3 issues merged, 1 issue parked, $18.40 spent, 6h12m of wall clock
+  merged  #14 ($4.90), #15 ($6.12), #17 ($5.11)
+  parked  #16 ($2.27) — the run completed but produced no PR and no questions
 ```
+
+Dollars appear only when this drain spent some: one that merely waited on a PR
+an earlier process opened prints the line without them rather than claiming a
+free backlog.
 
 Parking preserves the no-conflict guarantee: only one issue is ever in flight,
 and a parked issue is simply not in flight.
@@ -104,9 +110,9 @@ issue behind it until you reply, and nothing merges under a waiting branch. A
 drain that ends with issues still waiting says so:
 
 ```
-summary: 3 issues merged, 0 issues parked, 1 issue awaiting an answer, 4h02m of wall clock
-  merged  #14, #15, #17
-  waiting #16 — reply on the thread and the next drain picks them up
+summary: 3 issues merged, 0 issues parked, 1 issue awaiting an answer, $12.86 spent, 4h02m of wall clock
+  merged  #14 ($4.90), #15 ($6.12), #17 ($1.20)
+  waiting #16 ($0.64) — reply on the thread and the next drain picks them up
 ```
 
 One caveat worth knowing: the comment count a wait compares against lives in
@@ -389,6 +395,9 @@ backlog-drain stats
 | `-retries` | `3` | Resume attempts after a crashed run, and the bound on remediation runs against an open PR that is conflicting, red, or carrying a request for changes. A run the API refused to authenticate is never one of them — see below. |
 | `-retry-wait` | `30s` | Wait before each resume attempt. |
 | `-stall` | `15m` | Kill and resume a run that has emitted no events for this long (`0` disables). |
+| `-max-cost` | *(no limit)* | Park an issue once this drain's runs on it have cost this many dollars — see [Capping what a drain spends](#capping-what-a-drain-spends). |
+| `-max-issue-time` | *(no limit)* | Park an issue once this drain's runs on it have taken this much *run time*, e.g. `-max-issue-time 90m`. Unlike `-stall`, it does not care whether events are arriving. |
+| `-max-session-cost` | *(no limit)* | End the drain cleanly, between issues, once its runs have cost this many dollars. |
 | `-skip` | *(none)* | Comma-separated issue numbers to skip. Issues labelled `needs-human` are skipped anyway — see [How it works](#how-it-works). |
 | `-once` | `false` | Process a single issue to a merge, a park or a question for you, then exit. |
 | `-strict-order` | `false` | Work issues in strict ascending order: wait in place on an issue awaiting an answer instead of moving past it. |
@@ -470,6 +479,69 @@ depends on them, and deleting the directory mid-drain changes nothing about
 what the supervisor does next — that is what keeps run data compatible with
 "all state lives in GitHub". Writes are best-effort: a failure warns once and
 the drain carries on.
+
+### Capping what a drain spends
+
+All three caps are off unless you set one, so a drain that sets none behaves
+exactly as it always did.
+
+```bash
+backlog-drain -max-cost 15 -max-issue-time 90m -max-session-cost 200
+```
+
+- **`-max-cost`** — dollars one issue may cost before it is parked.
+- **`-max-issue-time`** — how much *run time* one issue may consume before it
+  is parked. Not the wall clock since the issue was picked up: an issue spends
+  most of its life waiting for you to merge its PR, and parking issues over how
+  long that took would punish nobody's slowness but the reviewer's.
+- **`-max-session-cost`** — dollars this drain may spend before it stops.
+
+`-max-issue-time` is the one that catches what `-stall` cannot. That watchdog
+kills a run that has gone *silent*; an agent looping productively but uselessly
+for three hours emits events the whole way through and is invisible to it. This
+cap does not care whether events are arriving, so it kills that run and parks
+the issue for you.
+
+The two per-issue caps read the tally of every run this drain dispatched for
+the issue — the first attempt, its resumes, the re-run that folded your answer
+in, and any conflict, CI or review remediation against its PR. They gate work
+about to be dispatched and never work already done, which is why a run that
+overspends but *opens a PR* is not parked: the work is on GitHub and waiting
+for a merge costs nothing more. What is parked is the issue whose next run
+would take it further over. The reason goes in the park comment on the thread
+and in the exit summary, the same as any other park:
+
+```
+  parked  #16 ($15.40) — this drain has spent $15.40 on it, the whole of its -max-cost of $15.00
+```
+
+`-max-session-cost` is checked between issues rather than inside one, because
+ending a drain cleanly means declining to take on more work rather than killing
+a run part-way and having to park a healthy issue over it. So one issue can
+carry the total past the budget, by whatever that issue costs. `-max-cost` does
+not bound the overrun to itself, either: it gates the *next* run rather than the
+one in flight, so an issue can end at its `-max-cost` plus the whole of the run
+that carried it over. Size the budget with a run's worth of headroom under it.
+Nothing is parked when it trips: the drain logs what it spent, prints its
+summary and exits 0, and since all state is on GitHub, raising the budget and
+starting it again picks up exactly where it stopped.
+
+One honest limitation, in the safe direction. A run that crashed, stalled or
+was interrupted never emitted a `result` event, so it reported no cost —
+pricing belongs to the Claude CLI and this binary will not guess at it. Its
+tokens are still counted (as observed) and its duration is timed from the
+clock, but its dollars are zero. A cost cap is therefore a ceiling on what was
+*observed*, and a drain that keeps dying spends more than the number admits.
+The summary says so when it happened:
+
+```
+summary: 2 issues merged, 1 issue parked, $9.10 spent (3 runs reported none, so that is an undercount), 5h40m of wall clock
+```
+
+Caps in force are named at startup, because
+[the environment can set any flag](#setting-defaults-from-the-environment) and
+a park whose reason quotes a `-max-cost` you never typed is a mystery worth
+pre-empting.
 
 ### Putting it on the PR: `-post-summary`
 

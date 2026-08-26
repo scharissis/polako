@@ -11,7 +11,31 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
 
 ## [Unreleased]
 
+### Added
+
+- **Operator impact:** three caps on what a drain may spend, all off by default
+  so nothing changes for a drain that sets none. `-max-cost` parks an issue
+  once this drain's runs on it have cost that many dollars; `-max-issue-time`
+  parks it once those runs have taken that much *run time*, killing the run in
+  flight when the limit lands mid-run; `-max-session-cost` ends the drain
+  cleanly, between issues, once its runs have cost that much. `-max-issue-time`
+  is what `-stall` cannot stand in for: that watchdog kills a run that has gone
+  silent, and an agent looping productively but uselessly for three hours emits
+  events the whole way through. The two per-issue caps read the tally of every
+  run dispatched for the issue — the first attempt, its resumes, the re-run
+  that folds an answer in, and any conflict, CI or review remediation against
+  its PR. They gate work about to be dispatched and never work already done, so
+  a run that overspends but opens a PR is left to be merged rather than parked.
+  Caps in force are named at startup, since the environment can set any flag.
+  One honest limitation: a run that crashed, stalled or was interrupted never
+  reported a cost, so a cap is a ceiling on what was observed.
+
 ### Changed
+
+- The exit summary now prices the drain and each issue in it, and says when
+  runs that reported no cost make the total an undercount. Dollars appear only
+  when this drain spent some, so a drain that only waited on a PR an earlier
+  process opened prints the line it always printed.
 
 - **Operator impact:** an issue labelled `awaiting-answer` no longer holds up
   the queue behind it. The drain puts it down and works the next issue, the way
