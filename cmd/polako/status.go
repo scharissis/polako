@@ -1,6 +1,6 @@
 package main
 
-// `backlog-drain status` answers "where does my backlog stand right now?" in
+// `polako status` answers "where does my backlog stand right now?" in
 // one snapshot, from GitHub alone.
 //
 // Everything worth knowing is already there — the queue, the parked issues, the
@@ -67,19 +67,19 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time)
 	fs.StringVar(&opt.dir, "dir", ".", "path to the repository's main checkout, when -repo is not given")
 	fs.StringVar(&opt.repo, "repo", "",
 		"repository to report on (owner/name), instead of whichever -dir is a checkout of")
-	fs.StringVar(&opt.label, "label", "", "only count issues carrying this label, as a drain would (empty = all)")
+	fs.StringVar(&opt.label, "label", "", "only count issues carrying this label, as `polako work` would (empty = all)")
 	fs.StringVar(&opt.branchPrefix, "branch-prefix", "issue-", "branch name prefix the skill uses")
 	fs.BoolVar(&opt.strictOrder, "strict-order", false,
-		"report as a drain run with -strict-order would: an issue awaiting an answer keeps its place in the queue")
+		"report as a work run with -strict-order would: an issue awaiting an answer keeps its place in the queue")
 	fs.Usage = func() {
-		fmt.Fprint(fs.Output(), "Usage: backlog-drain status [flags]\n\n"+
+		fmt.Fprint(fs.Output(), "Usage: polako status [flags]\n\n"+
 			"Prints where the backlog stands, derived from GitHub: the queue in the\n"+
-			"order a drain would work it, what is waiting on you, and any open PR on\n"+
+			"order `polako work` would take it, what is waiting on you, and any open PR on\n"+
 			"a branch the skill named. Reads only — nothing here changes anything,\n"+
-			"and it says the same thing whether or not a drain is running.\n\n"+envUsage+"\nFlags:\n")
+			"and it says the same thing whether or not a shift is running.\n\n"+envUsage+"\nFlags:\n")
 		fs.PrintDefaults()
 	}
-	// The same environment defaults the drain honours, so a BACKLOG_DRAIN_LABEL
+	// The same environment defaults the drain honours, so a POLAKO_LABEL
 	// that scopes the drain scopes the report of it too.
 	if err := applyEnvDefaults(fs); err != nil {
 		return err
@@ -397,7 +397,7 @@ func statusScope(cfg config) string {
 func queuePairs(snap statusSnapshot) [][2]string {
 	q := snap.queues
 	if len(q.ready)+len(q.blocked)+len(q.parked) == 0 {
-		return [][2]string{{"queue", "nothing open — a drain starting now would find the backlog drained"}}
+		return [][2]string{{"queue", "nothing open — a shift starting now would find the backlog cleared"}}
 	}
 	pairs := [][2]string{{"ready", queueLine(q.ready)}}
 	if len(q.blocked) > 0 {

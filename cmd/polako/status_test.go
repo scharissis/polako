@@ -247,7 +247,7 @@ func TestStatusSaysWhenTheBacklogIsDrained(t *testing.T) {
 	}
 	var out strings.Builder
 	renderStatus(&out, cfg, snap)
-	if want := "nothing open — a drain starting now would find the backlog drained"; !strings.Contains(out.String(), want) {
+	if want := "nothing open — a shift starting now would find the backlog cleared"; !strings.Contains(out.String(), want) {
 		t.Errorf("report is missing %q\ngot:\n%s", want, out.String())
 	}
 	if strings.Contains(out.String(), "needs you") {

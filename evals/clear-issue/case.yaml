@@ -2,7 +2,7 @@ name: clear-issue
 description: >
   A well-specified issue should go all the way to a PR without stopping to ask
   anything — and should still write the plan first.
-prompt: /backlog-drain:implement-issue 1
+prompt: /polako:implement-issue 1
 scaffold_script: scaffold.sh
 # One run keeps a full plan-to-PR cycle affordable. Pass --runs 3 when you care
 # whether a case is flaky rather than whether it works at all.

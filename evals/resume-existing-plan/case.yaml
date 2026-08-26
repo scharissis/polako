@@ -4,7 +4,7 @@ description: >
   from it. Re-planning is not merely wasteful — it discards the decisions the
   previous run already made, which is the whole reason the plan is written to
   disk before the code.
-prompt: /backlog-drain:implement-issue 1
+prompt: /polako:implement-issue 1
 scaffold_script: scaffold.sh
 runs: 1
 max_turns: 80

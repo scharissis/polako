@@ -1,4 +1,4 @@
-// Command backlog-drain drives Claude Code through a repository's GitHub
+// Command polako drives Claude Code through a repository's GitHub
 // issues, in ascending order, one at a time.
 //
 // For each open issue it runs `claude -p "/implement-issue N"`, then waits on
@@ -17,7 +17,7 @@
 // clarification comments and merging PRs — both on GitHub.
 //
 // The one thing it writes locally is run data: a line of numbers per run,
-// under ~/.backlog-drain, which nothing here ever reads back. See metrics.go.
+// under ~/.polako, which nothing here ever reads back. See metrics.go.
 //
 // Nothing here is tied to one repository or language: point -dir at any GitHub
 // checkout, and use -tools/-add-tools to match that project's ecosystem.
@@ -58,7 +58,7 @@ const skillDir = "implement-issue"
 // ~/.claude/skills is invoked bare instead, so that install path needs
 // -skill implement-issue. Point -skill anywhere else to drive a different
 // workflow with the same supervisor.
-const defaultSkill = "backlog-drain:" + skillDir
+const defaultSkill = "polako:" + skillDir
 
 // pluginName is the half of defaultSkill that names the plugin: the id
 // `claude plugin list` reports an installed copy under, and the prefix of the
@@ -68,7 +68,7 @@ var pluginName, _, _ = strings.Cut(defaultSkill, ":")
 // version is stamped at build time with -ldflags "-X main.version=$tag", which
 // is how a prebuilt release binary knows which release it is. A `go install`
 // learns the same thing from the module version, and a build from a clone falls
-// back to the revision — see drainVersion in metrics.go.
+// back to the revision — see polakoVersion in metrics.go.
 var version string
 
 // errNoWork marks a run whose prompt never resolved to a skill — almost
@@ -96,7 +96,7 @@ var errBudget = errors.New("the issue's budget is spent")
 // gets, and "needs a human" without the remedy wastes the trip.
 func authAdvice(err error) error {
 	return fmt.Errorf("%w — check `claude auth status`, then `claude auth login` "+
-		"(or `claude setup-token` for an unattended host), and start the drain again", err)
+		"(or `claude setup-token` for an unattended host), and start `polako work` again", err)
 }
 
 // deferredError puts an issue down without giving it up: a run asked something,
@@ -163,7 +163,7 @@ func parkReason(err error) (string, bool) {
 // dying spends more than either number admits.
 func overBudget(cfg config, t issueTally) string {
 	if cfg.maxCost > 0 && t.costUSD >= cfg.maxCost {
-		return fmt.Sprintf("this drain has spent %s on it, the whole of its -max-cost of %s",
+		return fmt.Sprintf("this shift has spent %s on it, the whole of its -max-cost of %s",
 			usd(t.costUSD), usd(cfg.maxCost))
 	}
 	if cfg.maxIssueTime > 0 && runTime(t) >= cfg.maxIssueTime {
@@ -186,7 +186,7 @@ func runLimit(cfg config, t issueTally) time.Duration {
 	return max(cfg.maxIssueTime-runTime(t), time.Millisecond)
 }
 
-// runTime is how long this drain's runs on one issue have taken.
+// runTime is how long this shift's runs on one issue have taken.
 func runTime(t issueTally) time.Duration { return time.Duration(t.wallMS) * time.Millisecond }
 
 // capNotes names the caps in force, for the startup line. Worth saying out
@@ -201,7 +201,7 @@ func capNotes(cfg config) string {
 		parts = append(parts, "-max-issue-time "+dur(cfg.maxIssueTime)+" of run time per issue")
 	}
 	if cfg.maxSessionCost > 0 {
-		parts = append(parts, "-max-session-cost "+usd(cfg.maxSessionCost)+" for this drain")
+		parts = append(parts, "-max-session-cost "+usd(cfg.maxSessionCost)+" for this shift")
 	}
 	return strings.Join(parts, ", ")
 }
@@ -323,12 +323,12 @@ type config struct {
 	// postSummary is the one opt-in that shows those numbers to anybody else:
 	// a numbers-only comment on each merged PR.
 	//
-	// drainID stamps every record this process writes, so `stats -drain` can
+	// shiftID stamps every record this process writes, so `stats -shift` can
 	// report on one drain rather than on whatever a time window happens to
 	// catch. Generated per process and persisted nowhere but the records
 	// themselves: nothing reads it back, so telemetry stays write-only.
 	tag         string
-	drainID     string
+	shiftID     string
 	rec         *recorder
 	postSummary bool
 
@@ -342,33 +342,59 @@ type config struct {
 }
 
 func main() {
-	// Two subcommands, dispatched before any flag is parsed so that a bare
-	// invocation still drains and nothing existing changes. Both are reports
-	// and neither starts a run: `stats` reads the run data and never touches
-	// GitHub, `status` reads GitHub and never touches the run data.
-	if len(os.Args) > 1 {
-		report := func(name string, run func() error) {
-			log.SetFlags(0) // a report, not a log
-			if err := run(); err != nil {
-				if errors.Is(err, errFlagsReported) {
-					os.Exit(2) // the usage is already on screen
-				}
-				log.Fatalf("%s: %v", name, err)
+	// Verbs, dispatched before any flag is parsed. `work` is the only one
+	// that starts runs; `stats` reads the run data and never touches GitHub,
+	// `status` reads GitHub and never touches the run data. A bare invocation
+	// prints the verb table rather than defaulting to the most consequential
+	// verb: starting an unattended agent loop should take a word that says so.
+	if len(os.Args) < 2 {
+		verbUsage(os.Stdout)
+		return
+	}
+	report := func(name string, run func() error) {
+		log.SetFlags(0) // a report, not a log
+		if err := run(); err != nil {
+			if errors.Is(err, errFlagsReported) {
+				os.Exit(2) // the usage is already on screen
 			}
+			log.Fatalf("%s: %v", name, err)
 		}
-		switch os.Args[1] {
-		case "stats":
-			report("stats", func() error { return runStats(os.Args[2:], os.Stdout, time.Now()) })
-			return
-		case "status":
-			// Its own context, cancelled by the same signals a drain honours:
-			// a snapshot makes a handful of gh calls, and Ctrl+C partway
-			// through should end them rather than be ignored.
-			ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
-			defer stop()
-			report("status", func() error { return runStatus(ctx, os.Args[2:], os.Stdout, time.Now()) })
-			return
+	}
+	switch os.Args[1] {
+	case "work":
+		// Drop the verb so the flag package parses what follows it.
+		os.Args = append(os.Args[:1], os.Args[2:]...)
+	case "stats":
+		report("stats", func() error { return runStats(os.Args[2:], os.Stdout, time.Now()) })
+		return
+	case "status":
+		// Its own context, cancelled by the same signals work honours: a
+		// snapshot makes a handful of gh calls, and Ctrl+C partway through
+		// should end them rather than be ignored.
+		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
+		defer stop()
+		report("status", func() error { return runStatus(ctx, os.Args[2:], os.Stdout, time.Now()) })
+		return
+	case "version", "-version", "--version":
+		// Reachable without a verb, because it is what an operator asks
+		// exactly when they are unsure what they are running.
+		fmt.Println(describeVersion())
+		return
+	case "help", "-h", "-help", "--help":
+		verbUsage(os.Stdout)
+		return
+	default:
+		// Old muscle memory lands here: the bare invocation used to work the
+		// backlog, so flags arriving without a verb get pointed at the verb
+		// they almost certainly meant.
+		if strings.HasPrefix(os.Args[1], "-") {
+			fmt.Fprintf(os.Stderr, "polako needs a verb before any flags — did you mean `polako work %s`?\n\n",
+				strings.Join(os.Args[1:], " "))
+		} else {
+			fmt.Fprintf(os.Stderr, "unknown verb %q\n\n", os.Args[1])
 		}
+		verbUsage(os.Stderr)
+		os.Exit(2)
 	}
 
 	cfg := parseFlags()
@@ -390,6 +416,20 @@ func main() {
 		}
 		log.Fatalf("stopping: %v", err)
 	}
+}
+
+// verbUsage is the bare invocation's answer: the one line of etymology that
+// explains the name, then the verbs. It lists only verbs that exist, so the
+// usage never advertises a verb that errors.
+func verbUsage(w io.Writer) {
+	fmt.Fprint(w,
+		"polako — Croatian for \"take it slow\": works a GitHub issue backlog to zero,\n"+
+			"one issue at a time, with a human at every gate.\n\n"+
+			"Usage: polako <verb> [flags]\n\n"+
+			"  work    work the backlog: run the skill per issue, wait for each merge, unattended\n"+
+			"  status  print where the backlog stands, from GitHub (read-only)\n"+
+			"  stats   report on the run data already recorded (local, read-only)\n\n"+
+			"Run 'polako <verb> -h' for that verb's flags.\n")
 }
 
 // shutdownSignals are every way a host says "stop now". All of them have to
@@ -429,11 +469,11 @@ func parseFlags() config {
 	flag.DurationVar(&cfg.retryWait, "retry-wait", 30*time.Second, "wait before each resume attempt")
 	flag.DurationVar(&cfg.stall, "stall", 15*time.Minute, "kill and resume a run with no output events for this long (0 disables)")
 	flag.Float64Var(&cfg.maxCost, "max-cost", 0,
-		"park an issue once this drain's runs on it have cost this many dollars (0 disables)")
+		"park an issue once this shift's runs on it have cost this many dollars (0 disables)")
 	flag.DurationVar(&cfg.maxIssueTime, "max-issue-time", 0,
-		"park an issue once this drain's runs on it have taken this much run time (0 disables)")
+		"park an issue once this shift's runs on it have taken this much run time (0 disables)")
 	flag.Float64Var(&cfg.maxSessionCost, "max-session-cost", 0,
-		"end the drain between issues once its runs have cost this many dollars (0 disables)")
+		"end the shift between issues once its runs have cost this many dollars (0 disables)")
 	flag.StringVar(&skip, "skip", "", "comma-separated issue numbers to skip (head-of-line escape hatch)")
 	flag.BoolVar(&cfg.once, "once", false,
 		"process a single issue to a merge, a park or a question, then exit")
@@ -442,17 +482,18 @@ func parseFlags() config {
 	flag.BoolVar(&cfg.dryRun, "dry-run", false,
 		"resolve the next issue, print the claude invocation it would get, and exit without running or writing anything")
 	flag.StringVar(&cfg.notifyCmd, "notify", "",
-		"command to run when the drain needs a human, with context in "+notifyPrefix+"* (see the README)")
+		"command to run when polako needs a human, with context in "+notifyPrefix+"* (see the README)")
 	flag.StringVar(&cfg.tag, "run-tag", "", "label recorded with every run, for comparing one batch against another")
 	flag.BoolVar(&cfg.postSummary, "post-summary", false,
 		"comment one line of run numbers on each merged PR (runs, tokens, dollars, wall time)")
 	flag.StringVar(&metrics, "metrics", "",
-		`directory for run-data records, or "off" (default ~/.backlog-drain/metrics)`)
+		`directory for run-data records, or "off" (default ~/.polako/metrics)`)
 	flag.Usage = func() {
 		fmt.Fprint(flag.CommandLine.Output(),
-			"Usage: backlog-drain [flags]         drain the backlog, one issue at a time\n"+
-				"       backlog-drain status [flags]  print where the backlog stands, from GitHub\n"+
-				"       backlog-drain stats [flags]   report on the run data already recorded\n\n"+
+			"Usage: polako work [flags]\n\n"+
+				"Work the backlog to zero: run the skill on the lowest open issue, wait\n"+
+				"for its PR to merge — or park the issue for a human — then advance.\n"+
+				"Unattended; nothing here merges. `polako -h` lists the other verbs.\n\n"+
 				envUsage+"\nFlags:\n")
 		flag.PrintDefaults()
 	}
@@ -478,7 +519,7 @@ func parseFlags() config {
 		metrics = metricsOff
 	}
 	cfg.rec = newRecorder(metrics)
-	cfg.drainID = newDrainID()
+	cfg.shiftID = newShiftID()
 	cfg.ghBin = "gh"
 	cfg.ghRetryWait = ghRetryDelay
 	cfg.resumeCeiling = defaultResumeCeiling
@@ -492,19 +533,19 @@ func parseFlags() config {
 }
 
 // envPrefix namespaces the variables that set flag defaults: -post-summary
-// reads BACKLOG_DRAIN_POST_SUMMARY.
-const envPrefix = "BACKLOG_DRAIN_"
+// reads POLAKO_POST_SUMMARY.
+const envPrefix = "POLAKO_"
 
 // envUsage is the one line of help that makes the mechanism discoverable. A
 // default nobody knows how to set is a default nobody sets.
 const envUsage = "Any flag below can take its default from the environment:\n" +
-	"BACKLOG_DRAIN_<FLAG>, e.g. BACKLOG_DRAIN_POST_SUMMARY=1. Arguments win.\n"
+	"POLAKO_<FLAG>, e.g. POLAKO_POST_SUMMARY=1. Arguments win.\n"
 
 // envExempt are the flags the environment may not set. Both are actions rather
 // than preferences, and either one left in a profile turns every later drain
 // into something that exits before doing any work — a failure that looks like
-// success, since the process ends cleanly. BACKLOG_DRAIN_VERSION is exactly the
-// variable a Dockerfile or CI job pins an install with; BACKLOG_DRAIN_DRY_RUN is
+// success, since the process ends cleanly. POLAKO_VERSION is exactly the
+// variable a Dockerfile or CI job pins an install with; POLAKO_DRY_RUN is
 // the one an operator exports to preview an unfamiliar repository once and then
 // forgets, after which the nightly drain reports success on a backlog nobody
 // touched.
@@ -621,7 +662,7 @@ func dryRun(ctx context.Context, cfg config, out io.Writer) error {
 		issue = pickLowest(blocked, cfg.skip)
 	}
 	if issue == 0 {
-		log.Println("no open issues — nothing to drain")
+		log.Println("no open issues — nothing to work")
 		return nil
 	}
 	// Restart safety is the first thing an issue is put through, and the answer
@@ -691,7 +732,7 @@ type issueResult struct {
 	parked   bool
 	awaiting bool   // put down waiting on a human answer, not finished
 	reason   string // why it parked; empty otherwise
-	// What this drain's runs on the issue cost, and how many of them reported
+	// What this shift's runs on the issue cost, and how many of them reported
 	// no cost at all. Both come off the tally the issue was carrying, so an
 	// issue this process only waited on contributes an honest zero.
 	cost         float64
@@ -761,7 +802,7 @@ func drain(ctx context.Context, cfg config) error {
 		// does not bound that to itself, since it gates the next run rather than
 		// the one in flight.
 		if spent := sessionSpend(results, states); cfg.maxSessionCost > 0 && spent >= cfg.maxSessionCost {
-			reason := fmt.Sprintf("this drain has spent %s of its -max-session-cost of %s — stopping here; "+
+			reason := fmt.Sprintf("this shift has spent %s of its -max-session-cost of %s — stopping here; "+
 				"everything is on GitHub, so raise the budget and start it again to carry on",
 				usd(spent), usd(cfg.maxSessionCost))
 			log.Print(reason)
@@ -784,8 +825,8 @@ func drain(ctx context.Context, cfg config) error {
 				// Naming those in the summary would send an operator to a thread
 				// with nothing left to do on it.
 				clear(states)
-				log.Println("no open issues — backlog drained")
-				notify(ctx, cfg, notification{event: notifyDrained,
+				log.Println("no open issues — backlog cleared")
+				notify(ctx, cfg, notification{event: notifyCleared,
 					reason: "no open issues left to work"})
 				return finish(nil)
 			}
@@ -847,7 +888,7 @@ func spend(st *issueState, r issueResult) issueResult {
 	return r
 }
 
-// sessionSpend is what this drain's runs have cost so far: the issues it has
+// sessionSpend is what this shift's runs have cost so far: the issues it has
 // finished with, plus the ones it put down still holding a tally. The two sets
 // are disjoint — an issue leaves states exactly as it enters results — so
 // nothing here is counted twice.
@@ -878,7 +919,7 @@ func sessionSpend(results []issueResult, states map[int]*issueState) float64 {
 func awaitAnswer(ctx context.Context, cfg config, blocked []int, states map[int]*issueState) (int, error) {
 	for _, issue := range blocked {
 		if st := states[issue]; st == nil || !st.awaiting {
-			log.Printf("issue #%d was already labelled %q when this drain reached it — re-running it "+
+			log.Printf("issue #%d was already labelled %q when this shift reached it — re-running it "+
 				"to see whether the answer is on the thread", issue, awaitingAnswerLabel)
 			return issue, nil
 		}
@@ -938,12 +979,12 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string) {
 		// that fails means the label was already there, so the first failure
 		// was something else and retrying the edit would only repeat it.
 		if cerr := ensureLabel(ctx, cfg, needsHumanLabel, "D93F0B",
-			"backlog-drain parked this issue for a human"); cerr == nil {
+			"polako parked this issue for a human"); cerr == nil {
 			_, err = gh(ctx, cfg, "issue", "edit", n, "--add-label", needsHumanLabel)
 		}
 	}
 	if err != nil {
-		log.Printf("could not label issue #%d %q (%v) — the next drain will pick it up again "+
+		log.Printf("could not label issue #%d %q (%v) — the next shift will pick it up again "+
 			"unless you label it yourself or close it", issue, needsHumanLabel, err)
 	}
 	// Parking supersedes any question still flagged on the issue: what it now
@@ -952,7 +993,7 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string) {
 	// read it as a question of its own and sit waiting for a comment nobody
 	// owes it. Best-effort and silent: the issue is already parked either way.
 	_, _ = gh(ctx, cfg, "issue", "edit", n, "--remove-label", awaitingAnswerLabel)
-	body := fmt.Sprintf("**backlog-drain parked this issue.** %s\n\n"+
+	body := fmt.Sprintf("**polako parked this issue.** %s\n\n"+
 		"Nothing will run on it again until the `%s` label is removed.", reason, needsHumanLabel)
 	if _, cerr := gh(ctx, cfg, "issue", "comment", n, "--body", body); cerr != nil {
 		log.Printf("could not comment on issue #%d (%v) — the reason is in this log and in the exit summary",
@@ -1034,7 +1075,7 @@ func drainSummary(results []issueResult, elapsed time.Duration) []string {
 	}
 	if len(waiting) > 0 {
 		lines = append(lines, "  waiting "+strings.Join(waiting, ", ")+
-			" — reply on the thread and the next drain picks them up")
+			" — reply on the thread and the next shift picks them up")
 	}
 	return append(lines, parked...)
 }
@@ -1078,7 +1119,7 @@ func preflight(ctx context.Context, cfg *config) error {
 	// the promise is that it leaves the repository as it found it.
 	if !cfg.dryRun {
 		_ = ensureLabel(ctx, *cfg, awaitingAnswerLabel, "FBCA04",
-			"backlog-drain is waiting for an answer on this issue")
+			"polako is waiting for an answer on this issue")
 	}
 	cfg.claudeVersion = claudeVersion(ctx, *cfg)
 	cfg.pluginVersion = pluginVersion(ctx, *cfg)
@@ -1086,7 +1127,7 @@ func preflight(ctx context.Context, cfg *config) error {
 	if cfg.dryRun {
 		log.Println("-dry-run: resolving the next issue only — no claude run, no GitHub write, no run data")
 	}
-	warnOnVersionSkew(drainVersion(), *cfg)
+	warnOnVersionSkew(polakoVersion(), *cfg)
 	if notes := capNotes(*cfg); notes != "" {
 		log.Printf("spend caps in force: %s", notes)
 	}
@@ -1098,7 +1139,7 @@ func preflight(ctx context.Context, cfg *config) error {
 	}
 	if cfg.notifyCmd != "" {
 		log.Printf("-notify is on — `%s` runs when an issue parks, an issue asks a question, "+
-			"the backlog drains, or the drain stops early", cfg.notifyCmd)
+			"the backlog clears, or the shift stops early", cfg.notifyCmd)
 	}
 	if cfg.rec.enabled() {
 		// Say where the data goes, every time, unprompted: it is the whole of
@@ -1108,8 +1149,8 @@ func preflight(ctx context.Context, cfg *config) error {
 		// The one place the id is ever shown. Nothing reads it back, so a
 		// report on this drain alone is unaskable unless this line is where an
 		// operator finds it — including while the drain is still running.
-		log.Printf("this drain is %s — `backlog-drain stats -drain %s` reports on it alone",
-			cfg.drainID, cfg.drainID)
+		log.Printf("this shift is %s — `polako stats -shift %s` reports on it alone",
+			cfg.shiftID, cfg.shiftID)
 	}
 	return nil
 }
@@ -1257,7 +1298,7 @@ func warnOnVersionSkew(binary string, cfg config) {
 		"they are meant to ship together, and the supervisor finds a PR by the "+
 		"branch name the skill chooses. Bring both to the current release: "+
 		"`claude plugin marketplace update && claude plugin update %s`, then "+
-		"`go install github.com/scharissis/backlog-drain/cmd/backlog-drain@latest`",
+		"`go install github.com/scharissis/polako/cmd/polako@latest`",
 		self, pluginName, plugin, pluginName)
 }
 
@@ -1304,7 +1345,7 @@ func parseSemver(s string) ([3]int, error) {
 // describeVersion answers -version: which release this binary is, or an honest
 // account of why it is not one.
 func describeVersion() string {
-	v := drainVersion()
+	v := polakoVersion()
 	if v == "" {
 		return pluginName + " (unknown version: built without module or VCS information)"
 	}
@@ -1526,7 +1567,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					// changes what the supervisor does in the meantime.
 					notify(ctx, cfg, notification{event: notifyAwaiting, issue: issue,
 						reason: "a run stopped to ask something on the issue thread — " +
-							"reply there and the next drain folds the answer in"})
+							"reply there and the next shift folds the answer in"})
 					if !cfg.strictOrder {
 						// The question is flagged on GitHub, which is durable
 						// and is all a later drain needs. Hand the issue back
@@ -3039,11 +3080,11 @@ func postSummary(ctx context.Context, cfg config, prNumber int, tally issueTally
 	if tally.runs == 0 {
 		// This drain only waited on a PR an earlier one opened, so it has
 		// nothing to report — and "0 runs, $0.00" would read as a free PR.
-		log.Printf("-post-summary: no runs for PR #%d in this drain — leaving it uncommented", prNumber)
+		log.Printf("-post-summary: no runs for PR #%d in this shift — leaving it uncommented", prNumber)
 		return
 	}
 	if _, err := gh(ctx, cfg, "pr", "comment", strconv.Itoa(prNumber), "--body", summaryComment(tally)); err != nil {
-		log.Printf("could not comment the run summary on PR #%d (%v) — the drain continues", prNumber, err)
+		log.Printf("could not comment the run summary on PR #%d (%v) — the shift continues", prNumber, err)
 		return
 	}
 	log.Printf("commented the run summary on PR #%d", prNumber)

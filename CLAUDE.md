@@ -1,7 +1,7 @@
-# backlog-drain
+# polako
 
 Two halves that ship and version together: the `implement-issue` skill takes a
-single GitHub issue from plan to PR, and the `backlog-drain` binary supervises a
+single GitHub issue from plan to PR, and the `polako` binary supervises a
 whole backlog of them unattended, never putting two issues in flight at once.
 
 ## Invariants
@@ -18,7 +18,7 @@ in the PR body rather than doing it quietly.
   point, rerun it later, and it must re-derive where things stand from GitHub
   alone. Anything that would want a local database is the wrong design here.
 - **Write-only telemetry is the one exception**, and it stays that way. The
-  run-data recorder (`metrics.go`) appends JSONL under `~/.backlog-drain`; the
+  run-data recorder (`metrics.go`) appends JSONL under `~/.polako`; the
   drain loop never reads it, no decision depends on it, and deleting the
   directory mid-drain changes no behavior. A read from those files anywhere
   outside `stats` would turn telemetry back into state. Records hold numbers,
@@ -83,7 +83,7 @@ in the PR body rather than doing it quietly.
   Claude process spawns a fake CLI — this same test package built once without
   the race detector, which then re-enters `TestMain` and impersonates `claude`,
   `gh` or the notify command. See `fakeCLI` and `fakeClaude` in
-  `cmd/backlog-drain/main_test.go`. Pointing those children back at `os.Args[0]`
+  `cmd/polako/main_test.go`. Pointing those children back at `os.Args[0]`
   works and costs a second of race-runtime startup apiece, ~300 times over.
 - Conventional-commit subjects: `fix:`, `docs:`, `feat:`, `test:`. A version
   bump is its own `chore(release): X.Y.Z` commit, touching only `plugin.json`

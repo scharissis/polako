@@ -3,7 +3,7 @@ description: >
   The review gate is mandatory and it comes before the PR. This case grades the
   ordering, not the code: a gate that runs after `gh pr create` reviews a change
   a human is already looking at.
-prompt: /backlog-drain:implement-issue 1
+prompt: /polako:implement-issue 1
 scaffold_script: scaffold.sh
 runs: 1
 max_turns: 80

@@ -17,7 +17,7 @@ import (
 	"testing"
 )
 
-// repoRoot is two levels up from cmd/backlog-drain.
+// repoRoot is two levels up from cmd/polako.
 func repoRoot() string { return filepath.Join("..", "..") }
 
 func readRepoFile(t *testing.T, parts ...string) string {
@@ -49,7 +49,7 @@ func moduleName(t *testing.T) string {
 func stringFlagDefault(t *testing.T, name string) string {
 	t.Helper()
 	registration := regexp.MustCompile(`\.StringVar\(&\w+(?:\.\w+)?, "` + regexp.QuoteMeta(name) + `", "([^"]*)"`)
-	m := registration.FindStringSubmatch(readRepoFile(t, "cmd", "backlog-drain", "main.go"))
+	m := registration.FindStringSubmatch(readRepoFile(t, "cmd", "polako", "main.go"))
 	if m == nil {
 		t.Fatalf("main.go registers no string flag named %q", name)
 	}
@@ -88,7 +88,7 @@ func TestPluginManifestMatchesTheModule(t *testing.T) {
 	if manifest.Description == "" {
 		t.Error("plugin.json needs a description: it is what the marketplace lists")
 	}
-	// Both release tags derive from this field — backlog-drain--vX.Y.Z for the
+	// Both release tags derive from this field — polako--vX.Y.Z for the
 	// plugin tooling, vX.Y.Z for `go install` — so it has to be plain semver.
 	if !regexp.MustCompile(`^\d+\.\d+\.\d+$`).MatchString(manifest.Version) {
 		t.Errorf("plugin version %q is not semver; the release tags derive from it", manifest.Version)

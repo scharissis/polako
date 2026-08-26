@@ -1,6 +1,7 @@
 # Built binaries
-/backlog-drain
-/backlog-drain.exe
+/polako
+/cmd/polako/polako
+/polako.exe
 /dist/
 
 # Eval runs: `claude plugin eval` writes results here, and the scaffold builds

@@ -81,7 +81,7 @@ const (
 	usageObserved = "observed"
 )
 
-// newDrainID names one process's records, so a report can single out the drain
+// newShiftID names one process's records, so a report can single out the shift
 // that wrote them. Random rather than derived from the clock or the pid,
 // because the two drains hardest to tell apart are the ones a timestamp cannot
 // separate: two started in the same second, and one holding a pid the kernel
@@ -90,7 +90,7 @@ const (
 // Four bytes. The id is only ever compared against the handful of drains whose
 // records share a directory, and it has to be short enough to retype from a
 // startup line.
-func newDrainID() string {
+func newShiftID() string {
 	var b [4]byte
 	// crypto/rand.Read fills the buffer or crashes the program; there is no
 	// half-filled outcome to guard against, and no fallback worth writing for
@@ -158,12 +158,12 @@ type runRecord struct {
 	TS    string `json:"ts"`
 	Ended string `json:"ended"`
 
-	// Drain is the process that wrote this record. Every record one drain
+	// Shift is the process that wrote this record. Every record one shift
 	// writes carries the same id and no two drains share one, which is what
 	// makes "what did last night's batch do" answerable at all: records from
 	// overlapping and back-to-back drains interleave in one file, and a time
 	// window cannot separate them.
-	Drain string `json:"drain"`
+	Shift string `json:"shift"`
 
 	Repo  string `json:"repo"`
 	Issue int    `json:"issue"`
@@ -212,7 +212,7 @@ type runRecord struct {
 	MaxIssueTimeS     int     `json:"max_issue_time_s,omitempty"`
 	MaxSessionCostUSD float64 `json:"max_session_cost_usd,omitempty"`
 
-	DrainVersion  string `json:"drain_version"`
+	PolakoVersion string `json:"polako_version"`
 	ClaudeVersion string `json:"claude_version"`
 	PluginVersion string `json:"plugin_version"`
 }
@@ -226,7 +226,7 @@ type issueRecord struct {
 	V       int    `json:"v"`
 	Kind    string `json:"kind"`
 	TS      string `json:"ts"`
-	Drain   string `json:"drain"`
+	Shift   string `json:"shift"`
 	Repo    string `json:"repo"`
 	Issue   int    `json:"issue"`
 	PR      int    `json:"pr"`
@@ -292,7 +292,7 @@ func (t *issueTally) add(rec runRecord) {
 // than the operator ever sees, so it says what it covers and what it does not.
 func summaryComment(t issueTally) string {
 	tool := pluginName
-	if v := drainVersion(); v != "" {
+	if v := polakoVersion(); v != "" {
 		tool += " " + v
 	}
 	// A run that crashed, stalled or was interrupted never emitted a result
@@ -307,7 +307,7 @@ func summaryComment(t issueTally) string {
 			"so tokens and dollars are undercounts.", t.approximated)
 	}
 	return fmt.Sprintf("**%s** — %s, %s, %s tokens, %s, %s of run time.\n\n"+
-		"<sub>Recorded by %s, covering the runs this drain supervised.%s "+
+		"<sub>Recorded by %s, covering the runs this shift supervised.%s "+
 		"Dollars are the Claude CLI's API-equivalent pricing.</sub>",
 		pluginName, plural(t.runs, "run"), plural(t.questions, "question round"),
 		count(t.tokens.total()), usd(t.costUSD),
@@ -322,7 +322,7 @@ func newRunRecord(cfg config, rc runContext, rep runReport) runRecord {
 		TS:    stamp(rc.started),
 		Ended: stamp(rc.ended),
 
-		Drain: cfg.drainID,
+		Shift: cfg.shiftID,
 		Repo:  cfg.repo,
 		Issue: rc.issue,
 		PR:    rc.pr,
@@ -363,7 +363,7 @@ func newRunRecord(cfg config, rc runContext, rep runReport) runRecord {
 		MaxIssueTimeS:     seconds(cfg.maxIssueTime),
 		MaxSessionCostUSD: cfg.maxSessionCost,
 
-		DrainVersion:  drainVersion(),
+		PolakoVersion: polakoVersion(),
 		ClaudeVersion: cfg.claudeVersion,
 		PluginVersion: cfg.pluginVersion,
 	}
@@ -402,7 +402,7 @@ func toolsHash(tools string) string {
 	return fmt.Sprintf("%08x", h.Sum32())
 }
 
-// drainVersion is the release tag when the binary was stamped at build time,
+// polakoVersion is the release tag when the binary was stamped at build time,
 // the module version when installed with `go install`, and the short VCS
 // revision when built from a clone. Empty if the binary carries none of them —
 // a `go run` of the package, or a test.
@@ -411,7 +411,7 @@ func toolsHash(tools string) string {
 // binary has: `go build` from a checkout records the revision but leaves the
 // module version at "(devel)", so without it every published binary would
 // report a bare SHA and no run could be attributed to a release.
-var drainVersion = sync.OnceValue(func() string {
+var polakoVersion = sync.OnceValue(func() string {
 	if version != "" {
 		return version
 	}
@@ -480,7 +480,7 @@ func defaultMetricsDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".backlog-drain", "metrics"), nil
+	return filepath.Join(home, ".polako", "metrics"), nil
 }
 
 func (r *recorder) enabled() bool { return r != nil && r.dir != "" }
@@ -500,7 +500,7 @@ func (r *recorder) recordIssue(cfg config, issue, pr int, outcome string, facts 
 		V:       recordVersion,
 		Kind:    "issue",
 		TS:      stamp(time.Now()),
-		Drain:   cfg.drainID,
+		Shift:   cfg.shiftID,
 		Repo:    cfg.repo,
 		Issue:   issue,
 		PR:      pr,
@@ -560,7 +560,7 @@ func (r *recorder) warn(err error) {
 		return
 	}
 	r.warned = true
-	log.Printf("run data not recorded (%v) — the drain continues; -metrics off silences this", err)
+	log.Printf("run data not recorded (%v) — the shift continues; -metrics off silences this", err)
 }
 
 // recordFile partitions records one file per repository, so deleting one

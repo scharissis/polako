@@ -20,7 +20,7 @@
 # its default here, unlike the other scripts in this directory.
 #
 # Writes nothing outside a temporary directory it removes on exit - not to
-# ~/.claude, ~/go/bin or ~/.backlog-drain. The plugin half installs into a
+# ~/.claude, ~/go/bin or ~/.polako. The plugin half installs into a
 # throwaway CLAUDE_CONFIG_DIR, so the release under test never becomes the
 # release this machine is running. (`go install` still populates the shared
 # module cache; that is a cache, not configuration.)
@@ -32,7 +32,7 @@ param([string]$Version)
 
 Set-Location (Join-Path $PSScriptRoot '..')
 
-$name = 'backlog-drain'
+$name = 'polako'
 $skill = 'implement-issue'
 
 if (-not $Version) {
@@ -401,7 +401,7 @@ try {
         # does the PATH, git, gh and version-skew checks, lowestOpenIssue then
         # finds nothing and the process exits 0 without starting a single
         # claude run. -metrics off keeps smoke runs out of the real run data.
-        $out = & $drain -dir . -label "__$name-smoke__" -metrics off 2>&1 | Out-String
+        $out = & $drain work -dir . -label "__$name-smoke__" -metrics off 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) {
             Bad 'preflight failed' (($out -split "`r?`n" | Where-Object { $_.Trim() })[-1])
         } else {

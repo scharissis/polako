@@ -34,7 +34,7 @@ const (
 	// Spelled like the label, because that is what the operator will see on the
 	// thread when they go and look.
 	notifyAwaiting = "awaiting-answer"
-	notifyDrained  = "drained"
+	notifyCleared  = "cleared"
 	// notifyStopped is the drain ending before the backlog did — a fatal error,
 	// or a session budget spent. Not on the issue's list, but it is the 2am
 	// case the flag exists for: a refused token stops everything, and without
@@ -44,9 +44,9 @@ const (
 
 // notifyPrefix namespaces the variables a notify command receives.
 //
-// The NOTIFY_ infix is load-bearing rather than decorative. BACKLOG_DRAIN_<FLAG>
+// The NOTIFY_ infix is load-bearing rather than decorative. POLAKO_<FLAG>
 // already sets flag defaults for both the drain and `stats`, so a plain
-// BACKLOG_DRAIN_REPO here would silently filter a `-notify "backlog-drain stats"`
+// POLAKO_REPO here would silently filter a `-notify "polako stats"`
 // to one repository — the flag setting a flag it was never meant to touch. A
 // test holds every variable below clear of every flag's.
 const notifyPrefix = envPrefix + "NOTIFY_"
@@ -118,7 +118,7 @@ func notify(ctx context.Context, cfg config, n notification) {
 		if s := strings.TrimSpace(out.String()); s != "" {
 			said = ": " + clip(s, 160)
 		}
-		log.Printf("-notify command failed for %s (%v)%s — nobody was told, but the drain continues",
+		log.Printf("-notify command failed for %s (%v)%s — nobody was told, but the shift continues",
 			n.describe(), err, said)
 		return
 	}

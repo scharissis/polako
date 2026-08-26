@@ -1,14 +1,15 @@
-# backlog-drain
+# polako
 
-Point it at any GitHub repository and it works the issue backlog to zero — one
-issue at a time, strictly in ascending order, unattended.
+*Polako* is Croatian for "take it slow". Point it at any GitHub repository and
+it works the issue backlog to zero — one issue at a time, strictly in
+ascending order, unattended, with a human at every gate.
 
 It has two halves:
 
 | Half | What it does |
 | --- | --- |
 | **`/implement-issue` skill** | Takes a *single* issue from research → `PLAN.md` → implementation → code review → pull request. Usable on its own, interactively. |
-| **`backlog-drain` binary** | Supervises the *whole queue*: runs the skill on the lowest open issue, waits for that PR to merge — or parks the issue for a human — then advances. Stdlib-only Go, single binary, any platform. |
+| **`polako` binary** | Supervises the *whole queue*: `polako work` runs the skill on the lowest open issue, waits for that PR to merge — or parks the issue for a human — then advances. `status` and `stats` are its two read-only reports. Stdlib-only Go, single binary, any platform. |
 
 The binary never has two issues in flight: it advances only once the issue it is
 working is merged, or parked for a human. Every run therefore branches from a
@@ -35,14 +36,14 @@ close the issue, remove the worktree, advance to the next
 ```
 
 **Your checkout is kept level with origin, and never written to.** Before each
-issue and after each merge, the drain fast-forwards `-dir`'s default branch. It
-has to: a drain never pulls — you merge on GitHub and it only watches — so that
+issue and after each merge, polako fast-forwards `-dir`'s default branch. It
+has to: polako never pulls — you merge on GitHub and it only watches — so that
 branch falls a commit behind on every merge, and it is what the skill cuts a new
 branch from and what a code review resolves a base against. Left behind, a
 review silently diffs the branch against a base that predates the last merge and
 folds an already-merged PR into what it reviews. It is `--ff-only` and nothing
 else: if your default branch has a commit of its own, or work in the way, or you
-are sitting on another branch, the drain says so in its log and leaves it
+are sitting on another branch, polako says so in its log and leaves it
 exactly as it is.
 
 **All state lives in GitHub** — issues, comments, PRs, branches. The process
@@ -55,20 +56,20 @@ it writes locally is a line of numbers per run, which nothing reads back — see
 **Being interrupted is not the same as failing, and is not treated as one.**
 Ctrl+C, a service manager stopping the unit, a shutdown, a terminal going away:
 all of them take the running `claude` down with the supervisor, so no orphaned
-run is left editing, pushing and opening PRs behind a restarted drain's back.
+run is left editing, pushing and opening PRs behind a restarted shift's back.
 A laptop that sleeps mid-issue costs the run, not the issue — `-retries` bounds
 crashes that got *nothing* done, so a run cut off after real work resets it
 rather than spending it. If the crashed session turns out to be unresumable, the
 next attempt starts fresh instead of failing on it three more times. And a `gh`
 call that fails because the network has not come back yet is retried a few times
-before it is believed, rather than ending a backlog that was draining fine.
+before it is believed, rather than ending a backlog that was clearing fine.
 
 **One issue that cannot be finished does not end the run.** An issue whose run
 produced nothing, whose retries ran out, whose PR was closed unmerged, whose
 conflicts could not be rebased away, whose CI stayed red, or which ran past a
-cap you set on it — see [Capping what a drain
-spends](#capping-what-a-drain-spends) — is *parked*:
-`backlog-drain` labels it
+cap you set on it — see [Capping what a shift
+spends](#capping-what-a-shift-spends) — is *parked*:
+`polako` labels it
 `needs-human`, comments on the thread saying what happened, and moves on to the
 next issue. The label is what takes it out of the queue, so a later run does not
 pick it straight back up — remove the label to put it back in. The process exits
@@ -80,7 +81,7 @@ summary: 3 issues merged, 1 issue parked, $18.40 spent, 6h12m of wall clock
   parked  #16 ($2.27) — the run completed but produced no PR and no questions
 ```
 
-Dollars appear only when this drain spent some: one that merely waited on a PR
+Dollars appear only this shift spent some: one that merely waited on a PR
 an earlier process opened prints the line without them rather than claiming a
 free backlog.
 
@@ -91,9 +92,9 @@ and a parked issue is simply not in flight.
 supervisor keys off that label rather than off the thread getting busier. The
 distinction matters because plenty of things comment on an issue that are not
 answers to anything — CI, a linked-PR notice, a bot, a passer-by — and treating
-those as a question left the drain waiting on a reply nobody knew was expected.
+those as a question left polako waiting on a reply nobody knew was expected.
 The label is also the only sign on GitHub that an issue is waiting on *you*;
-reply on the thread and the next check picks it up. `backlog-drain` declares the
+reply on the thread and the next check picks it up. `polako` declares the
 label on startup if the repository does not have it yet, and the run that folds
 your answer in is what removes it — or the park, if the issue is handed back
 before anyone gets that far, since a parked issue waits on a decision rather
@@ -108,9 +109,9 @@ rather than going quiet:
 issue #16 still awaiting a reply (2 new comment(s), none of them from a person)
 ```
 
-Comments from the account the drain itself authenticates as are *not* skipped,
+Comments from the account polako itself authenticates as are *not* skipped,
 because on most setups that account is yours — skipping them would swallow the
-answer the wait exists for. Nothing the drain writes can end a wait anyway: it
+answer the wait exists for. Nothing polako writes can end a wait anyway: it
 posts the question the wait starts after, a park notice that takes the issue out
 of the queue, and a closing comment.
 
@@ -133,16 +134,16 @@ default branch.
 Pass `-strict-order` to turn all of that off and get the old behaviour: the
 queue stays in strict ascending order, an issue awaiting an answer blocks every
 issue behind it until you reply, and nothing merges under a waiting branch. A
-drain that ends with issues still waiting says so:
+shift that ends with issues still waiting says so:
 
 ```
 summary: 3 issues merged, 0 issues parked, 1 issue awaiting an answer, $12.86 spent, 4h02m of wall clock
   merged  #14 ($4.90), #15 ($6.12), #17 ($1.20)
-  waiting #16 ($0.64) — reply on the thread and the next drain picks them up
+  waiting #16 ($0.64) — reply on the thread and the next shift picks them up
 ```
 
 One caveat worth knowing: the baseline a wait compares against lives in memory,
-so a restarted drain cannot tell whether a reply arrived while it was down — it
+so a restarted shift cannot tell whether a reply arrived while it was down — it
 cannot even pick its own question out of the thread, running as it does under
 your credentials. It spends one run per already-flagged issue finding out — the
 skill re-reads the thread and stops again without re-asking if the answer is not
@@ -175,7 +176,7 @@ pushes. Then it goes back to waiting, because a re-review is yours to give: the
 run may not dismiss or resolve the review, and still may not merge.
 
 Whether a review has been answered yet is read off GitHub rather than remembered,
-so a drain restarted mid-flight reaches the same conclusion: a review counts as
+so a shift restarted mid-flight reaches the same conclusion: a review counts as
 outstanding until the branch carries a commit newer than it. Two consequences
 worth knowing. A rebase — including one the conflict remediation performs — gives
 every commit a fresh date and so reads as an answer; that is deliberate, since
@@ -188,12 +189,12 @@ requirement — most do not — this still works, because it reads the reviews
 themselves and not just GitHub's summary `reviewDecision`, which is empty in
 that case.
 
-**Refused credentials stop the drain immediately.** A resume cannot mint a new
+**Refused credentials stop the shift immediately.** A resume cannot mint a new
 token, so retrying one spends `-retries` × several minutes reaching the
-identical 401 and then reports it as a crash. Instead the run ends the drain
+identical 401 and then reports it as a crash. Instead the run ends the shift
 with the fix in the last line: check `claude auth status`, then
 `claude auth login` — or `claude setup-token`, on an unattended host. State
-lives in GitHub, so starting the drain again once the token works picks up
+lives in GitHub, so starting `polako work` again once the token works picks up
 exactly where it stopped.
 
 **Human touchpoints are deliberately just two**, both on GitHub:
@@ -212,7 +213,7 @@ none of them holds anything else up.
 - `git`
 - Go 1.26+ — only to build from source
 
-All three must be on `PATH`; `backlog-drain` checks at startup rather than
+All three must be on `PATH`; `polako` checks at startup rather than
 failing an hour into an unattended run.
 
 ## Install
@@ -227,22 +228,22 @@ The repo doubles as its own marketplace, so there is no clone step. Register
 the marketplace once:
 
 ```bash
-claude plugin marketplace add scharissis/backlog-drain
+claude plugin marketplace add scharissis/polako
 ```
 
 Then install the plugin from it:
 
 ```bash
-claude plugin install backlog-drain@scharissis
+claude plugin install polako@scharissis
 ```
 
-`backlog-drain` is the plugin, `scharissis` is the marketplace it came from —
+`polako` is the plugin, `scharissis` is the marketplace it came from —
 the name declared in [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json),
 not the GitHub username, though here they happen to match. The plugin ships one
 component, the `implement-issue` skill, and costs ~40 tokens of always-on
 context; the skill body is only loaded when it fires.
 
-Restart Claude Code, and `/backlog-drain:implement-issue 48` is available.
+Restart Claude Code, and `/polako:implement-issue 48` is available.
 
 Note the namespace. Claude prefixes plugin skills with the plugin name, so the
 command is *not* `/implement-issue` on this path. The supervisor's `-skill`
@@ -268,7 +269,7 @@ commands with `--scope project` inside that project and commit the resulting
 To update, see [Getting updates](#getting-updates). To remove:
 
 ```bash
-claude plugin uninstall backlog-drain && claude plugin marketplace remove scharissis
+claude plugin uninstall polako && claude plugin marketplace remove scharissis
 ```
 
 ### The skill, by hand
@@ -288,7 +289,7 @@ A skill installed this way is invoked bare, with no plugin prefix, so the
 supervisor needs telling:
 
 ```bash
-backlog-drain -skill implement-issue
+polako work -skill implement-issue
 ```
 
 Do one or the other, not both — two copies of the same skill drift apart
@@ -297,25 +298,25 @@ silently.
 ### The binary
 
 ```bash
-go install github.com/scharissis/backlog-drain/cmd/backlog-drain@latest
+go install github.com/scharissis/polako/cmd/polako@latest
 ```
 
 For a private module, `go install` needs to be told not to consult the public
 proxy, and to use your git credentials:
 
 ```bash
-GOPRIVATE=github.com/scharissis/* go install github.com/scharissis/backlog-drain/cmd/backlog-drain@latest
+GOPRIVATE=github.com/scharissis/* go install github.com/scharissis/polako/cmd/polako@latest
 ```
 
 Or build from a clone, which avoids the question entirely:
 
 ```bash
-go build -o backlog-drain ./cmd/backlog-drain
+go build -o polako ./cmd/polako
 ```
 
 Prebuilt binaries for Linux, macOS and Windows are attached to each tagged
 release, and are the easiest option on a machine without Go. They are stamped
-with their tag, so `backlog-drain -version` tells you what you are running.
+with their tag, so `polako -version` tells you what you are running.
 
 ### Getting updates
 
@@ -323,14 +324,14 @@ with their tag, so `backlog-drain -version` tells you what you are running.
 marketplaces, so an installed plugin stays exactly where it is until you ask:
 
 ```bash
-claude plugin marketplace update scharissis && claude plugin update backlog-drain
+claude plugin marketplace update scharissis && claude plugin update polako
 ```
 
 Then `/reload-plugins`, or restart. **Upgrade the binary in the same breath** —
 the two halves are one release, and mixing them is not a supported combination:
 
 ```bash
-GOPRIVATE=github.com/scharissis/* go install github.com/scharissis/backlog-drain/cmd/backlog-drain@latest
+GOPRIVATE=github.com/scharissis/* go install github.com/scharissis/polako/cmd/polako@latest
 ```
 
 If they end up mismatched anyway, the supervisor says so at startup and names
@@ -348,7 +349,7 @@ To hold a machine at one release, pin the marketplace itself and it stops
 moving:
 
 ```bash
-claude plugin marketplace add scharissis/backlog-drain#backlog-drain--v0.4.0
+claude plugin marketplace add scharissis/polako#polako--v0.4.0
 ```
 
 ### Access
@@ -367,74 +368,78 @@ The repository is private, so:
 
 ## Usage
 
-Drain the whole backlog of the repository in the current directory:
+The binary takes a verb — `work`, `status` or `stats` — and a bare `polako`
+prints that table rather than starting anything: an unattended agent loop
+should take a word that says so.
+
+Work the whole backlog of the repository in the current directory:
 
 ```bash
-backlog-drain
+polako work
 ```
 
 Drive a repository somewhere else, and stop after the first issue is done with
 — merged, or parked for a human. A good way to try it out:
 
 ```bash
-backlog-drain -dir ../my-project -once
+polako work -dir ../my-project -once
 ```
 
 Only work issues carrying a label, and check GitHub more often:
 
 ```bash
-backlog-drain -label ready-for-claude -poll 90s
+polako work -label ready-for-claude -poll 90s
 ```
 
 Leave a couple of issues alone this time round:
 
 ```bash
-backlog-drain -skip 12,17
+polako work -skip 12,17
 ```
 
 Work strictly lowest-first, waiting on any issue that stops to ask you
 something:
 
 ```bash
-backlog-drain -strict-order
+polako work -strict-order
 ```
 
 See what it would do to an unfamiliar repository, without doing any of it:
 
 ```bash
-backlog-drain -dir ../someone-elses-project -dry-run
+polako work -dir ../someone-elses-project -dry-run
 ```
 
 Be told when it needs you, instead of finding out in the morning:
 
 ```bash
-backlog-drain -notify ~/bin/tell-me
+polako work -notify ~/bin/tell-me
 ```
 
-Ask where the backlog stands, from anywhere — including about a drain running
+Ask where the backlog stands, from anywhere — including about a shift running
 on another machine:
 
 ```bash
-backlog-drain status -repo scharissis/backlog-drain
+polako status -repo scharissis/polako
 ```
 
 Ask what all of that cost, once some runs have been recorded:
 
 ```bash
-backlog-drain stats
+polako stats
 ```
 
 ## Flags
 
-These are the drain's own. The two report subcommands take their own smaller
-sets — see [`status`](#where-the-backlog-stands-backlog-drain-status) and
-[`stats`](#reading-it-back-backlog-drain-stats).
+These are `polako work`'s own. The two report subcommands take their own smaller
+sets — see [`status`](#where-the-backlog-stands-polako-status) and
+[`stats`](#reading-it-back-polako-stats).
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `-dir` | `.` | Path to the repository's main checkout. |
 | `-claude` | `claude` | The Claude Code binary to invoke. There is no pass-through for extra `claude` arguments; point this at a wrapper script when you need one — see [Running both halves from a working tree](#running-both-halves-from-a-working-tree). |
-| `-skill` | `backlog-drain:implement-issue` | Slash command run once per issue. Plugin skills are namespaced `<plugin>:<skill>`; pass `-skill implement-issue` if you copied the skill into `~/.claude/skills` instead. |
+| `-skill` | `polako:implement-issue` | Slash command run once per issue. Plugin skills are namespaced `<plugin>:<skill>`; pass `-skill implement-issue` if you copied the skill into `~/.claude/skills` instead. |
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how PRs are matched back to issues. |
 | `-label` | *(none)* | Only process issues carrying this label. Doubles as an access control — see [Security](#security). |
 | `-tools` | *(see below)* | `--allowedTools` for unattended runs. **Replaces** the default set. |
@@ -445,35 +450,35 @@ sets — see [`status`](#where-the-backlog-stands-backlog-drain-status) and
 | `-retries` | `3` | Consecutive *fruitless* resume attempts after a crashed run — a crash that got real work done first resets the count rather than spending it — and the bound on remediation runs against an open PR that is conflicting, red, or carrying a request for changes. A run the API refused to authenticate is never one of them — see below. |
 | `-retry-wait` | `30s` | Wait before each resume attempt. |
 | `-stall` | `15m` | Kill and resume a run that has emitted no events for this long (`0` disables). |
-| `-max-cost` | *(no limit)* | Park an issue once this drain's runs on it have cost this many dollars — see [Capping what a drain spends](#capping-what-a-drain-spends). |
-| `-max-issue-time` | *(no limit)* | Park an issue once this drain's runs on it have taken this much *run time*, e.g. `-max-issue-time 90m`. Unlike `-stall`, it does not care whether events are arriving. |
-| `-max-session-cost` | *(no limit)* | End the drain cleanly, between issues, once its runs have cost this many dollars. |
+| `-max-cost` | *(no limit)* | Park an issue once this shift's runs on it have cost this many dollars — see [Capping what a shift spends](#capping-what-a-shift-spends). |
+| `-max-issue-time` | *(no limit)* | Park an issue once this shift's runs on it have taken this much *run time*, e.g. `-max-issue-time 90m`. Unlike `-stall`, it does not care whether events are arriving. |
+| `-max-session-cost` | *(no limit)* | End the shift cleanly, between issues, once its runs have cost this many dollars. |
 | `-skip` | *(none)* | Comma-separated issue numbers to skip. Issues labelled `needs-human` are skipped anyway — see [How it works](#how-it-works). |
 | `-once` | `false` | Process a single issue to a merge, a park or a question for you, then exit. |
 | `-strict-order` | `false` | Work issues in strict ascending order: wait in place on an issue awaiting an answer instead of moving past it. |
 | `-dry-run` | `false` | Resolve the next issue, print the `claude` invocation it would get, and exit. Runs nothing and writes nothing — see [Looking before you leap](#looking-before-you-leap--dry-run). |
-| `-notify` | *(none)* | Command to run whenever the drain needs a human, with context in `BACKLOG_DRAIN_NOTIFY_*` — see [Being told when it needs you](#being-told-when-it-needs-you--notify). |
+| `-notify` | *(none)* | Command to run whenever polako needs a human, with context in `POLAKO_NOTIFY_*` — see [Being told when it needs you](#being-told-when-it-needs-you--notify). |
 | `-run-tag` | *(none)* | Freeform label recorded with every run, so one batch can be compared against another. |
-| `-metrics` | `~/.backlog-drain/metrics` | Directory for run-data records, or `off` to write nothing. |
+| `-metrics` | `~/.polako/metrics` | Directory for run-data records, or `off` to write nothing. |
 | `-post-summary` | `false` | Comment one line of run numbers on each merged PR. The only thing that shows run data to anybody but you — see [Run data & cost tracking](#run-data--cost-tracking). |
 | `-version` | `false` | Print which release this binary is, then exit. Use it when startup warns that the binary and the skill disagree — see [Getting updates](#getting-updates). |
 
 ### Looking before you leap: `-dry-run`
 
-Pointing an unattended agent at a repository you have not drained before is a
+Pointing an unattended agent at a repository you have not worked before is a
 leap of faith. `-dry-run` takes it out:
 
 ```bash
-$ backlog-drain -dir ../my-project -dry-run
-example/my-project — running /backlog-drain:implement-issue per issue, polling every 5m0s
+$ polako work -dir ../my-project -dry-run
+example/my-project — running /polako:implement-issue per issue, polling every 5m0s
 -dry-run: resolving the next issue only — no claude run, no GitHub write, no run data
 ready: #12, #14, #19
 waiting on an answer: #9
 issue #12 would be worked next; the invocation follows on stdout
-claude -p '/backlog-drain:implement-issue 12' --permission-mode acceptEdits --allowedTools '…' --output-format stream-json --verbose
+claude -p '/polako:implement-issue 12' --permission-mode acceptEdits --allowedTools '…' --output-format stream-json --verbose
 ```
 
-It resolves the next issue exactly as a real drain would — same queue, same
+It resolves the next issue exactly as a real shift would — same queue, same
 `-skip`, same `needs-human` exclusions, same preference for an issue waiting on
 an answer when nothing else is ready — and then stops. Nothing is run and
 nothing is written: every GitHub call it makes is a read, it declares no labels,
@@ -481,12 +486,12 @@ and run-data recording is forced off for the run, so `-metrics` in your
 environment cannot leave a record of a run that never happened.
 
 The narration goes to stderr and the invocation alone to stdout, so
-`backlog-drain -dry-run | pbcopy` gives you something to paste and run by hand.
+`polako work -dry-run | pbcopy` gives you something to paste and run by hand.
 It is printed with shell quoting for that reason; the real run passes those
 arguments to the CLI directly, never through a shell.
 
 If the next issue's branch already has a PR, you get that instead — because
-that is what the drain would do with it:
+that is what polako would do with it:
 
 ```
 issue #12 already has PR #40 (OPEN) on branch issue-12 — it would wait on that PR rather than run claude: https://github.com/example/my-project/pull/40
@@ -498,41 +503,41 @@ issue whose PR was closed without merging.
 
 ### Being told when it needs you: `-notify`
 
-A drain left running overnight is quiet about the things you most want to know.
-An issue parks, or stops to ask you a question, and the drain does the right
+A shift left running overnight is quiet about the things you most want to know.
+An issue parks, or stops to ask you a question, and polako does the right
 thing — it works the queue behind it — so the only trace is a label on a thread
 nobody is watching. `-notify` runs a command of your choosing at each of those
 moments:
 
 ```bash
-backlog-drain -notify ~/bin/tell-me
+polako work -notify ~/bin/tell-me
 ```
 
 It fires on four states, and nothing else:
 
-| `BACKLOG_DRAIN_NOTIFY_EVENT` | What happened |
+| `POLAKO_NOTIFY_EVENT` | What happened |
 | --- | --- |
 | `parked` | An issue was parked for a human — including a run that crashed and used up its resumes. |
-| `awaiting-answer` | A run stopped to ask something on the issue thread. Reply there and the next drain folds it in. |
-| `drained` | The backlog is empty. Nothing is left to work. |
-| `stopped` | The drain ended before the backlog did: a fatal error, or `-max-session-cost` spent. |
+| `awaiting-answer` | A run stopped to ask something on the issue thread. Reply there and the next shift folds it in. |
+| `cleared` | The backlog is empty. Nothing is left to work. |
+| `stopped` | The shift ended before the backlog did: a fatal error, or `-max-session-cost` spent. |
 
 The context arrives in the environment, so the command needs no arguments:
 
 | Variable | Value |
 | --- | --- |
-| `BACKLOG_DRAIN_NOTIFY_EVENT` | One of the four above. |
-| `BACKLOG_DRAIN_NOTIFY_ISSUE` | The issue number, or empty when the whole drain rather than one issue needs you. |
-| `BACKLOG_DRAIN_NOTIFY_REPO` | `owner/name`. |
-| `BACKLOG_DRAIN_NOTIFY_REASON` | One line of English saying what happened and what to do about it. |
+| `POLAKO_NOTIFY_EVENT` | One of the four above. |
+| `POLAKO_NOTIFY_ISSUE` | The issue number, or empty when the whole shift rather than one issue needs you. |
+| `POLAKO_NOTIFY_REPO` | `owner/name`. |
+| `POLAKO_NOTIFY_REASON` | One line of English saying what happened and what to do about it. |
 
 So a hook is usually a three-line script:
 
 ```bash
 #!/bin/sh
 # ~/bin/tell-me
-terminal-notifier -title "backlog-drain: $BACKLOG_DRAIN_NOTIFY_EVENT" \
-  -message "${BACKLOG_DRAIN_NOTIFY_REPO} #${BACKLOG_DRAIN_NOTIFY_ISSUE:-—}: $BACKLOG_DRAIN_NOTIFY_REASON"
+terminal-notifier -title "polako: $POLAKO_NOTIFY_EVENT" \
+  -message "${POLAKO_NOTIFY_REPO} #${POLAKO_NOTIFY_ISSUE:-—}: $POLAKO_NOTIFY_REASON"
 ```
 
 Three things to know about how the command is run:
@@ -541,8 +546,8 @@ Three things to know about how the command is run:
   honouring quotes so a path with a space in it works, and run directly. There
   is no pipeline, no redirection and no `$VARIABLE` expansion — put anything
   like that in a script, which is where it can be tested on its own anyway.
-- **A failing hook never breaks the drain.** A non-zero exit, or one that hangs
-  past 30 seconds, costs you that notification and is logged; the drain carries
+- **A failing hook never breaks the shift.** A non-zero exit, or one that hangs
+  past 30 seconds, costs you that notification and is logged; polako carries
   on. A `-notify` naming a program that is not on `PATH` is caught at startup
   instead, since a night of notifications nobody receives is the one failure the
   flag must not have.
@@ -557,50 +562,50 @@ notifier that goes off every time is one you mute.
 
 ### Setting defaults from the environment
 
-Any flag can take its default from `BACKLOG_DRAIN_<FLAG>`, so a preference you
+Any flag can take its default from `POLAKO_<FLAG>`, so a preference you
 always want lives in your shell profile instead of on every command line:
 
 ```bash
-export BACKLOG_DRAIN_POST_SUMMARY=1
+export POLAKO_POST_SUMMARY=1
 ```
 
 The name uppercases and swaps `-` for `_`: `-post-summary` reads
-`BACKLOG_DRAIN_POST_SUMMARY`, `-retry-wait` reads `BACKLOG_DRAIN_RETRY_WAIT`.
+`POLAKO_POST_SUMMARY`, `-retry-wait` reads `POLAKO_RETRY_WAIT`.
 An argument always wins, so a single run can still go the other way with
-`-post-summary=false`, and `backlog-drain -h` prints the defaults actually in
+`-post-summary=false`, and `polako work -h` prints the defaults actually in
 force — which is how you see what the environment is doing.
 
-`BACKLOG_DRAIN_METRICS` covers both halves at once: where a drain writes, and
+`POLAKO_METRICS` covers both halves at once: where a shift writes, and
 where `stats` reads. `-version` and `-dry-run` are deliberately *not* settable
 this way — both are actions rather than preferences, and either one left in a
-profile would quietly turn every drain on that machine into something that
-exits, successfully, before doing any work. `BACKLOG_DRAIN_VERSION` is exactly
+profile would quietly turn every shift on that machine into something that
+exits, successfully, before doing any work. `POLAKO_VERSION` is exactly
 the variable a Dockerfile or CI job pins an install with, and
-`BACKLOG_DRAIN_DRY_RUN` is the one you export to preview an unfamiliar
+`POLAKO_DRY_RUN` is the one you export to preview an unfamiliar
 repository once and then forget.
 
 A value a flag cannot parse stops the run and names both the variable and the
 flag it was setting, rather than being skipped: a preference that was set,
 looks set, and quietly does nothing is worse than no preference at all.
 
-The `BACKLOG_DRAIN_NOTIFY_*` variables a hook receives sit deliberately clear of
-this namespace: none of them is `BACKLOG_DRAIN_<FLAG>` for any flag, so a
-notification cannot reconfigure a `backlog-drain` you run from inside your own
+The `POLAKO_NOTIFY_*` variables a hook receives sit deliberately clear of
+this namespace: none of them is `POLAKO_<FLAG>` for any flag, so a
+notification cannot reconfigure a `polako` you run from inside your own
 hook. A test enforces it.
 
-## Where the backlog stands: `backlog-drain status`
+## Where the backlog stands: `polako status`
 
-While a drain runs, the only view of it is the terminal it runs in. Everything
+While a shift runs, the only view of it is the terminal it runs in. Everything
 worth knowing is already on GitHub — that is where all the orchestration state
 lives — but reassembling it means a queue page, a label search and a PR tab.
 `status` prints the whole picture at once:
 
 ```bash
-backlog-drain status
+polako status
 ```
 
 ```
-scharissis/backlog-drain
+scharissis/polako
   ready         3 issues — #14, #19, #23
   awaiting you  1 issue — #9 (quiet 26h)
   parked        1 issue — #5, labelled needs-human
@@ -608,43 +613,43 @@ scharissis/backlog-drain
 
 open prs on issue branches
   pr   branch    issue  mergeable  checks              review                       url
-  #61  issue-14  #14    mergeable  failing (test-mac)  clear                        https://github.com/scharissis/backlog-drain/pull/61
-  #58  issue-19  #19    mergeable  passing             answered, awaiting re-review  https://github.com/scharissis/backlog-drain/pull/58
+  #61  issue-14  #14    mergeable  failing (test-mac)  clear                        https://github.com/scharissis/polako/pull/61
+  #58  issue-19  #19    mergeable  passing             answered, awaiting re-review  https://github.com/scharissis/polako/pull/58
 
 needs you: reply on #9; review and merge PR #58; decide what to do about #5 (drop needs-human to requeue)
 ```
 
-What it prints is what a drain starting right now would do next — which is the
-same thing a running drain is already doing. It reports **state, not liveness**:
-it never asks whether a drain is running, and says the same thing either way.
-That is what makes it useful from a laptop about a drain running on a server.
+What it prints is what a shift starting right now would do next — which is the
+same thing a running shift is already doing. It reports **state, not liveness**:
+it never asks whether a shift is running, and says the same thing either way.
+That is what makes it useful from a laptop about a shift running on a server.
 
 The closing `needs you:` line is the point of the whole thing — the items only a
-person can move. A PR the drain would remediate itself (conflicting, red, or
-carrying an unanswered review) is deliberately not on it: that one is still the
-drain's job.
+person can move. A PR polako would remediate itself (conflicting, red, or
+carrying an unanswered review) is deliberately not on it: that one is still
+polako's job.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `-repo` | *(whatever `-dir` is a checkout of)* | Repository to report on, `owner/name`. Naming it is what lets the command run from anywhere — no checkout needed, just a `gh` authenticated for the repo. |
 | `-dir` | `.` | Path to the repository's main checkout, used to resolve the repository when `-repo` is not given. |
-| `-label` | *(none)* | Only count issues carrying this label, the same scoping a drain's `-label` applies. |
+| `-label` | *(none)* | Only count issues carrying this label, the same scoping `polako work`'s `-label` applies. |
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how open PRs are matched back to issues. |
-| `-strict-order` | `false` | Report as a drain run with `-strict-order` would: an issue awaiting an answer keeps its place, so `next` can name it rather than the ready issue behind it. |
+| `-strict-order` | `false` | Report as a work run with `-strict-order` would: an issue awaiting an answer keeps its place, so `next` can name it rather than the ready issue behind it. |
 
-They take environment defaults the same way the drain's do, so a
-`BACKLOG_DRAIN_LABEL` that scopes your drain scopes the report of it too — and
+They take environment defaults the same way `polako work`'s do, so a
+`POLAKO_LABEL` that scopes your work scopes the report of it too — and
 anything narrowing or reordering the snapshot is named on the header line, since
 a flag left in a profile is otherwise invisible here.
 
-**Reads only.** Every call it makes is one of the read subcommands the drain
+**Reads only.** Every call it makes is one of the read subcommands polako
 itself re-derives state with at startup — `gh issue list`, `gh pr list`, `gh pr
 view`, and the REST read of a thread's comments — so nothing here can move an
 issue, a label or a PR. A test asserts the list of calls, which is stronger than
 checking that nothing changed: a write GitHub refuses changes nothing either.
 
 It reads no run data. Those files are write-only outside `stats`, and a status
-that opened them would be wrong anyway about a drain running on somebody else's
+that opened them would be wrong anyway about a shift running on somebody else's
 machine.
 
 It prints no issue, PR or comment text — numbers, branches, labels and states
@@ -658,18 +663,18 @@ running `status` is the one who typed it.
 Two things worth knowing about the numbers. **Quiet** is the age of the newest
 comment on a thread, which is a proxy for how long the question has waited:
 which comment is the skill's question cannot be told apart from here, since the
-drain asks under your own credentials, so this reports what it can actually see.
+polako asks under your own credentials, so this reports what it can actually see.
 And the PR table details the first eight PRs it finds on issue branches — one
 issue is in flight at a time, so there is normally one — with anything past that
 listed by number and said out loud rather than silently dropped.
 
 ## Run data & cost tracking
 
-Every run writes one line of numbers, so you can answer what a drained backlog
+Every run writes one line of numbers, so you can answer what a cleared backlog
 actually cost — and which settings are worth changing.
 
 **What is written, in full:** for each `claude` invocation, one JSON object
-holding the repository and issue number, a random id for the drain that wrote
+holding the repository and issue number, a random id for the shift that wrote
 it, why the run happened and what it left behind (a PR, questions, or neither),
 its status and exit code, turns, tool-use count, wall and API duration, tokens
 (in / out / cache read / cache write, plus the per-model split), dollars, and
@@ -688,7 +693,7 @@ quoted. Records hold numbers, identifiers and labels you chose. That is what
 makes one of these files safe to hand to a teammate, or paste into an analysis
 session, without re-reading it first.
 
-**Where it goes:** `~/.backlog-drain/metrics/<owner>--<repo>.jsonl`, one
+**Where it goes:** `~/.polako/metrics/<owner>--<repo>.jsonl`, one
 append-only file per repository — so deleting one project's data is `rm` on one
 file, and aggregating across projects is a glob. Created `0700`, so on a shared
 machine the records stay yours. Never inside your checkout: the skill commits
@@ -705,22 +710,22 @@ all: it is a prompt.
 To write nothing at all:
 
 ```bash
-backlog-drain -metrics off
+polako work -metrics off
 ```
 
-Records are write-only by design. The drain loop never reads them, no decision
-depends on them, and deleting the directory mid-drain changes nothing about
+Records are write-only by design. The work loop never reads them, no decision
+depends on them, and deleting the directory mid-shift changes nothing about
 what the supervisor does next — that is what keeps run data compatible with
 "all state lives in GitHub". Writes are best-effort: a failure warns once and
-the drain carries on.
+polako carries on.
 
-### Capping what a drain spends
+### Capping what a shift spends
 
-All three caps are off unless you set one, so a drain that sets none behaves
+All three caps are off unless you set one, so a shift that sets none behaves
 exactly as it always did.
 
 ```bash
-backlog-drain -max-cost 15 -max-issue-time 90m -max-session-cost 200
+polako work -max-cost 15 -max-issue-time 90m -max-session-cost 200
 ```
 
 - **`-max-cost`** — dollars one issue may cost before it is parked.
@@ -728,7 +733,7 @@ backlog-drain -max-cost 15 -max-issue-time 90m -max-session-cost 200
   is parked. Not the wall clock since the issue was picked up: an issue spends
   most of its life waiting for you to merge its PR, and parking issues over how
   long that took would punish nobody's slowness but the reviewer's.
-- **`-max-session-cost`** — dollars this drain may spend before it stops.
+- **`-max-session-cost`** — dollars this shift may spend before it stops.
 
 `-max-issue-time` is the one that catches what `-stall` cannot. That watchdog
 kills a run that has gone *silent*; an agent looping productively but uselessly
@@ -736,7 +741,7 @@ for three hours emits events the whole way through and is invisible to it. This
 cap does not care whether events are arriving, so it kills that run and parks
 the issue for you.
 
-The two per-issue caps read the tally of every run this drain dispatched for
+The two per-issue caps read the tally of every run this shift dispatched for
 the issue — the first attempt, its resumes, the re-run that folded your answer
 in, and any conflict, CI or review remediation against its PR. They gate work
 about to be dispatched and never work already done, which is why a run that
@@ -746,17 +751,17 @@ would take it further over. The reason goes in the park comment on the thread
 and in the exit summary, the same as any other park:
 
 ```
-  parked  #16 ($15.40) — this drain has spent $15.40 on it, the whole of its -max-cost of $15.00
+  parked  #16 ($15.40) — this shift has spent $15.40 on it, the whole of its -max-cost of $15.00
 ```
 
 `-max-session-cost` is checked between issues rather than inside one, because
-ending a drain cleanly means declining to take on more work rather than killing
+ending a shift cleanly means declining to take on more work rather than killing
 a run part-way and having to park a healthy issue over it. So one issue can
 carry the total past the budget, by whatever that issue costs. `-max-cost` does
 not bound the overrun to itself, either: it gates the *next* run rather than the
 one in flight, so an issue can end at its `-max-cost` plus the whole of the run
 that carried it over. Size the budget with a run's worth of headroom under it.
-Nothing is parked when it trips: the drain logs what it spent, prints its
+Nothing is parked when it trips: polako logs what it spent, prints its
 summary and exits 0, and since all state is on GitHub, raising the budget and
 starting it again picks up exactly where it stopped.
 
@@ -765,7 +770,7 @@ was interrupted never emitted a `result` event, so it reported no cost —
 pricing belongs to the Claude CLI and this binary will not guess at it. Its
 tokens are still counted (as observed) and its duration is timed from the
 clock, but its dollars are zero. A cost cap is therefore a ceiling on what was
-*observed*, and a drain that keeps dying spends more than the number admits.
+*observed*, and a shift that keeps dying spends more than the number admits.
 The summary says so when it happened:
 
 ```
@@ -782,24 +787,24 @@ pre-empting.
 Off by default. Turned on, each merged PR gets one comment:
 
 ```bash
-backlog-drain -post-summary
+polako work -post-summary
 ```
 
-> **backlog-drain** — 3 runs, 1 question round, 12.4M tokens, $6.12, 2h14m of
+> **polako** — 3 runs, 1 question round, 12.4M tokens, $6.12, 2h14m of
 > run time.
 >
-> <sub>Recorded by backlog-drain v0.5.0, covering the runs this drain
+> <sub>Recorded by polako v0.5.0, covering the runs this shift
 > supervised. Dollars are the Claude CLI's API-equivalent pricing.</sub>
 
 Numbers only, on the PR they describe, readable by exactly the people who can
 already see that PR. A run that crashed, stalled or was interrupted never
 reported a cost, so when the tally holds one the comment says how many and that
-its tokens and dollars are undercounts. It covers the runs *this* drain supervised, and says so: a
+its tokens and dollars are undercounts. It covers the runs *this* shift supervised, and says so: a
 supervisor restarted mid-issue reports what it saw, and one that only waited on
 a PR an earlier process opened comments nothing rather than claiming a free PR.
 
 To make it your default without typing it, export
-`BACKLOG_DRAIN_POST_SUMMARY=1` — see
+`POLAKO_POST_SUMMARY=1` — see
 [Setting defaults from the environment](#setting-defaults-from-the-environment).
 Startup says when it is on, so a variable you set months ago in a profile is
 never a mystery.
@@ -807,24 +812,24 @@ never a mystery.
 It is independent of `-metrics`, so `-metrics off -post-summary` is the
 combination for wanting team visibility and no local files at all. Best-effort
 like the rest of run data: a comment that cannot be posted is a log line, never
-a failed drain.
+a failed shift.
 
-### Reading it back: `backlog-drain stats`
+### Reading it back: `polako stats`
 
 `stats` is the only thing that ever reads those files — its sibling
-[`status`](#where-the-backlog-stands-backlog-drain-status) reads GitHub and
-never touches them. A bare `backlog-drain` still drains; nothing about the
+[`status`](#where-the-backlog-stands-polako-status) reads GitHub and
+never touches them. A bare `polako` prints the verb table; nothing about the
 report touches GitHub or starts a run.
 
 ```bash
-backlog-drain stats
+polako stats
 ```
 
 ```
-run data from /Users/you/.backlog-drain/metrics
+run data from /Users/you/.polako/metrics
   read    2 files, 11 records (1 unreadable line skipped)
   window  2026-08-20T09:00:00Z → 2026-08-24T11:03:11Z (4.1d)
-  repos   scharissis/backlog-drain, scharissis/other
+  repos   scharissis/polako, scharissis/other
 
 issues
   terminal          4 — merged 3 (75%), needs human 1
@@ -852,11 +857,11 @@ human latency
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `-metrics` | `~/.backlog-drain/metrics` | Directory to read records from — the same path the drain writes to. |
+| `-metrics` | `~/.polako/metrics` | Directory to read records from — the same path a shift writes to. |
 | `-repo` | *(every repository)* | Only count records for one repository, `owner/name`. |
 | `-since` | *(all of it)* | Only count records newer than this, e.g. `-since 168h`. |
-| `-drain` | *(every drain)* | Only count records from one drain — its id, or `last` for the newest drain in scope. |
-| `-by` | *(none)* | Add a breakdown table: `issue`, `model`, `tag` or `drain`. |
+| `-shift` | *(every shift)* | Only count records from one shift — its id, or `last` for the newest shift in scope. |
+| `-by` | *(none)* | Add a breakdown table: `issue`, `model`, `tag` or `shift`. |
 
 A window can keep an issue's terminal record while clipping away the runs that
 produced it. Those issues still count toward the merge rate, but they cannot be
@@ -882,7 +887,7 @@ changed files and reviews. Records written before that enrichment existed carry
 none, and neither does one whose lookup failed, so the line counts its own
 issues and says how many. The same two timestamps give **PR open to merge** the
 authoritative span, which is right even when the run that opened the PR falls
-outside the window or belonged to a drain on another machine.
+outside the window or belonged to a shift on another machine.
 
 **On resumed sessions:** a crashed run and the `--resume` that finishes its
 work are two records, and `stats` sums both. If a resumed run's `result` event
@@ -897,55 +902,55 @@ and this binary never guesses at it. Those runs are counted out separately
 rather than mixed in silently — a crash-prone configuration should not get to
 look cheap.
 
-### Telling one drain from another: `-drain`
+### Telling one shift from another: `-shift`
 
-Records from last night's batch, this morning's restart and a drain still
-running all interleave in one file, and `-since` cannot separate them: drains
-that ran back to back, or overlapped, defeat a time window. So every drain
+Records from last night's batch, this morning's restart and a shift still
+running all interleave in one file, and `-since` cannot separate them: shifts
+that ran back to back, or overlapped, defeat a time window. So every shift
 stamps its records with a random id and says so once at startup:
 
 ```
-recording run data in /Users/you/.backlog-drain/metrics — numbers only, never leaves this machine (-metrics off to disable)
-this drain is 7f3a91c4 — `backlog-drain stats -drain 7f3a91c4` reports on it alone
+recording run data in /Users/you/.polako/metrics — numbers only, never leaves this machine (-metrics off to disable)
+this shift is 7f3a91c4 — `polako stats -shift 7f3a91c4` reports on it alone
 ```
 
 That line is the only place the id appears — nothing reads it back, and the
-drain keeps no note of it anywhere else. Two questions it makes exact:
+shift keeps no note of it anywhere else. Two questions it makes exact:
 
 ```bash
-backlog-drain stats -drain last     # what has the drain running right now spent?
-backlog-drain stats -by drain       # what did each drain do?
+polako stats -shift last     # what has the shift running right now spent?
+polako stats -by shift       # what did each shift do?
 ```
 
-`last` is whichever drain wrote the newest record *in scope*, so it composes
+`last` is whichever shift wrote the newest record *in scope*, so it composes
 with the other filters rather than overriding them —
-`stats -drain last -repo owner/name` is the last drain to touch that
-repository, which is not always the last drain overall. Whichever way it
+`stats -shift last -repo owner/name` is the last shift to touch that
+repository, which is not always the last shift overall. Whichever way it
 resolves, the report names the id it landed on rather than the word you typed:
 
 ```
-  filtered  for scharissis/backlog-drain from drain 7f3a91c4
+  filtered  for scharissis/polako from shift 7f3a91c4
 ```
 
 Records written before ids existed group and filter as `(none)`, the same
 spelling an untagged run gets, so older files still load and still count.
 
-An issue picked up by one drain and finished by another after a restart is
-counted under each, and `-by drain` says when that happened. The two views of
-such an issue differ on purpose. In `-by drain`, **merged** is the issue's own
+An issue picked up by one shift and finished by another after a restart is
+counted under each, and `-by shift` says when that happened. The two views of
+such an issue differ on purpose. In `-by shift`, **merged** is the issue's own
 final outcome — the same rule as `-by tag`, and what makes `$/merged` "spent by
-this drain per issue of theirs that shipped" — so both drains count the merge.
-Under `-drain <id>` the records *are* that drain's, so the report shows what
-that drain concluded, which for the one that handed the issue on is
-`needs human`. One asks what became of the issues a drain worked; the other
-asks what that drain did.
+this shift per issue of theirs that shipped" — so both shifts count the merge.
+Under `-shift <id>` the records *are* that shift's, so the report shows what
+that shift concluded, which for the one that handed the issue on is
+`needs human`. One asks what became of the issues a shift worked; the other
+asks what that shift did.
 
 ### Comparing configurations
 
 `-run-tag` labels a batch so you can price one setup against another later:
 
 ```bash
-backlog-drain -model claude-opus-5 -run-tag baseline
+polako work -model claude-opus-5 -run-tag baseline
 ```
 
 Change one thing — the model, the skill's wording, `-stall` — tag the next
@@ -957,7 +962,7 @@ skill-wording experiments mean anything.
 Then compare them:
 
 ```bash
-backlog-drain stats -by tag
+polako stats -by tag
 ```
 
 ```
@@ -972,7 +977,7 @@ when it happens. For anything `stats` does not answer, the files are JSONL,
 which jq, DuckDB and every spreadsheet already read. What a day cost:
 
 ```bash
-cat ~/.backlog-drain/metrics/*.jsonl | jq -s 'map(select(.kind=="run")) | map(.cost_usd) | add'
+cat ~/.polako/metrics/*.jsonl | jq -s 'map(select(.kind=="run")) | map(.cost_usd) | add'
 ```
 
 **On dollars:** `cost_usd` is the CLI's API-equivalent pricing — real money on
@@ -996,7 +1001,7 @@ remove labels on the single issue it was dispatched for, which is how it raises
 `awaiting-answer`. For anything else, widen it rather than replacing it:
 
 ```bash
-backlog-drain -add-tools "Bash(bazel:*),Bash(just:*)"
+polako work -add-tools "Bash(bazel:*),Bash(just:*)"
 ```
 
 Two other knobs matter when moving between repos:
@@ -1069,7 +1074,7 @@ label, since the `labels:` key on a template or issue form is applied on
 creation whoever files it. Keep the gate label out of your templates.
 
 ```bash
-backlog-drain -label ready-for-claude
+polako work -label ready-for-claude
 ```
 
 On any repository open to issues from outside the team, run it that way. It is
@@ -1105,7 +1110,7 @@ commit, plus a separate commit that publishes it.
 
 | Tag | Who needs it |
 | --- | --- |
-| `backlog-drain--v0.4.0` | The Claude plugin tooling. `claude plugin tag` creates it, and refuses if `plugin.json` and the marketplace entry disagree. It is also what the marketplace entry's `ref` pins to, and what a `dependencies` range would resolve against. |
+| `polako--v0.4.0` | The Claude plugin tooling. `claude plugin tag` creates it, and refuses if `plugin.json` and the marketplace entry disagree. It is also what the marketplace entry's `ref` pins to, and what a `dependencies` range would resolve against. |
 | `v0.4.0` | Go modules — `go install ...@v0.4.0` only resolves semver tags — and the trigger for the binary release workflow. |
 
 1. **Release PR** — a `chore(release): 0.4.0` commit that bumps
@@ -1148,7 +1153,7 @@ commit, plus a separate commit that publishes it.
    version, which is the only place the `-ldflags` stamp is ever exercised;
    `go install ...@v0.4.0` resolves; the plugin installs with the `ref` moved
    and reports the same version the binary does; and a session lists
-   `/backlog-drain:implement-issue`. It writes nothing outside a temporary
+   `/polako:implement-issue`. It writes nothing outside a temporary
    directory — the plugin installs into a throwaway `CLAUDE_CONFIG_DIR`, so
    smoke-testing a release never moves *your* machine onto it.
 
@@ -1185,26 +1190,26 @@ tree is never read. To run the tip of a working tree, see
 nothing about whether the skill still takes an issue to a PR, and nothing ever
 will fully automate that: **nothing merges itself**, so the last link in the
 loop is a human. The cheapest honest test is therefore not a scratch repo and a
-seeded fake issue — it is to make the first issue you were going to drain
+seeded fake issue — it is to make the first issue you were going to work
 anyway the smoke test.
 
 After step 3, install the release for real and run one issue, watched rather
 than unattended:
 
 ```bash
-backlog-drain -once
+polako work -once
 ```
 
 What to watch for, in order:
 
-- Startup names the repository, `/backlog-drain:implement-issue`, and the same
+- Startup names the repository, `/polako:implement-issue`, and the same
   version on both halves — no `version skew` line.
 - The skill opens a PR whose head branch is `issue-N`. That name is the
   contract between the two halves; a change there breaks PR discovery.
 - The supervisor finds that PR and *waits* on it, rather than re-running the
   skill over the top of it.
 - You merge. The supervisor notices and exits.
-- `backlog-drain stats` counts that issue as `merged`.
+- `polako stats` counts that issue as `merged`.
 
 Then open the publish PR, and say in its body which issue you drove. If the
 backlog is empty at release time, say **that** instead — "the skill half went
@@ -1215,7 +1220,7 @@ silence.
 
 Pre-1.0, **minor is the breaking axis**. That is the npm-semver reading —
 `^0.3.0` means `0.3.x` — and plugin `dependencies` ranges resolve with npm
-semver against `backlog-drain--v*` tags, so it is the reading that makes a
+semver against `polako--v*` tags, so it is the reading that makes a
 constraint on this plugin behave.
 
 - **Patch** — bug fixes, doc changes, anything invisible to a caller.
@@ -1294,11 +1299,11 @@ an install is what every marketplace path gives you, because the entry pins a
 session:
 
 ```bash
-claude --plugin-dir /path/to/backlog-drain
+claude --plugin-dir /path/to/polako
 ```
 
 Two things make it the right tool rather than a workaround. The skill keeps its
-namespaced form, `/backlog-drain:implement-issue` — the same name the
+namespaced form, `/polako:implement-issue` — the same name the
 supervisor's `-skill` default already expects — so nothing needs telling. And it
 replaces an installed plugin of the same name for that session, so you do not
 have to uninstall your working copy to test tip and reinstall it afterwards.
@@ -1306,25 +1311,25 @@ To confirm which one a session actually loaded, the `init` event names the path
 and version it came from:
 
 ```bash
-claude --plugin-dir /path/to/backlog-drain -p "hi" --output-format stream-json --verbose | head -1
+claude --plugin-dir /path/to/polako -p "hi" --output-format stream-json --verbose | head -1
 ```
 
-The supervisor has no pass-through for extra `claude` arguments, so a drain
+The supervisor has no pass-through for extra `claude` arguments, so a shift
 cannot ask for `--plugin-dir` itself. Wrap it instead — save one of these as
 `~/bin/claude-tip`, or `claude-tip.cmd` on Windows — and point `-claude` at it:
 
 ```sh
 #!/bin/sh
-exec claude --plugin-dir /path/to/backlog-drain "$@"
+exec claude --plugin-dir /path/to/polako "$@"
 ```
 
 ```cmd
 @echo off
-claude --plugin-dir C:\path\to\backlog-drain %*
+claude --plugin-dir C:\path\to\polako %*
 ```
 
 ```bash
-chmod +x ~/bin/claude-tip && backlog-drain -claude ~/bin/claude-tip
+chmod +x ~/bin/claude-tip && polako -claude ~/bin/claude-tip
 ```
 
 Both startup probes are ordinary `claude` invocations — `claude --version` and
@@ -1337,7 +1342,7 @@ the directory it came from. Build the binary from the same tree and both halves
 are tip:
 
 ```bash
-go build -o backlog-drain ./cmd/backlog-drain && ./backlog-drain -claude ~/bin/claude-tip -once
+go build -o polako ./cmd/polako && ./polako -claude ~/bin/claude-tip -once
 ```
 
 Which path when:
@@ -1345,7 +1350,7 @@ Which path when:
 | Path | What it runs | Use it for |
 | --- | --- | --- |
 | `claude --plugin-dir <clone>` | the working tree, for one session | Developing against `main`. |
-| `claude plugin install backlog-drain@scharissis` | the tagged release | Smoke-testing a release, and normal use — see [Smoke-testing the skill](#smoke-testing-the-skill). |
+| `claude plugin install polako@scharissis` | the tagged release | Smoke-testing a release, and normal use — see [Smoke-testing the skill](#smoke-testing-the-skill). |
 | [Hand install](#the-skill-by-hand) | a copy you made | Not involving the plugin system at all. Remember `-skill implement-issue`. |
 
 ## License

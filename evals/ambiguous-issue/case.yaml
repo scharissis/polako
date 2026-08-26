@@ -3,7 +3,7 @@ description: >
   An under-specified issue should produce questions on the thread and the
   awaiting-answer label — and no PR. Guessing here is the expensive failure:
   the supervisor merges what it is given.
-prompt: /backlog-drain:implement-issue 1
+prompt: /polako:implement-issue 1
 scaffold_script: scaffold.sh
 runs: 1
 max_turns: 60

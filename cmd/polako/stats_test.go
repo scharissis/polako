@@ -17,17 +17,17 @@ import (
 // tokens without ever reporting a result, and the resumed session that
 // finished its work.
 const fixtureMain = `
-{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T09:20:00Z","repo":"scharissis/backlog-drain","issue":12,"pr":0,"reason":"implement","attempt":0,"session":"s12a","status":"ok","subtype":"success","outcome":"posted_questions","turns":20,"tool_uses":18,"wall_ms":1200000,"api_ms":900000,"cost_usd":1.10,"usage_source":"result","tokens":{"in":2000,"out":30000,"cache_read":4000000,"cache_write":200000},"model":"claude-opus-5","tag":"baseline","future_field":"a field written by a newer version"}
-{"v":1,"kind":"run","ts":"2026-08-20T12:30:00Z","ended":"2026-08-20T13:00:00Z","repo":"scharissis/backlog-drain","issue":12,"pr":34,"reason":"answers","attempt":0,"session":"s12b","status":"ok","subtype":"success","outcome":"opened_pr","turns":40,"tool_uses":35,"wall_ms":1800000,"api_ms":1400000,"cost_usd":2.50,"usage_source":"result","tokens":{"in":3000,"out":50000,"cache_read":6000000,"cache_write":300000},"model":"claude-opus-5","tag":"baseline"}
-{"v":1,"kind":"issue","ts":"2026-08-20T14:00:00Z","repo":"scharissis/backlog-drain","issue":12,"pr":34,"outcome":"needs_human","tag":"baseline"}
-{"v":1,"kind":"issue","ts":"2026-08-20T15:00:00Z","repo":"scharissis/backlog-drain","issue":12,"pr":34,"outcome":"merged","tag":"baseline"}
-{"v":1,"kind":"run","ts":"2026-08-21T09:00:00Z","ended":"2026-08-21T09:05:00Z","repo":"scharissis/backlog-drain","issue":13,"pr":0,"reason":"implement","attempt":0,"session":"s13a","status":"crash","exit_code":7,"outcome":"nothing","turns":6,"tool_uses":5,"wall_ms":300000,"cost_usd":0,"usage_source":"observed","tokens":{"in":500,"out":6000,"cache_read":700000,"cache_write":40000},"model":"claude-opus-5","tag":"baseline"}
-{"v":1,"kind":"run","ts":"2026-08-21T09:06:00Z","ended":"2026-08-21T09:40:00Z","repo":"scharissis/backlog-drain","issue":13,"pr":35,"reason":"resume","attempt":1,"session":"s13a","resumed_from":"s13a","status":"ok","subtype":"success","outcome":"opened_pr","turns":31,"tool_uses":27,"wall_ms":2040000,"api_ms":1500000,"cost_usd":3.00,"usage_source":"result","tokens":{"in":2500,"out":42000,"cache_read":5200000,"cache_write":260000},"model":"claude-opus-5","tag":"baseline"}
-{"v":1,"kind":"issue","ts":"2026-08-21T11:00:00Z","repo":"scharissis/backlog-drain","issue":13,"pr":35,"outcome":"merged","tag":"baseline"}
-{"v":1,"kind":"run","ts":"2026-08-22T09:00:00Z","ended":"2026-08-22T09:30:00Z","repo":"scharissis/backlog-drain","issue":14,"reason":"implement","status":"no-turns","subtype":"success","outcome":"nothing","turns":0,"wall_ms":1800000,"cost_usd":0.10,"usage_source":"result","tokens":{"in":100,"out":900,"cache_read":50000,"cache_write":2000},"model":"claude-sonnet-5","tag":"baseline"}
-{"v":1,"kind":"issue","ts":"2026-08-22T09:31:00Z","repo":"scharissis/backlog-drain","issue":14,"pr":0,"outcome":"needs_human","tag":"baseline"}
-{"v":1,"kind":"pr","ts":"2026-08-22T10:00:00Z","repo":"scharissis/backlog-drain","issue":14,"note":"a record kind written by a newer version"}
-{"v":1,"kind":"run","ts":"2026-08-23T09:00:00Z","ended":"2026-08-23T09:12:00Z","repo":"scharissis/backlog-drain","issue":15,"pr":36,"reason":"remediate","status":"ok","subtype":"success","outcome":"nothing","turns":9,"tool_uses":8,"wall_ms":720000,"cost_usd":0.40,"usage_source":"result","tokens":{"in":400,"out":5000,"cache_read":600000,"cache_write":30000},"model":"claude-opus-5","tag":"terse-plan"}
+{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T09:20:00Z","repo":"scharissis/polako","issue":12,"pr":0,"reason":"implement","attempt":0,"session":"s12a","status":"ok","subtype":"success","outcome":"posted_questions","turns":20,"tool_uses":18,"wall_ms":1200000,"api_ms":900000,"cost_usd":1.10,"usage_source":"result","tokens":{"in":2000,"out":30000,"cache_read":4000000,"cache_write":200000},"model":"claude-opus-5","tag":"baseline","future_field":"a field written by a newer version"}
+{"v":1,"kind":"run","ts":"2026-08-20T12:30:00Z","ended":"2026-08-20T13:00:00Z","repo":"scharissis/polako","issue":12,"pr":34,"reason":"answers","attempt":0,"session":"s12b","status":"ok","subtype":"success","outcome":"opened_pr","turns":40,"tool_uses":35,"wall_ms":1800000,"api_ms":1400000,"cost_usd":2.50,"usage_source":"result","tokens":{"in":3000,"out":50000,"cache_read":6000000,"cache_write":300000},"model":"claude-opus-5","tag":"baseline"}
+{"v":1,"kind":"issue","ts":"2026-08-20T14:00:00Z","repo":"scharissis/polako","issue":12,"pr":34,"outcome":"needs_human","tag":"baseline"}
+{"v":1,"kind":"issue","ts":"2026-08-20T15:00:00Z","repo":"scharissis/polako","issue":12,"pr":34,"outcome":"merged","tag":"baseline"}
+{"v":1,"kind":"run","ts":"2026-08-21T09:00:00Z","ended":"2026-08-21T09:05:00Z","repo":"scharissis/polako","issue":13,"pr":0,"reason":"implement","attempt":0,"session":"s13a","status":"crash","exit_code":7,"outcome":"nothing","turns":6,"tool_uses":5,"wall_ms":300000,"cost_usd":0,"usage_source":"observed","tokens":{"in":500,"out":6000,"cache_read":700000,"cache_write":40000},"model":"claude-opus-5","tag":"baseline"}
+{"v":1,"kind":"run","ts":"2026-08-21T09:06:00Z","ended":"2026-08-21T09:40:00Z","repo":"scharissis/polako","issue":13,"pr":35,"reason":"resume","attempt":1,"session":"s13a","resumed_from":"s13a","status":"ok","subtype":"success","outcome":"opened_pr","turns":31,"tool_uses":27,"wall_ms":2040000,"api_ms":1500000,"cost_usd":3.00,"usage_source":"result","tokens":{"in":2500,"out":42000,"cache_read":5200000,"cache_write":260000},"model":"claude-opus-5","tag":"baseline"}
+{"v":1,"kind":"issue","ts":"2026-08-21T11:00:00Z","repo":"scharissis/polako","issue":13,"pr":35,"outcome":"merged","tag":"baseline"}
+{"v":1,"kind":"run","ts":"2026-08-22T09:00:00Z","ended":"2026-08-22T09:30:00Z","repo":"scharissis/polako","issue":14,"reason":"implement","status":"no-turns","subtype":"success","outcome":"nothing","turns":0,"wall_ms":1800000,"cost_usd":0.10,"usage_source":"result","tokens":{"in":100,"out":900,"cache_read":50000,"cache_write":2000},"model":"claude-sonnet-5","tag":"baseline"}
+{"v":1,"kind":"issue","ts":"2026-08-22T09:31:00Z","repo":"scharissis/polako","issue":14,"pr":0,"outcome":"needs_human","tag":"baseline"}
+{"v":1,"kind":"pr","ts":"2026-08-22T10:00:00Z","repo":"scharissis/polako","issue":14,"note":"a record kind written by a newer version"}
+{"v":1,"kind":"run","ts":"2026-08-23T09:00:00Z","ended":"2026-08-23T09:12:00Z","repo":"scharissis/polako","issue":15,"pr":36,"reason":"remediate","status":"ok","subtype":"success","outcome":"nothing","turns":9,"tool_uses":8,"wall_ms":720000,"cost_usd":0.40,"usage_source":"result","tokens":{"in":400,"out":5000,"cache_read":600000,"cache_write":30000},"model":"claude-opus-5","tag":"terse-plan"}
 {"v":1,"kind":"run","ts":"2026-08-23T10:00:00Z","ended":"2026-08-2`
 
 const fixtureOther = `
@@ -43,8 +43,8 @@ func fixtureDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	for name, body := range map[string]string{
-		"scharissis--backlog-drain.jsonl": fixtureMain,
-		"scharissis--other.jsonl":         fixtureOther,
+		"scharissis--polako.jsonl": fixtureMain,
+		"scharissis--other.jsonl":  fixtureOther,
 		// Not a record file: the reader globs *.jsonl, and anything else in
 		// the directory is none of its business.
 		"notes.txt": "nothing to do with run data",
@@ -73,7 +73,7 @@ func stats(t *testing.T, args ...string) string {
 }
 
 // clearEnvDefaults keeps a test hermetic against the shell it runs in. Flags
-// take their defaults from BACKLOG_DRAIN_* now, so a maintainer who set one in
+// take their defaults from POLAKO_* now, so a maintainer who set one in
 // their profile would otherwise be running a different suite from CI.
 func clearEnvDefaults(t *testing.T) {
 	t.Helper()
@@ -91,7 +91,7 @@ func clearEnvDefaults(t *testing.T) {
 // there, and stats reads there, without either being told twice.
 func TestStatsReadsTheMetricsDirectoryFromTheEnvironment(t *testing.T) {
 	clearEnvDefaults(t)
-	t.Setenv("BACKLOG_DRAIN_METRICS", fixtureDir(t))
+	t.Setenv("POLAKO_METRICS", fixtureDir(t))
 
 	var buf bytes.Buffer
 	if err := runStats(nil, &buf, fixtureNow); err != nil {
@@ -117,7 +117,7 @@ func TestStatsReport(t *testing.T) {
 	want := fmt.Sprintf(`run data from %s
   read    2 files, 11 records (1 unreadable line skipped)
   window  2026-08-20T09:00:00Z → 2026-08-24T11:03:11Z (4.1d)
-  repos   scharissis/backlog-drain, scharissis/other
+  repos   scharissis/other, scharissis/polako
 
 issues
   terminal          4 — merged 3 (75%%), needs human 1
@@ -156,7 +156,7 @@ note: 1 run resumed an earlier session. Costs are summed exactly as each
 // happened — here, merged, not the needs_human that preceded it.
 func TestStatsDedupesIssueRecordsLatestWins(t *testing.T) {
 	out := stats(t, "-metrics", fixtureDir(t), "-by", byIssue)
-	line := issueLine(t, out, "scharissis/backlog-drain#12")
+	line := issueLine(t, out, "scharissis/polako#12")
 	if !strings.Contains(line, "merged") {
 		t.Errorf("issue #12 = %q, want the later merged record to win", line)
 	}
@@ -185,7 +185,7 @@ func issueLine(t *testing.T, out, prefix string) string {
 // configurations at nothing.
 func TestStatsCountsBothHalvesOfAResumedSession(t *testing.T) {
 	out := stats(t, "-metrics", fixtureDir(t), "-by", byIssue)
-	line := issueLine(t, out, "scharissis/backlog-drain#13")
+	line := issueLine(t, out, "scharissis/polako#13")
 	if !strings.Contains(line, "  2  ") {
 		t.Errorf("issue #13 = %q, want both the crash and the resume counted", line)
 	}
@@ -198,7 +198,7 @@ func TestStatsCountsBothHalvesOfAResumedSession(t *testing.T) {
 
 func TestStatsFiltersByRepo(t *testing.T) {
 	out := stats(t, "-metrics", fixtureDir(t), "-repo", "scharissis/other")
-	if strings.Contains(out, "backlog-drain#") || strings.Contains(out, "$8.10") {
+	if strings.Contains(out, "polako#") || strings.Contains(out, "$8.10") {
 		t.Errorf("-repo let another repository's records through:\n%s", out)
 	}
 	for _, want := range []string{"filtered for scharissis/other", "total $1.00"} {
@@ -249,12 +249,12 @@ func sameBody(a, b string) bool {
 func TestStatsByIssue(t *testing.T) {
 	out := stats(t, "-metrics", fixtureDir(t), "-by", byIssue)
 	want := `by issue
-  issue                        outcome      runs  questions   cost  tokens  wall
-  scharissis/backlog-drain#12  merged          2          1  $3.60   10.6M   50m
-  scharissis/backlog-drain#13  merged          2          0  $3.00    6.3M   39m
-  scharissis/backlog-drain#14  needs human     1          0  $0.10     53k   30m
-  scharissis/backlog-drain#15  in flight       1          0  $0.40  635.4k   12m
-  scharissis/other#5           merged          1          0  $1.00    1.6M   45m
+  issue                 outcome      runs  questions   cost  tokens  wall
+  scharissis/other#5    merged          1          0  $1.00    1.6M   45m
+  scharissis/polako#12  merged          2          1  $3.60   10.6M   50m
+  scharissis/polako#13  merged          2          0  $3.00    6.3M   39m
+  scharissis/polako#14  needs human     1          0  $0.10     53k   30m
+  scharissis/polako#15  in flight       1          0  $0.40  635.4k   12m
 `
 	if !strings.Contains(out, want) {
 		t.Errorf("-by issue table differs\n--- got ---\n%s\n--- want ---\n%s", out, want)
@@ -286,26 +286,26 @@ func TestStatsByModelAndTag(t *testing.T) {
 // is used: two processes that both worked issue #1 and disagreed about how it
 // ended, the records a version before ids left behind, and a third drain on
 // another repository whose records are the newest of the lot.
-const fixtureDrainsMain = `
+const fixtureShiftsMain = `
 {"v":1,"kind":"run","ts":"2026-08-19T09:00:00Z","ended":"2026-08-19T09:10:00Z","repo":"r/r","issue":2,"pr":1,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":0.50,"tokens":{"cache_read":500000},"model":"claude-opus-5"}
 {"v":1,"kind":"issue","ts":"2026-08-19T09:30:00Z","repo":"r/r","issue":2,"pr":1,"outcome":"merged"}
-{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T09:10:00Z","drain":"aaaa1111","repo":"r/r","issue":1,"pr":2,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":1.00,"tokens":{"cache_read":1000000},"model":"claude-opus-5"}
-{"v":1,"kind":"issue","ts":"2026-08-20T09:20:00Z","drain":"aaaa1111","repo":"r/r","issue":1,"pr":2,"outcome":"needs_human"}
-{"v":1,"kind":"run","ts":"2026-08-21T09:00:00Z","ended":"2026-08-21T09:30:00Z","drain":"bbbb2222","repo":"r/r","issue":1,"pr":3,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":2.00,"tokens":{"cache_read":2000000},"model":"claude-opus-5"}
-{"v":1,"kind":"issue","ts":"2026-08-21T10:00:00Z","drain":"bbbb2222","repo":"r/r","issue":1,"pr":3,"outcome":"merged"}
+{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T09:10:00Z","shift":"aaaa1111","repo":"r/r","issue":1,"pr":2,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":1.00,"tokens":{"cache_read":1000000},"model":"claude-opus-5"}
+{"v":1,"kind":"issue","ts":"2026-08-20T09:20:00Z","shift":"aaaa1111","repo":"r/r","issue":1,"pr":2,"outcome":"needs_human"}
+{"v":1,"kind":"run","ts":"2026-08-21T09:00:00Z","ended":"2026-08-21T09:30:00Z","shift":"bbbb2222","repo":"r/r","issue":1,"pr":3,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":2.00,"tokens":{"cache_read":2000000},"model":"claude-opus-5"}
+{"v":1,"kind":"issue","ts":"2026-08-21T10:00:00Z","shift":"bbbb2222","repo":"r/r","issue":1,"pr":3,"outcome":"merged"}
 `
 
-const fixtureDrainsOther = `
-{"v":1,"kind":"run","ts":"2026-08-22T09:00:00Z","ended":"2026-08-22T09:10:00Z","drain":"cccc3333","repo":"o/o","issue":9,"pr":4,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":3.00,"tokens":{"cache_read":3000000},"model":"claude-opus-5"}
-{"v":1,"kind":"issue","ts":"2026-08-22T09:30:00Z","drain":"cccc3333","repo":"o/o","issue":9,"pr":4,"outcome":"merged"}
+const fixtureShiftsOther = `
+{"v":1,"kind":"run","ts":"2026-08-22T09:00:00Z","ended":"2026-08-22T09:10:00Z","shift":"cccc3333","repo":"o/o","issue":9,"pr":4,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":3.00,"tokens":{"cache_read":3000000},"model":"claude-opus-5"}
+{"v":1,"kind":"issue","ts":"2026-08-22T09:30:00Z","shift":"cccc3333","repo":"o/o","issue":9,"pr":4,"outcome":"merged"}
 `
 
 func drainFixtureDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	for name, body := range map[string]string{
-		"r--r.jsonl": fixtureDrainsMain,
-		"o--o.jsonl": fixtureDrainsOther,
+		"r--r.jsonl": fixtureShiftsMain,
+		"o--o.jsonl": fixtureShiftsOther,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(strings.TrimPrefix(body, "\n")), 0o600); err != nil {
 			t.Fatalf("writing fixture %s: %v", name, err)
@@ -314,97 +314,97 @@ func drainFixtureDir(t *testing.T) string {
 	return dir
 }
 
-func TestStatsByDrain(t *testing.T) {
-	out := stats(t, "-metrics", drainFixtureDir(t), "-by", byDrain)
-	want := `by drain
-  drain     issues  merged  runs   cost  $/merged  tokens
+func TestStatsByShift(t *testing.T) {
+	out := stats(t, "-metrics", drainFixtureDir(t), "-by", byShift)
+	want := `by shift
+  shift     issues  merged  runs   cost  $/merged  tokens
   cccc3333       1       1     1  $3.00     $3.00      3M
   bbbb2222       1       1     1  $2.00     $2.00      2M
   aaaa1111       1       1     1  $1.00     $1.00      1M
   (none)         1       1     1  $0.50     $0.50    500k
 `
 	if !strings.Contains(out, want) {
-		t.Errorf("-by drain table differs\n--- got ---\n%s\n--- want ---\n%s", out, want)
+		t.Errorf("-by shift table differs\n--- got ---\n%s\n--- want ---\n%s", out, want)
 	}
 }
 
 // Records written before the field existed are not a parse failure and not a
 // gap: they are one more drain nobody can name.
-func TestStatsGroupsRecordsWithNoDrainIDUnderNone(t *testing.T) {
-	out := stats(t, "-metrics", fixtureDir(t), "-by", byDrain)
+func TestStatsGroupsRecordsWithNoShiftIDUnderNone(t *testing.T) {
+	out := stats(t, "-metrics", fixtureDir(t), "-by", byShift)
 	if !hasLine(out, "(none) 5 3 7") {
 		t.Errorf("a file written before drain ids existed should still group, whole:\n%s", out)
 	}
 	// And it is selectable, so a row of that table can be typed straight back
 	// in rather than being a dead end.
-	if got := stats(t, "-metrics", fixtureDir(t), "-drain", noneGroup); !hasLine(got, "total 7 — ok 5") {
-		t.Errorf("-drain %s should select exactly the records with no id:\n%s", noneGroup, got)
+	if got := stats(t, "-metrics", fixtureDir(t), "-shift", noneGroup); !hasLine(got, "total 7 — ok 5") {
+		t.Errorf("-shift %s should select exactly the records with no id:\n%s", noneGroup, got)
 	}
 }
 
 // The filter has to run before the latest-wins dedupe of terminal records:
 // both drains here recorded issue #1 ending, and the older one's report must
 // show what that drain concluded rather than what the next one did.
-func TestStatsFiltersToOneDrainBeforeDedupingIssues(t *testing.T) {
+func TestStatsFiltersToOneShiftBeforeDedupingIssues(t *testing.T) {
 	dir := drainFixtureDir(t)
 
-	older := stats(t, "-metrics", dir, "-drain", "aaaa1111")
+	older := stats(t, "-metrics", dir, "-shift", "aaaa1111")
 	for _, want := range []string{
-		"filtered from drain aaaa1111",
+		"filtered from shift aaaa1111",
 		"terminal 1 — merged 0 (0%), needs human 1",
 		"total $1.00",
 	} {
 		if !hasLine(older, want) {
-			t.Errorf("-drain aaaa1111 is missing %q:\n%s", want, older)
+			t.Errorf("-shift aaaa1111 is missing %q:\n%s", want, older)
 		}
 	}
 
-	newer := stats(t, "-metrics", dir, "-drain", "bbbb2222")
+	newer := stats(t, "-metrics", dir, "-shift", "bbbb2222")
 	if !hasLine(newer, "terminal 1 — merged 1 (100%)") || !hasLine(newer, "total $2.00") {
-		t.Errorf("-drain bbbb2222 should report only its own work:\n%s", newer)
+		t.Errorf("-shift bbbb2222 should report only its own work:\n%s", newer)
 	}
 }
 
 // "last" is the flag's whole point on a drain that is still running: the id is
 // in a startup line scrolled off the screen an hour ago.
-func TestStatsDrainLastPicksTheNewestDrainInScope(t *testing.T) {
+func TestStatsShiftLastPicksTheNewestShiftInScope(t *testing.T) {
 	dir := drainFixtureDir(t)
 
 	// The report names the id it resolved to, not the word that was typed —
 	// so a report pasted somewhere still says which drain it covered.
-	last := stats(t, "-metrics", dir, "-drain", drainLast)
-	if !hasLine(last, "filtered from drain cccc3333") || !hasLine(last, "total $3.00") {
-		t.Errorf(`-drain last should be the newest drain of all:\n%s`, last)
+	last := stats(t, "-metrics", dir, "-shift", shiftLast)
+	if !hasLine(last, "filtered from shift cccc3333") || !hasLine(last, "total $3.00") {
+		t.Errorf(`-shift last should be the newest drain of all:\n%s`, last)
 	}
 	// In scope, not overall: the last drain to touch one repository is a
 	// different question from the last drain anywhere.
-	perRepo := stats(t, "-metrics", dir, "-drain", drainLast, "-repo", "r/r")
-	if !hasLine(perRepo, "filtered for r/r from drain bbbb2222") || !hasLine(perRepo, "total $2.00") {
-		t.Errorf("-drain last should resolve inside -repo:\n%s", perRepo)
+	perRepo := stats(t, "-metrics", dir, "-shift", shiftLast, "-repo", "r/r")
+	if !hasLine(perRepo, "filtered for r/r from shift bbbb2222") || !hasLine(perRepo, "total $2.00") {
+		t.Errorf("-shift last should resolve inside -repo:\n%s", perRepo)
 	}
 }
 
-// -drain narrows the records -since kept; it does not replace the window.
+// -shift narrows the records -since kept; it does not replace the window.
 // Asserting that on "last" is impossible — the newest record is by
 // construction never the one a window clips — so it takes a named drain whose
 // records sit outside it.
-func TestStatsDrainAndSinceBothApply(t *testing.T) {
+func TestStatsShiftAndSinceBothApply(t *testing.T) {
 	// 72h back from fixtureNow starts on the 22nd; every aaaa1111 record is
 	// from the 20th.
-	out := stats(t, "-metrics", drainFixtureDir(t), "-drain", "aaaa1111", "-since", "72h")
+	out := stats(t, "-metrics", drainFixtureDir(t), "-shift", "aaaa1111", "-since", "72h")
 	if !strings.Contains(out, "no run data in") {
 		t.Errorf("a window excluding the drain's records should report nothing:\n%s", out)
 	}
-	if !hasLine(out, "in the last 3d from drain aaaa1111") {
+	if !hasLine(out, "in the last 3d from shift aaaa1111") {
 		t.Errorf("the empty report should name both filters, not just one:\n%s", out)
 	}
 }
 
 // An id nobody wrote is not an error — it is a report with nothing in it, and
 // the line has to say which drain came up empty.
-func TestStatsOnADrainWithNoRecords(t *testing.T) {
-	out := stats(t, "-metrics", drainFixtureDir(t), "-drain", "deadbeef")
-	if !strings.Contains(out, "from drain deadbeef") {
+func TestStatsOnAShiftWithNoRecords(t *testing.T) {
+	out := stats(t, "-metrics", drainFixtureDir(t), "-shift", "deadbeef")
+	if !strings.Contains(out, "from shift deadbeef") {
 		t.Errorf("want the empty report to name the drain asked for:\n%s", out)
 	}
 }
