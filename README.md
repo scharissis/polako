@@ -862,7 +862,7 @@ human latency
 | `-since` | *(all of it)* | Only count records newer than this, e.g. `-since 168h`. |
 | `-shift` | *(every shift)* | Only count records from one shift — its id, or `last` for the newest shift in scope. |
 | `-by` | *(none)* | Add a breakdown table: `issue`, `model`, `tag` or `shift`. |
-| `-runs` | *(off)* | Add the run log: one row per run, with the session id that reopens it — see [Reopening a past run](#reopening-a-past-run-runs). |
+| `-runs` | *(off)* | Add the run log: one row per run, with the session id that reopens it — see [Reopening a past run](#reopening-a-past-run--runs). |
 
 A window can keep an issue's terminal record while clipping away the runs that
 produced it. Those issues still count toward the merge rate, but they cannot be
@@ -965,8 +965,9 @@ run log
   2026-08-25T09:06:00Z  scharissis/polako#49  resume     ok        opened pr         b2e7c045-19af-4d6a-b7f1-8c02ea3169d4        1  $3.00    5.5M   34m
 ```
 
-The last column is the point of it. A session id is what the Claude CLI keeps
-the transcript under, so any row turns back into the whole run:
+The `session` column is the point of it — the last of the text columns, before
+the numbers. A session id is what the Claude CLI keeps the transcript under, so
+any row turns back into the whole run:
 
 ```bash
 claude --resume 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9
@@ -987,7 +988,7 @@ park — the two moments somebody wants to read a transcript:
 
 ```
 [claude] session started (model claude-opus-5, session 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9)
-issue #48 needs a human: claude crashed and 3 resume attempts failed
+issue #48 needs a human: claude crashed and 3 resume attempts failed — parking it and moving on
 issue #48: `claude --resume 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9` reopens what the last skill run on it did
 ```
 
