@@ -1244,69 +1244,70 @@ thing that moves an installed user.
 
 ### Cutting a release
 
-A release is that number, bumped and committed, plus two tags on the same
-commit, plus a separate commit that publishes it.
+A release is two merged PRs — one that cuts it, one that publishes it — with
+workflows doing everything in between. Nothing releases on its own: the
+pipeline only moves when the version in `plugin.json` changes on `main`, so
+ordinary merges never cut anything, and bumping that field stays the
+deliberate act it always was.
 
 | Tag | Who needs it |
 | --- | --- |
 | `polako--v0.4.0` | The Claude plugin tooling. `claude plugin tag` creates it, and refuses if `plugin.json` and the marketplace entry disagree. It is also what the marketplace entry's `ref` pins to, and what a `dependencies` range would resolve against. |
 | `v0.4.0` | Go modules — `go install ...@v0.4.0` only resolves semver tags — and the trigger for the binary release workflow. |
 
-1. **Release PR** — a `chore(release): 0.4.0` commit that bumps
-   [`plugin.json`](.claude-plugin/plugin.json) and writes the
-   [`CHANGELOG.md`](CHANGELOG.md) section, and does nothing else. That is what
-   makes the tag boundary mean something; a bump folded into a feature commit
-   leaves no commit that means "this is 0.4.0".
-2. **Tag it**, which two tags for one release makes worth scripting:
+1. **Start a release** — Actions → *Start a release* → pick patch, minor or
+   major ([What to bump](#what-to-bump)). It opens the release PR: one
+   `chore(release): X.Y.Z` commit that bumps
+   [`plugin.json`](.claude-plugin/plugin.json) and drafts a
+   [`CHANGELOG.md`](CHANGELOG.md) section from the commit subjects since the
+   last release, and does nothing else — folded into a feature commit, no
+   commit would mean "this is X.Y.Z". The same PR written by hand works
+   identically; the workflow is a convenience, the PR is the contract.
 
-   ```bash
-   ./scripts/release.sh
-   ```
+2. **Rewrite the draft, then merge.** Commit subjects are raw material; the
+   section should say what an operator needs to know before upgrading (the
+   changelog's own preamble says how). Merging the release PR is the act that
+   cuts the release: *Cut a release* sees the new version, refuses while the
+   changelog section is missing or `claude plugin validate` objects — before
+   either tag exists — then pushes both tags on the merge commit and hands
+   `vX.Y.Z` to *Release*, which cross-compiles the five targets with the tag
+   stamped in, publishes the GitHub release with the changelog section as its
+   body, starts a *Smoke* run, and opens the publish PR.
 
-   ```powershell
-   .\scripts\release.ps1
-   ```
+3. **Merge the publish PR.** It moves the `ref` in
+   [`marketplace.json`](.claude-plugin/marketplace.json) to the new tag, and
+   merging that one line is the moment anybody is exposed to the release. Its
+   body says what to check first: the *Smoke* run — every check CI cannot make
+   before the tags exist, from the five attached binaries and the `-ldflags`
+   version stamp, through `go install ...@vX.Y.Z` resolving, to the plugin
+   installing with the ref moved and a session listing the skill, all against
+   a throwaway `CLAUDE_CONFIG_DIR` so no machine moves onto the release early
+   (it runs [`smoke.sh`](scripts/smoke.sh); `./scripts/smoke.sh` asks the same
+   questions from a checkout) — and, when the skill half changed, one real
+   issue driven through the release, which no workflow can do for you: see
+   [Smoke-testing the skill](#smoke-testing-the-skill).
 
-   Each refuses on a dirty tree, on a missing changelog section, and on a
-   Claude Code too old for `claude plugin tag`; each runs
-   `claude plugin validate .` before either tag exists, because both tags are
-   pushed before CI sees them, so a manifest the plugin tooling rejects has to
-   be caught locally or not at all. Pushing `v0.4.0` starts the release
-   workflow, which validates again on a clean machine with current tooling,
-   cross-compiles the five targets with the tag stamped in, and attaches them to
-   a GitHub release whose body is that changelog section.
-3. **Smoke-test it**, while nobody is on it yet:
+**Rolling back** is reverting the publish commit; tags never move. Tagging and
+publishing are separate on purpose: a `ref` moved in the release commit would
+have `main` advertising a tag that does not exist from the moment it merges
+until the tag is pushed, and every install in that window fails. The gap is
+also what gives the smoke run something to prove while nobody is on the
+release yet.
 
-   ```bash
-   ./scripts/smoke.sh
-   ```
+**Every workflow in the chain is re-runnable.** Each re-derives where things
+stand from GitHub — which tags, release and PR already exist — finishes what
+is missing, and leaves what is done alone. A pipeline that died half-way is
+recovered by re-running *Cut a release* from the Actions tab; *Release* can be
+dispatched on the `vX.Y.Z` tag ref and *Smoke* on any version, the same way.
 
-   ```powershell
-   .\scripts\smoke.ps1
-   ```
-
-   Everything CI cannot reach, because it needs the network, `gh` and a real
-   `claude`: both tags exist and name one commit that is on `main`; the release
-   is published with all five binaries and a body that is the changelog section,
-   not generated commit subjects; the downloaded binary reports the right
-   version, which is the only place the `-ldflags` stamp is ever exercised;
-   `go install ...@v0.4.0` resolves; the plugin installs with the `ref` moved
-   and reports the same version the binary does; and a session lists
-   `/polako:implement-issue`. It writes nothing outside a temporary
-   directory — the plugin installs into a throwaway `CLAUDE_CONFIG_DIR`, so
-   smoke-testing a release never moves *your* machine onto it.
-
-   It cannot exercise the skill, so **drive one real issue through the release
-   before publishing** — see [Smoke-testing the skill](#smoke-testing-the-skill).
-4. **Publish PR** — move the `ref` in
-   [`marketplace.json`](.claude-plugin/marketplace.json) to the new tag.
-   Merging that one line is the moment anybody is exposed to the release.
-
-Steps 2 and 4 are separate on purpose. A `ref` bumped in the release commit
-would have `main` advertising a tag that does not exist from the moment it
-merges until the tag is pushed, and every install in that window fails.
-Splitting them is also what buys step 3 a window at all. **Rolling back** is
-reverting the publish commit; tags never move.
+The by-hand path still works, and refuses in the same places.
+[`release.sh`](scripts/release.sh) / [`release.ps1`](scripts/release.ps1) push
+the same two tags once the release PR has merged — each refuses on a dirty
+tree, a missing changelog section, and a Claude Code too old for `claude
+plugin tag`, and runs `claude plugin validate .` before either tag exists,
+because both tags go public before any CI sees them. Pushing `vX.Y.Z` by hand
+triggers *Release*, so the two paths converge from there: binaries, GitHub
+release, smoke run, publish PR.
 
 **Installs resolve to a tag, not to `main`.** The marketplace entry is an
 explicit `github` source with a `ref`, so a version number identifies exactly
@@ -1332,8 +1333,8 @@ loop is a human. The cheapest honest test is therefore not a scratch repo and a
 seeded fake issue — it is to make the first issue you were going to work
 anyway the smoke test.
 
-After step 3, install the release for real and run one issue, watched rather
-than unattended:
+Before merging the publish PR, install the release for real and run one issue,
+watched rather than unattended:
 
 ```bash
 polako work -once
@@ -1350,8 +1351,8 @@ What to watch for, in order:
 - You merge. The supervisor notices and exits.
 - `polako stats` counts that issue as `merged`.
 
-Then open the publish PR, and say in its body which issue you drove. If the
-backlog is empty at release time, say **that** instead — "the skill half went
+Then say in the publish PR's body which issue you drove. If the backlog is
+empty at release time, say **that** instead — "the skill half went
 unexercised" is worth recording rather than leaving to be inferred from
 silence.
 
@@ -1389,7 +1390,7 @@ CI runs, on Linux, macOS and Windows. `smoke` is its opposite number and is not
 part of this loop: it needs the network, `gh` and a real `claude`, and it only
 has anything to check once a release is tagged — see
 [Cutting a release](#cutting-a-release). The plugin side has its own validator,
-which `release.sh` and the release workflow both run for you:
+which the release scripts and workflows all run for you:
 
 ```bash
 claude plugin validate .

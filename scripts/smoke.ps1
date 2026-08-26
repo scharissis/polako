@@ -460,10 +460,11 @@ try {
     }
 
     Write-Host ''
-    Write-Host 'The skill half is not covered by any of this. Before opening the publish PR,'
+    Write-Host 'The skill half is not covered by any of this. Before merging the publish PR,'
     Write-Host "drive one real issue through $Version - see ""Cutting a release"" in the README."
     Write-Host ''
-    Write-Host "Then move the marketplace entry's ref to $pluginTag."
+    Write-Host "Then merge the publish PR moving the marketplace ref to $pluginTag - the"
+    Write-Host 'Release workflow opens it; open it by hand only if it is missing.'
 } finally {
     Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue

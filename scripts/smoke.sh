@@ -456,7 +456,8 @@ if [ "$failed" -gt 0 ]; then
 fi
 
 echo
-echo "The skill half is not covered by any of this. Before opening the publish PR,"
+echo "The skill half is not covered by any of this. Before merging the publish PR,"
 echo "drive one real issue through $version - see \"Cutting a release\" in the README."
 echo
-echo "Then move the marketplace entry's ref to $pluginTag."
+echo "Then merge the publish PR moving the marketplace ref to $pluginTag - the"
+echo "Release workflow opens it; open it by hand only if it is missing."

@@ -1,0 +1,55 @@
+name: Smoke
+
+# scripts/smoke.sh, run where the release pipeline can start it: release.yml
+# dispatches it the moment a release is published, and the Actions tab re-runs
+# it by hand for any version. Advisory by design — a red run here blocks
+# nothing by itself; it is the evidence the publish PR asks a human to read
+# before merging. The script writes nothing outside a temporary directory, so
+# running it here moves no machine, and no user, onto the release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The release to smoke-test, e.g. 0.8.0"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: install claude
+        run: npm install -g @anthropic-ai/claude-code
+
+      # The script's own `go install` borrows gh's token, but the plugin
+      # checks have claude clone this repository itself, outside the checkout
+      # the runner authenticated. On a private repository that clone needs a
+      # credential, so route every https fetch of github.com through the
+      # workflow token. The runner is thrown away with the config.
+      - name: let claude clone this repository
+        run: |
+          git config --global \
+            "url.https://x-access-token:${GH_TOKEN}@github.com/.insteadOf" \
+            "https://github.com/"
+
+      - name: smoke-test the release
+        env:
+          VERSION: ${{ inputs.version }}
+        run: ./scripts/smoke.sh "$VERSION"
