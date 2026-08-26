@@ -75,6 +75,22 @@ jobs:
             echo "::error::a release PR for $next is already open — edit and merge that one: $open"
             exit 1
           fi
+          # A previous run may have pushed the branch and then died before its
+          # PR opened — the createPullRequest permission being off is the
+          # usual cause. A scaffold nobody has touched is regenerated from
+          # main, so sweeping it aside loses nothing; a branch carrying
+          # anybody else's commits is not this workflow's to delete.
+          if [ -n "$(git ls-remote origin "refs/heads/release-$next")" ]; then
+            committer=$(gh api "repos/$GITHUB_REPOSITORY/commits/release-$next" \
+              --jq .commit.committer.email 2>/dev/null || true)
+            if [ "$committer" = "41898282+github-actions[bot]@users.noreply.github.com" ]; then
+              echo "deleting the scaffold branch release-$next a previous run left behind"
+              git push origin ":refs/heads/release-$next"
+            else
+              echo "::error::branch release-$next already exists with commits this workflow did not make — open a PR from it, or delete it (git push origin :release-$next) and re-run"
+              exit 1
+            fi
+          fi
           {
             echo "current=$current"
             echo "next=$next"
@@ -145,8 +161,15 @@ jobs:
             echo "PR merges, so this PR can sit, be edited, or be closed unmerged"
             echo "without anyone seeing a release."
           } > /tmp/body.md
-          gh pr create --base main --head "release-$NEXT" \
-            --title "chore(release): $NEXT" --body-file /tmp/body.md
+          if ! gh pr create --base main --head "release-$NEXT" \
+              --title "chore(release): $NEXT" --body-file /tmp/body.md; then
+            # Leave nothing behind: a failed run that keeps its branch makes
+            # the re-run fail differently, which reads as a second bug. The
+            # usual cause has a one-checkbox fix, so name it.
+            git push origin ":refs/heads/release-$NEXT"
+            echo "::error::could not open the release PR; the scaffold branch was deleted again. If the error above says GitHub Actions is not permitted to create pull requests, enable it once — Settings → Actions → General → Workflow permissions → 'Allow GitHub Actions to create and approve pull requests' — then re-run this workflow."
+            exit 1
+          fi
 
           # A PR opened with the workflow's own token gets no pull_request CI
           # run — GitHub suppresses runs for events its token caused — so ask
