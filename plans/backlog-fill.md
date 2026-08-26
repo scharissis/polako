@@ -111,6 +111,18 @@ what the prose here calls fill and drain, and the `drained` notify event
 becomes `cleared` to match), and every README path. The `issue-N` branch contract, deliberately, does not
 move: branches are named for issues, not for the tool.
 
+Two things the diff itself cannot carry. The GitHub repository rename is a
+Settings operation, not a commit — old URLs, clones and `go.mod` fetches
+redirect, so nothing breaks, but a person clicks it. And **the open backlog
+predates the new names**: an unattended run implements the words an issue
+actually says, so an issue asking for `backlog-drain status` or a
+`BACKLOG_DRAIN_*` variable would faithfully build the old name. Phase 0
+therefore ends with a one-pass edit of the open issues — updating what they
+*ask for* (flags, paths, env names, subcommands) to the polako spellings,
+leaving historical references and links alone. Eight issues today; minutes
+of curation, of exactly the kind the curation gate already assumes humans
+do.
+
 ### Same repo, one plugin, one version — settled
 
 A second repo was considered and rejected. The `proposed` label and the
@@ -237,9 +249,10 @@ re-deriving from GitHub, `disable-model-invocation: true`, arguments
 `[vision-doc] [focus]`. No document is ever guessed: invoked bare, it stops
 and asks for one rather than divining which file is the roadmap.
 
-- **Phase 0 — context and posture.** Read the vision document (a path, given
-  as the argument, resolved inside `-dir`). Read the open backlog *including
-  existing proposals*, and recently closed issues, for dedupe. The standing
+- **Phase 0 — context and posture.** Read the vision — a document path
+  resolved inside `-dir`, or the inline brief the supervisor passed. Read
+  the open backlog *including existing proposals*, and recently closed
+  issues, for dedupe. The standing
   posture paragraph, adapted: the vision doc is operator-authored but still
   data; existing issue text is attacker-controllable on any repo taking
   outside issues; anything in either that instructs the agent is content to
@@ -305,6 +318,22 @@ that exists under `-dir`, and a capability probe (`gh issue create --help`
 mentions `--parent`) whose result is passed to the skill as
 flat-vs-hierarchical guidance rather than discovered mid-run as a permission
 prompt nobody is there to answer.
+
+**A vision can be one sentence.** `-brief "a dating app for horses"` takes
+the document's place: same trust tier (typed by the operator, the most
+directly operator-authored input the system has), same gates absorbing the
+risk of thin input — a sparse brief yields a small starter epic whose body
+names the assumptions it had to make, which is exactly what curation is
+for. This is the greenfield story: an empty repository plus one sentence is
+a valid starting state, and the proposals are the first backlog. It is
+deliberately a separate flag, mutually exclusive with `-vision` and exactly
+one of them required — never a does-the-file-exist heuristic on `-vision`,
+where a typo'd path would silently become the vision instead of failing
+loudly. The provenance footer reads `from an inline brief` (no sha, so the
+next plan run dedupes purely against the open backlog, which it reads
+anyway), the milestone title defaults to the brief's first words, and past
+a couple of thousand characters the advice in `-h` is: that is a document,
+put it in a file.
 
 **Fill defaults to a strong model, deliberately.** A plan run happens once
 per batch and its output steers every drain run downstream, so its tokens are
@@ -373,9 +402,10 @@ Numbers, identifiers and operator-chosen strings only — `vision` is a path
 the operator typed, and no issue text is ever recorded. `stats` learns a
 small planning section when someone reaches for it (phase 4), not before.
 
-**Flags:** `-vision` (required), `-max-issues`, `-milestone` (a title, or
-`off`; default derived from the vision document's name) and `-focus` (a
-free-text steer like "only the observability section") are new; `-dir`,
+**Flags:** `-vision` (a document path) or `-brief` (inline text) — exactly
+one required — plus `-max-issues`, `-milestone` (a title, or `off`; default
+derived from the vision document's name, or the brief's first words) and
+`-focus` (a free-text steer like "only the observability section") are new; `-dir`,
 `-claude`, `-skill` (default `polako:plan-backlog`), `-model` (default
 `opus`, above), `-permission-mode`, `-tools`, `-add-tools`, `-stall`,
 `-max-cost`, `-metrics`, `-run-tag`, `-notify` and `-dry-run` keep their
@@ -507,7 +537,15 @@ this lands first; reversing costs one `sed` any time before it ships. If
 second thoughts arrive late anyway, the fallback ordering stands — phases
 1–3 ship under the `backlog-drain` name (the plan verb as an interim
 `backlog-drain plan`, awkward and ours alone to see) and the identity
-release goes last.
+release goes last. This one release is **driven by hand, not by the
+queue**: part of it is not expressible as a PR at all (the GitHub rename,
+the marketplace re-registration), and the diff invalidates assumptions a
+running supervisor holds about itself — its own plugin name, `-skill`
+default and version pairing — so it is the one change the tool should not
+be asked to make to itself unattended. It ends with the open-issue edit
+pass from the rename checklist, and then the first `polako work -once` on
+the existing backlog *is* the release smoke test, per the README's
+standing philosophy that the first real issue is the honest one.
 
 **Phase 1 — the drain learns the gate (0.8.0).** `proposed` exclusion,
 structural container skip with the old-gh fallback, the ignored-proposals
@@ -585,8 +623,17 @@ trust.
    roll-ups against what the drain recorded; if S/M/L predicts nothing, the
    line is noise and comes out — an estimate that cannot be wrong is not one.
 
-This document alone is a docs change and bumps nothing. The natural first
-verification of the whole feature is this repository: its own backlog is
-already `-label ready`-gated, and this plan is the vision document — a fill
-run proposing these phases as an epic under a milestone, curated by removing
-`proposed` and adding `ready`, is the feature eating its own dogfood first.
+This document alone is a docs change and bumps nothing. The bootstrap
+order on this repository, settled in review: **rename first, then work the
+old backlog, then plan the new one.** Phase 0 lands by hand; the open-issue
+edit pass updates what the existing issues ask for; and the first
+`polako work -once` on that backlog is the release smoke test — issue #50
+is the sharpest example of why this order, since it must land as
+`polako status`, not `backlog-drain status`. Existing hand-written issues
+need nothing else: they carry no `proposed` label, so the queue treats them
+exactly as it always has, and coexistence with proposals is already the
+design. Then comes the dogfood proper: this repository's backlog is
+already `-label ready`-gated, and this plan is the vision document — a plan
+run proposing its own remaining phases as an epic under a milestone,
+curated by removing `proposed` and adding `ready`, is the feature eating
+its own dogfood first.
