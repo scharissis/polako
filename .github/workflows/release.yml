@@ -152,8 +152,11 @@ jobs:
           # so it is swept aside; a branch carrying anybody else's commits is
           # not this workflow's to delete.
           if [ -n "$(git ls-remote origin "refs/heads/$branch")" ]; then
+            # `|| committer=""` and not `|| true`: a failed gh api prints its
+            # error envelope to stdout, and capturing that would read as a
+            # human committer and refuse a branch this workflow owns.
             committer=$(gh api "repos/$GITHUB_REPOSITORY/commits/$branch" \
-              --jq .commit.committer.email 2>/dev/null || true)
+              --jq .commit.committer.email 2>/dev/null) || committer=""
             if [ "$committer" = "41898282+github-actions[bot]@users.noreply.github.com" ]; then
               echo "deleting the publish branch $branch a previous run left behind"
               git push origin ":refs/heads/$branch"
