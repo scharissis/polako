@@ -57,6 +57,14 @@ push. Those tests check the promise is *written*. These cases check it is
   It refuses any subcommand the unattended allowlist would not grant, so a case
   cannot pass on a call the real run could never make.
 - `.claude/settings.json` — puts that `gh` first on `PATH`.
+- `CLAUDE.md` — says the project is `repo/`. The prompt is a bare slash command
+  with nowhere to name a directory, and Phase 0's `git worktree list` otherwise
+  runs wherever the runner started: no repository at all, or — if the workspace
+  sits inside one — the wrong one.
+
+It refuses to run in a directory that already holds any of those, so a second
+run in the same workspace, or a run pointed at a real project, stops with a
+sentence about it rather than half-building on top.
 
 Graders then read fixed paths (`.eval/pr-body.md`, `.eval/labels.log`,
 `.eval/comments/0.md`, `repo-issue-1/PLAN.md`) rather than having to work out
@@ -88,5 +96,12 @@ documentation. These are the parts most likely to need a correction:
 - **Whether `llm` graders can read workspace files.** Several `criteria` name a
   path under `.eval/`. If graders only see the transcript, those need rewording
   against the transcript instead — the facts are all visible there too.
+- **Whether `tool_used: Skill` ever fires here.** `SKILL.md` sets
+  `disable-model-invocation: true`, so the skill is only ever reached as a slash
+  command, and it is not obvious that arrives as a `Skill` tool call. The
+  ablation notes describe that grader as a plugin-fired indicator rather than
+  part of the score, which should make it harmless either way — but if it is
+  scored and always fails, drop it from all four cases. It is the one grader
+  here that asserts nothing about the skill's behaviour.
 
 Fix what the first run finds and delete this section.

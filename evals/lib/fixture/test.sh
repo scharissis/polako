@@ -19,7 +19,12 @@ check() {
 }
 
 check "greets by name" "Hello, World!" "$(./greet.sh World)"
-check "rejects a missing name" "2" "$(./greet.sh >/dev/null 2>&1; echo $?)"
+
+# `set -e` is inherited by command substitutions, so `$(cmd; echo $?)` would
+# abort the subshell on the very failure this asserts and hand `check` an empty
+# string. An if/else is the one form that survives errexit.
+if ./greet.sh >/dev/null 2>&1; then status=0; else status=$?; fi
+check "rejects a missing name" "2" "$status"
 
 if [ "$failures" -ne 0 ]; then
   echo "$failures failure(s)"

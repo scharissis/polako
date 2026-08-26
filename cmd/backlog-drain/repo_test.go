@@ -377,14 +377,11 @@ func TestPRBodyKeepsItsSectionsAndClosingLine(t *testing.T) {
 		}
 	}
 
-	var closing string
-	for _, line := range strings.Split(skill, "\n") {
-		if strings.Contains(line, "Closes #$issue") && strings.Contains(line, "End the body with") {
-			closing = line
-		}
+	closes := func(line string) bool {
+		return strings.Contains(line, "Closes #$issue") && strings.Contains(line, "End the body with")
 	}
-	if closing == "" {
-		t.Fatal("SKILL.md no longer ends the PR body with `Closes #$issue`; without it a merge" +
+	if !slices.ContainsFunc(strings.Split(skill, "\n"), closes) {
+		t.Error("SKILL.md no longer ends the PR body with `Closes #$issue`; without it a merge" +
 			" leaves the issue open and the next drain picks the same issue up again")
 	}
 }

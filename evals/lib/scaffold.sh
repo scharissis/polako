@@ -17,6 +17,21 @@ workspace=${EVAL_WORKSPACE:-$PWD}
 
 record=$workspace/.eval
 bin=$record/bin
+origin=$record/origin.git
+repo=$workspace/repo
+
+# Refuse a workspace that already holds something, rather than half-building on
+# top of it: `git commit` on an unchanged tree and a second `git remote add
+# origin` both fail several lines later with errors that read as git problems
+# rather than as "this directory has been used before, or is somebody's project".
+for occupied in "$repo" "$origin" "$workspace/.claude/settings.json" "$workspace/CLAUDE.md"; do
+  if [ -e "$occupied" ]; then
+    echo "scaffold: $occupied already exists, and this script would overwrite it." >&2
+    echo "Run in an empty directory, or point EVAL_WORKSPACE at one." >&2
+    exit 1
+  fi
+done
+
 mkdir -p "$record" "$bin"
 
 echo "scaffolding $(basename "$case_dir") into $workspace"
@@ -24,9 +39,6 @@ echo "scaffolding $(basename "$case_dir") into $workspace"
 # --- the scratch repository ------------------------------------------------
 # The skill fetches, resolves refs/remotes/origin/HEAD, branches from it and
 # pushes. All of that needs a remote that answers; none of it needs GitHub.
-origin=$record/origin.git
-repo=$workspace/repo
-
 git init --quiet --bare --initial-branch=main "$origin"
 git init --quiet --initial-branch=main "$repo"
 git -C "$repo" config user.name "Eval Fixture"
@@ -67,6 +79,20 @@ cat > "$workspace/.claude/settings.json" <<EOF
     "PATH": "$bin:$PATH"
   }
 }
+EOF
+
+# --- where the run is meant to work ----------------------------------------
+# The prompt is a bare slash command with nowhere to say "the project is in
+# ./repo", and Phase 0's `git worktree list` runs in whatever cwd the runner
+# started in. Left unsaid, that resolves to no repository at all — or, if the
+# workspace happens to sit inside one, to *that* repository, and the run
+# branches and commits in a real project. So the workspace says it outright.
+cat > "$workspace/CLAUDE.md" <<EOF
+# Eval workspace
+
+The project to work on is the git checkout at \`$repo\`. Change into it before
+doing anything else: the directory you start in is not a repository and is not
+the project. Worktrees this run creates belong beside it, in \`$workspace\`.
 EOF
 
 # --- per-case extras -------------------------------------------------------
