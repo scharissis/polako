@@ -1154,8 +1154,8 @@ claude --plugin-dir /path/to/backlog-drain -p "hi" --output-format stream-json -
 ```
 
 The supervisor has no pass-through for extra `claude` arguments, so a drain
-cannot ask for `--plugin-dir` itself. Wrap it instead, and point `-claude` at
-the wrapper:
+cannot ask for `--plugin-dir` itself. Wrap it instead — save one of these as
+`~/bin/claude-tip`, or `claude-tip.cmd` on Windows — and point `-claude` at it:
 
 ```sh
 #!/bin/sh
