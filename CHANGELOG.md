@@ -7,44 +7,44 @@ and why minor is the breaking axis before 1.0 — are in
 
 Entries carry an **Operator impact** line when a release changes what an
 unattended run does, rather than only what the code looks like. Those are the
-lines worth reading before upgrading a machine that drains a backlog overnight.
+lines worth reading before upgrading a machine that works a backlog overnight.
 
-## [Unreleased]
+## [0.7.0]
 
 ### Added
 
-- `backlog-drain status`: one snapshot of where the backlog stands, derived
-  from GitHub. The queue in the order a drain would work it, what is waiting on
+- `polako status`: one snapshot of where the backlog stands, derived
+  from GitHub. The queue in the order `polako work` would take it, what is waiting on
   an answer and how long its thread has been quiet, what is parked, and every
   open PR on an `issue-N` branch with its mergeable, checks and review state —
   closing with a `needs you:` line naming only the things a person has to move.
   It takes `-repo`, `-dir`, `-label`, `-branch-prefix` and `-strict-order`, and
   honours the same environment defaults, so it can be scoped exactly as the
-  drain it describes is — and it names on its header line whatever narrowed or
+  shift it describes is — and it names on its header line whatever narrowed or
   reordered the snapshot, since a flag left in a profile is otherwise invisible.
   `-repo owner/name` means it needs no checkout at all: any machine with `gh`
   authenticated for the repository gets the same answer.
 
-  It reports state, not liveness — it never asks whether a drain is running and
-  says the same thing either way, which is what makes it useful about a drain
+  It reports state, not liveness — it never asks whether a shift is running and
+  says the same thing either way, which is what makes it useful about a shift
   running on another machine. Every call it makes is a read, using the same `gh`
-  subcommands the drain re-derives its state with; a test asserts the list of
+  subcommands polako re-derives its state with; a test asserts the list of
   calls rather than merely checking that nothing changed. It opens no run-data
   file, so telemetry stays write-only outside `stats`, and it prints no issue,
   PR or comment text.
 
-  **Operator impact:** none on what a drain does. The subcommand is new, purely
+  **Operator impact:** none on what a shift does. The subcommand is new, purely
   additive, and mutates nothing.
 
-- Run data says which drain produced it. Every process generates a random
-  8-character id at startup, stamps it into every record it writes as `drain`,
+- Run data says which shift produced it. Every process generates a random
+  8-character id at startup, stamps it into every record it writes as `shift`,
   and prints it once beside the "recording run data in …" line with the exact
-  `stats` invocation that reports on it. `backlog-drain stats` gains `-drain
-  <id>` — with `last` meaning whichever drain wrote the newest record in scope,
-  so it composes with `-repo` and `-since` — and `-by drain` alongside the
-  existing groupings. That makes "what did the drain I left running overnight
+  `stats` invocation that reports on it. `polako stats` gains `-shift
+  <id>` — with `last` meaning whichever shift wrote the newest record in scope,
+  so it composes with `-repo` and `-since` — and `-by shift` alongside the
+  existing groupings. That makes "what did the shift I left running overnight
   do?" and "what has the one running right now spent?" exact questions, which
-  a `-since` window cannot answer once two drains overlap or run back to back.
+  a `-since` window cannot answer once two shifts overlap or run back to back.
   The field is additive: older files still load, and their records group and
   filter as `(none)`. Nothing reads the id back — telemetry stays write-only.
 
@@ -61,37 +61,37 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   green run; `evals/README.md` says what to expect first time.
 
 - `-dry-run`: resolve the next issue, print the exact `claude` invocation it
-  would get, and exit. The queue is resolved the way a real drain resolves it —
+  would get, and exit. The queue is resolved the way a real shift resolves it —
   `-skip`, `needs-human`, and the preference for an issue waiting on an answer
   when nothing else is ready — and an issue whose branch already carries a PR is
   reported as the PR it would wait on rather than a run it would not make.
   Nothing is run and nothing is written: every GitHub call is a read, no label
-  is declared, and run-data recording is forced off so a `BACKLOG_DRAIN_METRICS`
+  is declared, and run-data recording is forced off so a `POLAKO_METRICS`
   in the environment cannot leave a record of a run that never happened. The
   invocation goes to stdout and the narration to stderr, so it can be piped
   somewhere and pasted. It is an action rather than a preference, so — like
   `-version`, and unlike every other flag — it takes no default from the
-  environment: a `BACKLOG_DRAIN_DRY_RUN` left in a profile would turn every
-  later drain into a successful exit that worked nothing.
+  environment: a `POLAKO_DRY_RUN` left in a profile would turn every
+  later shift into a successful exit that worked nothing.
 
 - **Operator impact:** `-notify <command>` runs a command of your choosing
-  whenever the drain needs a human — an issue parked, an issue blocked on an
-  answer, the backlog drained, or the drain stopping early on a fatal error or a
+  whenever polako needs a human — an issue parked, an issue blocked on an
+  answer, the backlog cleared, or the shift stopping early on a fatal error or a
   spent `-max-session-cost`. Off unless asked for. It exists for the states that
-  are otherwise silent: the drain handles a parked or blocked issue by working
+  are otherwise silent: polako handles a parked or blocked issue by working
   the queue behind it, so the only trace is a label on a thread nobody is
-  watching until morning. Context arrives in `BACKLOG_DRAIN_NOTIFY_EVENT`,
+  watching until morning. Context arrives in `POLAKO_NOTIFY_EVENT`,
   `_ISSUE`, `_REPO` and `_REASON` — numbers, identifiers and this program's own
   words, never issue or PR text. The command is run directly rather than through
   a shell (put a pipeline in a script), a failing or hanging hook is logged and
-  never ends a drain, and a `-notify` naming a program that is not on `PATH` is
+  never ends a shift, and a `-notify` naming a program that is not on `PATH` is
   refused at startup rather than at the first notification hours later.
 
-- **Operator impact:** three caps on what a drain may spend, all off by default
-  so nothing changes for a drain that sets none. `-max-cost` parks an issue
-  once this drain's runs on it have cost that many dollars; `-max-issue-time`
+- **Operator impact:** three caps on what a shift may spend, all off by default
+  so nothing changes for a shift that sets none. `-max-cost` parks an issue
+  once this shift's runs on it have cost that many dollars; `-max-issue-time`
   parks it once those runs have taken that much *run time*, killing the run in
-  flight when the limit lands mid-run; `-max-session-cost` ends the drain
+  flight when the limit lands mid-run; `-max-session-cost` ends the shift
   cleanly, between issues, once its runs have cost that much. `-max-issue-time`
   is what `-stall` cannot stand in for: that watchdog kills a run that has gone
   silent, and an agent looping productively but uselessly for three hours emits
@@ -105,6 +105,21 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   reported a cost, so a cap is a ceiling on what was observed.
 
 ### Changed
+
+- **Operator impact — the tool is now `polako`, and the CLI takes a verb.**
+  The module path, binary, plugin, release-tag prefix, environment namespace
+  (`POLAKO_<FLAG>`, `POLAKO_NOTIFY_*`) and run-data directory
+  (`~/.polako/metrics` — move existing records with one `mv`) all take the
+  new name, and the old spellings are gone rather than aliased: this tool
+  currently has no users but its author, so nothing keeps a compatibility
+  surface alive. A bare `polako` prints the verb table instead of starting
+  an unattended agent loop — starting one now takes the word `work` — and
+  `status` and `stats` are verbs of the same binary, with `polako drain`
+  answered by a usage error that names the verb that replaced it. The
+  `drained` notify event is now `cleared`, records carry `polako_version`
+  where they carried `drain_version`, and the `issue-N` branch naming
+  contract is deliberately unchanged: branches are named for issues, not
+  for the tool.
 
 - The README now documents `claude --plugin-dir` — with a `-claude` wrapper
   script, since there is no pass-through for extra `claude` arguments — as the
@@ -120,21 +135,21 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   that the thread was as blocked as before. GitHub Apps are now read and skipped,
   and the log says so — `still awaiting a reply (2 new comment(s), none of them
   from a person)` — rather than repeating "still awaiting a reply" while GitHub
-  plainly shows new comments. Comments from the account the drain authenticates
+  plainly shows new comments. Comments from the account polako authenticates
   as are deliberately *not* skipped: on most setups that is the operator's own
   account, so skipping them would swallow the answer and wait forever, and
-  nothing the drain writes can end a wait in any case. Deciding this needs an
+  nothing polako writes can end a wait in any case. Deciding this needs an
   author type, which `gh issue view --json comments` does not carry — its author
   payload is a login and nothing else — so the thread is now read through `gh
-  api`. No new permission: the same read access the drain already needed.
+  api`. No new permission: the same read access polako already needed.
 
-- The exit summary now prices the drain and each issue in it, and says when
+- The exit summary now prices the shift and each issue in it, and says when
   runs that reported no cost make the total an undercount. Dollars appear only
-  when this drain spent some, so a drain that only waited on a PR an earlier
+  when this shift spent some, so a shift that only waited on a PR an earlier
   process opened prints the line it always printed.
 
 - **Operator impact:** an issue labelled `awaiting-answer` no longer holds up
-  the queue behind it. The drain puts it down and works the next issue, the way
+  the queue behind it. Polako puts it down and works the next issue, the way
   it already advances past a parked one, and picks it back up when the reply
   lands and nothing else is left — or straight away once the label is removed by
   hand. Only one issue is ever in flight, so two runs still cannot collide. What
@@ -143,15 +158,15 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   under it. A textual clash with one of those is rebased automatically as a
   `CONFLICTING` PR; a semantic one is not. `-strict-order` restores the old
   behaviour in full. Two smaller consequences: `-once` now exits on a question
-  as it does on a merge or a park, and a drain that ends with issues still
-  waiting names them in its summary. A restarted drain cannot know whether a
+  as it does on a merge or a park, and a shift that ends with issues still
+  waiting names them in its summary. A restarted shift cannot know whether a
   reply arrived while it was down, so it spends one run per already-flagged
   issue finding out; the skill re-reads the thread and stops again without
   re-asking when it has not.
 - **Operator impact:** a run that stops to ask a question now labels the issue
   `awaiting-answer`, and the supervisor waits on that label instead of on the
   issue's comment count rising across the run. A comment from CI, a bot, a
-  linked-PR notice or a passer-by is no longer read as a question, so the drain
+  linked-PR notice or a passer-by is no longer read as a question, so polako
   no longer waits indefinitely for a reply nobody knew was expected — and the
   blocked state is visible on GitHub rather than only in the terminal. The label
   is declared at startup if the repository does not have it, so nothing needs
@@ -170,9 +185,9 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   the diff, makes the changes, gets the suite passing and pushes — then goes back
   to waiting, because the re-review is yours. It may not dismiss or resolve the
   review, and still may not merge. Before this, asking for changes was invisible:
-  the drain logged "still open" every poll until somebody re-ran the skill by
+  polako logged "still open" every poll until somebody re-ran the skill by
   hand. Whether a review has been answered is derived from GitHub rather than
-  remembered, so a restarted drain agrees with the one that dispatched the run: a
+  remembered, so a restarted shift agrees with the one that dispatched the run: a
   review is outstanding until the branch carries a commit newer than it. That
   makes a rebase read as an answer — including one the conflict remediation
   performs — so a conflicting PR with a review open on it comes back for a fresh
@@ -182,7 +197,7 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   not require a review, so this works on the repositories most people have. One
   run per review, bounded by `-retries`; a run that finishes without moving the
   branch parks the issue rather than looping. These runs record `review` as their
-  reason, so `backlog-drain stats` tells them apart from the other two. The
+  reason, so `polako stats` tells them apart from the other two. The
   allowlist gains one entry, minted per run and pinned to the one PR being fixed
   — `Bash(gh api repos/OWNER/REPO/pulls/N/comments:*)` — because gh has no `pr`
   subcommand that prints line comments; `gh api` is not granted wholesale.
@@ -197,8 +212,8 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   which would hide a real failure beside it. One run per observed failure,
   bounded by `-retries`; a run that
   finishes without moving the branch parks the issue rather than looping. Before
-  this, a failing check was invisible: the drain logged "still open" every poll,
-  forever. These runs record `checks` as their reason, so `backlog-drain stats`
+  this, a failing check was invisible: polako logged "still open" every poll,
+  forever. These runs record `checks` as their reason, so `polako stats`
   tells them apart from conflict remediations. The allowlist gains three
   read-only entries the diagnosis needs — `gh pr checks`, `gh run list` and
   `gh run view`; `gh run` is still not granted wholesale, since that carries
@@ -236,14 +251,14 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   candidates at all, and a list that still cannot be resolved records nothing
   rather than a number nothing downstream could tell was wrong.
 - The skill's review gate brings the local default branch up to date before it
-  reviews. It resolves the branch's base from that local ref, and a drain never
+  reviews. It resolves the branch's base from that local ref, and polako never
   pulls — it merges on GitHub — so the ref falls one commit behind per merged
   PR. Reviewing against a stale one silently pulled an earlier merged PR into
   the diff, where `--fix` rewrote that already-merged code inside the branch
   under review. The supervisor now does the same thing itself, before it picks
-  up an issue and after a merge it saw — a teammate's push and a drain restarted
-  days later open the same gap, not only the drain's own merges. **Operator
-  impact:** a drain now fast-forwards `-dir`'s default branch. It is `--ff-only`
+  up an issue and after a merge it saw — a teammate's push and a shift restarted
+  days later open the same gap, not only polako's own merges. **Operator
+  impact:** polako now fast-forwards `-dir`'s default branch. It is `--ff-only`
   and nothing else: a default branch carrying a commit of its own, work in the
   way, or a checkout sitting on another branch is reported in the log and left
   exactly as it is, never rebased or reset.
@@ -252,7 +267,7 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   machine shutting down or a service manager stopping the unit takes the running
   `claude` down with the supervisor — previously it was orphaned, keeping
   `acceptEdits` and the whole `--allowedTools` set, free to push a branch and
-  open a PR that a restarted drain would then race with a second run on the same
+  open a PR that a restarted shift would then race with a second run on the same
   issue. A crashed session that turns out to be unresumable — its transcript
   truncated by a hard kill, or aged out of the CLI's retention — is given up on
   and the next attempt starts fresh, instead of failing on it identically until
