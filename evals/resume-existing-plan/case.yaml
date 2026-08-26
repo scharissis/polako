@@ -1,0 +1,47 @@
+name: resume-existing-plan
+description: >
+  A run that finds an existing worktree and a finished PLAN.md should resume
+  from it. Re-planning is not merely wasteful — it discards the decisions the
+  previous run already made, which is the whole reason the plan is written to
+  disk before the code.
+prompt: /backlog-drain:implement-issue 1
+scaffold_script: scaffold.sh
+runs: 1
+max_turns: 80
+timeout_seconds: 1800
+tags:
+  - skill
+  - resume
+graders:
+  - type: file_exists
+    name: pr_opened
+    path: .eval/pr-body.md
+
+  - type: llm
+    name: existing_worktree_was_reused
+    focus: what the run did in Phase 1
+    criteria: >
+      The run found the existing issue-1 worktree and worked in it. Fail if it
+      created a second worktree, recreated the branch from the default branch,
+      or discarded what was already there.
+
+  - type: llm
+    name: the_existing_plan_was_kept
+    focus: whether PLAN.md was resumed or rewritten
+    criteria: >
+      The run treated the existing PLAN.md as its plan. Its decisions survive in
+      the finished code — most visibly the POSIX-sh constraint: the
+      upper-casing uses `tr`, not a bash `${var^^}` expansion. Fail if PLAN.md
+      was replaced with a freshly written plan, or if the code contradicts the
+      plan's stated approach without saying why.
+
+  - type: llm
+    name: the_scoped_out_alias_stayed_out
+    focus: whether the run respected the plan's scope decisions
+    criteria: >
+      greet.sh does not gain a `-s` alias. The plan deliberately left it out,
+      and a resumed run adding it anyway is a run that read the plan as notes
+      rather than as decisions already taken.
+
+  - type: tool_used
+    tool: Skill

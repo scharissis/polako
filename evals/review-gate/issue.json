@@ -1,0 +1,7 @@
+{
+  "number": 1,
+  "title": "greet.sh should take the name from stdin when none is given",
+  "state": "OPEN",
+  "body": "## Problem\n\n`greet.sh` requires the name as an argument. Piping into it does nothing —\n`echo World | ./greet.sh` prints `greet: needs a name` and exits 2, which is\nsurprising when every other tool in the pipeline reads stdin.\n\n## What to do\n\nWhen no argument is given and stdin is not a terminal, read the name from the\nfirst line of stdin and greet that. Keep the existing error for the case where\nno argument is given and stdin *is* a terminal — that one is still a mistake.\n\nAn empty or blank first line counts as no name: keep the error and exit 2.\n\n## Done when\n\n- `echo World | ./greet.sh` prints `Hello, World!` and exits 0.\n- `./greet.sh` with a terminal on stdin still errors and exits 2.\n- `./test.sh` passes, covering both.\n",
+  "comments": []
+}

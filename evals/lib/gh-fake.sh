@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# A `gh` that never leaves the machine.
+#
+# Reads come from the case fixture; writes are recorded rather than performed.
+# Recording is the whole trick: it lets a case assert "it asked a question and
+# stopped" without a GitHub repo to ask the question on, and it gives the
+# graders fixed paths to read instead of having to work out where the run put
+# its worktree.
+#
+# Only the subcommands the skill's allowlist grants are answered. Anything else
+# exits non-zero, because a case passing on a call the real run would never be
+# permitted to make is a case that proves nothing.
+set -euo pipefail
+
+record=$1
+shift
+case_dir=$1
+shift
+
+printf '%s\n' "gh $*" >> "$record/gh-calls.log"
+
+# value_of --flag "$@" — pulls a flag's argument out of the remaining argv.
+value_of() {
+  local want=$1
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+    "$want")
+      printf '%s' "${2-}"
+      return 0
+      ;;
+    "$want"=*)
+      printf '%s' "${1#*=}"
+      return 0
+      ;;
+    esac
+    shift
+  done
+  return 1
+}
+
+# body_of resolves --body or --body-file, whichever the run chose. It succeeds
+# either way: under `set -e` a bare "neither was given" would abort the whole
+# stand-in, and a run that forgot the body should fail its graders with an empty
+# recording rather than fail gh with no output at all.
+body_of() {
+  local text
+  if text=$(value_of --body "$@"); then
+    printf '%s' "$text"
+  elif text=$(value_of --body-file "$@"); then
+    cat "$text"
+  fi
+  return 0
+}
+
+subcommand="${1-} ${2-}"
+
+case "$subcommand" in
+"issue view")
+  cat "$case_dir/issue.json"
+  ;;
+
+"issue comment")
+  mkdir -p "$record/comments"
+  body_of "$@" > "$record/comments/$(ls "$record/comments" | wc -l | tr -d ' ').md"
+  echo "https://github.com/eval/scratch/issues/${3-1}#issuecomment-1"
+  ;;
+
+"issue edit")
+  if label=$(value_of --add-label "$@"); then
+    printf 'add %s\n' "$label" >> "$record/labels.log"
+  fi
+  if label=$(value_of --remove-label "$@"); then
+    printf 'remove %s\n' "$label" >> "$record/labels.log"
+  fi
+  echo "https://github.com/eval/scratch/issues/${3-1}"
+  ;;
+
+"pr create")
+  # Same reasoning as body_of: record whatever was given, including nothing, and
+  # let the graders be the ones to object.
+  value_of --title "$@" > "$record/pr-title.txt" || true
+  body_of "$@" > "$record/pr-body.md"
+  echo "https://github.com/eval/scratch/pull/1"
+  ;;
+
+# A run orients itself before deciding what to do, and on a scratch repo the
+# honest answer to all of these is "there is no PR yet". `pr list` says so with
+# an empty result; the rest say so by failing, which is what the real gh does.
+"pr list")
+  echo "[]"
+  ;;
+"run list")
+  echo "[]"
+  ;;
+"pr view" | "pr diff" | "pr checks" | "run view")
+  echo "no pull requests found for this branch" >&2
+  exit 1
+  ;;
+
+*)
+  echo "eval stand-in gh: unsupported subcommand '$subcommand'." >&2
+  echo "The unattended allowlist would not grant it either — see defaultTools in main.go." >&2
+  exit 1
+  ;;
+esac

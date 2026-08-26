@@ -13,6 +13,18 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
 
 ### Added
 
+- The skill half has coverage. `repo_test.go` now asserts the promises the
+  supervisor actually depends on — that PLAN.md is written before
+  implementation, that the `awaiting-answer` label command is spelled the one
+  way `issueLabelTools` grants it, that the branch name matches the
+  `-branch-prefix` default, and that the PR body keeps its four sections and its
+  closing line. Those run free on every CI platform. Alongside them, `evals/`
+  holds four `claude plugin eval` cases that drive real plan-to-PR runs against
+  a scratch repo and a stand-in `gh`, and grade what they leave behind. The
+  eval suite is opt-in and deliberately outside `check.sh` and CI — it is the
+  one place this repo accepts a non-hermetic test — and it has not yet had a
+  green run; `evals/README.md` says what to expect first time.
+
 - `-dry-run`: resolve the next issue, print the exact `claude` invocation it
   would get, and exit. The queue is resolved the way a real drain resolves it —
   `-skip`, `needs-human`, and the preference for an issue waiting on an answer

@@ -1,0 +1,7 @@
+{
+  "number": 1,
+  "title": "Support other languages",
+  "state": "OPEN",
+  "body": "`greet.sh` only speaks English. It should handle other languages too.\n\nThis matters for the demo next month.\n",
+  "comments": []
+}

@@ -3,6 +3,10 @@
 /backlog-drain.exe
 /dist/
 
+# Eval runs: `claude plugin eval` writes results here, and the scaffold builds
+# its scratch repo, stand-in gh and record dir in the runner's working directory.
+/evals/results/
+
 # Go
 *.test
 *.out

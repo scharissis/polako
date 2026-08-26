@@ -1,0 +1,7 @@
+{
+  "number": 1,
+  "title": "greet.sh should support a --shout flag",
+  "state": "OPEN",
+  "body": "## Problem\n\nThere is no way to get the greeting in upper case, which the demo script wants\nfor its banner line.\n\n## What to do\n\nAccept `--shout` before the name. With it, print the greeting upper-cased:\n`./greet.sh --shout World` prints `HELLO, WORLD!`. Without it, behaviour is\nunchanged.\n\n## Done when\n\n- `./greet.sh --shout World` prints `HELLO, WORLD!` and exits 0.\n- `./greet.sh World` still prints `Hello, World!`.\n- `./test.sh` passes, covering both.\n",
+  "comments": []
+}

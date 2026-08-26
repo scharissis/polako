@@ -100,6 +100,18 @@ Linux, macOS and Windows. The plugin manifests have their own validator:
 claude plugin validate .
 ```
 
-The skill half has no automated coverage yet (issue #9). Until it does, a change
-to `skills/implement-issue/SKILL.md` needs verifying by hand against a real
-issue, and the PR body should say what was verified.
+The skill half is covered from two directions. `repo_test.go` asserts the
+contract-bearing lines of `SKILL.md` — the review gate, the label spelling, the
+branch name, the PR body's shape — and runs free on every platform. `evals/`
+drives real runs against a scratch repo and grades what they leave behind:
+
+```bash
+claude plugin eval . --scaffold --allow-tools Bash Write Edit
+```
+
+That suite is the one exception to hermetic tests, agreed on issue #9: it needs
+the network, a real `claude` and money, so it is opt-in and stays out of
+`check.sh` and CI. It is also new and has not yet had a green run — see
+`evals/README.md`. Until it has, a change to `skills/implement-issue/SKILL.md`
+still needs verifying by hand against a real issue, and the PR body should say
+what was verified.

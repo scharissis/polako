@@ -1,0 +1,52 @@
+name: ambiguous-issue
+description: >
+  An under-specified issue should produce questions on the thread and the
+  awaiting-answer label — and no PR. Guessing here is the expensive failure:
+  the supervisor merges what it is given.
+prompt: /backlog-drain:implement-issue 1
+scaffold_script: scaffold.sh
+runs: 1
+max_turns: 60
+timeout_seconds: 1200
+tags:
+  - skill
+  - blocked
+graders:
+  - type: file_exists
+    name: plan_written
+    path: repo-issue-1/PLAN.md
+
+  - type: file_exists
+    name: question_was_posted
+    path: .eval/comments/0.md
+
+  - type: llm
+    name: awaiting_answer_was_raised
+    focus: .eval/labels.log
+    criteria: >
+      The log records "add awaiting-answer" and does not then record
+      "remove awaiting-answer". Raising the label is the only thing that tells
+      the supervisor a question was asked rather than nothing produced; lowering
+      it again in the same run would tell the supervisor to carry on without an
+      answer.
+
+  - type: llm
+    name: no_pr_was_opened
+    focus: .eval/gh-calls.log
+    criteria: >
+      The log contains no "gh pr create" call. The issue does not say which
+      languages, how one is selected, or what the output should be, so there is
+      nothing to implement without guessing. A PR here means the run guessed.
+
+  - type: llm
+    name: questions_are_answerable
+    focus: the comment the run posted, at .eval/comments/0.md
+    criteria: >
+      The comment asks specific, answerable questions about what the issue left
+      out — which languages, how the language is chosen, what the output looks
+      like — in plain terse English. Fail if it is vague ("please clarify"), if
+      it restates the issue without asking anything, or if it proposes an
+      implementation and asks only for approval.
+
+  - type: tool_used
+    tool: Skill
