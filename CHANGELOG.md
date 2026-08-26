@@ -13,6 +13,18 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
 
 ### Added
 
+- Run data says which drain produced it. Every process generates a random
+  8-character id at startup, stamps it into every record it writes as `drain`,
+  and prints it once beside the "recording run data in …" line with the exact
+  `stats` invocation that reports on it. `backlog-drain stats` gains `-drain
+  <id>` — with `last` meaning whichever drain wrote the newest record in scope,
+  so it composes with `-repo` and `-since` — and `-by drain` alongside the
+  existing groupings. That makes "what did the drain I left running overnight
+  do?" and "what has the one running right now spent?" exact questions, which
+  a `-since` window cannot answer once two drains overlap or run back to back.
+  The field is additive: older files still load, and their records group and
+  filter as `(none)`. Nothing reads the id back — telemetry stays write-only.
+
 - The skill half has coverage. `repo_test.go` now asserts the promises the
   supervisor actually depends on — that PLAN.md is written before
   implementation, that the `awaiting-answer` label command is spelled the one

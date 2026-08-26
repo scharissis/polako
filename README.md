@@ -583,12 +583,13 @@ Every run writes one line of numbers, so you can answer what a drained backlog
 actually cost — and which settings are worth changing.
 
 **What is written, in full:** for each `claude` invocation, one JSON object
-holding the repository and issue number, why the run happened and what it left
-behind (a PR, questions, or neither), its status and exit code, turns, tool-use
-count, wall and API duration, tokens (in / out / cache read / cache write, plus
-the per-model split), dollars, and the configuration under test — skill, model,
-permission mode, `-run-tag`, a hash of the tool allowlist, the strategy knobs,
-and the three versions in play (this binary, the installed skill, and the
+holding the repository and issue number, a random id for the drain that wrote
+it, why the run happened and what it left behind (a PR, questions, or neither),
+its status and exit code, turns, tool-use count, wall and API duration, tokens
+(in / out / cache read / cache write, plus the per-model split), dollars, and
+the configuration under test — skill, model, permission mode, `-run-tag`, a
+hash of the tool allowlist, the strategy knobs, and the three versions in play
+(this binary, the installed skill, and the
 Claude CLI). One more object per issue records how it ended —
 `merged`, `closed_unmerged` or `needs_human` — and, when GitHub could be asked,
 what the PR turned out to be: additions, deletions, changed files, how many
@@ -767,7 +768,8 @@ human latency
 | `-metrics` | `~/.backlog-drain/metrics` | Directory to read records from — the same path the drain writes to. |
 | `-repo` | *(every repository)* | Only count records for one repository, `owner/name`. |
 | `-since` | *(all of it)* | Only count records newer than this, e.g. `-since 168h`. |
-| `-by` | *(none)* | Add a breakdown table: `issue`, `model` or `tag`. |
+| `-drain` | *(every drain)* | Only count records from one drain — its id, or `last` for the newest drain in scope. |
+| `-by` | *(none)* | Add a breakdown table: `issue`, `model`, `tag` or `drain`. |
 
 A window can keep an issue's terminal record while clipping away the runs that
 produced it. Those issues still count toward the merge rate, but they cannot be
@@ -807,6 +809,41 @@ undercount, and its dollars read as zero, because pricing belongs to the CLI
 and this binary never guesses at it. Those runs are counted out separately
 rather than mixed in silently — a crash-prone configuration should not get to
 look cheap.
+
+### Telling one drain from another: `-drain`
+
+Records from last night's batch, this morning's restart and a drain still
+running all interleave in one file, and `-since` cannot separate them: drains
+that ran back to back, or overlapped, defeat a time window. So every drain
+stamps its records with a random id and says so once at startup:
+
+```
+recording run data in /Users/you/.backlog-drain/metrics — numbers only, never leaves this machine (-metrics off to disable)
+this drain is 7f3a91c4 — `backlog-drain stats -drain 7f3a91c4` reports on it alone
+```
+
+That line is the only place the id appears — nothing reads it back, and the
+drain keeps no note of it anywhere else. Two questions it makes exact:
+
+```bash
+backlog-drain stats -drain last     # what has the drain running right now spent?
+backlog-drain stats -by drain       # what did each drain do?
+```
+
+`last` is whichever drain wrote the newest record *in scope*, so it composes
+with the other filters rather than overriding them —
+`stats -drain last -repo owner/name` is the last drain to touch that
+repository, which is not always the last drain overall. Whichever way it
+resolves, the report names the id it landed on rather than the word you typed:
+
+```
+  filtered  for scharissis/backlog-drain from drain 7f3a91c4
+```
+
+Records written before ids existed group and filter as `(none)`, the same
+spelling an untagged run gets, so older files still load and still count. An
+issue picked up by one drain and finished by another after a restart is counted
+under each, and `-by drain` says when that happened.
 
 ### Comparing configurations
 
