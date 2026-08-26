@@ -6,11 +6,13 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -39,6 +41,19 @@ func moduleName(t *testing.T) string {
 	}
 	t.Fatal("go.mod has no module directive")
 	return ""
+}
+
+// stringFlagDefault reads a flag's default out of its registration rather than
+// out of a copy kept in the test, so a test comparing the skill against the
+// binary's defaults cannot drift from what the binary actually ships.
+func stringFlagDefault(t *testing.T, name string) string {
+	t.Helper()
+	registration := regexp.MustCompile(`\.StringVar\(&\w+(?:\.\w+)?, "` + regexp.QuoteMeta(name) + `", "([^"]*)"`)
+	m := registration.FindStringSubmatch(readRepoFile(t, "cmd", "backlog-drain", "main.go"))
+	if m == nil {
+		t.Fatalf("main.go registers no string flag named %q", name)
+	}
+	return m[1]
 }
 
 // pluginManifest decodes plugin.json, the single source of truth for the
@@ -266,6 +281,111 @@ func TestReviewGateRefreshesTheBaseBeforeReviewing(t *testing.T) {
 	if review := strings.Index(skill, "/code-review"); review >= 0 && refresh > review {
 		t.Error("the base refresh comes after the review is invoked, which is too late to" +
 			" affect what it diffs against — move it before the invocation")
+	}
+}
+
+// PLAN.md is the resume point: a run killed mid-implementation is restarted
+// from it, and a plan written afterwards resumes nothing. So the ordering is
+// the promise, not the file. Phase 3's own heading carries the gate because a
+// resuming run reads that heading and decides from it whether it may start.
+func TestPlanIsWrittenBeforeImplementation(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	plan := strings.Index(skill, "## Phase 2 — Plan")
+	implement := strings.Index(skill, "## Phase 3 — Implement")
+	if plan < 0 || implement < 0 {
+		t.Fatalf("SKILL.md needs both a `## Phase 2 — Plan` and a `## Phase 3 — Implement`"+
+			" heading (found them at %d and %d)", plan, implement)
+	}
+	if plan > implement {
+		t.Error("Phase 3 — Implement is written before Phase 2 — Plan, so a run reading the" +
+			" skill in order implements before it has a plan to resume from")
+	}
+	if !strings.Contains(skill, "Write PLAN.md BEFORE implementing") {
+		t.Error("Phase 2 no longer tells the run to write PLAN.md before implementing —" +
+			" without it a clear-looking issue gets implemented with no resume point")
+	}
+	if heading, _, _ := strings.Cut(skill[implement:], "\n"); !strings.Contains(heading, "PLAN.md") {
+		t.Errorf("Phase 3's heading no longer gates on PLAN.md existing, so a resumed run"+
+			" cannot tell from it whether planning happened:\n\t%s", heading)
+	}
+}
+
+// The label command is allowlisted per run by issueLabelTools, as a prefix with
+// the issue number ahead of the flag. SKILL.md is where that command is
+// actually spelled, so the grant and the spelling are one contract with two
+// halves. Reordering the arguments does not fail loudly: the prefix stops
+// matching, Claude raises a permission prompt, and an unattended run has nobody
+// to answer it — so the run hangs with its question still unposted, which is
+// the failure this whole label exists to prevent.
+func TestLabelCommandsInTheSkillMatchTheGrantedPrefixes(t *testing.T) {
+	const issue = 42
+	skill := strings.ReplaceAll(readRepoFile(t, "skills", skillDir, "SKILL.md"), "$issue", strconv.Itoa(issue))
+
+	var granted []string
+	for _, tool := range strings.Split(issueLabelTools(issue), ",") {
+		prefix := strings.TrimSuffix(strings.TrimPrefix(tool, "Bash("), ":*)")
+		granted = append(granted, prefix)
+	}
+
+	var seen []string
+	for _, cmd := range regexp.MustCompile("gh issue edit [^`\n]*").FindAllString(skill, -1) {
+		cmd = strings.TrimRight(cmd, " .`")
+		seen = append(seen, cmd)
+		if !slices.ContainsFunc(granted, func(p string) bool { return strings.HasPrefix(cmd, p) }) {
+			t.Errorf("SKILL.md spells a label command the run is not granted:\n\t%s\n"+
+				"issueLabelTools grants only these prefixes: %v\n"+
+				"any other form raises a permission prompt nobody is there to answer", cmd, granted)
+		}
+	}
+
+	// Presence matters as much as spelling: raising the flag is the only thing
+	// that tells the supervisor a question was asked rather than nothing
+	// produced, and lowering it is the only thing that lets the drain carry on
+	// once the question has an answer.
+	for _, flag := range []string{"--add-label", "--remove-label"} {
+		want := fmt.Sprintf("gh issue edit %d %s %s", issue, flag, awaitingAnswerLabel)
+		if !slices.Contains(seen, want) {
+			t.Errorf("SKILL.md never spells %q; found only %v", want, seen)
+		}
+	}
+}
+
+// The skill names the branch and the supervisor finds the PR by that head
+// branch, never asking the skill what it chose. Rename either half alone and
+// every PR the other half goes looking for is simply absent — which reads as
+// "the run produced nothing" and parks a perfectly good issue.
+func TestSkillBranchNameMatchesTheBranchPrefixDefault(t *testing.T) {
+	prefix := stringFlagDefault(t, "branch-prefix")
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+	if want := prefix + "$issue"; !strings.Contains(skill, want) {
+		t.Errorf("SKILL.md never names branch %q, but -branch-prefix defaults to %q and that"+
+			" is the head branch the supervisor looks a PR up by", want, prefix)
+	}
+}
+
+// The PR body is the only account of the run a human reads before merging, and
+// its last line is what advances the queue: the merge auto-closes the issue,
+// and a closed issue is how the next drain sees the work as done. Left off, the
+// issue stays open and the backlog never drains past it.
+func TestPRBodyKeepsItsSectionsAndClosingLine(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	for _, heading := range []string{"## Summary", "## Design decisions", "## Scope", "## Verification"} {
+		if !strings.Contains(skill, heading) {
+			t.Errorf("SKILL.md no longer asks the PR body for a %q section", heading)
+		}
+	}
+
+	var closing string
+	for _, line := range strings.Split(skill, "\n") {
+		if strings.Contains(line, "Closes #$issue") && strings.Contains(line, "End the body with") {
+			closing = line
+		}
+	}
+	if closing == "" {
+		t.Fatal("SKILL.md no longer ends the PR body with `Closes #$issue`; without it a merge" +
+			" leaves the issue open and the next drain picks the same issue up again")
 	}
 }
 
