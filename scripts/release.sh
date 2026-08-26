@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Cut a release: one version number, two tags.
 #
-#   backlog-drain--v<version>  what the Claude plugin tooling creates and
+#   polako--v<version>  what the Claude plugin tooling creates and
 #                              validates (plugin.json vs the marketplace entry),
 #                              and what the marketplace entry's `ref` pins to
 #   v<version>                 semver, so `go install ...@v<version>` resolves,
@@ -66,12 +66,12 @@ fi
 # %s for the version, and is spelled to match the annotation on the semver tag
 # below: one release wearing two tags should read the same on both, by
 # construction rather than by the default happening to agree.
-claude plugin tag --push --message "backlog-drain %s"
+claude plugin tag --push --message "polako %s"
 
-git tag -a "v$version" -m "backlog-drain $version"
+git tag -a "v$version" -m "polako $version"
 git push origin "refs/tags/v$version"
 
-echo "pushed backlog-drain--v$version and v$version"
+echo "pushed polako--v$version and v$version"
 echo "the binary release workflow runs on v$version"
 
 # Whether step 3 is still owed. The full rule - the pinned ref must never be
@@ -79,8 +79,8 @@ echo "the binary release workflow runs on v$version"
 # on every PR, so this only has to say what to do next.
 ref=$(sed -n 's/.*"ref"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
   .claude-plugin/marketplace.json | head -1)
-if [ "$ref" = "backlog-drain--v$version" ]; then
-  echo "the marketplace entry already pins backlog-drain--v$version: $version is published"
+if [ "$ref" = "polako--v$version" ]; then
+  echo "the marketplace entry already pins polako--v$version: $version is published"
 else
   echo
   echo "STEP 3 - nobody is on $version yet. The marketplace entry still pins $ref."
@@ -88,5 +88,5 @@ else
   echo
   echo "  ./scripts/smoke.sh"
   echo
-  echo "then open a PR moving that ref to backlog-drain--v$version."
+  echo "then open a PR moving that ref to polako--v$version."
 fi

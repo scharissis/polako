@@ -20,7 +20,7 @@
 # picture than with one failure at a time.
 #
 # Writes nothing outside a temporary directory it removes on exit — not to
-# ~/.claude, ~/go/bin or ~/.backlog-drain. The plugin half installs into a
+# ~/.claude, ~/go/bin or ~/.polako. The plugin half installs into a
 # throwaway CLAUDE_CONFIG_DIR, so the release under test never becomes the
 # release this machine is running. (`go install` still populates the shared
 # module cache; that is a cache, not configuration.)
@@ -35,7 +35,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-name=backlog-drain
+name=polako
 skill=implement-issue
 
 version=${1:-}
@@ -255,9 +255,9 @@ x86_64 | amd64) goarch=amd64 ;;
 esac
 
 # What a released binary must print. The stamp is `v0.6.0`, not `0.6.0`:
-# GITHUB_REF_NAME carries the prefix and drainVersion returns it untouched.
+# GITHUB_REF_NAME carries the prefix and polakoVersion returns it untouched.
 want="$name $semverTag"
-drain=""
+drain=""  # path to the downloaded polako binary
 
 if [ -z "$goos" ] || [ -z "$goarch" ]; then
   skip "running the downloaded binary" "no release asset for $(uname -s)/$(uname -m)"
@@ -398,7 +398,7 @@ else
   # the PATH, git, gh and version-skew checks, lowestOpenIssue then finds
   # nothing and the process exits 0 without starting a single claude run.
   # -metrics off keeps smoke runs out of the real run data.
-  if out=$("$drain" -dir . -label "__${name}-smoke__" -metrics off 2>&1); then
+  if out=$("$drain" work -dir . -label "__${name}-smoke__" -metrics off 2>&1); then
     if grep -q "version skew" <<<"$out"; then
       bad "the binary and the plugin disagree on a version" \
         "$(grep -m1 'version skew' <<<"$out")"
@@ -406,7 +406,7 @@ else
       ok "binary $version and plugin $version agree - no skew warning"
     fi
     # -F because a repository name may carry a dot, which as a pattern would
-    # match a name this drain never reached.
+    # match a name this run never reached.
     if grep -qF "$repo" <<<"$out"; then
       ok "preflight reaches $repo"
     else

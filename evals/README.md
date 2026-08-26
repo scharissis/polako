@@ -2,7 +2,7 @@
 
 Four cases that grade what a run *does*, not what `SKILL.md` says. Each one
 scaffolds a scratch git repo, points a stand-in `gh` at a fixture issue, runs
-`/backlog-drain:implement-issue 1` for real, and scores the artifacts left
+`/polako:implement-issue 1` for real, and scores the artifacts left
 behind.
 
 | case | asserts |
@@ -39,7 +39,7 @@ full plan-to-PR cycle driven by a live model. So it is opt-in, run by hand, and
 That is a deliberate exception to the hermetic-tests convention in `CLAUDE.md`,
 agreed on issue #9 rather than taken quietly.
 
-The free half of skill coverage lives in `cmd/backlog-drain/repo_test.go`, which
+The free half of skill coverage lives in `cmd/polako/repo_test.go`, which
 asserts the contract-bearing lines of `SKILL.md` — the review gate, the label
 spelling, the branch name, the PR body's shape — on every platform on every
 push. Those tests check the promise is *written*. These cases check it is

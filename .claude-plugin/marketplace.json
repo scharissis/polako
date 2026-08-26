@@ -8,13 +8,13 @@
   },
   "plugins": [
     {
-      "name": "backlog-drain",
-      "description": "Drain a GitHub issue backlog one issue at a time, from issue to merged PR.",
+      "name": "polako",
+      "description": "Work a GitHub issue backlog to zero, one issue at a time, from issue to merged PR.",
       "category": "workflow",
       "source": {
         "source": "github",
-        "repo": "scharissis/backlog-drain",
-        "ref": "backlog-drain--v0.6.1"
+        "repo": "scharissis/polako",
+        "ref": "polako--v0.6.1"
       }
     }
   ]

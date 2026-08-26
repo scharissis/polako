@@ -25,12 +25,12 @@ import (
 // fakeClaudeEnv makes the test binary impersonate the claude CLI: when it is
 // set, TestMain streams canned events instead of running the suite. That lets
 // execClaude be exercised end to end on every platform, with no shell scripts.
-const fakeClaudeEnv = "BACKLOG_DRAIN_FAKE_CLAUDE"
+const fakeClaudeEnv = "POLAKO_FAKE_CLAUDE"
 
 // fakePluginEnv is the version `claude plugin list --json` should report for
-// the installed backlog-drain plugin. Unset means the subcommand fails, which
+// the installed polako plugin. Unset means the subcommand fails, which
 // is what a CLI too old to have it does.
-const fakePluginEnv = "BACKLOG_DRAIN_FAKE_PLUGIN_VERSION"
+const fakePluginEnv = "POLAKO_FAKE_PLUGIN_VERSION"
 
 func TestMain(m *testing.M) {
 	// A notify command inherits every variable the drain has, the fake-CLI ones
@@ -65,7 +65,7 @@ var (
 // fakeCLI is the binary the drain runs as `claude`, as `gh` and as the notify
 // command: this same test package, compiled once more without the race
 // detector. The child re-enters TestMain and picks its impersonation off the
-// BACKLOG_DRAIN_FAKE_* variables and argv exactly as before.
+// POLAKO_FAKE_* variables and argv exactly as before.
 //
 // Re-executing os.Args[0] would say the same thing in one word, and did. But
 // under `go test -race` os.Args[0] is race-instrumented, and a race-instrumented
@@ -90,7 +90,7 @@ func fakeCLI(t *testing.T) string {
 // hermetic as it was; what it now needs is the Go toolchain that is already
 // running it.
 func buildFakeCLI() {
-	dir, err := os.MkdirTemp("", "backlog-drain-fake-cli")
+	dir, err := os.MkdirTemp("", "polako-fake-cli")
 	if err != nil {
 		fakeCLIErr = fmt.Errorf("fake CLI: %v", err)
 		return
@@ -128,7 +128,7 @@ func fakeClaude(mode string) int {
 		}
 		// Two entries, so the match is proved to be by name and not by luck.
 		emit(`[{"id":"some-other-plugin@elsewhere","version":"9.9.9"},` +
-			`{"id":"backlog-drain@scharissis","version":"` + v + `","scope":"user","enabled":true}]`)
+			`{"id":"polako@scharissis","version":"` + v + `","scope":"user","enabled":true}]`)
 		return 0
 	}
 	switch mode {
@@ -137,7 +137,7 @@ func fakeClaude(mode string) int {
 		// both spellings of the skill are listed so the healthy path proves
 		// the missing-skill tripwire stays quiet when the command exists.
 		emit(`{"type":"system","subtype":"init","session_id":"sess-xyz","model":"claude-opus-5",` +
-			`"slash_commands":["compact","context","cost","backlog-drain:implement-issue","implement-issue"]}`)
+			`"slash_commands":["compact","context","cost","polako:implement-issue","implement-issue"]}`)
 		emit(`{"type":"assistant","session_id":"sess-xyz","message":{"content":[{"type":"text","text":"Reading the issue."}],` +
 			`"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":30,"cache_creation_input_tokens":40}}}`)
 		emit(`{"type":"assistant","session_id":"sess-xyz","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./..."}}],` +
@@ -246,7 +246,7 @@ func fakeClaude(mode string) int {
 		emit(`{"type":"system","subtype":"init","session_id":"sess-unk","model":"claude-opus-5",` +
 			`"slash_commands":["compact","context","cost","init","todos"]}`)
 		emit(`{"type":"result","subtype":"success","is_error":false,"session_id":"sess-unk","duration_ms":11,` +
-			`"num_turns":2,"total_cost_usd":0,"result":"Unknown skill: backlog-drain:implement-issue"}`)
+			`"num_turns":2,"total_cost_usd":0,"result":"Unknown skill: polako:implement-issue"}`)
 		// Both lines are already in the pipe; linger so the supervisor's
 		// deliberate kill — not this process's own exit — ends the run, and
 		// tests observe the killed path deterministically instead of racing.
@@ -570,7 +570,7 @@ func TestLogEventRendersProgressLines(t *testing.T) {
 		`{"type":"user","message":{"content":[{"type":"tool_result","content":"ignored"}]}}`,
 		`not even json`,
 		`{"type":"result","subtype":"success","duration_ms":1141000,"num_turns":74,"total_cost_usd":4.12,"is_error":false,` +
-			`"result":"Unknown skill: backlog-drain:implement-issue"}`,
+			`"result":"Unknown skill: polako:implement-issue"}`,
 	}
 	for _, e := range events {
 		if ev, ok := parseEvent([]byte(e)); ok {
@@ -586,7 +586,7 @@ func TestLogEventRendersProgressLines(t *testing.T) {
 		"→ Write: PLAN.md",
 		// The result text must reach the log: for a run the CLI answered
 		// itself, it is the only place the diagnosis ever appears.
-		"Unknown skill: backlog-drain:implement-issue",
+		"Unknown skill: polako:implement-issue",
 		"finished (ok) — 74 turns, 19m1s, $4.12",
 	} {
 		if !strings.Contains(out, want) {
@@ -1497,11 +1497,11 @@ func TestExecClaudeLeavesPlainPromptsAloneWhenTheSkillIsMissing(t *testing.T) {
 // The near-match hint is what turns "no such command" into a fix, and the
 // bare-vs-namespaced confusion is symmetrical, so both directions must hit.
 func TestNearMatchesBridgesPluginNamespacing(t *testing.T) {
-	inv := []string{"compact", "backlog-drain:implement-issue"}
-	if got := nearMatches(inv, "implement-issue"); !slices.Equal(got, []string{"/backlog-drain:implement-issue"}) {
+	inv := []string{"compact", "polako:implement-issue"}
+	if got := nearMatches(inv, "implement-issue"); !slices.Equal(got, []string{"/polako:implement-issue"}) {
 		t.Errorf("a bare -skill should surface the namespaced spelling, got %v", got)
 	}
-	if got := nearMatches([]string{"compact", "implement-issue"}, "backlog-drain:implement-issue"); !slices.Equal(got, []string{"/implement-issue"}) {
+	if got := nearMatches([]string{"compact", "implement-issue"}, "polako:implement-issue"); !slices.Equal(got, []string{"/implement-issue"}) {
 		t.Errorf("a namespaced -skill should surface the bare spelling, got %v", got)
 	}
 	if got := nearMatches(inv, "something-else"); got != nil {
@@ -1512,8 +1512,8 @@ func TestNearMatchesBridgesPluginNamespacing(t *testing.T) {
 // A wrong "missing" verdict kills a healthy run, so the check may only fire
 // on positive evidence: an inventory that is present and lacks the command.
 func TestLacksCommandNeedsPositiveEvidence(t *testing.T) {
-	list := []string{"compact", "cost", "backlog-drain:implement-issue"}
-	if lacksCommand(list, "backlog-drain:implement-issue") {
+	list := []string{"compact", "cost", "polako:implement-issue"}
+	if lacksCommand(list, "polako:implement-issue") {
 		t.Error("a listed command must be found")
 	}
 	if !lacksCommand(list, "implement-issue") {
@@ -1741,7 +1741,7 @@ func TestAuthFailureMatchesTheWaysTheCLIReportsIt(t *testing.T) {
 		"Opened a PR for issue 2.",
 		"API Error: 500 Internal Server Error", // transient, and worth every retry
 		"API Error: 429 rate limit exceeded",   // likewise
-		"Unknown skill: backlog-drain:implement-issue",
+		"Unknown skill: polako:implement-issue",
 		// The reason the match is anchored: this repo's own backlog contains
 		// OAuth issues, and a run that quotes one while failing for an
 		// unrelated reason must still be retried, not treated as a token
@@ -1802,7 +1802,7 @@ func TestPluginVersionPicksTheCopyThatWillRun(t *testing.T) {
 	}{{
 		name: "sole match",
 		list: `[{"id":"some-other-plugin@elsewhere","version":"9.9.9","scope":"user"},
-		        {"id":"backlog-drain@scharissis","version":"0.3.0","scope":"user"}]`,
+		        {"id":"polako@scharissis","version":"0.3.0","scope":"user"}]`,
 		want: "0.3.0",
 		why:  "one copy installed, so there is nothing to choose between",
 	}, {
@@ -1811,39 +1811,39 @@ func TestPluginVersionPicksTheCopyThatWillRun(t *testing.T) {
 		// tested against a tip binary. The session copy replaces the installed
 		// one outright, and it is listed second.
 		name: "session copy behind a user install",
-		list: `[{"id":"backlog-drain@scharissis","version":"0.1.0","scope":"user"},
-		        {"id":"backlog-drain@inline","version":"0.6.1","scope":"session"}]`,
+		list: `[{"id":"polako@scharissis","version":"0.1.0","scope":"user"},
+		        {"id":"polako@inline","version":"0.6.1","scope":"session"}]`,
 		want: "0.6.1",
 		why:  "the session copy is the one that drives the run",
 	}, {
 		name: "two copies with no scope to separate them",
-		list: `[{"id":"backlog-drain@scharissis","version":"0.1.0","scope":"user"},
-		        {"id":"backlog-drain@a-fork","version":"0.6.1","scope":"user"}]`,
+		list: `[{"id":"polako@scharissis","version":"0.1.0","scope":"user"},
+		        {"id":"polako@a-fork","version":"0.6.1","scope":"user"}]`,
 		why: "no honest answer, and a wrong version is worse than none",
 	}, {
 		name: "two session copies",
-		list: `[{"id":"backlog-drain@one","version":"0.1.0","scope":"session"},
-		        {"id":"backlog-drain@two","version":"0.6.1","scope":"session"}]`,
+		list: `[{"id":"polako@one","version":"0.1.0","scope":"session"},
+		        {"id":"polako@two","version":"0.6.1","scope":"session"}]`,
 		why: "narrowing to session scope did not get it down to one",
 	}, {
 		name: "duplicates that agree",
-		list: `[{"id":"backlog-drain@scharissis","version":"0.6.1","scope":"user"},
-		        {"id":"backlog-drain@a-mirror","version":"0.6.1","scope":"user"}]`,
+		list: `[{"id":"polako@scharissis","version":"0.6.1","scope":"user"},
+		        {"id":"polako@a-mirror","version":"0.6.1","scope":"user"}]`,
 		want: "0.6.1",
 		why:  "whichever one wins reports the same version, so it is not a guess",
 	}, {
 		name: "a disabled duplicate beside an enabled one",
-		list: `[{"id":"backlog-drain@a-fork","version":"0.1.0","scope":"user","enabled":false},
-		        {"id":"backlog-drain@scharissis","version":"0.6.1","scope":"user","enabled":true}]`,
+		list: `[{"id":"polako@a-fork","version":"0.1.0","scope":"user","enabled":false},
+		        {"id":"polako@scharissis","version":"0.6.1","scope":"user","enabled":true}]`,
 		want: "0.6.1",
 		why:  "a disabled copy never loads, so it is not one of the copies to choose between",
 	}, {
 		name: "the only copy is disabled",
-		list: `[{"id":"backlog-drain@scharissis","version":"0.6.1","scope":"user","enabled":false}]`,
+		list: `[{"id":"polako@scharissis","version":"0.6.1","scope":"user","enabled":false}]`,
 		why:  "nothing will load it, so no version drove the run",
 	}, {
 		name: "a CLI that does not report enabled",
-		list: `[{"id":"backlog-drain@scharissis","version":"0.6.1","scope":"user"}]`,
+		list: `[{"id":"polako@scharissis","version":"0.6.1","scope":"user"}]`,
 		want: "0.6.1",
 		why:  "an absent field is not a disabled plugin",
 	}, {
@@ -2011,9 +2011,9 @@ func TestSummaryCommentNeverCarriesWhatTheRunSaid(t *testing.T) {
 
 func TestEnvVarNameMapsAFlagToItsVariable(t *testing.T) {
 	cases := map[string]string{
-		"post-summary": "BACKLOG_DRAIN_POST_SUMMARY",
-		"metrics":      "BACKLOG_DRAIN_METRICS",
-		"retry-wait":   "BACKLOG_DRAIN_RETRY_WAIT",
+		"post-summary": "POLAKO_POST_SUMMARY",
+		"metrics":      "POLAKO_METRICS",
+		"retry-wait":   "POLAKO_RETRY_WAIT",
 	}
 	for flagName, want := range cases {
 		if got := envVarName(flagName); got != want {
@@ -2034,9 +2034,9 @@ func envFlagSet() (*flag.FlagSet, *bool, *string, *time.Duration) {
 }
 
 func TestEnvDefaultsSetWhatWasNotPassed(t *testing.T) {
-	t.Setenv("BACKLOG_DRAIN_POST_SUMMARY", "1")
-	t.Setenv("BACKLOG_DRAIN_MODEL", "claude-opus-5")
-	t.Setenv("BACKLOG_DRAIN_POLL", "90s")
+	t.Setenv("POLAKO_POST_SUMMARY", "1")
+	t.Setenv("POLAKO_MODEL", "claude-opus-5")
+	t.Setenv("POLAKO_POLL", "90s")
 
 	fs, post, model, poll := envFlagSet()
 	if err := applyEnvDefaults(fs); err != nil {
@@ -2056,8 +2056,8 @@ func TestEnvDefaultsSetWhatWasNotPassed(t *testing.T) {
 
 // The environment is a preference; an argument is a decision about this run.
 func TestCommandLineBeatsTheEnvironment(t *testing.T) {
-	t.Setenv("BACKLOG_DRAIN_MODEL", "claude-opus-5")
-	t.Setenv("BACKLOG_DRAIN_POST_SUMMARY", "1")
+	t.Setenv("POLAKO_MODEL", "claude-opus-5")
+	t.Setenv("POLAKO_POST_SUMMARY", "1")
 
 	fs, post, model, _ := envFlagSet()
 	if err := applyEnvDefaults(fs); err != nil {
@@ -2074,7 +2074,7 @@ func TestCommandLineBeatsTheEnvironment(t *testing.T) {
 // A preference that was set, looks set, and silently does nothing is the worst
 // outcome for a run nobody is watching.
 func TestEnvDefaultsRejectAValueTheFlagCannotParse(t *testing.T) {
-	t.Setenv("BACKLOG_DRAIN_POLL", "banana")
+	t.Setenv("POLAKO_POLL", "banana")
 
 	fs, _, _, _ := envFlagSet()
 	err := applyEnvDefaults(fs)
@@ -2083,21 +2083,21 @@ func TestEnvDefaultsRejectAValueTheFlagCannotParse(t *testing.T) {
 	}
 	// The message has to name both halves: the variable to fix, and the flag
 	// it was trying to set.
-	for _, want := range []string{"BACKLOG_DRAIN_POLL", "banana", "-poll"} {
+	for _, want := range []string{"POLAKO_POLL", "banana", "-poll"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
 	}
 }
 
-// The two flags that are actions rather than preferences. BACKLOG_DRAIN_VERSION
-// is what a Dockerfile or CI job pins an install with, and BACKLOG_DRAIN_DRY_RUN
+// The two flags that are actions rather than preferences. POLAKO_VERSION
+// is what a Dockerfile or CI job pins an install with, and POLAKO_DRY_RUN
 // is what an operator exports to preview one repository and forgets; honouring
 // either would turn every drain on that machine into a print that exits before
 // doing any work, and exits 0 doing it.
 func TestEnvDefaultsIgnoreTheActionFlags(t *testing.T) {
-	t.Setenv("BACKLOG_DRAIN_VERSION", "0.6.0")
-	t.Setenv("BACKLOG_DRAIN_DRY_RUN", "1")
+	t.Setenv("POLAKO_VERSION", "0.6.0")
+	t.Setenv("POLAKO_DRY_RUN", "1")
 
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)

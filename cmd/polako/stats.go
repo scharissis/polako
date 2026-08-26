@@ -1,6 +1,6 @@
 package main
 
-// `backlog-drain stats` reads the run data back. It is the only reader there
+// `polako stats` reads the run data back. It is the only reader there
 // is: the drain loop never opens these files, so telemetry stays telemetry
 // rather than becoming state the supervisor depends on.
 //
@@ -40,14 +40,14 @@ const (
 	byIssue = "issue"
 	byModel = "model"
 	byTag   = "tag"
-	byDrain = "drain"
+	byShift = "shift"
 )
 
 // byGroups is the whitelist and the order the error message lists them in.
-var byGroups = []string{byIssue, byModel, byTag, byDrain}
+var byGroups = []string{byIssue, byModel, byTag, byShift}
 
 // orList renders a choice the way the flag's help and its error both want it:
-// "issue, model, tag or drain", so a message that lists four reads as English
+// "issue, model, tag or shift", so a message that lists four reads as English
 // rather than as a dump of the slice behind it.
 func orList(items []string) string {
 	if len(items) < 2 {
@@ -56,10 +56,10 @@ func orList(items []string) string {
 	return strings.Join(items[:len(items)-1], ", ") + " or " + items[len(items)-1]
 }
 
-// drainLast is the -drain value meaning "whichever drain wrote the newest
+// shiftLast is the -drain value meaning "whichever drain wrote the newest
 // record in scope". It is what makes the flag usable on a drain that is still
 // running, without going back to the startup line for its id.
-const drainLast = "last"
+const shiftLast = "last"
 
 // noneGroup labels records carrying no value for the field in hand — an
 // untagged run, and every record written before drain ids existed. It is also
@@ -76,7 +76,7 @@ type statsOptions struct {
 	repo  string
 	since time.Duration
 	by    string
-	drain string
+	shift string
 }
 
 // runStats is the `stats` subcommand: parse its own flags, read the records,
@@ -87,20 +87,20 @@ func runStats(args []string, out io.Writer, now time.Time) error {
 	var opt statsOptions
 	var metrics string
 	fs.StringVar(&metrics, "metrics", "",
-		"directory holding the run-data records (default ~/.backlog-drain/metrics)")
+		"directory holding the run-data records (default ~/.polako/metrics)")
 	fs.StringVar(&opt.repo, "repo", "", "only count records for this repository (owner/name)")
 	fs.DurationVar(&opt.since, "since", 0, "only count records newer than this ago (e.g. 168h)")
-	fs.StringVar(&opt.drain, "drain", "",
-		`only count records from this drain's id, or "`+drainLast+`" for the newest drain in scope`)
+	fs.StringVar(&opt.shift, "shift", "",
+		`only count records from this shift's id, or "`+shiftLast+`" for the newest shift in scope`)
 	fs.StringVar(&opt.by, "by", "", "also break the numbers down by "+orList(byGroups))
 	fs.Usage = func() {
-		fmt.Fprint(fs.Output(), "Usage: backlog-drain stats [flags]\n\n"+
-			"Reports on the run data recorded by previous drains. Reads only;\n"+
-			"nothing here changes what a drain does.\n\n"+envUsage+"\nFlags:\n")
+		fmt.Fprint(fs.Output(), "Usage: polako stats [flags]\n\n"+
+			"Reports on the run data recorded by previous shifts. Reads only;\n"+
+			"nothing here changes what a shift does.\n\n"+envUsage+"\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	// The same environment defaults the drain honours, which is what lets one
-	// BACKLOG_DRAIN_METRICS point both halves at the same directory.
+	// POLAKO_METRICS point both halves at the same directory.
 	if err := applyEnvDefaults(fs); err != nil {
 		return err
 	}
@@ -121,7 +121,7 @@ func runStats(args []string, out io.Writer, now time.Time) error {
 	if opt.by != "" && !slices.Contains(byGroups, opt.by) {
 		return fmt.Errorf("-by %q: choose one of %s", opt.by, orList(byGroups))
 	}
-	opt.drain = strings.TrimSpace(opt.drain)
+	opt.shift = strings.TrimSpace(opt.shift)
 
 	dir, err := statsDir(metrics)
 	if err != nil {
@@ -142,7 +142,7 @@ func statsDir(spec string) (string, error) {
 	dir := strings.TrimSpace(spec)
 	if strings.EqualFold(dir, metricsOff) {
 		return "", fmt.Errorf("-metrics off has nothing to read — point it at a directory, "+
-			"or omit it for the default (%s)", "~/.backlog-drain/metrics")
+			"or omit it for the default (%s)", "~/.polako/metrics")
 	}
 	if dir == "" {
 		home, err := defaultMetricsDir()
@@ -183,7 +183,7 @@ type dataset struct {
 	// written before ids existed, or empty when the flag was not given. The
 	// report names this rather than what was typed, so a "last" run says which
 	// drain it turned out to cover.
-	drain string
+	shift string
 }
 
 func loadRecords(dir string, opt statsOptions, now time.Time) (dataset, error) {
@@ -258,10 +258,10 @@ func loadRecords(dir string, opt statsOptions, now time.Time) (dataset, error) {
 	// issue reaching a terminal state, and a latest-wins dedupe run first
 	// would hand the drain being asked about the other drain's record — or
 	// drop the issue from its report entirely.
-	if opt.drain != "" {
-		ds.drain = resolveDrain(opt.drain, ds.runs, terminal)
-		ds.runs = slices.DeleteFunc(ds.runs, func(r runRecord) bool { return !sameDrain(r.Drain, ds.drain) })
-		terminal = slices.DeleteFunc(terminal, func(r issueRecord) bool { return !sameDrain(r.Drain, ds.drain) })
+	if opt.shift != "" {
+		ds.shift = resolveShift(opt.shift, ds.runs, terminal)
+		ds.runs = slices.DeleteFunc(ds.runs, func(r runRecord) bool { return !sameShift(r.Shift, ds.shift) })
+		terminal = slices.DeleteFunc(terminal, func(r issueRecord) bool { return !sameShift(r.Shift, ds.shift) })
 	}
 	ds.issues = dedupeIssues(terminal)
 	sort.SliceStable(ds.runs, func(i, j int) bool {
@@ -290,7 +290,7 @@ func dedupeIssues(records []issueRecord) []issueRecord {
 	return out
 }
 
-// resolveDrain turns the -drain value into the id to filter on. "last" is the
+// resolveShift turns the -drain value into the id to filter on. "last" is the
 // drain that wrote the newest record already in scope, so it composes with
 // -repo and -since rather than overriding them: the last drain to touch one
 // repository is a different question from the last drain overall.
@@ -298,20 +298,20 @@ func dedupeIssues(records []issueRecord) []issueRecord {
 // Records are timed by when they were written — a run's end, not its start —
 // because a long run begun before a second drain started is still the older
 // record of the two.
-func resolveDrain(spec string, runs []runRecord, issues []issueRecord) string {
-	if !strings.EqualFold(spec, drainLast) {
+func resolveShift(spec string, runs []runRecord, issues []issueRecord) string {
+	if !strings.EqualFold(spec, shiftLast) {
 		return spec
 	}
 	var newest time.Time
 	id := ""
 	for _, r := range runs {
 		if t := endOf(r); t.After(newest) {
-			newest, id = t, r.Drain
+			newest, id = t, r.Shift
 		}
 	}
 	for _, r := range issues {
 		if t := recTime(r.TS); t.After(newest) {
-			newest, id = t, r.Drain
+			newest, id = t, r.Shift
 		}
 	}
 	// Nothing in scope, or nothing in scope carrying an id: either way the
@@ -323,8 +323,8 @@ func resolveDrain(spec string, runs []runRecord, issues []issueRecord) string {
 	return id
 }
 
-// sameDrain matches a record's id against the one -drain resolved to.
-func sameDrain(got, want string) bool {
+// sameShift matches a record's id against the one -drain resolved to.
+func sameShift(got, want string) bool {
 	if want == noneGroup {
 		return got == ""
 	}
@@ -508,7 +508,7 @@ func render(w io.Writer, ds dataset, opt statsOptions) {
 			return
 		}
 		if ds.files == 0 {
-			fmt.Fprintln(w, "a drain records there automatically, unless it was run with -metrics off.")
+			fmt.Fprintln(w, "a work run records there automatically, unless it was run with -metrics off.")
 		}
 		return
 	}
@@ -524,7 +524,7 @@ func render(w io.Writer, ds dataset, opt statsOptions) {
 	switch opt.by {
 	case byIssue:
 		printIssueTable(w, issues)
-	case byModel, byTag, byDrain:
+	case byModel, byTag, byShift:
 		printGroupTable(w, ds, issues, opt.by)
 	}
 	if note := resumeNote(ds); note != "" {
@@ -542,8 +542,8 @@ func scopeSuffix(opt statsOptions, ds dataset) string {
 	}
 	// The resolved id, never the literal "last": a report that names the drain
 	// it covered is one that still means the same thing tomorrow.
-	if opt.drain != "" {
-		parts = append(parts, "from drain "+ds.drain)
+	if opt.shift != "" {
+		parts = append(parts, "from shift "+ds.shift)
 	}
 	if len(parts) == 0 {
 		return ""
@@ -883,8 +883,8 @@ func printGroupTable(w io.Writer, ds dataset, issues []*issueStats, by string) {
 		switch by {
 		case byModel:
 			name = r.Model
-		case byDrain:
-			name = r.Drain
+		case byShift:
+			name = r.Shift
 		default:
 			name = r.Tag
 		}

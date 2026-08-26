@@ -36,21 +36,21 @@ if ($LASTEXITCODE -ne 0) {
 
 # Refuses if plugin.json and the marketplace entry disagree. --message takes
 # %s for the version; see release.sh for why it matches the tag below.
-claude plugin tag --push --message 'backlog-drain %s'
+claude plugin tag --push --message 'polako %s'
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-git tag -a "v$version" -m "backlog-drain $version"
+git tag -a "v$version" -m "polako $version"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 git push origin "refs/tags/v$version"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Host "pushed backlog-drain--v$version and v$version"
+Write-Host "pushed polako--v$version and v$version"
 Write-Host "the binary release workflow runs on v$version"
 
 # Whether step 3 is still owed. The full rule is enforced by a test on every PR.
 $ref = ((Get-Content .claude-plugin\marketplace.json -Raw | ConvertFrom-Json).plugins[0].source).ref
-if ($ref -eq "backlog-drain--v$version") {
-  Write-Host "the marketplace entry already pins backlog-drain--v$version: $version is published"
+if ($ref -eq "polako--v$version") {
+  Write-Host "the marketplace entry already pins polako--v$version: $version is published"
 } else {
   Write-Host ''
   Write-Host "STEP 3 - nobody is on $version yet. The marketplace entry still pins $ref."
@@ -58,5 +58,5 @@ if ($ref -eq "backlog-drain--v$version") {
   Write-Host ''
   Write-Host '  .\scripts\smoke.ps1'
   Write-Host ''
-  Write-Host "then open a PR moving that ref to backlog-drain--v$version."
+  Write-Host "then open a PR moving that ref to polako--v$version."
 }

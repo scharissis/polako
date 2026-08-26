@@ -41,7 +41,7 @@ func TestDryRunSaysWhatItWouldDoAndChangesNothing(t *testing.T) {
 	printed := strings.TrimSpace(out.String())
 	for _, want := range []string{
 		cfg.claudeBin,                         // the -claude binary, first
-		`'/backlog-drain:implement-issue 1'`,  // the prompt, quoted to survive a paste
+		`'/polako:implement-issue 1'`,         // the prompt, quoted to survive a paste
 		`Bash(gh issue edit 1 --add-label:*)`, // the grant pinned to this issue
 		"--output-format stream-json",
 	} {

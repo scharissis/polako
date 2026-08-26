@@ -11,7 +11,7 @@ import (
 )
 
 // homeDir points os.UserHomeDir at a temporary directory for one test, on
-// every platform, so nothing can touch the real ~/.backlog-drain.
+// every platform, so nothing can touch the real ~/.polako.
 func homeDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -23,7 +23,7 @@ func homeDir(t *testing.T) string {
 func metricsConfig(t *testing.T, spec string) config {
 	t.Helper()
 	return config{
-		repo:           "scharissis/backlog-drain",
+		repo:           "scharissis/polako",
 		skill:          defaultSkill,
 		permissionMode: "acceptEdits",
 		model:          "claude-opus-5",
@@ -35,7 +35,7 @@ func metricsConfig(t *testing.T, spec string) config {
 		stall:          15 * time.Minute,
 		claudeVersion:  "2.1.34",
 		pluginVersion:  "0.3.0",
-		drainID:        "d1d2d3d4",
+		shiftID:        "d1d2d3d4",
 		rec:            newRecorder(spec),
 	}
 }
@@ -87,8 +87,8 @@ func TestRunRecordIsSelfDescribing(t *testing.T) {
 		"kind":            "run",
 		"ts":              "2026-08-24T10:15:00Z",
 		"ended":           "2026-08-24T10:34:02Z",
-		"drain":           "d1d2d3d4",
-		"repo":            "scharissis/backlog-drain",
+		"shift":           "d1d2d3d4",
+		"repo":            "scharissis/polako",
 		"issue":           float64(12),
 		"pr":              float64(34),
 		"reason":          reasonImplement,
@@ -237,7 +237,7 @@ func TestIssueRecordHoldsOnlyTheTerminalOutcome(t *testing.T) {
 	for key, want := range map[string]any{
 		"v": float64(recordVersion), "kind": "issue", "repo": cfg.repo,
 		"issue": float64(12), "pr": float64(34), "outcome": issueMerged, "tag": "baseline",
-		"drain": cfg.drainID,
+		"shift": cfg.shiftID,
 	} {
 		if got[key] != want {
 			t.Errorf("record[%q] = %v, want %v", key, got[key], want)
@@ -339,7 +339,7 @@ func TestNilRecorderIsSafe(t *testing.T) {
 func TestNewRecorderDefaultsUnderTheHomeDirectory(t *testing.T) {
 	home := homeDir(t)
 	rec := newRecorder("")
-	if want := filepath.Join(home, ".backlog-drain", "metrics"); rec.dir != want {
+	if want := filepath.Join(home, ".polako", "metrics"); rec.dir != want {
 		t.Errorf("default -metrics dir = %q, want %q", rec.dir, want)
 	}
 	// Resolving must not create anything: an -metrics off run and a
@@ -392,8 +392,8 @@ func TestRecordsAreNotWorldReadable(t *testing.T) {
 
 func TestRecordFilePartitionsPerRepository(t *testing.T) {
 	cases := map[string]string{
-		"scharissis/backlog-drain": "scharissis--backlog-drain.jsonl",
-		"Owner/Repo.js":            "Owner--Repo.js.jsonl",
+		"scharissis/polako": "scharissis--polako.jsonl",
+		"Owner/Repo.js":     "Owner--Repo.js.jsonl",
 		// Every separator is folded away, so a slug is always one filename
 		// component however odd the repo name is.
 		"weird name/../repo": "weird_name--..--repo.jsonl",
@@ -422,10 +422,10 @@ func TestToolsHashDistinguishesAllowlists(t *testing.T) {
 
 // The id's whole job is telling apart the drains a timestamp cannot: two
 // started in the same second, and one running while another finishes.
-func TestDrainIDsAreShortAndNeverRepeat(t *testing.T) {
+func TestShiftIDsAreShortAndNeverRepeat(t *testing.T) {
 	seen := map[string]bool{}
 	for range 100 {
-		id := newDrainID()
+		id := newShiftID()
 		if len(id) != 8 || strings.Trim(id, "0123456789abcdef") != "" {
 			t.Fatalf("drain id %q should be 8 hex digits — it goes in a log line to be retyped", id)
 		}
@@ -450,7 +450,7 @@ func TestEveryRecordOneDrainWritesCarriesItsID(t *testing.T) {
 	// A second process, same directory, same repository: the ordinary case of
 	// a drain restarted after the first was killed.
 	other := metricsConfig(t, dir)
-	other.drainID = "0f0f0f0f"
+	other.shiftID = "0f0f0f0f"
 	other.rec.recordRun(other, rc, sampleReport())
 
 	lines := readRecords(t, dir, cfg.repo)
@@ -460,16 +460,16 @@ func TestEveryRecordOneDrainWritesCarriesItsID(t *testing.T) {
 	ids := map[string]int{}
 	for _, line := range lines {
 		var got struct {
-			Drain string `json:"drain"`
+			Shift string `json:"shift"`
 		}
 		if err := json.Unmarshal([]byte(line), &got); err != nil {
 			t.Fatalf("record is not JSON: %v", err)
 		}
-		ids[got.Drain]++
+		ids[got.Shift]++
 	}
-	if ids[cfg.drainID] != 2 || ids[other.drainID] != 1 {
+	if ids[cfg.shiftID] != 2 || ids[other.shiftID] != 1 {
 		t.Errorf("ids across the file = %v, want 2 from %q and 1 from %q",
-			ids, cfg.drainID, other.drainID)
+			ids, cfg.shiftID, other.shiftID)
 	}
 }
 
@@ -565,7 +565,7 @@ func TestSummaryCommentReportsTheNumbersAndSaysWhatTheyCover(t *testing.T) {
 	}
 	// It is posted where other people read it, so it says which runs it
 	// covers and that the dollars are the CLI's pricing rather than a bill.
-	for _, want := range []string{"this drain supervised", "API-equivalent pricing"} {
+	for _, want := range []string{"this shift supervised", "API-equivalent pricing"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("summary does not say %q:\n%s", want, got)
 		}

@@ -19,7 +19,7 @@ import (
 // per notification, holding that notification's own variables. The literal
 // "fail" instead makes it exit nonzero, which is the other thing an operator's
 // command can do.
-const fakeNotifyEnv = "BACKLOG_DRAIN_FAKE_NOTIFY"
+const fakeNotifyEnv = "POLAKO_FAKE_NOTIFY"
 
 // fakeNotify stands in for an operator's -notify command.
 func fakeNotify(dest string) int {
@@ -74,7 +74,7 @@ func TestNotifyHandsTheHookItsContext(t *testing.T) {
 	notify(context.Background(), cfg, notification{
 		event: notifyParked, issue: 7, reason: "the run produced no PR"})
 	notify(context.Background(), cfg, notification{
-		event: notifyDrained, reason: "no open issues left to work"})
+		event: notifyCleared, reason: "no open issues left to work"})
 
 	got := told()
 	if len(got) != 2 {
@@ -112,7 +112,7 @@ func TestNotifyFailureNeverBreaksTheRun(t *testing.T) {
 	for _, want := range []string{
 		"-notify command failed for parked #3",
 		"the webhook is down", // what it said, which is usually the diagnosis
-		"the drain continues",
+		"the shift continues",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log is missing %q\ngot:\n%s", want, out)
@@ -124,16 +124,16 @@ func TestNotifyFailureNeverBreaksTheRun(t *testing.T) {
 func TestNotifyDoesNothingWithoutACommand(t *testing.T) {
 	buf := captureLog(t)
 	notify(context.Background(), config{repo: "owner/repo"},
-		notification{event: notifyDrained})
+		notification{event: notifyCleared})
 	notify(context.Background(), config{repo: "owner/repo", notifyCmd: "   "},
-		notification{event: notifyDrained})
+		notification{event: notifyCleared})
 	if out := buf.String(); out != "" {
 		t.Errorf("a drain with no -notify said %q, want silence", out)
 	}
 }
 
 // The variables a hook receives share a namespace with the ones that set flag
-// defaults, and `backlog-drain stats` — which takes -repo — is a plausible
+// defaults, and `polako stats` — which takes -repo — is a plausible
 // notify command. A collision would have a notification quietly reconfigure the
 // process it notifies.
 func TestNotifyVariablesNeverShadowAFlag(t *testing.T) {
@@ -234,7 +234,7 @@ func TestNotifyFiresWhenAnIssueParksAndWhenTheBacklogDrains(t *testing.T) {
 			t.Errorf("the park notification is missing %q\ngot: %s", want, got[0])
 		}
 	}
-	if !strings.Contains(got[1], notifyPrefix+"EVENT=drained") {
+	if !strings.Contains(got[1], notifyPrefix+"EVENT=cleared") {
 		t.Errorf("second notification = %s, want the backlog draining", got[1])
 	}
 }
@@ -271,7 +271,7 @@ func TestNotifyFiresOnceForAnIssueBlockedOnAnAnswer(t *testing.T) {
 	}
 	// The answer landed and the issue shipped, so the next thing the operator
 	// hears is that there is nothing left — never the same question twice.
-	if !strings.Contains(got[1], notifyPrefix+"EVENT=drained") {
+	if !strings.Contains(got[1], notifyPrefix+"EVENT=cleared") {
 		t.Errorf("second notification = %s, want the backlog draining", got[1])
 	}
 }

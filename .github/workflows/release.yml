@@ -43,7 +43,7 @@ jobs:
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
             goos=${target%/*}
             goarch=${target#*/}
-            out="dist/backlog-drain_${GITHUB_REF_NAME}_${goos}_${goarch}"
+            out="dist/polako_${GITHUB_REF_NAME}_${goos}_${goarch}"
             if [ "$goos" = "windows" ]; then
               out="${out}.exe"
             fi
@@ -53,12 +53,12 @@ jobs:
             # run can be attributed to a release.
             GOOS=$goos GOARCH=$goarch go build -trimpath \
               -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
-              -o "$out" ./cmd/backlog-drain
+              -o "$out" ./cmd/polako
           done
           ls -l dist
 
       # The changelog section is what says whether a release changes anything an
-      # operator has to know about before upgrading a machine that drains
+      # operator has to know about before upgrading a machine that works a backlog
       # overnight; a list of commit subjects buries exactly that. Falling back to
       # generated notes rather than failing, because a release that is already
       # tagged and built should not be held up by its own prose.

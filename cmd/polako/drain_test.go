@@ -23,7 +23,7 @@ import (
 // fakeGhEnv points the fake gh at the JSON file holding its pretend
 // repository. Every gh call is a separate process, so the state has to live
 // somewhere both the drain's writes and its reads can see.
-const fakeGhEnv = "BACKLOG_DRAIN_FAKE_GH"
+const fakeGhEnv = "POLAKO_FAKE_GH"
 
 // ghSubcommands are the first arguments that mean "this invocation is gh".
 // The test process exports both fake-CLI variables at once and children
@@ -148,7 +148,7 @@ func writeGhState(path string, st *ghState) error {
 // line. It is how a test proves which calls a path made, which the state
 // afterwards cannot: a mutation gh refused leaves the state untouched too, and
 // so does one that wrote back exactly what was already there.
-const fakeGhLogEnv = "BACKLOG_DRAIN_FAKE_GH_LOG"
+const fakeGhLogEnv = "POLAKO_FAKE_GH_LOG"
 
 // fakeGh answers one gh invocation and persists anything it changed.
 func fakeGh(path string, args []string) int {
@@ -696,7 +696,7 @@ func TestDrainRetriesAnIssueFlaggedBeforeItStarted(t *testing.T) {
 		t.Error("issue 1 should have been closed after the answer was folded in and its PR merged")
 	}
 	out := buf.String()
-	if want := "was already labelled \"awaiting-answer\" when this drain reached it"; !strings.Contains(out, want) {
+	if want := "was already labelled \"awaiting-answer\" when this shift reached it"; !strings.Contains(out, want) {
 		t.Errorf("log is missing %q\ngot:\n%s", want, out)
 	}
 	if strings.Contains(out, "nothing else to work") {
@@ -752,7 +752,7 @@ func TestDrainForgetsAQuestionAHumanClosedInstead(t *testing.T) {
 	for _, want := range []string{
 		"leaving it for a human", // it really was put down
 		"=== issue #2 ===",       // and the queue behind it really was worked
-		"no open issues — backlog drained",
+		"no open issues — backlog cleared",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("log is missing %q, so this proves nothing\ngot:\n%s", want, out)
@@ -796,7 +796,7 @@ func TestDrainOnceExitsOnAQuestion(t *testing.T) {
 		"summary: 0 issues merged, 0 issues parked, 1 issue awaiting an answer, $0.50 spent",
 		// An issue put down for an answer keeps its tally, so the summary can
 		// still say what the round of questions cost.
-		"waiting #1 ($0.50) — reply on the thread and the next drain picks them up",
+		"waiting #1 ($0.50) — reply on the thread and the next shift picks them up",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log is missing %q\ngot:\n%s", want, out)
@@ -1414,8 +1414,8 @@ func TestDrainParksAnIssueOverItsCostCap(t *testing.T) {
 
 	out := buf.String()
 	for _, want := range []string{
-		"issue #1 needs a human: this drain has spent $9.00 on it, the whole of its -max-cost of $1.00",
-		"parked  #1 ($9.00) — this drain has spent $9.00 on it",
+		"issue #1 needs a human: this shift has spent $9.00 on it, the whole of its -max-cost of $1.00",
+		"parked  #1 ($9.00) — this shift has spent $9.00 on it",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log is missing %q\ngot:\n%s", want, out)
