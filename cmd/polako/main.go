@@ -314,6 +314,27 @@ type config struct {
 	// No claude process, no GitHub write, no run-data record — which is what
 	// makes it safe to point at a repository nobody here has drained before.
 	dryRun bool
+
+	// Remote Control. A shift's runs are unattended by design and invisible
+	// with it: while a run is in flight its output exists only in the terminal
+	// that started it. remote asks each invocation to register with Remote
+	// Control, so the operator can watch and steer it from claude.ai/code or
+	// the mobile app instead.
+	//
+	// remoteOff is how a CLI that will not have it is remembered — in memory,
+	// for this process only, shared by every copy of the config a run is
+	// dispatched under, because "this CLI rejects the flag" is a fact about the
+	// CLI rather than about one run. A pointer for exactly that reason: config
+	// is passed by value everywhere, and a bool would be re-learned per run and
+	// re-logged with it. Nothing durable, so a CLI that grows support for the
+	// combination lights up with no change here.
+	//
+	// remoteName is what one run is called in that list, set on a copy of the
+	// config the way addTools is: it names an issue, and the recorder's config
+	// must not change with every issue number.
+	remote     bool
+	remoteOff  *atomic.Bool
+	remoteName string
 	// notifyCmd is run whenever the drain reaches a state a person has to move
 	// past. Empty, the default, means no hook at all. See notify.go.
 	notifyCmd string
@@ -483,6 +504,8 @@ func parseFlags() config {
 		"resolve the next issue, print the claude invocation it would get, and exit without running or writing anything")
 	flag.StringVar(&cfg.notifyCmd, "notify", "",
 		"command to run when polako needs a human, with context in "+notifyPrefix+"* (see the README)")
+	flag.BoolVar(&cfg.remote, "remote", true,
+		"register each run with Remote Control, so you can watch it from claude.ai/code or the phone")
 	flag.StringVar(&cfg.tag, "run-tag", "", "label recorded with every run, for comparing one batch against another")
 	flag.BoolVar(&cfg.postSummary, "post-summary", false,
 		"comment one line of run numbers on each merged PR (runs, tokens, dollars, wall time)")
@@ -520,6 +543,7 @@ func parseFlags() config {
 	}
 	cfg.rec = newRecorder(metrics)
 	cfg.shiftID = newShiftID()
+	cfg.remoteOff = new(atomic.Bool)
 	cfg.ghBin = "gh"
 	cfg.ghRetryWait = ghRetryDelay
 	cfg.resumeCeiling = defaultResumeCeiling
@@ -1154,6 +1178,14 @@ func preflight(ctx context.Context, cfg *config) error {
 		log.Printf("-notify is on — `%s` runs when an issue parks, an issue asks a question, "+
 			"the backlog clears, or the shift stops early", cfg.notifyCmd)
 	}
+	if cfg.remote {
+		// Said every time, unprompted, like the recorder's line and for the same
+		// reason: this is the one thing a shift does that makes its sessions
+		// visible somewhere other than this terminal, and it is on by default.
+		log.Printf("-remote is on — each run registers with Remote Control as `polako %s#<issue>`, "+
+			"so you can watch and steer it from claude.ai/code or the app (-remote=false keeps "+
+			"runs to this machine)", cfg.repo)
+	}
 	if cfg.rec.enabled() {
 		// Say where the data goes, every time, unprompted: it is the whole of
 		// the answer to "what does this tool record".
@@ -1755,6 +1787,7 @@ func resumePrompt(skill string, issue int) string {
 // -tools/-add-tools, which is the thing worth grouping runs by, rather than
 // changing with every issue number.
 func issueRun(cfg config, issue int) (config, string, string) {
+	cfg = remoteRun(cfg, issue)
 	cfg.addTools = resolveTools(cfg.addTools, issueLabelTools(issue))
 	return cfg, fmt.Sprintf("/%s %d", cfg.skill, issue), cfg.skill
 }
@@ -1780,6 +1813,35 @@ func issueLabelTools(issue int) string {
 		issue, issue)
 }
 
+// remoteRun names one invocation in the operator's remote session list, and
+// returns the config to dispatch it under. `polako <repo>#<issue>`, so the list
+// reads the way the queue does — a shift working three repositories overnight is
+// otherwise three indistinguishable rows.
+//
+// A copy, for the same reason issueRun returns one: the name changes with every
+// issue, and the config the recorder reads must not.
+func remoteRun(cfg config, issue int) config {
+	cfg.remoteName = fmt.Sprintf("polako %s#%d", cfg.repo, issue)
+	return cfg
+}
+
+// registersRemote reports whether this invocation should ask to register with
+// Remote Control: the operator wants it, and this CLI has not already turned out
+// to reject it.
+func (c config) registersRemote() bool {
+	return c.remote && (c.remoteOff == nil || !c.remoteOff.Load())
+}
+
+// dropRemote gives up on registration for the rest of the shift. Nil-safe
+// because a config assembled anywhere but parseFlags — a test, mostly — carries
+// no shared flag to set, and losing the memo is harmless: every later run
+// re-learns it at the price of one rejected dispatch.
+func (c config) dropRemote() {
+	if c.remoteOff != nil {
+		c.remoteOff.Store(true)
+	}
+}
+
 // buildArgs assembles one headless claude invocation.
 func buildArgs(cfg config, prompt, resumeID string) []string {
 	var args []string
@@ -1789,6 +1851,12 @@ func buildArgs(cfg config, prompt, resumeID string) []string {
 	args = append(args, "-p", prompt, "--permission-mode", cfg.permissionMode)
 	if cfg.model != "" {
 		args = append(args, "--model", cfg.model)
+	}
+	if cfg.registersRemote() {
+		// The name is always passed, never left to the CLI: --remote-control
+		// takes an optional value, and an omitted one would let it swallow
+		// whichever argument came next.
+		args = append(args, "--remote-control", cfg.remoteName)
 	}
 	return append(args,
 		"--allowedTools", resolveTools(cfg.tools, cfg.addTools),
@@ -1926,6 +1994,13 @@ type runReport struct {
 	skillMissing bool // the session's command list lacks the skill the prompt invokes
 	authFailed   bool // the result text is the CLI reporting refused credentials
 	overBudget   bool // -max-issue-time ran out while this run was still going
+	// remoteRejected says the CLI refused the Remote Control flags before
+	// starting anything. Unlike every other field here it never reaches the
+	// caller: execClaude re-dispatches without them and returns that report
+	// instead, so nothing downstream sees the attempt at all. It carries no
+	// status() of its own for the same reason — a run that never reached a
+	// model is not an outcome to record.
+	remoteRejected bool
 }
 
 // status maps a run to exactly one value, most specific first: a run stopped
@@ -2077,12 +2152,128 @@ func authFailure(result string) bool {
 // the retry logic needs the session ID to resume, and the run burned real
 // tokens whether or not it lived to report them.
 func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes string, limit time.Duration) (runReport, error) {
+	rep, err := dispatchClaude(ctx, cfg, prompt, resumeID, invokes, limit)
+	if !rep.remoteRejected {
+		return rep, err
+	}
+	// The whole attempt is thrown away, report and all: it never reached a
+	// model, so charging it to -retries or recording it as a run would be
+	// describing something that did not happen. What the caller gets back is
+	// the run that did.
+	log.Println("this claude cannot register headless runs with Remote Control; runs continue " +
+		"unwatched (-remote=false silences this)")
+	cfg.dropRemote() // for the rest of the shift
+	cfg.remote = false
+	// Off on this copy as well as on the shared memo, so the re-dispatch cannot
+	// possibly ask a second time and be refused a second time — which is what a
+	// config carrying no shared memo would otherwise do, handing the caller a
+	// report of a run that never happened.
+	return dispatchClaude(ctx, cfg, prompt, resumeID, invokes, limit)
+}
+
+// rejectedRemote reports whether an attempt died on the registration flags
+// rather than on anything to do with the work. Two things have to hold before
+// anything else is looked at, and each rules out a failure worth reporting
+// honestly:
+//
+//   - the flags were on the command line at all — errTail is nil otherwise;
+//   - no init event ever arrived, so the session never started and no model was
+//     reached, and the run cannot have done anything worth keeping.
+//
+// Given those, a refusal takes one of two shapes. The CLI exits nonzero saying
+// something about Remote Control, which a usage error does and nothing else
+// here does — matched on the feature's name as well as the flag's, because a
+// CLI that documents `--remote-control` for interactive sessions is at least as
+// likely to answer "Remote Control is not available with --print" as it is to
+// answer "unknown option". Or it takes the flag, turns interactive on it and
+// waits for input nobody is there to give, in which case it never exits at all
+// and the stall watchdog is what ends it. The second shape is the one that
+// matters most: undetected, an on-by-default flag would stall every run of the
+// shift and park the whole backlog.
+//
+// Deliberately not "and it exited quickly". A threshold would be an arbitrary
+// constant that a loaded machine trips over, and it buys nothing the conditions
+// above do not already give: a CLI that got as far as an init event took the
+// flags, whatever it did next.
+//
+// An interrupted run is excluded because a shutdown signal kills the child
+// through the context before it can announce itself, which looks the same from
+// here — and a run the operator stopped must not teach the shift anything.
+//
+// A false positive costs one extra dispatch and one misleading log line: the
+// re-dispatch carries no flags, so whatever really went wrong goes wrong again
+// and is reported honestly. That is the direction to be wrong in.
+func rejectedRemote(rep runReport, errTail *tailWriter) bool {
+	if errTail == nil || rep.started || rep.interrupted {
+		return false
+	}
+	// Killed rather than exited, so there is no status to read and no usage
+	// error to match: silence before the first event is the whole of the tell.
+	if rep.stalled {
+		return true
+	}
+	if rep.exitCode <= 0 {
+		return false
+	}
+	tail := strings.ToLower(errTail.String())
+	return strings.Contains(tail, "remote-control") || strings.Contains(tail, "remote control")
+}
+
+// stderrWaitDelay is how long cmd.Wait will go on waiting for the stderr pipe
+// once the process itself is gone. Long enough that ordinary output in flight
+// is never truncated, short enough that an orphan holding the pipe costs
+// seconds rather than the rest of the night.
+const stderrWaitDelay = 5 * time.Second
+
+// maxStderrTail bounds what a dispatch remembers of its child's stderr. Only
+// the last few lines can be a usage error, and a run that logs for six hours
+// must not be held in memory to find one.
+const maxStderrTail = 4096
+
+// tailWriter keeps the last maxStderrTail bytes written through it. Every byte
+// still reaches the operator's terminal — this sits behind an io.MultiWriter,
+// never in front of one. Unsynchronised on purpose: exec.Cmd.Wait waits for the
+// goroutine copying stderr to finish, so a read after Wait is ordered behind
+// every write, and there is no other reader.
+type tailWriter struct{ buf []byte }
+
+func (t *tailWriter) Write(p []byte) (int, error) {
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > maxStderrTail {
+		// Copied rather than resliced: a slice walked forward keeps the whole
+		// original array alive behind it.
+		t.buf = append([]byte(nil), t.buf[len(t.buf)-maxStderrTail:]...)
+	}
+	return len(p), nil
+}
+
+func (t *tailWriter) String() string { return string(t.buf) }
+
+// dispatchClaude is one attempt at the invocation execClaude describes: it
+// starts the process, streams it and reports what it did. The split exists for
+// the one caller above, which may have to make the same attempt twice.
+func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes string, limit time.Duration) (runReport, error) {
 	rep := runReport{sessionID: resumeID, turns: -1, exitCode: -1}
 	args := buildArgs(cfg, prompt, resumeID)
 	log.Printf("running: %s %s", cfg.claudeBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.claudeBin, args...)
 	cmd.Dir = cfg.dir
 	cmd.Stderr = os.Stderr
+	// Remembered only while a registration is being attempted, so a shift with
+	// -remote off passes the same os.Stderr straight through as it always did.
+	// What it is read for is the one diagnosis stdout cannot carry: a CLI that
+	// refuses the flag prints a usage error and emits no events at all.
+	var errTail *tailWriter
+	if cfg.registersRemote() {
+		errTail = &tailWriter{}
+		cmd.Stderr = io.MultiWriter(os.Stderr, errTail)
+		// A writer that is not an *os.File makes os/exec hand the child a pipe
+		// and copy it here, and cmd.Wait then waits on that pipe rather than on
+		// the process — so a background command the run left behind, holding the
+		// inherited stderr, would hold this drain open forever. The bound is what
+		// keeps the promise that registration cannot hang a run.
+		cmd.WaitDelay = stderrWaitDelay
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return rep, err
@@ -2181,12 +2372,25 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes strin
 	}
 
 	err = cmd.Wait()
+	// Only ever returned in place of a nil: the process exited cleanly and
+	// something it left behind was still holding the stderr pipe when
+	// WaitDelay ran out. That is a fact about an orphan, not about the run.
+	if errors.Is(err, exec.ErrWaitDelay) {
+		err = nil
+	}
 	if cmd.ProcessState != nil {
 		rep.exitCode = cmd.ProcessState.ExitCode()
 	}
 	rep.stalled = stalled.Load()
 	rep.interrupted = ctx.Err() != nil
 	rep.overBudget = overspent.Load()
+	rep.remoteRejected = rejectedRemote(rep, errTail)
+	if rep.remoteRejected {
+		// Ahead of every report below, and of the error too: nothing about this
+		// attempt is worth telling the caller, because the caller is about to be
+		// handed a second one made without the flags.
+		return rep, nil
+	}
 	if rep.skillMissing {
 		return rep, fmt.Errorf("%w: %s", errNoWork, missing)
 	}
@@ -2678,7 +2882,7 @@ func remediateConflicts(ctx context.Context, cfg config, issue, prNumber int, ta
 			"Do not open a new PR, do not merge anything, and do not commit to the default branch.",
 		prNumber, branch, branch)
 	started := time.Now()
-	rep, err := execClaude(ctx, cfg, prompt, "", "", runLimit(cfg, *tally))
+	rep, err := execClaude(ctx, remoteRun(cfg, issue), prompt, "", "", runLimit(cfg, *tally))
 	// A remediation run pushes to a PR that already exists, so it leaves
 	// behind neither a new PR nor questions.
 	tally.add(cfg.rec.recordRun(cfg, runContext{
@@ -2709,7 +2913,7 @@ func remediateChecks(ctx context.Context, cfg config, issue, prNumber int, faili
 			"branch, and do not rerun or cancel workflows.",
 		prNumber, branch, strings.Join(failing, ", "), prNumber, branch)
 	started := time.Now()
-	rep, err := execClaude(ctx, cfg, prompt, "", "", runLimit(cfg, *tally))
+	rep, err := execClaude(ctx, remoteRun(cfg, issue), prompt, "", "", runLimit(cfg, *tally))
 	// Like a conflict remediation, this pushes to a PR that already exists, so
 	// it leaves behind neither a new PR nor questions.
 	tally.add(cfg.rec.recordRun(cfg, runContext{
@@ -2746,7 +2950,7 @@ func remediateReview(ctx context.Context, cfg config, issue, prNumber int, tally
 	// A copy, so the pinned grant reaches this invocation and nothing else —
 	// including the record below, whose tools_hash goes on identifying the
 	// operator's -tools/-add-tools rather than changing with every PR number.
-	runCfg := cfg
+	runCfg := remoteRun(cfg, issue)
 	runCfg.addTools = resolveTools(cfg.addTools, prReviewTools(cfg.repo, prNumber))
 	started := time.Now()
 	rep, err := execClaude(ctx, runCfg, prompt, "", "", runLimit(cfg, *tally))

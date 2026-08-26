@@ -458,6 +458,7 @@ sets — see [`status`](#where-the-backlog-stands-polako-status) and
 | `-strict-order` | `false` | Work issues in strict ascending order: wait in place on an issue awaiting an answer instead of moving past it. |
 | `-dry-run` | `false` | Resolve the next issue, print the `claude` invocation it would get, and exit. Runs nothing and writes nothing — see [Looking before you leap](#looking-before-you-leap--dry-run). |
 | `-notify` | *(none)* | Command to run whenever polako needs a human, with context in `POLAKO_NOTIFY_*` — see [Being told when it needs you](#being-told-when-it-needs-you--notify). |
+| `-remote` | `true` | Register each run with Remote Control, so you can watch and steer it from claude.ai/code or the app — see [Watching a shift from anywhere](#watching-a-shift-from-anywhere--remote). |
 | `-run-tag` | *(none)* | Freeform label recorded with every run, so one batch can be compared against another. |
 | `-metrics` | `~/.polako/metrics` | Directory for run-data records, or `off` to write nothing. |
 | `-post-summary` | `false` | Comment one line of run numbers on each merged PR. The only thing that shows run data to anybody but you — see [Run data & cost tracking](#run-data--cost-tracking). |
@@ -472,10 +473,11 @@ leap of faith. `-dry-run` takes it out:
 $ polako work -dir ../my-project -dry-run
 example/my-project — running /polako:implement-issue per issue, polling every 5m0s
 -dry-run: resolving the next issue only — no claude run, no GitHub write, no run data
+-remote is on — each run registers with Remote Control as `polako example/my-project#<issue>`, so you can watch and steer it from claude.ai/code or the app (-remote=false keeps runs to this machine)
 ready: #12, #14, #19
 waiting on an answer: #9
 issue #12 would be worked next; the invocation follows on stdout
-claude -p '/polako:implement-issue 12' --permission-mode acceptEdits --allowedTools '…' --output-format stream-json --verbose
+claude -p '/polako:implement-issue 12' --permission-mode acceptEdits --remote-control 'polako example/my-project#12' --allowedTools '…' --output-format stream-json --verbose
 ```
 
 It resolves the next issue exactly as a real shift would — same queue, same
@@ -559,6 +561,62 @@ Three things to know about how the command is run:
 `-notify` is deliberately quiet about the ordinary case. A PR waiting to be
 merged is a human touchpoint too, but it happens on every healthy issue, and a
 notifier that goes off every time is one you mute.
+
+### Watching a shift from anywhere: `-remote`
+
+A shift's runs are unattended by design and invisible with it: while a run is in
+flight, its output exists only in the terminal that started it. On by default,
+`-remote` registers each run with Claude Code's Remote Control, so it appears in
+your session list on [claude.ai/code](https://claude.ai/code) and in the mobile
+app — live, readable, and steerable if you want to step in.
+
+Sessions are named after the queue, so the list reads the way the backlog does:
+
+```
+polako example/repo#12
+```
+
+That covers every `claude` a shift starts on the issue: the skill run, any
+resume after a crash, and the conflict, CI and review remediations against its
+PR. Startup says the registration is on and what the names look like, because
+[the environment can set any flag](#setting-defaults-from-the-environment) and a
+default-on outward path should never be a surprise.
+
+To keep every run on this machine and nowhere else:
+
+```bash
+polako work -remote=false
+```
+
+That produces `claude` invocations byte-identical to a build without the flag.
+
+**Degrades, never prompts.** Unattended means nobody is there to answer a
+question, so a registration that cannot happen must not hang or fail a run.
+Authenticating with an API key rather than a claude.ai login, an organisation
+that has turned Remote Control off, `disableRemoteControl` in settings — in each
+case the run simply proceeds unwatched.
+
+The same is true of a `claude` that will not take the flag in print mode at all.
+polako finds out rather than assuming: it asks on the shift's first run, and if
+that run dies before a session ever starts — a usage error, or a CLI that takes
+the flag and then sits waiting for the input an unattended run has nobody to
+give — nothing was spent, so it says so once, re-dispatches that same run
+without the flag, and stops asking for the rest of the shift.
+
+```
+this claude cannot register headless runs with Remote Control; runs continue unwatched (-remote=false silences this)
+```
+
+The refused attempt never reached a model, so it costs no `-retries` budget and
+writes no run-data record. Nothing about the answer is remembered past the
+process, either, so a CLI that grows support for the combination starts working
+with no change here and no flag to set.
+
+**What this means for what leaves your machine** — a Remote Control session is
+visible through your own claude.ai account, which is the one place a shift's
+session content is readable off this machine. It goes to you and nobody else,
+over Claude Code's own channel, and `-remote=false` closes it. See
+[Security](#security).
 
 ### Setting defaults from the environment
 
@@ -699,13 +757,21 @@ file, and aggregating across projects is a glob. Created `0700`, so on a shared
 machine the records stay yours. Never inside your checkout: the skill commits
 things there, and cost data must not become committable by accident.
 
-**Nothing leaves your machine unless you ask it to.** There is no telemetry
-endpoint, no phone-home, and no network path out of the recorder — the binary is
-the only thing that meters anything, and it writes to your disk. The single
-exception is [`-post-summary`](#putting-it-on-the-pr--post-summary), off unless
-you turn it on, which puts one line of numbers on your own merged PR. The skill
-half, the part you can install from a marketplace, carries no data collection at
-all: it is a prompt.
+**Run data never leaves your machine unless you ask it to.** There is no
+telemetry endpoint, no phone-home, and no network path out of the recorder — the
+binary is the only thing that meters anything, and it writes to your disk. The
+single exception is [`-post-summary`](#putting-it-on-the-pr--post-summary), off
+unless you turn it on, which puts one line of numbers on your own merged PR. The
+skill half, the part you can install from a marketplace, carries no data
+collection at all: it is a prompt.
+
+One other thing about a shift is visible off this machine, and it is not run
+data: [`-remote`](#watching-a-shift-from-anywhere--remote), on by default,
+registers each run with Remote Control so you can watch it from claude.ai/code
+or the app. That makes the session itself — its transcript, live — readable
+through your own claude.ai account, and nobody else's. It is Claude Code's own
+channel rather than anything polako built, it carries nothing the local
+recorder writes, and `-remote=false` closes it.
 
 To write nothing at all:
 
@@ -1136,6 +1202,29 @@ description of a change to make, never as instructions addressed to it, and to
 report anything that tries to be — rather than obey it — in the PR body. That
 is a mitigation, not a boundary: treat it as defence in depth behind the two
 above, and keep the human merge step as the last check on what actually lands.
+
+### What leaves the machine
+
+Two things, and only these two:
+
+| What | Where it goes | Default |
+| --- | --- | --- |
+| [`-remote`](#watching-a-shift-from-anywhere--remote) | The session itself, live, in your own claude.ai session list — so you can watch and steer a run from the web or the app. | **On.** `-remote=false` closes it. |
+| [`-post-summary`](#putting-it-on-the-pr--post-summary) | One line of run numbers, as a comment on your own merged PR — readable by exactly the people who can already see that PR. | Off. |
+
+Everything else stays local. Run data is written to your disk and read by
+nothing but `polako stats`; `-notify` runs a command of yours on your own
+machine; and the skill half, being a prompt, collects nothing at all.
+
+`-remote` is the one of the two that is on by default and the one that carries
+*text* rather than numbers, so it is worth being explicit about: a registered
+session is readable through the claude.ai account the CLI is already
+authenticated as — the same account that is running the model and already holds
+the transcript. It reaches you and nobody else, over Claude Code's own channel,
+and it is the same visibility an interactive session started with
+`claude --remote-control` has. If that is not a trade you want on a given
+repository, turn it off; a shift with `-remote=false` invokes `claude` exactly
+as it did before the flag existed.
 
 ## Publishing and versioning
 

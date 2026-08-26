@@ -23,10 +23,21 @@ in the PR body rather than doing it quietly.
   directory mid-drain changes no behavior. A read from those files anywhere
   outside `stats` would turn telemetry back into state. Records hold numbers,
   identifiers and operator-chosen labels only — never issue, comment or PR
-  text. Nothing goes off the machine except by explicit request: `-post-summary`,
-  default off, comments those same numbers on the operator's own merged PR. That
-  one flag is the whole outward path, and widening it — a second destination, a
-  default-on, anything carrying text — is the change to argue for out loud.
+  text. No run-data record goes off the machine except by explicit request:
+  `-post-summary`, default off, comments those same numbers on the operator's own
+  merged PR.
+- **Two things leave the machine, and they are named here.** `-post-summary`
+  above, and `-remote`, default *on*, which registers each run with Remote
+  Control so the operator can watch it from claude.ai/code or the app. `-remote`
+  is the one that carries session text rather than numbers, and it is defensible
+  only for the reasons it was argued on issue #52: the destination is the
+  operator's own claude.ai account — the same account already running the model
+  and already holding the transcript — the channel is Claude Code's own rather
+  than anything built here, and `-remote=false` restores the earlier behaviour
+  byte for byte. A third destination, or widening either of these two, is the
+  change to argue for out loud rather than slip in. So is making registration
+  load-bearing: it degrades to an unwatched run and must never hang, prompt or
+  fail one, and nothing durable may remember whether it worked.
 - **Restart safety.** If a PR already exists for an issue's branch, never re-run
   the skill for that issue — go straight to waiting on the PR.
 - **The `needs-human` label is orchestration state.** It is the only durable
