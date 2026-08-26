@@ -1120,11 +1120,11 @@ claude plugin validate .
 ```
 
 The suite is hermetic: no network, no `gh`, no real `claude`. Tests that need a
-Claude process re-execute the test binary as a fake CLI that streams canned
-`stream-json` events, which covers the streaming, session-capture, crash and
-stall-watchdog paths for real. A second group of tests keeps the repository
-honest — the plugin manifest, the shipped skill and the documented flags all
-have to agree with the code.
+Claude process spawn a fake CLI — the test package built once, without the race
+detector, then re-entered as a child — that streams canned `stream-json` events,
+which covers the streaming, session-capture, crash and stall-watchdog paths for
+real. A second group of tests keeps the repository honest — the plugin manifest,
+the shipped skill and the documented flags all have to agree with the code.
 
 ### Evaluating the skill
 

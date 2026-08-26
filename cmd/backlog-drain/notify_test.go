@@ -53,7 +53,7 @@ func notifyLog(t *testing.T, cfg *config) func() []string {
 	t.Setenv(fakeNotifyEnv, dest)
 	// Quoted, because a test binary's path is not guaranteed to be free of
 	// spaces — which is the case splitCommand exists for.
-	cfg.notifyCmd = `"` + os.Args[0] + `"`
+	cfg.notifyCmd = `"` + fakeCLI(t) + `"`
 	return func() []string {
 		b, err := os.ReadFile(dest)
 		if os.IsNotExist(err) {

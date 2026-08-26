@@ -80,8 +80,11 @@ in the PR body rather than doing it quietly.
 - Every flag is part of the interface, so every flag is documented in the
   README. A test enforces it.
 - Tests are hermetic: no network, no `gh`, no real `claude`. A run that needs a
-  Claude process re-executes the test binary as a fake CLI — see `fakeClaude` in
-  `cmd/backlog-drain/main_test.go`.
+  Claude process spawns a fake CLI — this same test package built once without
+  the race detector, which then re-enters `TestMain` and impersonates `claude`,
+  `gh` or the notify command. See `fakeCLI` and `fakeClaude` in
+  `cmd/backlog-drain/main_test.go`. Pointing those children back at `os.Args[0]`
+  works and costs a second of race-runtime startup apiece, ~300 times over.
 - Conventional-commit subjects: `fix:`, `docs:`, `feat:`, `test:`. A version
   bump is its own `chore(release): X.Y.Z` commit, touching only `plugin.json`
   and `CHANGELOG.md` — folded into a feature commit, it leaves no commit that

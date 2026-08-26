@@ -10,9 +10,13 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -44,7 +48,70 @@ func TestMain(m *testing.M) {
 	if mode := os.Getenv(fakeClaudeEnv); mode != "" {
 		os.Exit(fakeClaude(mode))
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	if fakeCLIDir != "" {
+		os.RemoveAll(fakeCLIDir)
+	}
+	os.Exit(code)
+}
+
+var (
+	fakeCLIOnce sync.Once
+	fakeCLIDir  string
+	fakeCLIBin  string
+	fakeCLIErr  error
+)
+
+// fakeCLI is the binary the drain runs as `claude`, as `gh` and as the notify
+// command: this same test package, compiled once more without the race
+// detector. The child re-enters TestMain and picks its impersonation off the
+// BACKLOG_DRAIN_FAKE_* variables and argv exactly as before.
+//
+// Re-executing os.Args[0] would say the same thing in one word, and did. But
+// under `go test -race` os.Args[0] is race-instrumented, and a race-instrumented
+// binary burns about a second in runtime startup before it reaches main — an
+// empty one measures the same. The suite makes some 300 fake-CLI calls, so that
+// second was most of the race step's wall clock, and every drain test added
+// bought another. What is given up is race coverage of a test fixture: each
+// child is a single-purpose emitter, the concurrency the detector exists for
+// lives in the parent drain loop, which is still built with -race, and neither
+// real `gh` nor real `claude` is an instrumented Go binary either.
+func fakeCLI(t *testing.T) string {
+	t.Helper()
+	fakeCLIOnce.Do(buildFakeCLI)
+	if fakeCLIErr != nil {
+		t.Fatal(fakeCLIErr)
+	}
+	return fakeCLIBin
+}
+
+// buildFakeCLI compiles the test binary rather than running it. Nothing is
+// fetched and nothing but the standard library is linked, so the suite stays as
+// hermetic as it was; what it now needs is the Go toolchain that is already
+// running it.
+func buildFakeCLI() {
+	dir, err := os.MkdirTemp("", "backlog-drain-fake-cli")
+	if err != nil {
+		fakeCLIErr = fmt.Errorf("fake CLI: %v", err)
+		return
+	}
+	bin := filepath.Join(dir, "fake-cli")
+	if runtime.GOOS == "windows" {
+		bin += ".exe" // or exec refuses to run it
+	}
+	// -race=false spelled out rather than merely omitted: a GOFLAGS carrying
+	// -race would otherwise put the instrumentation straight back, and silently
+	// — the suite would still pass, five minutes slower. -vet=off because `go
+	// test` vets by default and check.sh and CI both run `go vet` as a step of
+	// their own; vetting this package twice per run lengthens the build for
+	// nothing.
+	out, err := exec.Command("go", "test", "-race=false", "-vet=off", "-c", "-o", bin, ".").CombinedOutput()
+	if err != nil {
+		os.RemoveAll(dir)
+		fakeCLIErr = fmt.Errorf("fake CLI: building it needs a working `go` on PATH: %v\n%s", err, out)
+		return
+	}
+	fakeCLIDir, fakeCLIBin = dir, bin
 }
 
 // fakeClaude stands in for `claude -p ... --output-format stream-json`.
@@ -459,6 +526,35 @@ func TestShutdownSignalsCoverMoreThanCtrlC(t *testing.T) {
 	for _, want := range []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP} {
 		if !slices.Contains(got, want) {
 			t.Errorf("shutdownSignals() = %v, want it to carry %v", got, want)
+		}
+	}
+}
+
+// Nothing fails if the children go back to being os.Args[0] — they behave
+// identically, they just cost a race-runtime startup each, and the suite starts
+// some 300 of them. A silent regression from tens of seconds to five minutes of
+// CI is exactly what nothing else here would catch.
+//
+// It is asserted on the seams rather than on fakeCLI's return value, because
+// that is where the regression would arrive: a drain test written with
+// os.Args[0], or one of these constructors reverted. fakeCLI hands back a path
+// under os.MkdirTemp, which cannot equal the running binary, so asking it is
+// asking a question that answers itself.
+func TestFakeCLIIsBuiltRatherThanReExecuted(t *testing.T) {
+	cfg, _ := drainConfig(t, "stream", &ghState{})
+	notifyLog(t, &cfg)
+	standalone := fakeClaudeConfig(t, "stream")
+
+	for _, seam := range []struct{ name, bin string }{
+		{"drainConfig claudeBin", cfg.claudeBin},
+		{"drainConfig ghBin", cfg.ghBin},
+		{"notifyLog notifyCmd", strings.Trim(cfg.notifyCmd, `"`)},
+		{"fakeClaudeConfig claudeBin", standalone.claudeBin},
+	} {
+		if seam.bin == os.Args[0] {
+			t.Errorf("%s is os.Args[0]; it has to be the non-race build fakeCLI returns. "+
+				"Under `go test -race` re-executing this binary spends ~1s in runtime "+
+				"startup per invocation, and the suite makes some 300 of them", seam.name)
 		}
 	}
 }
@@ -1177,7 +1273,7 @@ func fakeClaudeConfig(t *testing.T, mode string) config {
 	t.Setenv(fakeClaudeEnv, mode) // inherited by the child process
 	return config{
 		dir:            t.TempDir(),
-		claudeBin:      os.Args[0], // this test binary, re-entered via TestMain
+		claudeBin:      fakeCLI(t), // this test package, re-entered via TestMain
 		skill:          defaultSkill,
 		permissionMode: "acceptEdits",
 		tools:          "Read",
