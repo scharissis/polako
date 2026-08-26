@@ -1504,7 +1504,7 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 			// would have stopped at two.
 			runs: 1 + resumeCeiling,
 			check: func(t *testing.T, err error, st *ghState, out string) {
-				want := fmt.Sprintf("claude has been resumed %d times on this issue and still has "+
+				want := fmt.Sprintf("claude has been retried %d times on this issue and still has "+
 					"not finished it — each run gets somewhere and then dies, which needs a human",
 					resumeCeiling)
 				if got := parkedFor(t, err); got != want {
@@ -1513,6 +1513,14 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 				if !strings.Contains(out, "the -retries budget starts over") {
 					t.Errorf("want the reset said out loud, since -retries 1 would not explain "+
 						"%d runs on its own\ngot:\n%s", 1+resumeCeiling, out)
+				}
+				// The invocation, not only the announcement. Reading "resume this
+				// session or start fresh" off the same counter the reset zeroes
+				// makes every one of these retries a silent fresh run: the log
+				// still promises the resume, and the crashed session's context is
+				// thrown away on the one path that exists to keep it.
+				if !strings.Contains(out, "--resume sess-partial") {
+					t.Errorf("want the announced resume actually made\ngot:\n%s", out)
 				}
 			},
 		},

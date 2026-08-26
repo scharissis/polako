@@ -1286,13 +1286,19 @@ const resumeCeiling = 20
 // it within one process.
 func processIssue(ctx context.Context, cfg config, issue int, st *issueState) error {
 	branch := fmt.Sprintf("%s%d", cfg.branchPrefix, issue)
-	// attempt counts consecutive *fruitless* crashes — ones that got nothing
-	// done — and is what -retries bounds. resumes counts every resume this issue
-	// has had, fruitful ones included, and is what resumeCeiling bounds. Two
-	// counters because they guard two different failures: a session that dies
-	// straight back on every resume, and a run that inches a little further each
-	// time and never arrives.
-	attempt, resumes := 0, 0
+	// fruitless counts consecutive crashes that got nothing done, and is what
+	// -retries bounds. resumes counts every retry this issue has had, fruitful
+	// ones included, and is what resumeCeiling bounds. Two counters because they
+	// guard two different failures: a session that dies straight back on every
+	// resume, and a run that inches a little further each time and never
+	// arrives.
+	//
+	// retrying is a third thing again: whether the last time round this loop was
+	// a crash retry, which is what decides that the session is worth resuming.
+	// Neither counter can answer that — fruitless is zeroed by a crash that got
+	// work done, and reading the resume off it would silently turn every such
+	// retry into a fresh run that threw the crashed session away.
+	fruitless, resumes, retrying := 0, 0, false
 
 	// Before the run, not only after the last merge: the gap this closes is also
 	// opened by a teammate's push and by a drain restarted days later, and the
@@ -1349,7 +1355,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 			// one, or the one it got turned out to be unresumable — is a fresh
 			// skill run in everything but name, so it is recorded as one. The
 			// skill re-derives where it got to from the worktree.
-			case attempt > 0 && st.session != "":
+			case retrying && st.session != "":
 				resumeTarget = st.session
 				reason = reasonResume
 			case st.answered:
@@ -1360,7 +1366,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 			started := time.Now()
 			rep, runErr := runClaude(ctx, cfg, issue, resumeTarget, runLimit(cfg, *tally))
 			rc := runContext{
-				issue: issue, reason: reason, attempt: attempt,
+				issue: issue, reason: reason, attempt: resumes,
 				resumedFrom: resumeTarget, started: started, ended: time.Now(),
 			}
 			if rep.sessionID != "" {
@@ -1375,10 +1381,13 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 			// and 3 resume attempts failed". Forget the session instead and let
 			// the next attempt go fresh, which is the run that would have worked.
 			//
-			// Only when the run also failed: a resume that answered cleanly
-			// without an init event is not a shape any CLI produces, and as with
-			// lacksCommand every uncertainty here resolves toward carrying on.
-			if resumeTarget != "" && runErr != nil && !rep.started {
+			// Only when the run also failed on its own: a resume that answered
+			// cleanly without an init event is not a shape any CLI produces, and
+			// as with lacksCommand every uncertainty here resolves toward
+			// carrying on. A shutdown signal is the other exclusion — it kills
+			// the child through the context, so a resume interrupted before its
+			// first event looks exactly like a dead session and is not one.
+			if resumeTarget != "" && runErr != nil && ctx.Err() == nil && !rep.started {
 				log.Printf("session %s could not be resumed — the next attempt starts a fresh run, "+
 					"which re-derives where the last one got to from the worktree", resumeTarget)
 				st.session = ""
@@ -1485,9 +1494,9 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 						return err
 					}
 					log.Printf("new activity on #%d — re-running to fold the answers in", issue)
-					attempt, st.answered = 0, true
+					fruitless, retrying, st.answered = 0, false, true
 					continue
-				case runErr != nil && attempt < cfg.retries && resumes < resumeCeiling:
+				case runErr != nil && fruitless < cfg.retries && resumes < resumeCeiling:
 					// Crash (API drop, stall, tool failure): resume the exact
 					// session by ID, keeping its research context. If no
 					// session was ever created, retry as a fresh run instead.
@@ -1503,6 +1512,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 						return park("%s", reason)
 					}
 					resumes++
+					retrying = true
 					mode := "restarting fresh"
 					if st.session != "" {
 						mode = "resuming session " + st.session
@@ -1512,14 +1522,14 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 						// for all anyone here knows — so it was not the crash
 						// loop -retries exists to stop. A host that sleeps four
 						// times across one long issue must not park it.
-						attempt = 0
-						log.Printf("%s (resume %d/%d; the last run got work done before it "+
+						fruitless = 0
+						log.Printf("%s (retry %d/%d; the last run got work done before it "+
 							"ended, so the -retries budget starts over) in %s",
 							mode, resumes, resumeCeiling, cfg.retryWait)
 					} else {
-						attempt++
+						fruitless++
 						log.Printf("%s (attempt %d/%d) in %s",
-							mode, attempt, cfg.retries, cfg.retryWait)
+							mode, fruitless, cfg.retries, cfg.retryWait)
 					}
 					if err := sleep(ctx, cfg.retryWait); err != nil {
 						return err
@@ -1529,7 +1539,10 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					record(0, outcomeNothing)
 					terminal(0, issueNeedsHuman)
 					if resumes >= resumeCeiling {
-						return park("claude has been resumed %d times on this issue and still has "+
+						// "retried" rather than "resumed": most of these are
+						// resumes, but a dead session turns one into a fresh
+						// restart, and the count covers both.
+						return park("claude has been retried %d times on this issue and still has "+
 							"not finished it — each run gets somewhere and then dies, which needs "+
 							"a human", resumes)
 					}
@@ -1543,7 +1556,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 				}
 			}
 			record(pr.Number, outcomeOpenedPR)
-			attempt = 0
+			fruitless, retrying = 0, false
 		}
 
 		switch pr.State {
