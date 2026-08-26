@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -98,6 +99,18 @@ func fakeClaude(mode string) int {
 		emit(`{"type":"result","subtype":"success","session_id":"sess-costly","duration_ms":1000,` +
 			`"num_turns":4,"total_cost_usd":9,"usage":{"input_tokens":5,"output_tokens":6}}`)
 		return 7
+	case "giant":
+		// One event past the reader's ceiling. The write blocks as soon as the
+		// pipe fills, which is the whole failure: nothing drains it any more, so
+		// a supervisor that waits on this process waits forever.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-giant","model":"claude-opus-5"}`)
+		fmt.Fprint(os.Stdout, `{"type":"assistant","session_id":"sess-giant","message":{"content":[{"type":"text","text":"`)
+		chunk := strings.Repeat("x", 1<<16)
+		for written := 0; written < maxEventBytes+len(chunk); written += len(chunk) {
+			fmt.Fprint(os.Stdout, chunk)
+		}
+		emit(`"}]}}`)
+		return 0
 	case "oddshape":
 		// content as a plain string rather than an array: valid JSON the event
 		// schema cannot hold, and here the only line carrying the session.
@@ -1117,6 +1130,36 @@ func TestExecClaudeKillsAStalledRun(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 10*time.Second {
 		t.Errorf("watchdog took %s to fire", elapsed)
+	}
+}
+
+// An event too large for the reader used to end the scan silently. The child
+// then blocked writing into a pipe nobody was draining, cmd.Wait never
+// returned, and the run died as a -stall kill a quarter of an hour later —
+// reported as a stall, which is the one thing it was not. It has to fail
+// straight away, and say what actually happened.
+func TestExecClaudeReportsAnEventTooLargeToRead(t *testing.T) {
+	captureLog(t)
+	cfg := fakeClaudeConfig(t, "giant")
+	cfg.stall = 0 // the watchdog must not be what rescues this
+
+	// A backstop, not the mechanism: without the fix nothing ends the run, and
+	// a suite that hangs for ten minutes says less than one that fails.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	start := time.Now()
+	rep, err := execClaude(ctx, cfg, "/implement-issue 7", "", "implement-issue", 0)
+	if err == nil || !strings.Contains(err.Error(), "could not read the event stream") {
+		t.Fatalf("an unreadable event should be reported as one, got err=%v", err)
+	}
+	if !errors.Is(err, bufio.ErrTooLong) {
+		t.Errorf("err = %v, want the scanner's own cause wrapped in it", err)
+	}
+	if rep.sessionID != "sess-giant" {
+		t.Errorf("session id = %q, want %q so the retry can resume it", rep.sessionID, "sess-giant")
+	}
+	if elapsed := time.Since(start); elapsed > 15*time.Second {
+		t.Errorf("took %s to give up, so the child was waited out rather than killed", elapsed)
 	}
 }
 

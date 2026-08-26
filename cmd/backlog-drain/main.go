@@ -1370,6 +1370,14 @@ func buildArgs(cfg config, prompt, resumeID string) []string {
 	)
 }
 
+// maxEventBytes is the largest stream-json event the reader will accept.
+// Generous because an event can carry a whole file's contents, and bounded
+// because a scanner with no ceiling would grow its buffer to whatever a run
+// emits. An event over it is a read error rather than a truncation — see
+// execClaude, which reports it and kills the run instead of letting the child
+// block on a pipe that stopped being drained.
+const maxEventBytes = 32 * 1024 * 1024
+
 // watchTick is how often the stall watchdog samples: often enough to honour a
 // short -stall promptly, capped so long production runs stay quiet.
 func watchTick(stall time.Duration) time.Duration {
@@ -1682,8 +1690,8 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes strin
 	}
 
 	sc := bufio.NewScanner(stdout)
-	sc.Buffer(make([]byte, 64*1024), 32*1024*1024) // events carrying file contents can be large
-	missing := ""                                  // the diagnosis, once the inventory rules the prompt's command out
+	sc.Buffer(make([]byte, 64*1024), maxEventBytes)
+	missing := "" // the diagnosis, once the inventory rules the prompt's command out
 	for sc.Scan() {
 		lastEvent.Store(time.Now().UnixNano())
 		ev, ok := parseEvent(sc.Bytes())
@@ -1716,6 +1724,15 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes strin
 		}
 	}
 
+	// A read that failed leaves the child writing into a pipe nobody is
+	// draining, so it blocks and cmd.Wait never returns — which is why the kill
+	// comes before the wait rather than after it. Left to itself the failure
+	// surfaced as a -stall kill up to fifteen minutes later, reported as a stall.
+	scanErr := sc.Err()
+	if scanErr != nil {
+		_ = cmd.Process.Kill()
+	}
+
 	err = cmd.Wait()
 	if cmd.ProcessState != nil {
 		rep.exitCode = cmd.ProcessState.ExitCode()
@@ -1734,6 +1751,16 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes strin
 	}
 	if rep.stalled {
 		return rep, fmt.Errorf("run stalled: no output events for %s", cfg.stall)
+	}
+	// Behind the deliberate kills above, which close the pipe themselves and so
+	// end the scan at EOF rather than in an error, and ahead of the crash report
+	// below, which on this path is only the kill just made. An ordinary error
+	// rather than a dead end, so the caller resumes: a resumed session re-reads
+	// where it got to and need not produce the same oversized event again.
+	if scanErr != nil {
+		return rep, fmt.Errorf("could not read the event stream: %w — a single event larger than "+
+			"%d MB is the likeliest cause, and the run was killed rather than left blocked "+
+			"writing into a pipe nobody was reading", scanErr, maxEventBytes/(1024*1024))
 	}
 	// Deliberately not gated on the exit code: the CLI reports this as a
 	// nonzero exit today, which is exactly what made it look like a crash

@@ -122,6 +122,14 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
 
 ### Fixed
 
+- A stream event too large to read is reported as one, and the run is killed
+  rather than waited on. The reader has a 32 MB ceiling — an event can carry a
+  whole file — and a line over it ended the read silently. The CLI then blocked
+  writing into a pipe nothing was draining, so the supervisor waited on a
+  process that would never exit, and the run died as a `-stall` kill up to
+  fifteen minutes later. **Operator impact:** that failure now surfaces in
+  seconds, saying what it was; it is still treated as a crash, so the run is
+  resumed on the usual `-retries` budget rather than parking the issue.
 - The recorded `plugin_version` is the copy of the skill that actually drove the
   run. It was whichever entry `claude plugin list --json` happened to name
   first, and that list holds more than one when a `--plugin-dir` copy is loaded
