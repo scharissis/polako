@@ -178,6 +178,24 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   and nothing else: a default branch carrying a commit of its own, work in the
   way, or a checkout sitting on another branch is reported in the log and left
   exactly as it is, never rebased or reset.
+- **Operator impact:** four interruptions the supervisor did not recover from.
+  `SIGTERM` and `SIGHUP` now end the run the way `SIGINT` always did, so a
+  machine shutting down or a service manager stopping the unit takes the running
+  `claude` down with the supervisor — previously it was orphaned, keeping
+  `acceptEdits` and the whole `--allowedTools` set, free to push a branch and
+  open a PR that a restarted drain would then race with a second run on the same
+  issue. A crashed session that turns out to be unresumable — its transcript
+  truncated by a hard kill, or aged out of the CLI's retention — is given up on
+  and the next attempt starts fresh, instead of failing on it identically until
+  the issue parks as "claude crashed and 3 resume attempts failed". `-retries`
+  now counts consecutive *fruitless* crashes: a run cut off after real work
+  resets it rather than spending it, so a laptop that sleeps four times across
+  one long issue no longer parks a healthy one, with a crude ceiling on total
+  resumes per issue still guaranteeing the loop ends. And the read-only GitHub
+  lookups that decide what to work next are retried a few times before their
+  failure is believed, the way the waiting paths always did — waking from sleep
+  is exactly when a `gh` call fails for a few seconds. A `gh` that genuinely
+  cannot answer is still fatal, and writes are still made once.
 
 ## [0.6.1]
 
