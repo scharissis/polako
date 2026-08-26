@@ -282,6 +282,121 @@ func TestStatsByModelAndTag(t *testing.T) {
 	}
 }
 
+// The drain fixture is what a real directory looks like the first time -drain
+// is used: two processes that both worked issue #1 and disagreed about how it
+// ended, the records a version before ids left behind, and a third drain on
+// another repository whose records are the newest of the lot.
+const fixtureDrainsMain = `
+{"v":1,"kind":"run","ts":"2026-08-19T09:00:00Z","ended":"2026-08-19T09:10:00Z","repo":"r/r","issue":2,"pr":1,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":0.50,"tokens":{"cache_read":500000},"model":"claude-opus-5"}
+{"v":1,"kind":"issue","ts":"2026-08-19T09:30:00Z","repo":"r/r","issue":2,"pr":1,"outcome":"merged"}
+{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T09:10:00Z","drain":"aaaa1111","repo":"r/r","issue":1,"pr":2,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":1.00,"tokens":{"cache_read":1000000},"model":"claude-opus-5"}
+{"v":1,"kind":"issue","ts":"2026-08-20T09:20:00Z","drain":"aaaa1111","repo":"r/r","issue":1,"pr":2,"outcome":"needs_human"}
+{"v":1,"kind":"run","ts":"2026-08-21T09:00:00Z","ended":"2026-08-21T09:30:00Z","drain":"bbbb2222","repo":"r/r","issue":1,"pr":3,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":2.00,"tokens":{"cache_read":2000000},"model":"claude-opus-5"}
+{"v":1,"kind":"issue","ts":"2026-08-21T10:00:00Z","drain":"bbbb2222","repo":"r/r","issue":1,"pr":3,"outcome":"merged"}
+`
+
+const fixtureDrainsOther = `
+{"v":1,"kind":"run","ts":"2026-08-22T09:00:00Z","ended":"2026-08-22T09:10:00Z","drain":"cccc3333","repo":"o/o","issue":9,"pr":4,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":3.00,"tokens":{"cache_read":3000000},"model":"claude-opus-5"}
+{"v":1,"kind":"issue","ts":"2026-08-22T09:30:00Z","drain":"cccc3333","repo":"o/o","issue":9,"pr":4,"outcome":"merged"}
+`
+
+func drainFixtureDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"r--r.jsonl": fixtureDrainsMain,
+		"o--o.jsonl": fixtureDrainsOther,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(strings.TrimPrefix(body, "\n")), 0o600); err != nil {
+			t.Fatalf("writing fixture %s: %v", name, err)
+		}
+	}
+	return dir
+}
+
+func TestStatsByDrain(t *testing.T) {
+	out := stats(t, "-metrics", drainFixtureDir(t), "-by", byDrain)
+	want := `by drain
+  drain     issues  merged  runs   cost  $/merged  tokens
+  cccc3333       1       1     1  $3.00     $3.00      3M
+  bbbb2222       1       1     1  $2.00     $2.00      2M
+  aaaa1111       1       1     1  $1.00     $1.00      1M
+  (none)         1       1     1  $0.50     $0.50    500k
+`
+	if !strings.Contains(out, want) {
+		t.Errorf("-by drain table differs\n--- got ---\n%s\n--- want ---\n%s", out, want)
+	}
+}
+
+// Records written before the field existed are not a parse failure and not a
+// gap: they are one more drain nobody can name.
+func TestStatsGroupsRecordsWithNoDrainIDUnderNone(t *testing.T) {
+	out := stats(t, "-metrics", fixtureDir(t), "-by", byDrain)
+	if !hasLine(out, "(none) 5 3 7") {
+		t.Errorf("a file written before drain ids existed should still group, whole:\n%s", out)
+	}
+	// And it is selectable, so a row of that table can be typed straight back
+	// in rather than being a dead end.
+	if got := stats(t, "-metrics", fixtureDir(t), "-drain", noneGroup); !hasLine(got, "total 7 — ok 5") {
+		t.Errorf("-drain %s should select exactly the records with no id:\n%s", noneGroup, got)
+	}
+}
+
+// The filter has to run before the latest-wins dedupe of terminal records:
+// both drains here recorded issue #1 ending, and the older one's report must
+// show what that drain concluded rather than what the next one did.
+func TestStatsFiltersToOneDrainBeforeDedupingIssues(t *testing.T) {
+	dir := drainFixtureDir(t)
+
+	older := stats(t, "-metrics", dir, "-drain", "aaaa1111")
+	for _, want := range []string{
+		"filtered from drain aaaa1111",
+		"terminal 1 — merged 0 (0%), needs human 1",
+		"total $1.00",
+	} {
+		if !hasLine(older, want) {
+			t.Errorf("-drain aaaa1111 is missing %q:\n%s", want, older)
+		}
+	}
+
+	newer := stats(t, "-metrics", dir, "-drain", "bbbb2222")
+	if !hasLine(newer, "terminal 1 — merged 1 (100%)") || !hasLine(newer, "total $2.00") {
+		t.Errorf("-drain bbbb2222 should report only its own work:\n%s", newer)
+	}
+}
+
+// "last" is the flag's whole point on a drain that is still running: the id is
+// in a startup line scrolled off the screen an hour ago.
+func TestStatsDrainLastPicksTheNewestDrainInScope(t *testing.T) {
+	dir := drainFixtureDir(t)
+
+	// The report names the id it resolved to, not the word that was typed —
+	// so a report pasted somewhere still says which drain it covered.
+	last := stats(t, "-metrics", dir, "-drain", drainLast)
+	if !hasLine(last, "filtered from drain cccc3333") || !hasLine(last, "total $3.00") {
+		t.Errorf(`-drain last should be the newest drain of all:\n%s`, last)
+	}
+	// In scope, not overall: the last drain to touch one repository is a
+	// different question from the last drain anywhere.
+	perRepo := stats(t, "-metrics", dir, "-drain", drainLast, "-repo", "r/r")
+	if !hasLine(perRepo, "filtered for r/r from drain bbbb2222") || !hasLine(perRepo, "total $2.00") {
+		t.Errorf("-drain last should resolve inside -repo:\n%s", perRepo)
+	}
+	windowed := stats(t, "-metrics", dir, "-drain", drainLast, "-since", "120h")
+	if !hasLine(windowed, "from drain cccc3333") {
+		t.Errorf("-drain last should resolve inside -since:\n%s", windowed)
+	}
+}
+
+// An id nobody wrote is not an error — it is a report with nothing in it, and
+// the line has to say which drain came up empty.
+func TestStatsOnADrainWithNoRecords(t *testing.T) {
+	out := stats(t, "-metrics", drainFixtureDir(t), "-drain", "deadbeef")
+	if !strings.Contains(out, "from drain deadbeef") {
+		t.Errorf("want the empty report to name the drain asked for:\n%s", out)
+	}
+}
+
 // Batches are normally one tag each, so an issue worked under two of them is
 // counted under both — and said so, rather than quietly inflating a column.
 func TestStatsNotesIssuesSpanningGroups(t *testing.T) {
