@@ -28,6 +28,13 @@ const fakeClaudeEnv = "BACKLOG_DRAIN_FAKE_CLAUDE"
 const fakePluginEnv = "BACKLOG_DRAIN_FAKE_PLUGIN_VERSION"
 
 func TestMain(m *testing.M) {
+	// A notify command inherits every variable the drain has, the fake-CLI ones
+	// included, so what says this invocation is the notifier is the one variable
+	// only a notification carries. Checked first for that reason: it takes no
+	// arguments, so argv cannot tell it apart from a bare claude run.
+	if dest := os.Getenv(fakeNotifyEnv); dest != "" && os.Getenv(notifyPrefix+"EVENT") != "" {
+		os.Exit(fakeNotify(dest))
+	}
 	// A drain test exports both fake-CLI variables, and every child process
 	// inherits both, so argv is what decides which CLI this invocation is.
 	if state := os.Getenv(fakeGhEnv); state != "" && len(os.Args) > 1 && slices.Contains(ghSubcommands, os.Args[1]) {
@@ -1882,18 +1889,26 @@ func TestEnvDefaultsRejectAValueTheFlagCannotParse(t *testing.T) {
 	}
 }
 
-// BACKLOG_DRAIN_VERSION is what a Dockerfile or CI job pins an install with.
-// Honouring it would turn every drain on that machine into a version print.
-func TestEnvDefaultsIgnoreVersion(t *testing.T) {
+// The two flags that are actions rather than preferences. BACKLOG_DRAIN_VERSION
+// is what a Dockerfile or CI job pins an install with, and BACKLOG_DRAIN_DRY_RUN
+// is what an operator exports to preview one repository and forgets; honouring
+// either would turn every drain on that machine into a print that exits before
+// doing any work, and exits 0 doing it.
+func TestEnvDefaultsIgnoreTheActionFlags(t *testing.T) {
 	t.Setenv("BACKLOG_DRAIN_VERSION", "0.6.0")
+	t.Setenv("BACKLOG_DRAIN_DRY_RUN", "1")
 
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	showVersion := fs.Bool("version", false, "")
+	dry := fs.Bool("dry-run", false, "")
 	if err := applyEnvDefaults(fs); err != nil {
 		t.Fatalf("applyEnvDefaults: %v", err)
 	}
 	if *showVersion {
 		t.Error("-version must not be settable from the environment")
+	}
+	if *dry {
+		t.Error("-dry-run must not be settable from the environment")
 	}
 }

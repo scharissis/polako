@@ -13,6 +13,33 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
 
 ### Added
 
+- `-dry-run`: resolve the next issue, print the exact `claude` invocation it
+  would get, and exit. The queue is resolved the way a real drain resolves it —
+  `-skip`, `needs-human`, and the preference for an issue waiting on an answer
+  when nothing else is ready — and an issue whose branch already carries a PR is
+  reported as the PR it would wait on rather than a run it would not make.
+  Nothing is run and nothing is written: every GitHub call is a read, no label
+  is declared, and run-data recording is forced off so a `BACKLOG_DRAIN_METRICS`
+  in the environment cannot leave a record of a run that never happened. The
+  invocation goes to stdout and the narration to stderr, so it can be piped
+  somewhere and pasted. It is an action rather than a preference, so — like
+  `-version`, and unlike every other flag — it takes no default from the
+  environment: a `BACKLOG_DRAIN_DRY_RUN` left in a profile would turn every
+  later drain into a successful exit that worked nothing.
+
+- **Operator impact:** `-notify <command>` runs a command of your choosing
+  whenever the drain needs a human — an issue parked, an issue blocked on an
+  answer, the backlog drained, or the drain stopping early on a fatal error or a
+  spent `-max-session-cost`. Off unless asked for. It exists for the states that
+  are otherwise silent: the drain handles a parked or blocked issue by working
+  the queue behind it, so the only trace is a label on a thread nobody is
+  watching until morning. Context arrives in `BACKLOG_DRAIN_NOTIFY_EVENT`,
+  `_ISSUE`, `_REPO` and `_REASON` — numbers, identifiers and this program's own
+  words, never issue or PR text. The command is run directly rather than through
+  a shell (put a pipeline in a script), a failing or hanging hook is logged and
+  never ends a drain, and a `-notify` naming a program that is not on `PATH` is
+  refused at startup rather than at the first notification hours later.
+
 - **Operator impact:** three caps on what a drain may spend, all off by default
   so nothing changes for a drain that sets none. `-max-cost` parks an issue
   once this drain's runs on it have cost that many dollars; `-max-issue-time`
