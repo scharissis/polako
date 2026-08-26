@@ -630,9 +630,12 @@ drain's job.
 | `-dir` | `.` | Path to the repository's main checkout, used to resolve the repository when `-repo` is not given. |
 | `-label` | *(none)* | Only count issues carrying this label, the same scoping a drain's `-label` applies. |
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how open PRs are matched back to issues. |
+| `-strict-order` | `false` | Report as a drain run with `-strict-order` would: an issue awaiting an answer keeps its place, so `next` can name it rather than the ready issue behind it. |
 
-All four take environment defaults the same way the drain's do, so a
-`BACKLOG_DRAIN_LABEL` that scopes your drain scopes the report of it too.
+They take environment defaults the same way the drain's do, so a
+`BACKLOG_DRAIN_LABEL` that scopes your drain scopes the report of it too — and
+anything narrowing or reordering the snapshot is named on the header line, since
+a flag left in a profile is otherwise invisible here.
 
 **Reads only.** Every call it makes is one of the read subcommands the drain
 itself re-derives state with at startup — `gh issue list`, `gh pr list`, `gh pr
@@ -647,6 +650,10 @@ machine.
 It prints no issue, PR or comment text — numbers, branches, labels and states
 only. That is what you need in order to decide where to go next, and it keeps
 text anybody on the internet can write out of your terminal.
+
+`-skip` is deliberately not among the flags: it is a head-of-line escape hatch
+typed on one invocation rather than a property of the backlog, and the person
+running `status` is the one who typed it.
 
 Two things worth knowing about the numbers. **Quiet** is the age of the newest
 comment on a thread, which is a proxy for how long the question has waited:

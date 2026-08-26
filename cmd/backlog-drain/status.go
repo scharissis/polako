@@ -55,6 +55,7 @@ type statusOptions struct {
 	repo         string
 	label        string
 	branchPrefix string
+	strictOrder  bool
 }
 
 // runStatus is the `status` subcommand: parse its own flags, read GitHub, print
@@ -68,6 +69,8 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time)
 		"repository to report on (owner/name), instead of whichever -dir is a checkout of")
 	fs.StringVar(&opt.label, "label", "", "only count issues carrying this label, as a drain would (empty = all)")
 	fs.StringVar(&opt.branchPrefix, "branch-prefix", "issue-", "branch name prefix the skill uses")
+	fs.BoolVar(&opt.strictOrder, "strict-order", false,
+		"report as a drain run with -strict-order would: an issue awaiting an answer keeps its place in the queue")
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: backlog-drain status [flags]\n\n"+
 			"Prints where the backlog stands, derived from GitHub: the queue in the\n"+
@@ -117,6 +120,7 @@ func statusConfig(ctx context.Context, opt statusOptions) (config, error) {
 		ghRetryWait:  ghRetryDelay,
 		label:        opt.label,
 		branchPrefix: opt.branchPrefix,
+		strictOrder:  opt.strictOrder,
 	}
 	if _, err := exec.LookPath(cfg.ghBin); err != nil {
 		return cfg, fmt.Errorf("%q not found on PATH (%w) — status reads GitHub through it", cfg.ghBin, err)
@@ -128,7 +132,11 @@ func statusConfig(ctx context.Context, opt statusOptions) (config, error) {
 	cfg.dir = abs
 
 	if repo := strings.TrimSpace(opt.repo); repo != "" {
-		if strings.Count(repo, "/") != 1 {
+		// Both halves, not just the separator: "owner/" reaches gh as a
+		// repository with no name and comes back as a lookup failure nobody can
+		// trace to the flag that caused it.
+		owner, name, _ := strings.Cut(repo, "/")
+		if strings.Count(repo, "/") != 1 || owner == "" || name == "" {
 			return cfg, fmt.Errorf("-repo %q is not owner/name — e.g. -repo %s", repo, "octocat/hello-world")
 		}
 		cfg.repo, cfg.ghRepo = repo, repo
@@ -161,6 +169,10 @@ type statusSnapshot struct {
 	// undetailed is how many open PRs on issue branches were left as numbers
 	// alone because statusPRs was reached.
 	undetailed []int
+	// strictOrder is the -strict-order the queue was read under, kept because it
+	// changes what "next" means rather than what is in the queues: a flagged
+	// issue holds its place, and everything behind it waits on it.
+	strictOrder bool
 }
 
 // statusPR is one open PR on a branch the skill named, and what GitHub says
@@ -194,15 +206,22 @@ func readStatus(ctx context.Context, cfg config, now time.Time) (statusSnapshot,
 		return snap, err
 	}
 	// The drain's own rule, in dryRun's words: the lowest ready issue, and with
-	// none, the lowest issue waiting on an answer.
-	snap.next = pickLowest(snap.queues.ready, nil)
-	if snap.next == 0 {
+	// none, the lowest issue waiting on an answer. -strict-order is the one
+	// thing that changes it — openIssues folds the two queues into one there, so
+	// a flagged issue keeps its place and everything behind it waits.
+	snap.strictOrder = cfg.strictOrder
+	if cfg.strictOrder {
+		snap.next = pickLowest(append(slices.Clone(snap.queues.ready), snap.queues.blocked...), nil)
+	} else if snap.next = pickLowest(snap.queues.ready, nil); snap.next == 0 {
 		snap.next = pickLowest(snap.queues.blocked, nil)
 	}
 
 	for _, issue := range snap.queues.blocked {
 		comments, err := issueComments(ctx, cfg, issue)
 		if err != nil {
+			if ctx.Err() != nil {
+				return snap, ctx.Err()
+			}
 			// One thread that would not answer is not a reason to report
 			// nothing: the issue is still listed, without its span.
 			continue
@@ -274,8 +293,17 @@ func readStatusPRs(ctx context.Context, cfg config, q issueQueues) ([]statusPR, 
 			undetailed = append(undetailed, prs[i].number)
 			continue
 		}
-		view, err := prStatus(ctx, cfg, prs[i].number)
+		// Retried like the two list reads above it: one blip on `pr view` would
+		// otherwise drop the PR out of the `needs you` line, which is the whole
+		// point of the report.
+		view, err := retryRead(ctx, cfg, fmt.Sprintf("reading PR #%d", prs[i].number),
+			func() (prView, error) { return prStatus(ctx, cfg, prs[i].number) })
 		if err != nil {
+			if ctx.Err() != nil {
+				// Ctrl+C is not a PR whose state would not read. Reporting a
+				// table of "not read" and exiting 0 would claim GitHub answered.
+				return nil, nil, ctx.Err()
+			}
 			// Same tolerance as a thread that would not answer: the PR is
 			// listed, without the state nobody could read.
 			continue
@@ -348,11 +376,22 @@ func renderStatus(w io.Writer, cfg config, snap statusSnapshot) {
 	}
 }
 
+// statusScope names what narrowed or reordered the report, so a snapshot that
+// covers less than the whole backlog cannot be read as one that covers all of
+// it — the flags are settable from the environment, and one forgotten in a
+// profile is otherwise invisible here.
 func statusScope(cfg config) string {
-	if cfg.label == "" {
+	var parts []string
+	if cfg.label != "" {
+		parts = append(parts, "issues labelled "+cfg.label)
+	}
+	if cfg.strictOrder {
+		parts = append(parts, "-strict-order")
+	}
+	if len(parts) == 0 {
 		return ""
 	}
-	return " — issues labelled " + cfg.label
+	return " — " + strings.Join(parts, ", ")
 }
 
 func queuePairs(snap statusSnapshot) [][2]string {
@@ -390,21 +429,33 @@ func queueLine(ready []int) string {
 	return fmt.Sprintf("%s — %s", plural(len(ready), "issue"), issueRefs(ready))
 }
 
-// nextLine says what a drain starting now would do first. The three cases are
-// the drain's own: work the lowest ready issue, or — with none — run the lowest
-// issue waiting on an answer to find out whether the reply is already on the
-// thread, or find nothing to do at all.
+// nextLine says what a drain starting now would do first. The cases are the
+// drain's own, in the drain's own order: nothing to do at all, else restart
+// safety — an existing PR means the skill is never re-run, whichever queue the
+// issue came out of — else work the lowest ready issue, or, with none, run the
+// lowest issue waiting on an answer to find out whether the reply is already on
+// the thread.
+//
+// Restart safety comes before the awaiting-answer wording because processIssue
+// puts it first: a flagged issue whose branch already carries a PR is
+// supervised, not re-run.
 func nextLine(snap statusSnapshot) string {
-	switch {
-	case snap.next == 0:
+	if snap.next == 0 {
 		return "nothing — every open issue is parked"
-	case slices.Contains(snap.queues.blocked, snap.next):
-		return fmt.Sprintf("#%d — nothing else is workable, so it would re-run that issue "+
-			"to see whether your reply is on the thread", snap.next)
 	}
 	if pr := findPR(snap, snap.next); pr != nil {
 		return fmt.Sprintf("#%d — its branch already has PR #%d, so it would wait on that rather "+
 			"than run the skill again", snap.next, pr.number)
+	}
+	if slices.Contains(snap.queues.blocked, snap.next) {
+		why := "nothing else is workable"
+		if snap.strictOrder {
+			// It is not that nothing else is workable — issues behind it are.
+			// -strict-order is why they wait.
+			why = "-strict-order holds the queue behind it"
+		}
+		return fmt.Sprintf("#%d — %s, so it would re-run that issue "+
+			"to see whether your reply is on the thread", snap.next, why)
 	}
 	return fmt.Sprintf("#%d", snap.next)
 }

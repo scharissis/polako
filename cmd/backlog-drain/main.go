@@ -2381,8 +2381,10 @@ func (c issueComment) fromBot() bool { return c.User.Type == "Bot" }
 // comments are a machine's is simply not in that answer. REST puts a type on
 // every author, which is the whole reason for the detour.
 //
-// Repo-implicit, like every other gh call here: they all run in cfg.dir and let
-// gh resolve the repository from the checkout.
+// The path's {owner}/{repo} are gh's own placeholders, filled in from whatever
+// repository it resolved out of cfg.dir — which is how every call here reads on
+// a drain. ghArgs substitutes them by hand when cfg.ghRepo names one instead,
+// since `gh api` has no --repo to take.
 func issueComments(ctx context.Context, cfg config, issue int) ([]issueComment, error) {
 	path := fmt.Sprintf("repos/{owner}/{repo}/issues/%d/comments?per_page=100", issue)
 	out, err := retryRead(ctx, cfg, fmt.Sprintf("reading #%d's comments", issue), func() ([]byte, error) {

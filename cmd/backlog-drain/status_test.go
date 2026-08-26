@@ -195,6 +195,47 @@ func TestStatusNamesTheAnswerItWouldChase(t *testing.T) {
 	}
 }
 
+// -strict-order is the one flag that changes which issue is next without
+// changing what is in the queues: a flagged issue keeps its place, and the
+// ready issues behind it wait. A report that ignored it would name an issue
+// the drain it describes is not going to touch.
+func TestStatusHonoursStrictOrder(t *testing.T) {
+	state := func() *ghState {
+		return &ghState{Issues: map[string]*fakeIssue{
+			"4": {Open: true, Labels: []string{awaitingAnswerLabel}, Comments: 1},
+			"8": {Open: true},
+		}}
+	}
+	cfg, _ := statusConfigFor(t, state())
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	if snap.next != 8 {
+		t.Errorf("next = %d, want #8: by default a drain works past the issue awaiting an answer", snap.next)
+	}
+
+	strict, _ := statusConfigFor(t, state())
+	strict.strictOrder = true
+	snap, err = readStatus(context.Background(), strict, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	if snap.next != 4 {
+		t.Fatalf("next = %d, want #4: -strict-order waits in place on it", snap.next)
+	}
+	var out strings.Builder
+	renderStatus(&out, strict, snap)
+	for _, want := range []string{
+		"example/repo — -strict-order", // said out loud: the flag can come from the environment
+		"next          #4 — -strict-order holds the queue behind it",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("report is missing %q\ngot:\n%s", want, out.String())
+		}
+	}
+}
+
 // An empty backlog is a real answer, and the one an operator most wants said
 // plainly rather than inferred from three absent sections.
 func TestStatusSaysWhenTheBacklogIsDrained(t *testing.T) {
@@ -389,6 +430,30 @@ func TestNeedsYouOnlyNamesWhatAPersonMustMove(t *testing.T) {
 	}
 	if needsYou(statusSnapshot{}) != "" {
 		t.Errorf("needsYou = %q on an idle backlog, want nothing", needsYou(statusSnapshot{}))
+	}
+}
+
+// Restart safety outranks the awaiting-answer wording, because processIssue
+// puts it first: a flagged issue whose branch already carries a PR is
+// supervised, never re-run. Saying otherwise sends an operator looking for a
+// Claude run that will not happen.
+func TestStatusNextRespectsRestartSafetyOnAFlaggedIssue(t *testing.T) {
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues: map[string]*fakeIssue{
+			"4": {Open: true, Labels: []string{awaitingAnswerLabel}, Comments: 1},
+		},
+		PRs: map[string]*fakePR{"issue-4": {Number: 20, State: "OPEN", Mergeable: "MERGEABLE"}},
+	})
+
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	if snap.next != 4 {
+		t.Fatalf("next = %d, want #4", snap.next)
+	}
+	if got, want := nextLine(snap), "#4 — its branch already has PR #20"; !strings.Contains(got, want) {
+		t.Errorf("nextLine = %q, want it to start %q", got, want)
 	}
 }
 

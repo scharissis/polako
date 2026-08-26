@@ -18,10 +18,12 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   an answer and how long its thread has been quiet, what is parked, and every
   open PR on an `issue-N` branch with its mergeable, checks and review state —
   closing with a `needs you:` line naming only the things a person has to move.
-  It takes `-repo`, `-dir`, `-label` and `-branch-prefix`, and honours the same
-  environment defaults, so it can be scoped exactly as the drain it describes
-  is. `-repo owner/name` means it needs no checkout at all: any machine with
-  `gh` authenticated for the repository gets the same answer.
+  It takes `-repo`, `-dir`, `-label`, `-branch-prefix` and `-strict-order`, and
+  honours the same environment defaults, so it can be scoped exactly as the
+  drain it describes is — and it names on its header line whatever narrowed or
+  reordered the snapshot, since a flag left in a profile is otherwise invisible.
+  `-repo owner/name` means it needs no checkout at all: any machine with `gh`
+  authenticated for the repository gets the same answer.
 
   It reports state, not liveness — it never asks whether a drain is running and
   says the same thing either way, which is what makes it useful about a drain
