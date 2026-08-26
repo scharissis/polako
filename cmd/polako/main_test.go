@@ -563,6 +563,8 @@ func TestLogEventRendersProgressLines(t *testing.T) {
 	buf := captureLog(t)
 
 	events := []string{
+		// No session_id: the line predates the field and still has to render,
+		// since a CLI that reports none must not lose its progress line.
 		`{"type":"system","subtype":"init","model":"claude-opus-5"}`,
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"Gathering context on issue #48.\nStarting now."}]}}`,
 		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"gh issue view 48 --json body,comments"}}]}}`,
@@ -595,6 +597,22 @@ func TestLogEventRendersProgressLines(t *testing.T) {
 	}
 	if strings.Contains(out, "ignored") || strings.Contains(out, "not even json") {
 		t.Errorf("tool results / junk lines should not be rendered\ngot:\n%s", out)
+	}
+}
+
+// The session id is the one handle that reopens a run in full, and the stream
+// is the only place it is ever announced. A run whose line does not carry it
+// cannot be found again, however completely it was recorded.
+func TestLogEventNamesTheSession(t *testing.T) {
+	buf := captureLog(t)
+	ev, ok := parseEvent([]byte(
+		`{"type":"system","subtype":"init","model":"claude-opus-5","session_id":"0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9"}`))
+	if !ok {
+		t.Fatal("init event should parse")
+	}
+	logEvent(ev)
+	if want := "session started (model claude-opus-5, session 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9)"; !strings.Contains(buf.String(), want) {
+		t.Errorf("output missing %q\ngot:\n%s", want, buf.String())
 	}
 }
 

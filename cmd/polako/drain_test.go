@@ -520,6 +520,10 @@ func TestDrainParksADeadIssueAndKeepsGoing(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"issue #1 needs a human: the run completed but produced no PR and no questions",
+		// A park is when somebody wants to read what the run actually did, so
+		// the id that reopens it goes beside the reason — in the log, never in
+		// the reason itself, which is posted to the issue thread.
+		"issue #1: `claude --resume sess-xyz` reopens what the last skill run on it did",
 		"=== issue #2 ===",
 		// The run cost something, so the summary prices the drain and each
 		// issue in it — including the issue this drain only waited on, whose
