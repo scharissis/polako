@@ -59,6 +59,13 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
 
 ### Changed
 
+- The README now documents `claude --plugin-dir` — with a `-claude` wrapper
+  script, since there is no pass-through for extra `claude` arguments — as the
+  way to run both halves from a working tree. It used to say a local
+  marketplace developed against `main`, which cannot work: the marketplace
+  entry is a `github` source pinned to a `ref`, so adding the clone still
+  installs the tagged release and the tree is never read.
+
 - **Operator impact:** a wait on `awaiting-answer` now ends when a *person*
   comments, not when the comment count goes up. Whether an issue is blocked was
   already the label's job; when the wait ends was still any new comment, so CI, a

@@ -422,7 +422,7 @@ backlog-drain stats
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `-dir` | `.` | Path to the repository's main checkout. |
-| `-claude` | `claude` | The Claude Code binary to invoke. |
+| `-claude` | `claude` | The Claude Code binary to invoke. There is no pass-through for extra `claude` arguments; point this at a wrapper script when you need one — see [Running both halves from a working tree](#running-both-halves-from-a-working-tree). |
 | `-skill` | `backlog-drain:implement-issue` | Slash command run once per issue. Plugin skills are namespaced `<plugin>:<skill>`; pass `-skill implement-issue` if you copied the skill into `~/.claude/skills` instead. |
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how PRs are matched back to issues. |
 | `-label` | *(none)* | Only process issues carrying this label. Doubles as an access control — see [Security](#security). |
@@ -1040,9 +1040,12 @@ newest `vX.Y.Z` tag, so a plugin tracking `main` would drift from its binary by
 construction. A test holds the `ref` to never being *ahead* of `plugin.json` —
 lagging is the normal state between steps 2 and 4.
 
-To develop against `main` rather than a release, add the clone as a local
-marketplace (`claude plugin marketplace add ./`) or use the
-[hand install](#the-skill-by-hand).
+That pin is also why adding your clone as a local marketplace does not develop
+against `main`: `claude plugin marketplace add ./` registers the marketplace
+from the working tree, but the entry it reads is a `github` source with a `ref`,
+so the install that follows fetches the *tagged release* from GitHub and the
+tree is never read. To run the tip of a working tree, see
+[Running both halves from a working tree](#running-both-halves-from-a-working-tree).
 
 ### Smoke-testing the skill
 
@@ -1122,6 +1125,72 @@ Claude process re-execute the test binary as a fake CLI that streams canned
 stall-watchdog paths for real. A second group of tests keeps the repository
 honest — the plugin manifest, the shipped skill and the documented flags all
 have to agree with the code.
+
+### Running both halves from a working tree
+
+The suite never runs the skill, so a change to
+[`SKILL.md`](skills/implement-issue/SKILL.md) is only ever proven by driving a
+real issue with it. That means running your working tree, not an install — and
+an install is what every marketplace path gives you, because the entry pins a
+`ref` ([Publishing and versioning](#publishing-and-versioning)).
+
+`--plugin-dir` is the way in. It loads a plugin from a directory for one
+session:
+
+```bash
+claude --plugin-dir /path/to/backlog-drain
+```
+
+Two things make it the right tool rather than a workaround. The skill keeps its
+namespaced form, `/backlog-drain:implement-issue` — the same name the
+supervisor's `-skill` default already expects — so nothing needs telling. And it
+replaces an installed plugin of the same name for that session, so you do not
+have to uninstall your working copy to test tip and reinstall it afterwards.
+To confirm which one a session actually loaded, the `init` event names the path
+and version it came from:
+
+```bash
+claude --plugin-dir /path/to/backlog-drain -p "hi" --output-format stream-json --verbose | head -1
+```
+
+The supervisor has no pass-through for extra `claude` arguments, so a drain
+cannot ask for `--plugin-dir` itself. Wrap it instead — save one of these as
+`~/bin/claude-tip`, or `claude-tip.cmd` on Windows — and point `-claude` at it:
+
+```sh
+#!/bin/sh
+exec claude --plugin-dir /path/to/backlog-drain "$@"
+```
+
+```cmd
+@echo off
+claude --plugin-dir C:\path\to\backlog-drain %*
+```
+
+```bash
+chmod +x ~/bin/claude-tip && backlog-drain -claude ~/bin/claude-tip
+```
+
+Both startup probes are ordinary `claude` invocations — `claude --version` and
+`claude plugin list --json` — so a wrapper that `exec`s the real thing carries
+them through — and the second one then lists the tree's copy at `session` scope
+beside whatever is installed. That session copy is the version the supervisor
+reports and records, because it is the one replacing the install for the run; a
+stale install left behind does not shadow it. The `init` event above still names
+the directory it came from. Build the binary from the same tree and both halves
+are tip:
+
+```bash
+go build -o backlog-drain ./cmd/backlog-drain && ./backlog-drain -claude ~/bin/claude-tip -once
+```
+
+Which path when:
+
+| Path | What it runs | Use it for |
+| --- | --- | --- |
+| `claude --plugin-dir <clone>` | the working tree, for one session | Developing against `main`. |
+| `claude plugin install backlog-drain@scharissis` | the tagged release | Smoke-testing a release, and normal use — see [Smoke-testing the skill](#smoke-testing-the-skill). |
+| [Hand install](#the-skill-by-hand) | a copy you made | Not involving the plugin system at all. Remember `-skill implement-issue`. |
 
 ## License
 
