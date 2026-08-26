@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -32,6 +33,12 @@ const fakeClaudeEnv = "POLAKO_FAKE_CLAUDE"
 // is what a CLI too old to have it does.
 const fakePluginEnv = "POLAKO_FAKE_PLUGIN_VERSION"
 
+// fakeArgsLogEnv names a file every fake claude run appends its argv to, one
+// line per invocation. It is how a test sees what was actually dispatched —
+// including a run the supervisor threw away and re-dispatched, which by design
+// leaves no other trace at all.
+const fakeArgsLogEnv = "POLAKO_FAKE_ARGS_LOG"
+
 func TestMain(m *testing.M) {
 	// A notify command inherits every variable the drain has, the fake-CLI ones
 	// included, so what says this invocation is the notifier is the one variable
@@ -46,6 +53,9 @@ func TestMain(m *testing.M) {
 		os.Exit(fakeGh(state, os.Args[1:]))
 	}
 	if mode := os.Getenv(fakeClaudeEnv); mode != "" {
+		// Here rather than inside fakeClaude, which recurses: a mode that
+		// delegates to another must still count as the one invocation it is.
+		recordFakeArgs()
 		os.Exit(fakeClaude(mode))
 	}
 	code := m.Run()
@@ -263,6 +273,16 @@ func fakeClaude(mode string) int {
 			`{\"type\":\"authentication_error\",\"message\":\"OAuth access token is invalid.\"},` +
 			`\"request_id\":null}"}`)
 		return 1
+	case "remotereject":
+		// A CLI that does not take --remote-control in print mode: it prints a
+		// usage error naming the flag and exits without emitting one event, so
+		// nothing ever started and no model was reached. Dispatched again
+		// without the flag it behaves like any healthy run.
+		if slices.Contains(os.Args, "--remote-control") {
+			fmt.Fprintln(os.Stderr, "error: unknown option '--remote-control' (--print)")
+			return 1
+		}
+		return fakeClaude("stream")
 	case "hang":
 		emit(`{"type":"system","subtype":"init","session_id":"sess-hang","model":"claude-opus-5"}`)
 		time.Sleep(30 * time.Second) // the stall watchdog is expected to kill this
@@ -312,6 +332,41 @@ func fakeClaude(mode string) int {
 	}
 	fmt.Fprintf(os.Stderr, "unknown fake claude mode %q\n", mode)
 	return 2
+}
+
+// recordFakeArgs appends this invocation's argv to the file fakeArgsLogEnv
+// names, if a test asked for one. Best-effort and silent: a fake CLI that
+// cannot write its own bookkeeping should fail the assertion that reads it,
+// not the run it is impersonating.
+func recordFakeArgs() {
+	path := os.Getenv(fakeArgsLogEnv)
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintln(f, strings.Join(os.Args[1:], " "))
+}
+
+// watchClaudeArgs points the fake CLI at a fresh log and returns the reader for
+// it: one string per invocation the supervisor made, in order.
+func watchClaudeArgs(t *testing.T) func() []string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "claude-args.log")
+	t.Setenv(fakeArgsLogEnv, path)
+	return func() []string {
+		b, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			t.Fatalf("reading the fake CLI's argv log: %v", err)
+		}
+		return strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
+	}
 }
 
 // errFakeCrash is a simulated death, not a broken harness: the run exits
@@ -1075,6 +1130,34 @@ func TestBuildArgsPassesTheRequestedModel(t *testing.T) {
 	}
 }
 
+// -remote is on by default and is the one thing that makes a run visible off
+// this machine, so both halves are pinned: what registration adds, and that
+// turning it off leaves the invocation exactly as it was before the flag
+// existed.
+func TestBuildArgsRegistersWithRemoteControl(t *testing.T) {
+	off := config{permissionMode: "acceptEdits", tools: "Read", repo: "example/repo"}
+	on := off
+	on.remote, on.remoteOff = true, new(atomic.Bool)
+	on = remoteRun(on, 52)
+
+	args := buildArgs(on, "/implement-issue 52", "")
+	i := slices.Index(args, "--remote-control")
+	if i < 0 || args[i+1] != "polako example/repo#52" {
+		t.Errorf("registration should name the session after the queue, got %v", args)
+	}
+
+	if got := buildArgs(off, "/implement-issue 52", ""); slices.Contains(got, "--remote-control") {
+		t.Errorf("-remote=false must invoke claude exactly as before the flag existed, got %v", got)
+	}
+
+	// A CLI already found to reject the flags is the same as -remote=false, for
+	// every run the shift dispatches after it finds out.
+	on.dropRemote()
+	if got := buildArgs(on, "/implement-issue 52", ""); slices.Contains(got, "--remote-control") {
+		t.Errorf("a CLI that rejected registration must not be asked again, got %v", got)
+	}
+}
+
 func TestBuildArgsAppliesAddTools(t *testing.T) {
 	cfg := config{permissionMode: "plan", tools: "Read", addTools: "Bash(zig:*)"}
 	args := buildArgs(cfg, "p", "")
@@ -1314,6 +1397,94 @@ func TestExecClaudeStreamsEventsAndCapturesSession(t *testing.T) {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("stream not rendered: missing %q\ngot:\n%s", want, buf.String())
 		}
+	}
+}
+
+// The whole point of feature-detecting rather than assuming: against a CLI that
+// will not take the flags in print mode, a default shift has to behave exactly
+// as it did before they existed.
+func TestExecClaudeFallsBackWhenTheCLIRejectsRemoteControl(t *testing.T) {
+	buf := captureLog(t)
+	args := watchClaudeArgs(t)
+	cfg := fakeClaudeConfig(t, "remotereject")
+	cfg.remote, cfg.remoteOff, cfg.repo = true, new(atomic.Bool), "example/repo"
+	cfg = remoteRun(cfg, 7)
+
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0)
+	if err != nil {
+		t.Fatalf("a rejected registration must not fail the run: %v", err)
+	}
+	// The report the caller gets is the second attempt's, and only the second
+	// attempt's. That is what keeps the rejection off -retries and out of the
+	// run data: nothing above execClaude ever sees the first one.
+	if rep.sessionID != "sess-xyz" || rep.exitCode != 0 {
+		t.Errorf("report = %+v, want the re-dispatched run's, not the rejected attempt's", rep)
+	}
+	if rep.remoteRejected {
+		t.Error("the report handed back must be the one that ran, not the one that was refused")
+	}
+	if got := args(); len(got) != 2 ||
+		!strings.Contains(got[0], "--remote-control") || strings.Contains(got[1], "--remote-control") {
+		t.Errorf("want one attempt with the flag and one without, got %v", got)
+	}
+	if !strings.Contains(buf.String(), "cannot register headless runs with Remote Control") {
+		t.Errorf("the fall-back should be explained once\ngot:\n%s", buf.String())
+	}
+
+	// Learned for the shift, not for the run: the next dispatch under the same
+	// config asks for nothing, so the explanation is said once however long the
+	// backlog is.
+	if _, err := execClaude(context.Background(), cfg, "/implement-issue 8", "", "implement-issue", 0); err != nil {
+		t.Fatalf("the run after a rejection: %v", err)
+	}
+	if got := args(); len(got) != 3 || strings.Contains(got[2], "--remote-control") {
+		t.Errorf("a later run must not ask again, got %v", got)
+	}
+	if n := strings.Count(buf.String(), "cannot register headless runs"); n != 1 {
+		t.Errorf("the explanation was logged %d times, want exactly 1", n)
+	}
+}
+
+// The detection has to be narrow: an ordinary crash also exits nonzero, and
+// reading one as a rejected flag would silently stop registering for the rest
+// of the shift — and, worse, hand the caller a second run it never asked for.
+func TestRejectedRemoteIgnoresEverythingButAUsageError(t *testing.T) {
+	usage := &tailWriter{}
+	fmt.Fprintln(usage, "error: unknown option '--remote-control' (--print)")
+	other := &tailWriter{}
+	fmt.Fprintln(other, "No conversation found with the given session ID")
+
+	for _, tc := range []struct {
+		name string
+		rep  runReport
+		tail *tailWriter
+		want bool
+	}{
+		{"refused the flag", runReport{exitCode: 1}, usage, true},
+		{"registration was never asked for", runReport{exitCode: 1}, nil, false},
+		{"a dead session, which also emits nothing", runReport{exitCode: 1}, other, false},
+		{"the session started, so the flag was taken", runReport{exitCode: 1, started: true}, usage, false},
+		{"a clean exit", runReport{exitCode: 0}, usage, false},
+		{"Ctrl+C before the first event", runReport{exitCode: -1, interrupted: true}, usage, false},
+	} {
+		if got := rejectedRemote(tc.rep, tc.tail); got != tc.want {
+			t.Errorf("%s: rejectedRemote = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// The tail is bounded because a six-hour run's stderr is not, and the bytes a
+// usage error lives in are the last ones.
+func TestTailWriterKeepsTheEnd(t *testing.T) {
+	w := &tailWriter{}
+	fmt.Fprint(w, strings.Repeat("x", maxStderrTail))
+	fmt.Fprint(w, "the last thing it said")
+	got := w.String()
+	if len(got) != maxStderrTail {
+		t.Errorf("tail length = %d, want it capped at %d", len(got), maxStderrTail)
+	}
+	if !strings.HasSuffix(got, "the last thing it said") {
+		t.Errorf("tail = %q…, want it to end with the newest output", got[:40])
 	}
 }
 
