@@ -35,6 +35,7 @@ func metricsConfig(t *testing.T, spec string) config {
 		stall:          15 * time.Minute,
 		claudeVersion:  "2.1.34",
 		pluginVersion:  "0.3.0",
+		drainID:        "d1d2d3d4",
 		rec:            newRecorder(spec),
 	}
 }
@@ -86,6 +87,7 @@ func TestRunRecordIsSelfDescribing(t *testing.T) {
 		"kind":            "run",
 		"ts":              "2026-08-24T10:15:00Z",
 		"ended":           "2026-08-24T10:34:02Z",
+		"drain":           "d1d2d3d4",
 		"repo":            "scharissis/backlog-drain",
 		"issue":           float64(12),
 		"pr":              float64(34),
@@ -235,6 +237,7 @@ func TestIssueRecordHoldsOnlyTheTerminalOutcome(t *testing.T) {
 	for key, want := range map[string]any{
 		"v": float64(recordVersion), "kind": "issue", "repo": cfg.repo,
 		"issue": float64(12), "pr": float64(34), "outcome": issueMerged, "tag": "baseline",
+		"drain": cfg.drainID,
 	} {
 		if got[key] != want {
 			t.Errorf("record[%q] = %v, want %v", key, got[key], want)
@@ -414,6 +417,59 @@ func TestToolsHashDistinguishesAllowlists(t *testing.T) {
 	}
 	if len(a) != 8 {
 		t.Errorf("tools hash %q should be 8 hex digits", a)
+	}
+}
+
+// The id's whole job is telling apart the drains a timestamp cannot: two
+// started in the same second, and one running while another finishes.
+func TestDrainIDsAreShortAndNeverRepeat(t *testing.T) {
+	seen := map[string]bool{}
+	for range 100 {
+		id := newDrainID()
+		if len(id) != 8 || strings.Trim(id, "0123456789abcdef") != "" {
+			t.Fatalf("drain id %q should be 8 hex digits — it goes in a log line to be retyped", id)
+		}
+		if seen[id] {
+			t.Fatalf("drain id %q came back twice; two drains sharing one make -drain meaningless", id)
+		}
+		seen[id] = true
+	}
+}
+
+// Every record one process writes carries the same id, whatever kind it is —
+// that is what makes `stats -drain` a report on a drain rather than on some of
+// its runs.
+func TestEveryRecordOneDrainWritesCarriesItsID(t *testing.T) {
+	dir := t.TempDir()
+	cfg := metricsConfig(t, dir)
+	rc := runContext{issue: 12, reason: reasonImplement, outcome: outcomeOpenedPR,
+		started: time.Now(), ended: time.Now()}
+	cfg.rec.recordRun(cfg, rc, sampleReport())
+	cfg.rec.recordIssue(cfg, 12, 34, issueMerged, prFacts{})
+
+	// A second process, same directory, same repository: the ordinary case of
+	// a drain restarted after the first was killed.
+	other := metricsConfig(t, dir)
+	other.drainID = "0f0f0f0f"
+	other.rec.recordRun(other, rc, sampleReport())
+
+	lines := readRecords(t, dir, cfg.repo)
+	if len(lines) != 3 {
+		t.Fatalf("wrote %d lines, want 3", len(lines))
+	}
+	ids := map[string]int{}
+	for _, line := range lines {
+		var got struct {
+			Drain string `json:"drain"`
+		}
+		if err := json.Unmarshal([]byte(line), &got); err != nil {
+			t.Fatalf("record is not JSON: %v", err)
+		}
+		ids[got.Drain]++
+	}
+	if ids[cfg.drainID] != 2 || ids[other.drainID] != 1 {
+		t.Errorf("ids across the file = %v, want 2 from %q and 1 from %q",
+			ids, cfg.drainID, other.drainID)
 	}
 }
 

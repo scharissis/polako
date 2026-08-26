@@ -33,14 +33,39 @@ import (
 	"time"
 )
 
-// The -by groupings. Kept to three: JSONL is already jq, DuckDB and
-// spreadsheet food, so this command answers the questions worth a flag and
-// leaves the long tail to those.
+// The -by groupings. Kept short: JSONL is already jq, DuckDB and spreadsheet
+// food, so this command answers the questions worth a flag and leaves the long
+// tail to those.
 const (
 	byIssue = "issue"
 	byModel = "model"
 	byTag   = "tag"
+	byDrain = "drain"
 )
+
+// byGroups is the whitelist and the order the error message lists them in.
+var byGroups = []string{byIssue, byModel, byTag, byDrain}
+
+// orList renders a choice the way the flag's help and its error both want it:
+// "issue, model, tag or drain", so a message that lists four reads as English
+// rather than as a dump of the slice behind it.
+func orList(items []string) string {
+	if len(items) < 2 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " or " + items[len(items)-1]
+}
+
+// drainLast is the -drain value meaning "whichever drain wrote the newest
+// record in scope". It is what makes the flag usable on a drain that is still
+// running, without going back to the startup line for its id.
+const drainLast = "last"
+
+// noneGroup labels records carrying no value for the field in hand — an
+// untagged run, and every record written before drain ids existed. It is also
+// what -drain accepts for that set, so a row of the -by table can be typed
+// straight back in.
+const noneGroup = "(none)"
 
 // errFlagsReported marks a flag error the flag package has already printed,
 // together with the usage text that explains it. Saying it a second time on
@@ -51,6 +76,7 @@ type statsOptions struct {
 	repo  string
 	since time.Duration
 	by    string
+	drain string
 }
 
 // runStats is the `stats` subcommand: parse its own flags, read the records,
@@ -64,7 +90,9 @@ func runStats(args []string, out io.Writer, now time.Time) error {
 		"directory holding the run-data records (default ~/.backlog-drain/metrics)")
 	fs.StringVar(&opt.repo, "repo", "", "only count records for this repository (owner/name)")
 	fs.DurationVar(&opt.since, "since", 0, "only count records newer than this ago (e.g. 168h)")
-	fs.StringVar(&opt.by, "by", "", "also break the numbers down by issue, model or tag")
+	fs.StringVar(&opt.drain, "drain", "",
+		`only count records from this drain's id, or "`+drainLast+`" for the newest drain in scope`)
+	fs.StringVar(&opt.by, "by", "", "also break the numbers down by "+orList(byGroups))
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: backlog-drain stats [flags]\n\n"+
 			"Reports on the run data recorded by previous drains. Reads only;\n"+
@@ -90,9 +118,10 @@ func runStats(args []string, out io.Writer, now time.Time) error {
 		// for a window, with no line in the output to correct them.
 		return fmt.Errorf("-since %s is negative — it is how far back to look, e.g. -since 168h", opt.since)
 	}
-	if opt.by != "" && !slices.Contains([]string{byIssue, byModel, byTag}, opt.by) {
-		return fmt.Errorf("-by %q: choose one of %s, %s or %s", opt.by, byIssue, byModel, byTag)
+	if opt.by != "" && !slices.Contains(byGroups, opt.by) {
+		return fmt.Errorf("-by %q: choose one of %s", opt.by, orList(byGroups))
 	}
+	opt.drain = strings.TrimSpace(opt.drain)
 
 	dir, err := statsDir(metrics)
 	if err != nil {
@@ -150,6 +179,11 @@ type dataset struct {
 	files   int
 	skipped int      // lines that were not usable JSON — a torn tail, or junk
 	unread  []string // files that could not be opened at all
+	// drain is what -drain resolved to: an id, noneGroup for the records
+	// written before ids existed, or empty when the flag was not given. The
+	// report names this rather than what was typed, so a "last" run says which
+	// drain it turned out to cover.
+	drain string
 }
 
 func loadRecords(dir string, opt statsOptions, now time.Time) (dataset, error) {
@@ -163,7 +197,10 @@ func loadRecords(dir string, opt statsOptions, now time.Time) (dataset, error) {
 	if opt.since > 0 {
 		cutoff = now.Add(-opt.since)
 	}
-	terminal := map[issueKey]issueRecord{}
+	// Kept as read, not deduped yet: -drain has to be applied first, and the
+	// dedupe below is what would otherwise decide between two drains' records
+	// before either was filtered out.
+	var terminal []issueRecord
 	for _, path := range paths {
 		f, err := os.Open(path)
 		if err != nil {
@@ -204,15 +241,8 @@ func loadRecords(dir string, opt statsOptions, now time.Time) (dataset, error) {
 					ds.skipped++
 					continue
 				}
-				if !inScope(rec.Repo, rec.TS, opt, cutoff) {
-					continue
-				}
-				// Latest wins: the supervisor can be killed between a merge
-				// and its record, so the same issue may reach a terminal
-				// state twice. The newest line is the one that happened.
-				key := issueKey{rec.Repo, rec.Issue}
-				if prev, ok := terminal[key]; !ok || !recTime(rec.TS).Before(recTime(prev.TS)) {
-					terminal[key] = rec
+				if inScope(rec.Repo, rec.TS, opt, cutoff) {
+					terminal = append(terminal, rec)
 				}
 			}
 			// Any other kind belongs to a newer writer than this reader.
@@ -224,15 +254,81 @@ func loadRecords(dir string, opt statsOptions, now time.Time) (dataset, error) {
 			ds.skipped++
 		}
 	}
-	ds.issues = make([]issueRecord, 0, len(terminal))
-	for _, rec := range terminal {
-		ds.issues = append(ds.issues, rec)
+	// Before the dedupe, never after: two drains can each record the same
+	// issue reaching a terminal state, and a latest-wins dedupe run first
+	// would hand the drain being asked about the other drain's record — or
+	// drop the issue from its report entirely.
+	if opt.drain != "" {
+		ds.drain = resolveDrain(opt.drain, ds.runs, terminal)
+		ds.runs = slices.DeleteFunc(ds.runs, func(r runRecord) bool { return !sameDrain(r.Drain, ds.drain) })
+		terminal = slices.DeleteFunc(terminal, func(r issueRecord) bool { return !sameDrain(r.Drain, ds.drain) })
 	}
-	sort.Slice(ds.issues, func(i, j int) bool { return lessIssue(ds.issues[i], ds.issues[j]) })
+	ds.issues = dedupeIssues(terminal)
 	sort.SliceStable(ds.runs, func(i, j int) bool {
 		return recTime(ds.runs[i].TS).Before(recTime(ds.runs[j].TS))
 	})
 	return ds, nil
+}
+
+// dedupeIssues keeps one terminal record per issue, latest wins: the
+// supervisor can be killed between a merge and its record, so the same issue
+// may reach a terminal state twice. The newest line is the one that happened,
+// and among lines sharing a timestamp it is the last one written.
+func dedupeIssues(records []issueRecord) []issueRecord {
+	latest := map[issueKey]issueRecord{}
+	for _, rec := range records {
+		key := issueKey{rec.Repo, rec.Issue}
+		if prev, ok := latest[key]; !ok || !recTime(rec.TS).Before(recTime(prev.TS)) {
+			latest[key] = rec
+		}
+	}
+	out := make([]issueRecord, 0, len(latest))
+	for _, rec := range latest {
+		out = append(out, rec)
+	}
+	sort.Slice(out, func(i, j int) bool { return lessIssue(out[i], out[j]) })
+	return out
+}
+
+// resolveDrain turns the -drain value into the id to filter on. "last" is the
+// drain that wrote the newest record already in scope, so it composes with
+// -repo and -since rather than overriding them: the last drain to touch one
+// repository is a different question from the last drain overall.
+//
+// Records are timed by when they were written — a run's end, not its start —
+// because a long run begun before a second drain started is still the older
+// record of the two.
+func resolveDrain(spec string, runs []runRecord, issues []issueRecord) string {
+	if !strings.EqualFold(spec, drainLast) {
+		return spec
+	}
+	var newest time.Time
+	id := ""
+	for _, r := range runs {
+		if t := endOf(r); t.After(newest) {
+			newest, id = t, r.Drain
+		}
+	}
+	for _, r := range issues {
+		if t := recTime(r.TS); t.After(newest) {
+			newest, id = t, r.Drain
+		}
+	}
+	// Nothing in scope, or nothing in scope carrying an id: either way the
+	// answer is the set of records with none, which is what the -by table
+	// already calls (none).
+	if id == "" {
+		return noneGroup
+	}
+	return id
+}
+
+// sameDrain matches a record's id against the one -drain resolved to.
+func sameDrain(got, want string) bool {
+	if want == noneGroup {
+		return got == ""
+	}
+	return strings.EqualFold(got, want)
 }
 
 func lessIssue(a, b issueRecord) bool {
@@ -405,7 +501,7 @@ func mergeSpan(is *issueStats) (time.Duration, bool) {
 
 func render(w io.Writer, ds dataset, opt statsOptions) {
 	if len(ds.runs) == 0 && len(ds.issues) == 0 {
-		fmt.Fprintf(w, "no run data in %s%s\n", ds.dir, scopeSuffix(opt))
+		fmt.Fprintf(w, "no run data in %s%s\n", ds.dir, scopeSuffix(opt, ds))
 		if len(ds.unread) > 0 {
 			fmt.Fprintf(w, "%s there could not be opened: %s\n",
 				plural(len(ds.unread), "file"), strings.Join(ds.unread, ", "))
@@ -428,7 +524,7 @@ func render(w io.Writer, ds dataset, opt statsOptions) {
 	switch opt.by {
 	case byIssue:
 		printIssueTable(w, issues)
-	case byModel, byTag:
+	case byModel, byTag, byDrain:
 		printGroupTable(w, ds, issues, opt.by)
 	}
 	if note := resumeNote(ds); note != "" {
@@ -436,13 +532,18 @@ func render(w io.Writer, ds dataset, opt statsOptions) {
 	}
 }
 
-func scopeSuffix(opt statsOptions) string {
+func scopeSuffix(opt statsOptions, ds dataset) string {
 	var parts []string
 	if opt.repo != "" {
 		parts = append(parts, "for "+opt.repo)
 	}
 	if opt.since > 0 {
 		parts = append(parts, "in the last "+dur(opt.since))
+	}
+	// The resolved id, never the literal "last": a report that names the drain
+	// it covered is one that still means the same thing tomorrow.
+	if opt.drain != "" {
+		parts = append(parts, "from drain "+ds.drain)
 	}
 	if len(parts) == 0 {
 		return ""
@@ -468,7 +569,7 @@ func sourcePairs(ds dataset, opt statsOptions) [][2]string {
 		}
 		pairs = append(pairs, [2]string{"window", fmt.Sprintf("%s → %s%s", stamp(from), stamp(to), span)})
 	}
-	if scope := strings.TrimSpace(scopeSuffix(opt)); scope != "" {
+	if scope := strings.TrimSpace(scopeSuffix(opt, ds)); scope != "" {
 		pairs = append(pairs, [2]string{"filtered", scope})
 	}
 	if repos := repoNames(ds); len(repos) > 1 {
@@ -753,10 +854,20 @@ func printIssueTable(w io.Writer, issues []*issueStats) {
 		[]string{"issue", "outcome", "runs", "questions", "cost", "tokens", "wall"}, rows, 2)
 }
 
-// printGroupTable breaks the numbers down by the configuration under test. An
-// issue whose runs span two models or two tags counts under each — the point
-// of the breakdown is comparing batches, and a batch is normally one of both,
-// so the footnote appears only when that assumption does not hold.
+// printGroupTable breaks the numbers down by the configuration under test, or
+// by the drain that did the work. An issue whose runs span two models or two
+// tags counts under each — the point of the breakdown is comparing batches,
+// and a batch is normally one of both, so the footnote appears only when that
+// assumption does not hold. By drain it holds far less often: an issue picked
+// up by one drain and finished by the next is the ordinary shape of a restart.
+//
+// merged is the issue's own final outcome, so every group that worked it
+// counts the merge — the same rule for a drain as for a tag, and what makes
+// $/merged "spent by this group per issue of theirs that shipped". It is why a
+// -by drain row can read merged 1 for a drain whose own terminal record parked
+// the issue, while -drain <id> on the same drain reads needs human 1: the
+// filter narrows the records to that drain's, so the report is that drain's
+// verdict rather than the issue's fate. Two questions, two right answers.
 func printGroupTable(w io.Writer, ds dataset, issues []*issueStats, by string) {
 	type group struct {
 		name   string
@@ -768,12 +879,17 @@ func printGroupTable(w io.Writer, ds dataset, issues []*issueStats, by string) {
 	order := []string{}
 	groups := map[string]*group{}
 	for _, r := range ds.runs {
-		name := r.Tag
-		if by == byModel {
+		var name string
+		switch by {
+		case byModel:
 			name = r.Model
+		case byDrain:
+			name = r.Drain
+		default:
+			name = r.Tag
 		}
 		if name == "" {
-			name = "(none)"
+			name = noneGroup
 		}
 		g, ok := groups[name]
 		if !ok {
