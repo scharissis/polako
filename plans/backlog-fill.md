@@ -530,7 +530,10 @@ every flag, `claude plugin validate .` — with its own `chore(release)` bump.
 
 **Phase 0 — the identity release (0.7.0).** `polako` everywhere the rename
 checklist says — verbs `plan` and `work` — bare invocation prints the verb table
-under the one-line etymology, `status` reserved for issue #50. One release,
+under the one-line etymology, `status` reserved for issue #50. The table
+ships listing only the verbs that exist — `work` and `stats`; `plan` and
+`status` join it as their phase and issue land, so the usage never
+advertises a verb that errors. One release,
 nothing else in it: the noisiest diff of the project's life should contain
 no behavior change to review around. The name is settled provisionally, so
 this lands first; reversing costs one `sed` any time before it ships. If
@@ -632,7 +635,13 @@ is the sharpest example of why this order, since it must land as
 `polako status`, not `backlog-drain status`. Existing hand-written issues
 need nothing else: they carry no `proposed` label, so the queue treats them
 exactly as it always has, and coexistence with proposals is already the
-design. Then comes the dogfood proper: this repository's backlog is
+design. Phases 1 and 2 can join that same queue: filed by hand as two
+issues written from this document's own sections, they take numbers above
+the existing backlog, so ascending order works the old items first, then
+the gate, then the skill — one unattended block, with each phase's release
+PR cut by hand after its code merges. Phase 3 then arrives the most honest
+way available: the first interactive run of the new skill, pointed at this
+document, proposes it. Then comes the dogfood proper: this repository's backlog is
 already `-label ready`-gated, and this plan is the vision document — a plan
 run proposing its own remaining phases as an epic under a milestone,
 curated by removing `proposed` and adding `ready`, is the feature eating
