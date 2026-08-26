@@ -219,7 +219,7 @@ func fakeClaude(mode string) int {
 			return 1
 		}
 		return fakeClaude("stream")
-	case "asks", "noisy", "askscrash":
+	case "asks", "noisy", "askscrash", "asksbot":
 		// A run that leaves something behind on the thread. Both then stream
 		// like a healthy one, because the supervisor's whole reading of what
 		// happened comes from GitHub afterwards, not from the events.
@@ -280,6 +280,15 @@ func fakeSkillEffect(mode string) error {
 		// CI, a bot, a linked-PR notice: a comment the run did not write, and
 		// one nobody is waiting for an answer to.
 		err = call("comment", n, "--body", "Build #1234 passed.")
+	case mode == "asksbot" && !slices.Contains(is.Labels, awaitingAnswerLabel):
+		// Asks the same question, but the thread then moves twice while the
+		// supervisor polls: CI comments first, and only later the person who was
+		// actually asked. Far enough apart that a poll falls between them.
+		if err = call("comment", n, "--body", "Which of the two should it do?"); err == nil {
+			if err = call("edit", n, "--add-label", awaitingAnswerLabel); err == nil {
+				is.BotOnRead, is.ReplyOnRead = 2, 4
+			}
+		}
 	case slices.Contains(is.Labels, awaitingAnswerLabel) && mode == "askscrash":
 		// Dispatched to fold the answer in and dies on the way, leaving the
 		// asking run's flag standing.

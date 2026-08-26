@@ -59,6 +59,21 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
 
 ### Changed
 
+- **Operator impact:** a wait on `awaiting-answer` now ends when a *person*
+  comments, not when the comment count goes up. Whether an issue is blocked was
+  already the label's job; when the wait ends was still any new comment, so CI, a
+  linked-PR notice or a stale-bot nudge each cost a full Claude run to discover
+  that the thread was as blocked as before. GitHub Apps are now read and skipped,
+  and the log says so — `still awaiting a reply (2 new comment(s), none of them
+  from a person)` — rather than repeating "still awaiting a reply" while GitHub
+  plainly shows new comments. Comments from the account the drain authenticates
+  as are deliberately *not* skipped: on most setups that is the operator's own
+  account, so skipping them would swallow the answer and wait forever, and
+  nothing the drain writes can end a wait in any case. Deciding this needs an
+  author type, which `gh issue view --json comments` does not carry — its author
+  payload is a login and nothing else — so the thread is now read through `gh
+  api`. No new permission: the same read access the drain already needed.
+
 - The exit summary now prices the drain and each issue in it, and says when
   runs that reported no cost make the total an undercount. Dollars appear only
   when this drain spent some, so a drain that only waited on a PR an earlier

@@ -99,6 +99,21 @@ your answer in is what removes it — or the park, if the issue is handed back
 before anyone gets that far, since a parked issue waits on a decision rather
 than on a reply.
 
+**Ending that wait is the same judgement, made again.** A wait ends on a comment
+written by a *person* after the question was flagged. GitHub Apps — Actions, a
+CI reporter, a stale-bot nudge — are read and skipped, and the log says so
+rather than going quiet:
+
+```
+issue #16 still awaiting a reply (2 new comment(s), none of them from a person)
+```
+
+Comments from the account the drain itself authenticates as are *not* skipped,
+because on most setups that account is yours — skipping them would swallow the
+answer the wait exists for. Nothing the drain writes can end a wait anyway: it
+posts the question the wait starts after, a park notice that takes the issue out
+of the queue, and a closing comment.
+
 **A question does not hold up the queue either.** A flagged issue is put down
 and the next one is worked, exactly the way a park advances past an
 unimplementable issue. It is picked back up when the reply lands and nothing
@@ -126,11 +141,12 @@ summary: 3 issues merged, 0 issues parked, 1 issue awaiting an answer, $12.86 sp
   waiting #16 ($0.64) — reply on the thread and the next drain picks them up
 ```
 
-One caveat worth knowing: the comment count a wait compares against lives in
-memory, so a restarted drain cannot tell whether a reply arrived while it was
-down. It spends one run per already-flagged issue finding out — the skill
-re-reads the thread and stops again without re-asking if the answer is not there
-yet — and holds a baseline from then on.
+One caveat worth knowing: the baseline a wait compares against lives in memory,
+so a restarted drain cannot tell whether a reply arrived while it was down — it
+cannot even pick its own question out of the thread, running as it does under
+your credentials. It spends one run per already-flagged issue finding out — the
+skill re-reads the thread and stops again without re-asking if the answer is not
+there yet — and holds a baseline from then on.
 
 **An open PR that goes red is repaired, not just watched.** Each poll reads the
 PR's check rollup and its reviews as well as its mergeability. A conflict gets a

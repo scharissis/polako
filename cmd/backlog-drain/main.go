@@ -28,6 +28,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -104,9 +105,9 @@ func authAdvice(err error) error {
 // because nobody has decided anything, and not fatal, because every issue
 // behind it is still perfectly workable.
 //
-// baseline is the number of comments on the thread when the question was
-// flagged, so a later check can tell a reply from silence.
-type deferredError struct{ baseline int }
+// baseline is the newest comment on the thread when the question was flagged,
+// so a later check can tell a reply from silence. See commentBaseline.
+type deferredError struct{ baseline int64 }
 
 func (e *deferredError) Error() string { return "waiting for an answer on the issue thread" }
 
@@ -677,9 +678,9 @@ type issueResult struct {
 // which would otherwise be lost every time an issue is put down for an answer.
 type issueState struct {
 	tally    issueTally
-	answered bool // a reply landed, so the next run folds it in
-	awaiting bool // this drain left it flagged for a human
-	baseline int  // comments on the thread when the question was flagged
+	answered bool  // a reply landed, so the next run folds it in
+	awaiting bool  // this drain left it flagged for a human
+	baseline int64 // newest comment on the thread when the question was flagged
 	// session is the resume target: the last session any run on this issue
 	// reported. It outlives a single processIssue call so that a run dispatched
 	// once an answer lands, and then dying before it reports a session of its
@@ -840,11 +841,12 @@ func sessionSpend(results []issueResult, states map[int]*issueState) float64 {
 //
 // An issue this drain did not flag itself is run straight away. Its answer may
 // already be sitting on the thread — left before this process started, or while
-// an earlier one was down — and nothing on GitHub says whether it is. One run
-// settles it for a price the skill keeps low: it re-reads the thread and stops
-// again without re-asking when the answer is not there. From then on this drain
-// holds a comment count to compare against, so the question is only paid for
-// once.
+// an earlier one was down — and nothing on GitHub says whether it is. Which
+// comment is this drain's own question is exactly what it cannot tell, running
+// as it does under the credentials of the person it is asking. One run settles
+// it for a price the skill keeps low: it re-reads the thread and stops again
+// without re-asking when the answer is not there. From then on this drain holds
+// a baseline to compare against, so the question is only paid for once.
 func awaitAnswer(ctx context.Context, cfg config, blocked []int, states map[int]*issueState) (int, error) {
 	for _, issue := range blocked {
 		if st := states[issue]; st == nil || !st.awaiting {
@@ -859,7 +861,7 @@ func awaitAnswer(ctx context.Context, cfg config, blocked []int, states map[int]
 		return 0, err
 	}
 	for _, issue := range blocked {
-		n, err := commentCount(ctx, cfg, issue)
+		comments, err := issueComments(ctx, cfg, issue)
 		if err != nil {
 			if ctx.Err() != nil {
 				return 0, ctx.Err()
@@ -867,10 +869,14 @@ func awaitAnswer(ctx context.Context, cfg config, blocked []int, states map[int]
 			log.Printf("transient: checking #%d comments failed (%v) — will retry", issue, err)
 			continue
 		}
-		if n > states[issue].baseline {
-			log.Printf("new activity on #%d — re-running to fold the answers in", issue)
+		baseline := states[issue].baseline
+		if replyArrived(comments, baseline) {
+			log.Printf("somebody replied on #%d — re-running to fold the answers in", issue)
 			states[issue].answered = true
 			return issue, nil
+		}
+		if note := botsOnly(comments, baseline); note != "" {
+			log.Printf("issue #%d still awaiting a reply%s", issue, note)
 		}
 	}
 	return 0, nil
@@ -1473,12 +1479,14 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 				case asked:
 					// Questions were posted and flagged (even if the run then
 					// crashed). The baseline for "a reply arrived" is read now,
-					// so it already counts the question itself.
+					// so the question itself is the newest thing on the thread
+					// and can never be mistaken for its own answer.
 					record(0, outcomeQuestions)
-					baseline, err := commentCount(ctx, cfg, issue)
+					comments, err := issueComments(ctx, cfg, issue)
 					if err != nil {
 						return err
 					}
+					baseline := commentBaseline(comments)
 					// Fired here rather than in either fork below, because both
 					// of them leave the issue waiting on the same person: this
 					// is the state the flag exists for, and -strict-order only
@@ -1496,10 +1504,10 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					}
 					log.Printf("issue #%d is labelled %q — waiting for a reply on the thread",
 						issue, awaitingAnswerLabel)
-					if err := waitForComments(ctx, cfg, issue, baseline); err != nil {
+					if err := waitForReply(ctx, cfg, issue, baseline); err != nil {
 						return err
 					}
-					log.Printf("new activity on #%d — re-running to fold the answers in", issue)
+					log.Printf("somebody replied on #%d — re-running to fold the answers in", issue)
 					fruitless, retrying, st.answered = 0, false, true
 					continue
 				case runErr != nil && fruitless < cfg.retries && resumes < cfg.resumeCeiling:
@@ -2300,26 +2308,83 @@ func issueHasLabel(ctx context.Context, cfg config, issue int, name string) (boo
 	return v.hasLabel(name), nil
 }
 
-// commentCount is a reply detector and nothing more. It used to decide whether
-// a run had asked a question, by comparing the count before and after — which
-// counted CI, bots and passers-by as questions and left the drain waiting on a
-// reply nobody was expecting. awaitingAnswerLabel decides that now; a count is
-// only ever compared against a baseline taken once the issue is already known
-// to be blocked, where any new comment is worth re-reading the thread for.
-func commentCount(ctx context.Context, cfg config, issue int) (int, error) {
-	out, err := retryRead(ctx, cfg, fmt.Sprintf("counting #%d's comments", issue), func() ([]byte, error) {
-		return gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "comments")
+// issueComment is the part of one thread comment a wait decides on: which
+// comment it is, and whether a person or a machine wrote it.
+type issueComment struct {
+	ID   int64 `json:"id"`
+	User struct {
+		// Type is "Bot" for a GitHub App — Actions, Dependabot, a CI
+		// reporter — and "User" for everyone else.
+		Type string `json:"type"`
+	} `json:"user"`
+}
+
+func (c issueComment) fromBot() bool { return c.User.Type == "Bot" }
+
+// issueComments reads a thread oldest-first.
+//
+// Through `gh api` rather than `gh issue view --json comments`, which is the
+// obvious call and the wrong one: its author payload is a login and nothing
+// else. A GitHub App comes back from it as plain "dependabot" — no is_bot
+// field, and no "[bot]" suffix on the login to key off either — so which
+// comments are a machine's is simply not in that answer. REST puts a type on
+// every author, which is the whole reason for the detour.
+//
+// Repo-implicit, like every other gh call here: they all run in cfg.dir and let
+// gh resolve the repository from the checkout.
+func issueComments(ctx context.Context, cfg config, issue int) ([]issueComment, error) {
+	path := fmt.Sprintf("repos/{owner}/{repo}/issues/%d/comments?per_page=100", issue)
+	out, err := retryRead(ctx, cfg, fmt.Sprintf("reading #%d's comments", issue), func() ([]byte, error) {
+		return gh(ctx, cfg, "api", path, "--paginate")
 	})
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	var v struct {
-		Comments []json.RawMessage `json:"comments"`
+	// Decoded page by page rather than in one Unmarshal: --paginate concatenates
+	// what each request answered, and whether that arrives as one merged array
+	// or several back-to-back is gh's business, not this function's.
+	var all []issueComment
+	dec := json.NewDecoder(bytes.NewReader(out))
+	for {
+		var page []issueComment
+		if err := dec.Decode(&page); errors.Is(err, io.EOF) {
+			return all, nil
+		} else if err != nil {
+			return nil, fmt.Errorf("parsing #%d's comments: %w", issue, err)
+		}
+		all = append(all, page...)
 	}
-	if err := json.Unmarshal(out, &v); err != nil {
-		return 0, fmt.Errorf("parsing comments: %w", err)
+}
+
+// commentBaseline marks where a thread stood when a question was flagged: the
+// newest comment on it, which is the question itself. Comment ids only ever
+// increase, so "newer than the baseline" needs no clock and survives an edit or
+// a deletion further up the thread, neither of which an index or a count does.
+func commentBaseline(comments []issueComment) int64 {
+	if len(comments) == 0 {
+		return 0
 	}
-	return len(v.Comments), nil
+	return comments[len(comments)-1].ID
+}
+
+// replyArrived reports whether somebody has answered since the baseline.
+//
+// Only a person ends a wait. CI, a linked-PR notice, a stale-bot nudge and a
+// release announcement all land on a thread that is still exactly as blocked as
+// it was, and each one used to cost a full Claude run to discover that.
+//
+// Comments from the account the drain itself runs as are deliberately *not*
+// excluded. The drain writes three issue comments and none of them can end a
+// live wait: the question is what the baseline is taken after, parking removes
+// awaitingAnswerLabel on its way past, and "Shipped in #N" closes the issue.
+// -post-summary comments on the PR, not here. Meanwhile the drain authenticates
+// as whoever's `gh` credentials it was started with — usually the very person
+// being asked — so filtering the account out would swallow the answer and wait
+// forever. A wait that never ends is worse than a run that ends it early.
+func replyArrived(comments []issueComment, baseline int64) bool {
+	return slices.ContainsFunc(comments, func(c issueComment) bool {
+		return c.ID > baseline && !c.fromBot()
+	})
 }
 
 // pickPR chooses the PR that decides a branch's fate: an open one if any,
@@ -2931,21 +2996,39 @@ func postSummary(ctx context.Context, cfg config, prNumber int, tally issueTally
 	log.Printf("commented the run summary on PR #%d", prNumber)
 }
 
-func waitForComments(ctx context.Context, cfg config, issue, baseline int) error {
+func waitForReply(ctx context.Context, cfg config, issue int, baseline int64) error {
 	for {
 		if err := sleep(ctx, cfg.poll); err != nil {
 			return err
 		}
-		n, err := commentCount(ctx, cfg, issue)
+		comments, err := issueComments(ctx, cfg, issue)
 		if err != nil {
 			log.Printf("transient: checking #%d comments failed (%v) — will retry", issue, err)
 			continue
 		}
-		if n > baseline {
+		if replyArrived(comments, baseline) {
 			return nil
 		}
-		log.Printf("issue #%d still awaiting a reply — next check in %s", issue, cfg.poll)
+		log.Printf("issue #%d still awaiting a reply%s — next check in %s",
+			issue, botsOnly(comments, baseline), cfg.poll)
 	}
+}
+
+// botsOnly says out loud that the thread moved and it still was not an answer.
+// Without it a filtered-out comment is invisible: the log repeats "still
+// awaiting a reply" while GitHub plainly shows new comments, and the honest
+// reading of that is that the drain is broken.
+func botsOnly(comments []issueComment, baseline int64) string {
+	n := 0
+	for _, c := range comments {
+		if c.ID > baseline && c.fromBot() {
+			n++
+		}
+	}
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%d new comment(s), none of them from a person)", n)
 }
 
 func ensureIssueClosed(ctx context.Context, cfg config, issue, prNumber int) error {
@@ -3045,7 +3128,7 @@ func gh(ctx context.Context, cfg config, args ...string) ([]byte, error) {
 // ghReads is how many times a read-only GitHub lookup is attempted before its
 // failure is taken for real.
 //
-// The paths that wait on something — supervisePR, waitForComments — have always
+// The paths that wait on something — supervisePR, waitForReply — have always
 // shrugged a failed gh call off and tried again. The lookups that decide what to
 // work next never did: one of them failing ends the whole drain, and waking from
 // sleep is exactly when a gh call fails for a few seconds because the network
