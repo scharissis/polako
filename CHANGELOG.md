@@ -13,6 +13,27 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
 
 ### Added
 
+- `backlog-drain status`: one snapshot of where the backlog stands, derived
+  from GitHub. The queue in the order a drain would work it, what is waiting on
+  an answer and how long its thread has been quiet, what is parked, and every
+  open PR on an `issue-N` branch with its mergeable, checks and review state —
+  closing with a `needs you:` line naming only the things a person has to move.
+  It takes `-repo`, `-dir`, `-label` and `-branch-prefix`, and honours the same
+  environment defaults, so it can be scoped exactly as the drain it describes
+  is. `-repo owner/name` means it needs no checkout at all: any machine with
+  `gh` authenticated for the repository gets the same answer.
+
+  It reports state, not liveness — it never asks whether a drain is running and
+  says the same thing either way, which is what makes it useful about a drain
+  running on another machine. Every call it makes is a read, using the same `gh`
+  subcommands the drain re-derives its state with; a test asserts the list of
+  calls rather than merely checking that nothing changed. It opens no run-data
+  file, so telemetry stays write-only outside `stats`, and it prints no issue,
+  PR or comment text.
+
+  **Operator impact:** none on what a drain does. The subcommand is new, purely
+  additive, and mutates nothing.
+
 - Run data says which drain produced it. Every process generates a random
   8-character id at startup, stamps it into every record it writes as `drain`,
   and prints it once beside the "recording run data in …" line with the exact

@@ -411,6 +411,13 @@ Be told when it needs you, instead of finding out in the morning:
 backlog-drain -notify ~/bin/tell-me
 ```
 
+Ask where the backlog stands, from anywhere — including about a drain running
+on another machine:
+
+```bash
+backlog-drain status -repo scharissis/backlog-drain
+```
+
 Ask what all of that cost, once some runs have been recorded:
 
 ```bash
@@ -418,6 +425,10 @@ backlog-drain stats
 ```
 
 ## Flags
+
+These are the drain's own. The two report subcommands take their own smaller
+sets — see [`status`](#where-the-backlog-stands-backlog-drain-status) and
+[`stats`](#reading-it-back-backlog-drain-stats).
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
@@ -577,6 +588,74 @@ this namespace: none of them is `BACKLOG_DRAIN_<FLAG>` for any flag, so a
 notification cannot reconfigure a `backlog-drain` you run from inside your own
 hook. A test enforces it.
 
+## Where the backlog stands: `backlog-drain status`
+
+While a drain runs, the only view of it is the terminal it runs in. Everything
+worth knowing is already on GitHub — that is where all the orchestration state
+lives — but reassembling it means a queue page, a label search and a PR tab.
+`status` prints the whole picture at once:
+
+```bash
+backlog-drain status
+```
+
+```
+scharissis/backlog-drain
+  ready         3 issues — #14, #19, #23
+  awaiting you  1 issue — #9 (quiet 26h)
+  parked        1 issue — #5, labelled needs-human
+  next          #14 — its branch already has PR #61, so it would wait on that rather than run the skill again
+
+open prs on issue branches
+  pr   branch    issue  mergeable  checks              review                       url
+  #61  issue-14  #14    mergeable  failing (test-mac)  clear                        https://github.com/scharissis/backlog-drain/pull/61
+  #58  issue-19  #19    mergeable  passing             answered, awaiting re-review  https://github.com/scharissis/backlog-drain/pull/58
+
+needs you: reply on #9; review and merge PR #58; decide what to do about #5 (drop needs-human to requeue)
+```
+
+What it prints is what a drain starting right now would do next — which is the
+same thing a running drain is already doing. It reports **state, not liveness**:
+it never asks whether a drain is running, and says the same thing either way.
+That is what makes it useful from a laptop about a drain running on a server.
+
+The closing `needs you:` line is the point of the whole thing — the items only a
+person can move. A PR the drain would remediate itself (conflicting, red, or
+carrying an unanswered review) is deliberately not on it: that one is still the
+drain's job.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `-repo` | *(whatever `-dir` is a checkout of)* | Repository to report on, `owner/name`. Naming it is what lets the command run from anywhere — no checkout needed, just a `gh` authenticated for the repo. |
+| `-dir` | `.` | Path to the repository's main checkout, used to resolve the repository when `-repo` is not given. |
+| `-label` | *(none)* | Only count issues carrying this label, the same scoping a drain's `-label` applies. |
+| `-branch-prefix` | `issue-` | Branch prefix the skill uses; how open PRs are matched back to issues. |
+
+All four take environment defaults the same way the drain's do, so a
+`BACKLOG_DRAIN_LABEL` that scopes your drain scopes the report of it too.
+
+**Reads only.** Every call it makes is one of the read subcommands the drain
+itself re-derives state with at startup — `gh issue list`, `gh pr list`, `gh pr
+view`, and the REST read of a thread's comments — so nothing here can move an
+issue, a label or a PR. A test asserts the list of calls, which is stronger than
+checking that nothing changed: a write GitHub refuses changes nothing either.
+
+It reads no run data. Those files are write-only outside `stats`, and a status
+that opened them would be wrong anyway about a drain running on somebody else's
+machine.
+
+It prints no issue, PR or comment text — numbers, branches, labels and states
+only. That is what you need in order to decide where to go next, and it keeps
+text anybody on the internet can write out of your terminal.
+
+Two things worth knowing about the numbers. **Quiet** is the age of the newest
+comment on a thread, which is a proxy for how long the question has waited:
+which comment is the skill's question cannot be told apart from here, since the
+drain asks under your own credentials, so this reports what it can actually see.
+And the PR table details the first eight PRs it finds on issue branches — one
+issue is in flight at a time, so there is normally one — with anything past that
+listed by number and said out loud rather than silently dropped.
+
 ## Run data & cost tracking
 
 Every run writes one line of numbers, so you can answer what a drained backlog
@@ -725,9 +804,10 @@ a failed drain.
 
 ### Reading it back: `backlog-drain stats`
 
-`stats` is the binary's one subcommand, and the only thing that ever reads
-those files. A bare `backlog-drain` still drains; nothing about the report
-touches GitHub or starts a run.
+`stats` is the only thing that ever reads those files — its sibling
+[`status`](#where-the-backlog-stands-backlog-drain-status) reads GitHub and
+never touches them. A bare `backlog-drain` still drains; nothing about the
+report touches GitHub or starts a run.
 
 ```bash
 backlog-drain stats
