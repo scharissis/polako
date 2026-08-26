@@ -421,8 +421,8 @@ func drainConfig(t *testing.T, mode string, st *ghState) (config, string) {
 	t.Setenv(fakeClaudeEnv, mode)
 	return config{
 		dir:            t.TempDir(), // not a checkout: worktree cleanup is best-effort
-		claudeBin:      os.Args[0],
-		ghBin:          os.Args[0],
+		claudeBin:      fakeCLI(t),
+		ghBin:          fakeCLI(t),
 		repo:           st.Repo, // preflight fills this in; drain tests call drain directly
 		skill:          defaultSkill,
 		branchPrefix:   "issue-",
