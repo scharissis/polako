@@ -34,6 +34,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"maps"
 	"os"
@@ -291,6 +292,14 @@ type config struct {
 	// at a time, and an issue nobody is working is not in flight.
 	strictOrder bool
 
+	// dryRun resolves the next issue, says what it would do to it, and stops.
+	// No claude process, no GitHub write, no run-data record — which is what
+	// makes it safe to point at a repository nobody here has drained before.
+	dryRun bool
+	// notifyCmd is run whenever the drain reaches a state a person has to move
+	// past. Empty, the default, means no hook at all. See notify.go.
+	notifyCmd string
+
 	// Run-data capture. tag labels a batch of runs so configurations can be
 	// compared later; rec is the sink, and writes nothing when -metrics is off.
 	// postSummary is the one opt-in that shows those numbers to anybody else:
@@ -371,6 +380,10 @@ func parseFlags() config {
 		"process a single issue to a merge, a park or a question, then exit")
 	flag.BoolVar(&cfg.strictOrder, "strict-order", false,
 		"work issues in strict ascending order: wait on one that asked a question instead of moving past it")
+	flag.BoolVar(&cfg.dryRun, "dry-run", false,
+		"resolve the next issue, print the claude invocation it would get, and exit without running or writing anything")
+	flag.StringVar(&cfg.notifyCmd, "notify", "",
+		"command to run when the drain needs a human, with context in "+notifyPrefix+"* (see the README)")
 	flag.StringVar(&cfg.tag, "run-tag", "", "label recorded with every run, for comparing one batch against another")
 	flag.BoolVar(&cfg.postSummary, "post-summary", false,
 		"comment one line of run numbers on each merged PR (runs, tokens, dollars, wall time)")
@@ -398,6 +411,12 @@ func parseFlags() config {
 		os.Exit(0)
 	}
 
+	// A dry run writes nothing, run data included. -metrics is a preference an
+	// operator may well have set in their environment and forgotten, and a
+	// record of a run that never happened is worse than no record at all.
+	if cfg.dryRun {
+		metrics = metricsOff
+	}
 	cfg.rec = newRecorder(metrics)
 	cfg.ghBin = "gh"
 	cfg.skip = parseSkip(skip)
@@ -490,7 +509,100 @@ func run(ctx context.Context, cfg config) error {
 	if err := preflight(ctx, &cfg); err != nil {
 		return err
 	}
+	if cfg.dryRun {
+		return dryRun(ctx, cfg, os.Stdout)
+	}
 	return drain(ctx, cfg)
+}
+
+// dryRun answers "what would this do here?" without doing any of it. It
+// resolves the next issue exactly as the drain would and reports what that
+// issue would get: an invocation, or the PR it would wait on instead.
+//
+// Nothing is run and nothing is written. Every GitHub call it makes is a read,
+// preflight declares no label, and the recorder is off — so pointing it at an
+// unfamiliar repository leaves that repository exactly as it found it.
+//
+// The narration goes to the log and the invocation alone to out — stdout for a
+// real invocation — so the command can be piped somewhere useful instead of
+// being fished out of a transcript.
+func dryRun(ctx context.Context, cfg config, out io.Writer) error {
+	ready, blocked, err := openIssues(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	// What the operator would see if they ran it for real, in the two queues
+	// the drain actually keeps. -skip is applied here as well, so a queue this
+	// prints is a queue this would work.
+	workable := func(ns []int) []int {
+		out := slices.DeleteFunc(slices.Clone(ns), func(n int) bool { return cfg.skip[n] })
+		slices.Sort(out)
+		return out
+	}
+	if queue := workable(ready); len(queue) > 0 {
+		log.Printf("ready: %s", issueRefs(queue))
+	}
+	if waiting := workable(blocked); len(waiting) > 0 {
+		log.Printf("waiting on an answer: %s", issueRefs(waiting))
+	}
+	// The drain takes the lowest ready issue. With none, it runs the lowest
+	// issue waiting on an answer, to find out whether the reply is already on
+	// the thread — which is what awaitAnswer does on a drain that flagged none
+	// of them itself.
+	issue := pickLowest(ready, cfg.skip)
+	if issue == 0 {
+		issue = pickLowest(blocked, cfg.skip)
+	}
+	if issue == 0 {
+		log.Println("no open issues — nothing to drain")
+		return nil
+	}
+	// Restart safety is the first thing an issue is put through, and the answer
+	// an operator most wants from a dry run: an issue whose branch already has
+	// a PR never gets a claude run at all.
+	branch := fmt.Sprintf("%s%d", cfg.branchPrefix, issue)
+	pr, err := prForBranch(ctx, cfg, branch)
+	if err != nil {
+		return err
+	}
+	if pr != nil {
+		log.Printf("issue #%d already has PR #%d (%s) on branch %s — it would wait on that PR "+
+			"rather than run claude: %s", issue, pr.Number, pr.State, branch, pr.URL)
+		return nil
+	}
+	runCfg, prompt, _ := issueRun(cfg, issue)
+	log.Printf("issue #%d would be worked next; the invocation follows on stdout", issue)
+	_, err = fmt.Fprintln(out, commandLine(cfg.claudeBin, buildArgs(runCfg, prompt, "")))
+	return err
+}
+
+// commandLine renders an argv the way a person would type it, so what a dry run
+// prints can be pasted into a shell rather than merely read. The quoting is
+// POSIX because a printed command line has to pick a dialect; nothing here is
+// ever run through a shell, so this is documentation of an argv and not the
+// argv itself.
+func commandLine(bin string, args []string) string {
+	parts := make([]string, 0, len(args)+1)
+	for _, a := range append([]string{bin}, args...) {
+		parts = append(parts, shellQuote(a))
+	}
+	return strings.Join(parts, " ")
+}
+
+// shellQuote wraps anything a shell would not take literally in single quotes —
+// the one form needing no further escaping, bar the single quote itself, which
+// is spelled by closing, escaping and reopening. The allowlist is deliberate:
+// guessing at which punctuation is safe is how a printed command line ends up
+// meaning something else.
+func shellQuote(s string) string {
+	safe := func(r rune) bool {
+		return r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' ||
+			strings.ContainsRune("-_./:=+,@", r)
+	}
+	if s != "" && !strings.ContainsFunc(s, func(r rune) bool { return !safe(r) }) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // issueResult is one issue's fate, kept only long enough to print the summary
@@ -554,6 +666,12 @@ func drain(ctx context.Context, cfg config) error {
 		for _, line := range drainSummary(append(results, stillWaiting(states)...), time.Since(started)) {
 			log.Print(line)
 		}
+		// A drain that ended before the backlog did needs somebody. Ctrl+C is
+		// the exception rather than an oversight: whoever pressed it is at the
+		// keyboard already.
+		if err != nil && !errors.Is(err, context.Canceled) {
+			notify(ctx, cfg, notification{event: notifyStopped, reason: err.Error()})
+		}
 		return err
 	}
 
@@ -565,9 +683,13 @@ func drain(ctx context.Context, cfg config) error {
 		// does not bound that to itself, since it gates the next run rather than
 		// the one in flight.
 		if spent := sessionSpend(results, states); cfg.maxSessionCost > 0 && spent >= cfg.maxSessionCost {
-			log.Printf("this drain has spent %s of its -max-session-cost of %s — stopping here; "+
+			reason := fmt.Sprintf("this drain has spent %s of its -max-session-cost of %s — stopping here; "+
 				"everything is on GitHub, so raise the budget and start it again to carry on",
 				usd(spent), usd(cfg.maxSessionCost))
+			log.Print(reason)
+			// A clean exit, but the backlog is not drained and only a person can
+			// decide to raise the budget — which is what notifyStopped is for.
+			notify(ctx, cfg, notification{event: notifyStopped, reason: reason})
 			return finish(nil)
 		}
 		ready, blocked, err := openIssues(ctx, cfg)
@@ -585,6 +707,8 @@ func drain(ctx context.Context, cfg config) error {
 				// with nothing left to do on it.
 				clear(states)
 				log.Println("no open issues — backlog drained")
+				notify(ctx, cfg, notification{event: notifyDrained,
+					reason: "no open issues left to work"})
 				return finish(nil)
 			}
 			// Nothing else is workable, so the only way forward is an issue
@@ -621,6 +745,10 @@ func drain(ctx context.Context, cfg config) error {
 			delete(states, issue)
 			log.Printf("issue #%d needs a human: %s — parking it and moving on", issue, reason)
 			parkIssue(ctx, cfg, issue, reason)
+			// After the park, not before: by now the label and the comment
+			// saying why are on the issue, so somebody following the
+			// notification finds the whole story there.
+			notify(ctx, cfg, notification{event: notifyParked, issue: issue, reason: reason})
 		case err != nil:
 			return finish(fmt.Errorf("issue #%d: %w", issue, err))
 		default:
@@ -846,6 +974,9 @@ func preflight(ctx context.Context, cfg *config) error {
 			return fmt.Errorf("%q not found on PATH: %w", bin, err)
 		}
 	}
+	if err := checkNotifyCommand(cfg.notifyCmd); err != nil {
+		return err
+	}
 	if _, err := git(ctx, *cfg, "rev-parse", "--git-dir"); err != nil {
 		return fmt.Errorf("-dir %s is not a git checkout: %w", cfg.dir, err)
 	}
@@ -859,11 +990,19 @@ func preflight(ctx context.Context, cfg *config) error {
 	// one is a headless session holding no grant that could create it. Discovering
 	// that at the moment a question needs flagging is the expensive time to find
 	// out — the question gets posted and then never waited on.
-	_ = ensureLabel(ctx, *cfg, awaitingAnswerLabel, "FBCA04",
-		"backlog-drain is waiting for an answer on this issue")
+	//
+	// Not on a dry run, which declares nothing: creating a label is a write, and
+	// the promise is that it leaves the repository as it found it.
+	if !cfg.dryRun {
+		_ = ensureLabel(ctx, *cfg, awaitingAnswerLabel, "FBCA04",
+			"backlog-drain is waiting for an answer on this issue")
+	}
 	cfg.claudeVersion = claudeVersion(ctx, *cfg)
 	cfg.pluginVersion = pluginVersion(ctx, *cfg)
 	log.Printf("%s — running /%s per issue, polling every %s", cfg.repo, cfg.skill, cfg.poll)
+	if cfg.dryRun {
+		log.Println("-dry-run: resolving the next issue only — no claude run, no GitHub write, no run data")
+	}
 	warnOnVersionSkew(drainVersion(), *cfg)
 	if notes := capNotes(*cfg); notes != "" {
 		log.Printf("spend caps in force: %s", notes)
@@ -874,11 +1013,36 @@ func preflight(ctx context.Context, cfg *config) error {
 		// where the PR comments are coming from.
 		log.Printf("-post-summary is on — each merged PR gets one comment of run numbers")
 	}
+	if cfg.notifyCmd != "" {
+		log.Printf("-notify is on — `%s` runs when an issue parks, an issue asks a question, "+
+			"the backlog drains, or the drain stops early", cfg.notifyCmd)
+	}
 	if cfg.rec.enabled() {
 		// Say where the data goes, every time, unprompted: it is the whole of
 		// the answer to "what does this tool record".
 		log.Printf("recording run data in %s — numbers only, never leaves this machine (-metrics off to disable)",
 			cfg.rec.dir)
+	}
+	return nil
+}
+
+// checkNotifyCommand fails a misconfigured -notify at startup rather than at
+// the first notification, which on a healthy backlog can be hours later. A hook
+// that cannot run is a night of notifications nobody receives — and since the
+// whole point of the flag is finding out promptly, discovering it late is the
+// one failure it must not have.
+func checkNotifyCommand(command string) error {
+	if strings.TrimSpace(command) == "" {
+		return nil
+	}
+	fields := splitCommand(command)
+	if len(fields) == 0 {
+		return fmt.Errorf("-notify %q has no command in it — give it something to run, or drop the flag", command)
+	}
+	if _, err := exec.LookPath(fields[0]); err != nil {
+		return fmt.Errorf("-notify names %q, which is not on PATH (%w) — fix the command or drop the "+
+			"flag; note that it is run directly rather than through a shell, so a pipeline or a "+
+			"$VARIABLE has to live in a script", fields[0], err)
 	}
 	return nil
 }
@@ -1219,6 +1383,13 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					if err != nil {
 						return err
 					}
+					// Fired here rather than in either fork below, because both
+					// of them leave the issue waiting on the same person: this
+					// is the state the flag exists for, and -strict-order only
+					// changes what the supervisor does in the meantime.
+					notify(ctx, cfg, notification{event: notifyAwaiting, issue: issue,
+						reason: "a run stopped to ask something on the issue thread — " +
+							"reply there and the next drain folds the answer in"})
 					if !cfg.strictOrder {
 						// The question is flagged on GitHub, which is durable
 						// and is all a later drain needs. Hand the issue back
@@ -1317,19 +1488,28 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 // that exact session instead of starting the skill fresh, and a nonzero limit
 // is what -max-issue-time has left for this issue.
 func runClaude(ctx context.Context, cfg config, issue int, resumeID string, limit time.Duration) (runReport, error) {
-	// cfg is a copy, so the widened allowlist reaches this invocation and
-	// nothing else: the recorder's tools_hash goes on identifying the operator's
-	// -tools/-add-tools, which is the thing worth grouping runs by, rather than
-	// changing with every issue number.
-	cfg.addTools = resolveTools(cfg.addTools, issueLabelTools(issue))
-
-	prompt, invokes := fmt.Sprintf("/%s %d", cfg.skill, issue), cfg.skill
+	cfg, prompt, invokes := issueRun(cfg, issue)
 	if resumeID != "" {
 		// Plain English, so invokes is empty: the resumed session already
 		// holds the skill's context and never re-resolves the command.
 		prompt, invokes = fmt.Sprintf("Continue the /%s %d workflow exactly where it stopped.", cfg.skill, issue), ""
 	}
 	return execClaude(ctx, cfg, prompt, resumeID, invokes, limit)
+}
+
+// issueRun is what a fresh skill run on one issue consists of: the config it
+// runs under, the prompt it is given, and the slash command that prompt
+// invokes. It exists as a function of its own so -dry-run prints the invocation
+// runClaude would make rather than a second rendering of it, which is the sort
+// of pair that drifts the first time either side changes.
+//
+// The config is a copy, so the widened allowlist reaches this invocation and
+// nothing else: the recorder's tools_hash goes on identifying the operator's
+// -tools/-add-tools, which is the thing worth grouping runs by, rather than
+// changing with every issue number.
+func issueRun(cfg config, issue int) (config, string, string) {
+	cfg.addTools = resolveTools(cfg.addTools, issueLabelTools(issue))
+	return cfg, fmt.Sprintf("/%s %d", cfg.skill, issue), cfg.skill
 }
 
 // issueLabelTools grants a run the two commands it needs to raise and lower

@@ -372,6 +372,18 @@ something:
 backlog-drain -strict-order
 ```
 
+See what it would do to an unfamiliar repository, without doing any of it:
+
+```bash
+backlog-drain -dir ../someone-elses-project -dry-run
+```
+
+Be told when it needs you, instead of finding out in the morning:
+
+```bash
+backlog-drain -notify ~/bin/tell-me
+```
+
 Ask what all of that cost, once some runs have been recorded:
 
 ```bash
@@ -401,10 +413,105 @@ backlog-drain stats
 | `-skip` | *(none)* | Comma-separated issue numbers to skip. Issues labelled `needs-human` are skipped anyway — see [How it works](#how-it-works). |
 | `-once` | `false` | Process a single issue to a merge, a park or a question for you, then exit. |
 | `-strict-order` | `false` | Work issues in strict ascending order: wait in place on an issue awaiting an answer instead of moving past it. |
+| `-dry-run` | `false` | Resolve the next issue, print the `claude` invocation it would get, and exit. Runs nothing and writes nothing — see [Looking before you leap](#looking-before-you-leap-dry-run). |
+| `-notify` | *(none)* | Command to run whenever the drain needs a human, with context in `BACKLOG_DRAIN_NOTIFY_*` — see [Being told when it needs you](#being-told-when-it-needs-you-notify). |
 | `-run-tag` | *(none)* | Freeform label recorded with every run, so one batch can be compared against another. |
 | `-metrics` | `~/.backlog-drain/metrics` | Directory for run-data records, or `off` to write nothing. |
 | `-post-summary` | `false` | Comment one line of run numbers on each merged PR. The only thing that shows run data to anybody but you — see [Run data & cost tracking](#run-data--cost-tracking). |
 | `-version` | `false` | Print which release this binary is, then exit. Use it when startup warns that the binary and the skill disagree — see [Getting updates](#getting-updates). |
+
+### Looking before you leap: `-dry-run`
+
+Pointing an unattended agent at a repository you have not drained before is a
+leap of faith. `-dry-run` takes it out:
+
+```bash
+$ backlog-drain -dir ../my-project -dry-run
+example/my-project — running /backlog-drain:implement-issue per issue, polling every 5m0s
+-dry-run: resolving the next issue only — no claude run, no GitHub write, no run data
+ready: #12, #14, #19
+waiting on an answer: #9
+issue #12 would be worked next; the invocation follows on stdout
+claude -p '/backlog-drain:implement-issue 12' --permission-mode acceptEdits --allowedTools '…' --output-format stream-json --verbose
+```
+
+It resolves the next issue exactly as a real drain would — same queue, same
+`-skip`, same `needs-human` exclusions, same preference for an issue waiting on
+an answer when nothing else is ready — and then stops. Nothing is run and
+nothing is written: every GitHub call it makes is a read, it declares no labels,
+and run-data recording is forced off for the run, so `-metrics` in your
+environment cannot leave a record of a run that never happened.
+
+The narration goes to stderr and the invocation alone to stdout, so
+`backlog-drain -dry-run | pbcopy` gives you something to paste and run by hand.
+It is printed with shell quoting for that reason; the real run passes those
+arguments to the CLI directly, never through a shell.
+
+If the next issue's branch already has a PR, you get that instead — because
+that is what the drain would do with it:
+
+```
+issue #12 already has PR #40 (OPEN) on branch issue-12 — it would wait on that PR rather than run claude: https://github.com/example/my-project/pull/40
+```
+
+### Being told when it needs you: `-notify`
+
+A drain left running overnight is quiet about the things you most want to know.
+An issue parks, or stops to ask you a question, and the drain does the right
+thing — it works the queue behind it — so the only trace is a label on a thread
+nobody is watching. `-notify` runs a command of your choosing at each of those
+moments:
+
+```bash
+backlog-drain -notify ~/bin/tell-me
+```
+
+It fires on four states, and nothing else:
+
+| `BACKLOG_DRAIN_NOTIFY_EVENT` | What happened |
+| --- | --- |
+| `parked` | An issue was parked for a human — including a run that crashed and used up its resumes. |
+| `awaiting-answer` | A run stopped to ask something on the issue thread. Reply there and the next drain folds it in. |
+| `drained` | The backlog is empty. Nothing is left to work. |
+| `stopped` | The drain ended before the backlog did: a fatal error, or `-max-session-cost` spent. |
+
+The context arrives in the environment, so the command needs no arguments:
+
+| Variable | Value |
+| --- | --- |
+| `BACKLOG_DRAIN_NOTIFY_EVENT` | One of the four above. |
+| `BACKLOG_DRAIN_NOTIFY_ISSUE` | The issue number, or empty when the whole drain rather than one issue needs you. |
+| `BACKLOG_DRAIN_NOTIFY_REPO` | `owner/name`. |
+| `BACKLOG_DRAIN_NOTIFY_REASON` | One line of English saying what happened and what to do about it. |
+
+So a hook is usually a three-line script:
+
+```bash
+#!/bin/sh
+# ~/bin/tell-me
+terminal-notifier -title "backlog-drain: $BACKLOG_DRAIN_NOTIFY_EVENT" \
+  -message "${BACKLOG_DRAIN_NOTIFY_REPO} #${BACKLOG_DRAIN_NOTIFY_ISSUE:-—}: $BACKLOG_DRAIN_NOTIFY_REASON"
+```
+
+Three things to know about how the command is run:
+
+- **It is not a shell.** The command line is split into a program and arguments,
+  honouring quotes so a path with a space in it works, and run directly. There
+  is no pipeline, no redirection and no `$VARIABLE` expansion — put anything
+  like that in a script, which is where it can be tested on its own anyway.
+- **A failing hook never breaks the drain.** A non-zero exit, or one that hangs
+  past 30 seconds, costs you that notification and is logged; the drain carries
+  on. A `-notify` naming a program that is not on `PATH` is caught at startup
+  instead, since a night of notifications nobody receives is the one failure the
+  flag must not have.
+- **It carries numbers, identifiers and this program's own words.** Issue,
+  comment and PR text never reach it, for the same reason they never reach a
+  run-data record: on a repository that accepts outside issues, that text is
+  attacker-controllable.
+
+`-notify` is deliberately quiet about the ordinary case. A PR waiting to be
+merged is a human touchpoint too, but it happens on every healthy issue, and a
+notifier that goes off every time is one you mute.
 
 ### Setting defaults from the environment
 
@@ -429,6 +536,11 @@ variable a Dockerfile or CI job pins an install with.
 A value a flag cannot parse stops the run and names both the variable and the
 flag it was setting, rather than being skipped: a preference that was set,
 looks set, and quietly does nothing is worse than no preference at all.
+
+The `BACKLOG_DRAIN_NOTIFY_*` variables a hook receives sit deliberately clear of
+this namespace: none of them is `BACKLOG_DRAIN_<FLAG>` for any flag, so a
+notification cannot reconfigure a `backlog-drain` you run from inside your own
+hook. A test enforces it.
 
 ## Run data & cost tracking
 

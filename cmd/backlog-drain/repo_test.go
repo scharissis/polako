@@ -272,32 +272,8 @@ func TestReviewGateRefreshesTheBaseBeforeReviewing(t *testing.T) {
 // Every flag is part of the interface, so every flag has to appear in the
 // README. This is the check that catches a new flag shipped undocumented.
 func TestReadmeDocumentsEveryFlag(t *testing.T) {
-	sources, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("listing sources: %v", err)
-	}
-	// Any receiver, not just the flag package: a subcommand declares its flags
-	// on its own FlagSet (fs.StringVar), and those are just as much interface.
-	flagName := regexp.MustCompile(`\.\w+Var\(&\w+(?:\.\w+)?, "([a-z-]+)"`)
-	var names []string
-	for _, src := range sources {
-		if strings.HasSuffix(src, "_test.go") {
-			continue
-		}
-		b, err := os.ReadFile(src)
-		if err != nil {
-			t.Fatalf("reading %s: %v", src, err)
-		}
-		for _, m := range flagName.FindAllStringSubmatch(string(b), -1) {
-			names = append(names, m[1])
-		}
-	}
-	if len(names) < 10 {
-		t.Fatalf("only found %d flags in %v — the regexp has gone stale", len(names), sources)
-	}
-
 	readme := readRepoFile(t, "README.md")
-	for _, name := range names {
+	for _, name := range declaredFlags(t) {
 		if !strings.Contains(readme, "-"+name) {
 			t.Errorf("README.md does not document the -%s flag", name)
 		}

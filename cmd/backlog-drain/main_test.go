@@ -28,6 +28,13 @@ const fakeClaudeEnv = "BACKLOG_DRAIN_FAKE_CLAUDE"
 const fakePluginEnv = "BACKLOG_DRAIN_FAKE_PLUGIN_VERSION"
 
 func TestMain(m *testing.M) {
+	// A notify command inherits every variable the drain has, the fake-CLI ones
+	// included, so what says this invocation is the notifier is the one variable
+	// only a notification carries. Checked first for that reason: it takes no
+	// arguments, so argv cannot tell it apart from a bare claude run.
+	if dest := os.Getenv(fakeNotifyEnv); dest != "" && os.Getenv(notifyPrefix+"EVENT") != "" {
+		os.Exit(fakeNotify(dest))
+	}
 	// A drain test exports both fake-CLI variables, and every child process
 	// inherits both, so argv is what decides which CLI this invocation is.
 	if state := os.Getenv(fakeGhEnv); state != "" && len(os.Args) > 1 && slices.Contains(ghSubcommands, os.Args[1]) {
