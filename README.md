@@ -413,8 +413,8 @@ backlog-drain stats
 | `-skip` | *(none)* | Comma-separated issue numbers to skip. Issues labelled `needs-human` are skipped anyway — see [How it works](#how-it-works). |
 | `-once` | `false` | Process a single issue to a merge, a park or a question for you, then exit. |
 | `-strict-order` | `false` | Work issues in strict ascending order: wait in place on an issue awaiting an answer instead of moving past it. |
-| `-dry-run` | `false` | Resolve the next issue, print the `claude` invocation it would get, and exit. Runs nothing and writes nothing — see [Looking before you leap](#looking-before-you-leap-dry-run). |
-| `-notify` | *(none)* | Command to run whenever the drain needs a human, with context in `BACKLOG_DRAIN_NOTIFY_*` — see [Being told when it needs you](#being-told-when-it-needs-you-notify). |
+| `-dry-run` | `false` | Resolve the next issue, print the `claude` invocation it would get, and exit. Runs nothing and writes nothing — see [Looking before you leap](#looking-before-you-leap--dry-run). |
+| `-notify` | *(none)* | Command to run whenever the drain needs a human, with context in `BACKLOG_DRAIN_NOTIFY_*` — see [Being told when it needs you](#being-told-when-it-needs-you--notify). |
 | `-run-tag` | *(none)* | Freeform label recorded with every run, so one batch can be compared against another. |
 | `-metrics` | `~/.backlog-drain/metrics` | Directory for run-data records, or `off` to write nothing. |
 | `-post-summary` | `false` | Comment one line of run numbers on each merged PR. The only thing that shows run data to anybody but you — see [Run data & cost tracking](#run-data--cost-tracking). |
@@ -453,6 +453,10 @@ that is what the drain would do with it:
 ```
 issue #12 already has PR #40 (OPEN) on branch issue-12 — it would wait on that PR rather than run claude: https://github.com/example/my-project/pull/40
 ```
+
+It names what it would actually do with that PR, which is not the same in every
+state: wait on an open one, close the issue behind a merged one, and park an
+issue whose PR was closed without merging.
 
 ### Being told when it needs you: `-notify`
 
@@ -529,9 +533,13 @@ An argument always wins, so a single run can still go the other way with
 force — which is how you see what the environment is doing.
 
 `BACKLOG_DRAIN_METRICS` covers both halves at once: where a drain writes, and
-where `stats` reads. `-version` is deliberately *not* settable this way — it is
-an action rather than a preference, and `BACKLOG_DRAIN_VERSION` is exactly the
-variable a Dockerfile or CI job pins an install with.
+where `stats` reads. `-version` and `-dry-run` are deliberately *not* settable
+this way — both are actions rather than preferences, and either one left in a
+profile would quietly turn every drain on that machine into something that
+exits, successfully, before doing any work. `BACKLOG_DRAIN_VERSION` is exactly
+the variable a Dockerfile or CI job pins an install with, and
+`BACKLOG_DRAIN_DRY_RUN` is the one you export to preview an unfamiliar
+repository once and then forget.
 
 A value a flag cannot parse stops the run and names both the variable and the
 flag it was setting, rather than being skipped: a preference that was set,

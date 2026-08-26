@@ -437,11 +437,15 @@ const envPrefix = "BACKLOG_DRAIN_"
 const envUsage = "Any flag below can take its default from the environment:\n" +
 	"BACKLOG_DRAIN_<FLAG>, e.g. BACKLOG_DRAIN_POST_SUMMARY=1. Arguments win.\n"
 
-// envExempt are the flags the environment may not set. -version is an action
-// rather than a preference, and BACKLOG_DRAIN_VERSION is exactly the variable
-// a Dockerfile or CI job pins an install with — where it would quietly turn
-// every drain into a version print that exits before doing any work.
-var envExempt = map[string]bool{"version": true}
+// envExempt are the flags the environment may not set. Both are actions rather
+// than preferences, and either one left in a profile turns every later drain
+// into something that exits before doing any work — a failure that looks like
+// success, since the process ends cleanly. BACKLOG_DRAIN_VERSION is exactly the
+// variable a Dockerfile or CI job pins an install with; BACKLOG_DRAIN_DRY_RUN is
+// the one an operator exports to preview an unfamiliar repository once and then
+// forgets, after which the nightly drain reports success on a backlog nobody
+// touched.
+var envExempt = map[string]bool{"version": true, "dry-run": true}
 
 // applyEnvDefaults lets an operator set a per-machine default for any flag, so
 // a preference they always want lives in a shell profile instead of being
@@ -535,9 +539,9 @@ func dryRun(ctx context.Context, cfg config, out io.Writer) error {
 	// the drain actually keeps. -skip is applied here as well, so a queue this
 	// prints is a queue this would work.
 	workable := func(ns []int) []int {
-		out := slices.DeleteFunc(slices.Clone(ns), func(n int) bool { return cfg.skip[n] })
-		slices.Sort(out)
-		return out
+		queue := slices.DeleteFunc(slices.Clone(ns), func(n int) bool { return cfg.skip[n] })
+		slices.Sort(queue)
+		return queue
 	}
 	if queue := workable(ready); len(queue) > 0 {
 		log.Printf("ready: %s", issueRefs(queue))
@@ -566,8 +570,19 @@ func dryRun(ctx context.Context, cfg config, out io.Writer) error {
 		return err
 	}
 	if pr != nil {
-		log.Printf("issue #%d already has PR #%d (%s) on branch %s — it would wait on that PR "+
-			"rather than run claude: %s", issue, pr.Number, pr.State, branch, pr.URL)
+		// Which of the three the drain would do depends on the PR's state, and
+		// naming the wrong one is the single thing this flag must not do: a
+		// merged PR is the case where it would write to GitHub at all.
+		next := "wait on that PR"
+		switch pr.State {
+		case "MERGED":
+			next = "close the issue and move on"
+		case "OPEN":
+		default:
+			next = "park the issue for a human"
+		}
+		log.Printf("issue #%d already has PR #%d (%s) on branch %s — it would %s "+
+			"rather than run claude: %s", issue, pr.Number, pr.State, branch, next, pr.URL)
 		return nil
 	}
 	runCfg, prompt, _ := issueRun(cfg, issue)
@@ -1032,12 +1047,12 @@ func preflight(ctx context.Context, cfg *config) error {
 // whole point of the flag is finding out promptly, discovering it late is the
 // one failure it must not have.
 func checkNotifyCommand(command string) error {
-	if strings.TrimSpace(command) == "" {
-		return nil
-	}
+	// Split rather than trimmed, so "is there a hook at all?" is decided by the
+	// same function notify itself decides it with: two spellings of empty would
+	// eventually disagree, and the one that stays silent is this one.
 	fields := splitCommand(command)
 	if len(fields) == 0 {
-		return fmt.Errorf("-notify %q has no command in it — give it something to run, or drop the flag", command)
+		return nil
 	}
 	if _, err := exec.LookPath(fields[0]); err != nil {
 		return fmt.Errorf("-notify names %q, which is not on PATH (%w) — fix the command or drop the "+

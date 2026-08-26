@@ -116,22 +116,39 @@ func TestDryRunPrintsTheInvocationARunWouldMake(t *testing.T) {
 // Restart safety is the first thing an issue is put through, so it is the first
 // thing a dry run has to report: an issue whose branch already carries a PR
 // gets no claude run at all, and printing one would be a lie.
-func TestDryRunReportsThePRItWouldWaitOnInstead(t *testing.T) {
-	buf := captureLog(t)
-	cfg, _ := drainConfig(t, "stream", &ghState{
-		Issues: map[string]*fakeIssue{"1": {Open: true}},
-		PRs:    map[string]*fakePR{"issue-1": {Number: 42, State: "OPEN"}},
-	})
+//
+// Which is only half the answer, because what the drain does with that PR is
+// not one thing — it waits on an open one, closes the issue behind a merged
+// one, and parks an issue whose PR was closed unmerged. A dry run that says
+// "waiting" for all three names the wrong next step, and the merged case is the
+// one where it would touch GitHub at all.
+func TestDryRunReportsWhatItWouldDoWithAnExistingPR(t *testing.T) {
+	for _, tc := range []struct {
+		state string
+		want  string
+	}{
+		{"OPEN", "issue #1 already has PR #42 (OPEN) on branch issue-1 — it would wait on that PR"},
+		{"MERGED", "PR #42 (MERGED) on branch issue-1 — it would close the issue and move on"},
+		{"CLOSED", "PR #42 (CLOSED) on branch issue-1 — it would park the issue for a human"},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
+			buf := captureLog(t)
+			cfg, _ := drainConfig(t, "stream", &ghState{
+				Issues: map[string]*fakeIssue{"1": {Open: true}},
+				PRs:    map[string]*fakePR{"issue-1": {Number: 42, State: tc.state}},
+			})
 
-	var out strings.Builder
-	if err := dryRun(context.Background(), cfg, &out); err != nil {
-		t.Fatalf("dryRun: %v", err)
-	}
+			var out strings.Builder
+			if err := dryRun(context.Background(), cfg, &out); err != nil {
+				t.Fatalf("dryRun: %v", err)
+			}
 
-	if got := strings.TrimSpace(out.String()); got != "" {
-		t.Errorf("printed %q, want no invocation for an issue that would not get one", got)
-	}
-	if want := "issue #1 already has PR #42 (OPEN) on branch issue-1"; !strings.Contains(buf.String(), want) {
-		t.Errorf("log is missing %q\ngot:\n%s", want, buf.String())
+			if got := strings.TrimSpace(out.String()); got != "" {
+				t.Errorf("printed %q, want no invocation for an issue that would not get one", got)
+			}
+			if !strings.Contains(buf.String(), tc.want) {
+				t.Errorf("log is missing %q\ngot:\n%s", tc.want, buf.String())
+			}
+		})
 	}
 }

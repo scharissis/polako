@@ -1889,18 +1889,26 @@ func TestEnvDefaultsRejectAValueTheFlagCannotParse(t *testing.T) {
 	}
 }
 
-// BACKLOG_DRAIN_VERSION is what a Dockerfile or CI job pins an install with.
-// Honouring it would turn every drain on that machine into a version print.
-func TestEnvDefaultsIgnoreVersion(t *testing.T) {
+// The two flags that are actions rather than preferences. BACKLOG_DRAIN_VERSION
+// is what a Dockerfile or CI job pins an install with, and BACKLOG_DRAIN_DRY_RUN
+// is what an operator exports to preview one repository and forgets; honouring
+// either would turn every drain on that machine into a print that exits before
+// doing any work, and exits 0 doing it.
+func TestEnvDefaultsIgnoreTheActionFlags(t *testing.T) {
 	t.Setenv("BACKLOG_DRAIN_VERSION", "0.6.0")
+	t.Setenv("BACKLOG_DRAIN_DRY_RUN", "1")
 
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	showVersion := fs.Bool("version", false, "")
+	dry := fs.Bool("dry-run", false, "")
 	if err := applyEnvDefaults(fs); err != nil {
 		t.Fatalf("applyEnvDefaults: %v", err)
 	}
 	if *showVersion {
 		t.Error("-version must not be settable from the environment")
+	}
+	if *dry {
+		t.Error("-dry-run must not be settable from the environment")
 	}
 }

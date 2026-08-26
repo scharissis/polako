@@ -22,7 +22,10 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   is declared, and run-data recording is forced off so a `BACKLOG_DRAIN_METRICS`
   in the environment cannot leave a record of a run that never happened. The
   invocation goes to stdout and the narration to stderr, so it can be piped
-  somewhere and pasted.
+  somewhere and pasted. It is an action rather than a preference, so — like
+  `-version`, and unlike every other flag — it takes no default from the
+  environment: a `BACKLOG_DRAIN_DRY_RUN` left in a profile would turn every
+  later drain into a successful exit that worked nothing.
 
 - **Operator impact:** `-notify <command>` runs a command of your choosing
   whenever the drain needs a human — an issue parked, an issue blocked on an
