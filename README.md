@@ -105,7 +105,7 @@ CI reporter, a stale-bot nudge — are read and skipped, and the log says so
 rather than going quiet:
 
 ```
-issue #16 still awaiting a reply (2 new comment(s), none of them from a person) — next check in 5m
+issue #16 still awaiting a reply (2 new comment(s), none of them from a person)
 ```
 
 Comments from the account the drain itself authenticates as are *not* skipped,

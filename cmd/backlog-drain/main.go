@@ -3021,7 +3021,7 @@ func waitForReply(ctx context.Context, cfg config, issue int, baseline int64) er
 func botsOnly(comments []issueComment, baseline int64) string {
 	n := 0
 	for _, c := range comments {
-		if c.ID > baseline {
+		if c.ID > baseline && c.fromBot() {
 			n++
 		}
 	}
