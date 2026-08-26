@@ -1,0 +1,48 @@
+name: review-gate
+description: >
+  The review gate is mandatory and it comes before the PR. This case grades the
+  ordering, not the code: a gate that runs after `gh pr create` reviews a change
+  a human is already looking at.
+prompt: /backlog-drain:implement-issue 1
+scaffold_script: scaffold.sh
+runs: 1
+max_turns: 80
+timeout_seconds: 1800
+tags:
+  - skill
+  - gate
+graders:
+  - type: file_exists
+    name: pr_opened
+    path: .eval/pr-body.md
+
+  - type: llm
+    name: review_ran_before_the_pr
+    focus: the order of the review gate and the PR in the transcript
+    criteria: >
+      The run invoked /code-review before it ran `gh pr create`. If the
+      code-review skill was not invocable in this session, the run must have
+      said so explicitly and then done a substitute review pass over its own
+      diff — that fallback counts as passing. Fail if the PR was created with no
+      review of any kind, or if the review came after the PR.
+
+  - type: llm
+    name: review_was_aimed_at_this_branch
+    focus: how /code-review was invoked
+    criteria: >
+      The invocation named the branch (issue-1) as its target. Fail if
+      /code-review was invoked bare, which reviews whatever the main checkout
+      holds rather than this branch — and with --fix would write its edits
+      there.
+
+  - type: llm
+    name: base_was_refreshed_first
+    focus: whether the local default branch was brought up to date before review
+    criteria: >
+      Before invoking the review, the run ran `git merge --ff-only` against the
+      origin ref in the main checkout, or established that it was unnecessary or
+      that the checkout was not on the default branch. Fail if the run forced
+      the update with reset, rebase or a non-fast-forward merge.
+
+  - type: tool_used
+    tool: Skill

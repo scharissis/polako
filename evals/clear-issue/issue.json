@@ -1,0 +1,7 @@
+{
+  "number": 1,
+  "title": "greet.sh has no --help",
+  "state": "OPEN",
+  "body": "## Problem\n\n`greet.sh` takes a name and prints a greeting, but there is no way to ask it\nwhat it does. Running it with no arguments prints `greet: needs a name` and\nexits 2, which tells you that you got it wrong but not what right looks like.\n\n## What to do\n\nAccept `--help` (and `-h`) as the first argument. Print a usage line naming the\nscript and its one argument, plus a one-line description, then exit 0.\n\n`--help` must be checked before the missing-argument branch, so `./greet.sh\n--help` prints usage rather than the error.\n\n## Done when\n\n- `./greet.sh --help` and `./greet.sh -h` both print usage and exit 0.\n- `./test.sh` still passes, with a case covering the new flag.\n",
+  "comments": []
+}

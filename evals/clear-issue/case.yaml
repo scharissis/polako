@@ -1,0 +1,53 @@
+name: clear-issue
+description: >
+  A well-specified issue should go all the way to a PR without stopping to ask
+  anything — and should still write the plan first.
+prompt: /backlog-drain:implement-issue 1
+scaffold_script: scaffold.sh
+# One run keeps a full plan-to-PR cycle affordable. Pass --runs 3 when you care
+# whether a case is flaky rather than whether it works at all.
+runs: 1
+max_turns: 80
+timeout_seconds: 1800
+tags:
+  - skill
+  - happy-path
+graders:
+  - type: file_exists
+    name: plan_written
+    path: repo-issue-1/PLAN.md
+
+  - type: file_exists
+    name: pr_opened
+    path: .eval/pr-body.md
+
+  - type: llm
+    name: plan_preceded_the_code
+    focus: the order in which the run produced its artifacts
+    criteria: >
+      PLAN.md was written before any change to greet.sh or test.sh was
+      committed. Evidence that the plan came first: it was written in an early
+      turn, before the implementation edits, and it describes the approach
+      rather than summarising work already done. Fail if the plan was written
+      after the implementation, or only as part of the final commit.
+
+  - type: llm
+    name: pr_body_is_complete
+    focus: the recorded PR body at .eval/pr-body.md
+    criteria: >
+      The body has all four sections — Summary, Design decisions, Scope,
+      Verification — and its last line is exactly "Closes #1". Fail if any
+      section is missing, if the body is a bare diff summary, or if the closing
+      line is absent or buried mid-paragraph.
+
+  - type: llm
+    name: no_question_was_asked
+    focus: whether the run stopped to ask anything, per .eval/labels.log
+    criteria: >
+      The issue is specified well enough to implement, so the run should not
+      have applied the awaiting-answer label or posted a clarifying question.
+      Fail if labels.log records "add awaiting-answer" without a matching
+      "remove awaiting-answer" in the same run.
+
+  - type: tool_used
+    tool: Skill

@@ -1126,11 +1126,35 @@ stall-watchdog paths for real. A second group of tests keeps the repository
 honest — the plugin manifest, the shipped skill and the documented flags all
 have to agree with the code.
 
+### Evaluating the skill
+
+The hermetic suite can only check that
+[`SKILL.md`](skills/implement-issue/SKILL.md) still *says* what the supervisor
+depends on: that the review gate is there and names a branch, that the label
+command is spelled the one way the allowlist grants, that the PR body ends by
+closing the issue. Whether a run *keeps* those promises is what
+[`evals/`](evals/) is for:
+
+```bash
+claude plugin eval . --scaffold --allow-tools Bash Write Edit
+```
+
+Four cases, each one a real plan-to-PR run against a scratch repo and a
+stand-in `gh`: a specified issue reaching a PR, an under-specified one producing
+questions instead of guesses, the review gate firing before the PR, and an
+existing plan being resumed rather than rewritten.
+
+This one is not part of `check.sh` and not in CI. It needs the network, a real
+`claude` and money — a deliberate exception to the hermetic rule, and the
+reasoning is in [`evals/README.md`](evals/README.md) along with the caveat that
+the suite is new and has not yet had a green run.
+
 ### Running both halves from a working tree
 
-The suite never runs the skill, so a change to
-[`SKILL.md`](skills/implement-issue/SKILL.md) is only ever proven by driving a
-real issue with it. That means running your working tree, not an install — and
+The hermetic suite never runs the skill, and the eval cases run it against a
+scratch repo rather than a real backlog, so a change to
+[`SKILL.md`](skills/implement-issue/SKILL.md) is still worth proving by driving
+a real issue with it. That means running your working tree, not an install — and
 an install is what every marketplace path gives you, because the entry pins a
 `ref` ([Publishing and versioning](#publishing-and-versioning)).
 
