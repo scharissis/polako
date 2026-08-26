@@ -27,7 +27,7 @@ const fakeGhEnv = "BACKLOG_DRAIN_FAKE_GH"
 // ghSubcommands are the first arguments that mean "this invocation is gh".
 // The test process exports both fake-CLI variables at once and children
 // inherit them, so argv is what tells the two impersonations apart.
-var ghSubcommands = []string{"repo", "issue", "pr", "label"}
+var ghSubcommands = []string{"repo", "issue", "pr", "label", "api"}
 
 // ghState is the whole of a pretend repository.
 type ghState struct {
@@ -48,15 +48,24 @@ type ghState struct {
 }
 
 type fakeIssue struct {
-	Open     bool     `json:"open"`
-	Labels   []string `json:"labels"`
-	Comments int      `json:"comments"`
+	Open   bool     `json:"open"`
+	Labels []string `json:"labels"`
+	// Comments is how many comments the thread has; they carry ids 1..Comments
+	// in the order they were written, the way GitHub hands them out. Bots holds
+	// the ids of the ones a GitHub App wrote rather than a person.
+	Comments int   `json:"comments"`
+	Bots     []int `json:"bots"`
 
 	// ReplyOnRead is a human answering a question while the supervisor polls:
 	// their comment appears on the Nth read of the thread from now. Counting
 	// reads rather than wall clock keeps the test deterministic — the drain
 	// unblocks because the thread moved, never because a timer went off.
 	ReplyOnRead int `json:"reply_on_read"`
+
+	// BotOnRead is the same for the comments this issue exists to ignore: CI, a
+	// linked-PR notice, a stale-bot nudge. A bot comment lands on the Nth read
+	// from now, and the wait must not end because of it.
+	BotOnRead int `json:"bot_on_read"`
 
 	// CloseOnList is a human dealing with the issue themselves while the
 	// supervisor is off working another one: it disappears from the Nth
@@ -96,6 +105,17 @@ type fakeReview struct {
 	Author      string `json:"author"`
 	State       string `json:"state"`
 	SubmittedAt string `json:"submitted_at"`
+}
+
+// apiIssue picks the issue number out of the one REST path the drain asks for,
+// repos/{owner}/{repo}/issues/N/comments?per_page=100.
+func apiIssue(path string) string {
+	_, rest, ok := strings.Cut(path, "/issues/")
+	if !ok {
+		return ""
+	}
+	n, _, _ := strings.Cut(rest, "/")
+	return n
 }
 
 func readGhState(path string) (*ghState, error) {
@@ -155,6 +175,12 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 	issue := func() *fakeIssue { return st.Issues[at(2)] }
 
 	call := at(0) + " " + at(1)
+	// `gh api` names its target in a URL path, so the second word is no use as a
+	// call name. The drain makes exactly one api call; give it a readable name so
+	// a FailReads entry can be flaky about it like any other.
+	if at(0) == "api" {
+		call = "api comments"
+	}
 	// Ahead of everything, so a test can be flaky about a call whatever it would
 	// otherwise have answered. The countdown has to be persisted even though
 	// nothing else changed, or every invocation would start it over.
@@ -178,19 +204,6 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			fmt.Fprintf(os.Stderr, "no issue #%s\n", at(2))
 			return "", false, 1
 		}
-		if strings.Contains(flagVal("--json"), "comments") {
-			counting := is.ReplyOnRead > 0
-			if counting {
-				is.ReplyOnRead--
-				if is.ReplyOnRead == 0 {
-					is.Comments++ // the human's reply lands on this read
-				}
-			}
-			// The countdown has to be persisted even on the reads before the
-			// reply, or every read would start it over.
-			return `{"comments":[` + strings.TrimSuffix(strings.Repeat("{},", is.Comments), ",") + `]}`,
-				counting, 0
-		}
 		if strings.Contains(flagVal("--json"), "labels") {
 			var labels []string
 			for _, l := range is.Labels {
@@ -203,6 +216,38 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			state = "OPEN"
 		}
 		return `{"state":"` + state + `"}`, false, 0
+
+	case "api comments":
+		is := st.Issues[apiIssue(at(1))]
+		if is == nil {
+			fmt.Fprintf(os.Stderr, "no issue for %s\n", at(1))
+			return "", false, 1
+		}
+		// Both countdowns run on every read, and both have to be persisted even
+		// on the reads before they fire, or each read would start them over.
+		counting := is.ReplyOnRead > 0 || is.BotOnRead > 0
+		if is.ReplyOnRead > 0 {
+			is.ReplyOnRead--
+			if is.ReplyOnRead == 0 {
+				is.Comments++ // the human's reply lands on this read
+			}
+		}
+		if is.BotOnRead > 0 {
+			is.BotOnRead--
+			if is.BotOnRead == 0 {
+				is.Comments++
+				is.Bots = append(is.Bots, is.Comments)
+			}
+		}
+		var comments []string
+		for id := 1; id <= is.Comments; id++ {
+			author := "User"
+			if slices.Contains(is.Bots, id) {
+				author = "Bot"
+			}
+			comments = append(comments, fmt.Sprintf(`{"id":%d,"user":{"type":%q}}`, id, author))
+		}
+		return "[" + strings.Join(comments, ",") + "]", counting, 0
 
 	case "issue edit":
 		is := issue()
@@ -480,7 +525,7 @@ func TestDrainWaitsForAnAnswerThenFoldsItIn(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		`issue #1 is labelled "awaiting-answer" — waiting for a reply on the thread`,
-		"new activity on #1 — re-running to fold the answers in",
+		"somebody replied on #1 — re-running to fold the answers in",
 		"Bash(gh issue edit 1 --add-label:*)",
 		"summary: 1 issue merged, 0 issues parked",
 	} {
@@ -523,7 +568,7 @@ func TestDrainDoesNotWaitTwiceOnOneQuestion(t *testing.T) {
 
 	out := buf.String()
 	for _, want := range []string{
-		"new activity on #1 — re-running to fold the answers in",
+		"somebody replied on #1 — re-running to fold the answers in",
 		"resuming session sess-xyz",
 		"claude crashed and 1 resume attempts failed",
 	} {
@@ -579,7 +624,7 @@ func TestDrainWorksALaterIssueWhileOneAwaitsAnAnswer(t *testing.T) {
 	}
 	for _, want := range []string{
 		"nothing else to work — waiting for a reply on #1",
-		"new activity on #1 — re-running to fold the answers in",
+		"somebody replied on #1 — re-running to fold the answers in",
 		"summary: 2 issues merged, 0 issues parked",
 	} {
 		if !strings.Contains(out, want) {
@@ -636,7 +681,7 @@ func TestDrainStopsCallingAnIssueWaitingOnceItIsPickedBackUp(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "new activity on #1") {
+	if !strings.Contains(out, "somebody replied on #1") {
 		t.Fatalf("the answer never landed, so this proves nothing\ngot:\n%s", out)
 	}
 	if strings.Contains(out, "awaiting an answer") || strings.Contains(out, "waiting #1") {
@@ -744,6 +789,98 @@ func TestDrainDoesNotReadStrayCommentsAsQuestions(t *testing.T) {
 	}
 	if want := "the run completed but produced no PR and no questions"; !strings.Contains(buf.String(), want) {
 		t.Errorf("log is missing %q\ngot:\n%s", want, buf.String())
+	}
+}
+
+// Issue #30: a wait ends when somebody answers, not when the thread twitches.
+// CI, a stale-bot nudge or a release announcement lands on an issue that is
+// still exactly as blocked as it was, and each one used to cost a full Claude
+// run to discover that. Under -strict-order, where the drain sits on the thread
+// itself.
+func TestDrainKeepsWaitingThroughABotComment(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "asksbot", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		Labels: []string{awaitingAnswerLabel},
+	})
+	cfg.strictOrder = true
+
+	// Bounded: the failure this guards against is a wait that never ends.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if len(st.Issues["1"].Bots) != 1 {
+		t.Fatalf("issue 1 bot comments = %v, want the bot to have commented — this proves nothing otherwise",
+			st.Issues["1"].Bots)
+	}
+	if st.Issues["1"].Open {
+		t.Error("issue 1 should have been closed after the answer was folded in and its PR merged")
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"still awaiting a reply (1 new comment(s), none of them from a person)",
+		"somebody replied on #1 — re-running to fold the answers in",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
+	}
+	// Two runs: the one that asked, and the one that folded the answer in. A
+	// third would be the bot's comment paid for at full price.
+	if got := strings.Count(out, "session started"); got != 2 {
+		t.Errorf("dispatched %d claude runs, want 2 — a bot comment must not be one of them\ngot:\n%s",
+			got, out)
+	}
+}
+
+// The same, on the path a default drain actually takes: issue 1 is put down and
+// issue 2 worked, and the poll that decides whether to pick issue 1 back up has
+// to ignore the bot exactly as the in-place wait does.
+func TestDrainDoesNotPickAnIssueBackUpForABotComment(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "asksbot", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}, "2": {Open: true}},
+		// Issue 2's PR is already merged, so it advances without a claude run and
+		// the drain is left with nothing to work but the blocked issue.
+		PRs:    map[string]*fakePR{"issue-2": {Number: 9, State: "MERGED"}},
+		Labels: []string{awaitingAnswerLabel},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if len(st.Issues["1"].Bots) != 1 {
+		t.Fatalf("issue 1 bot comments = %v, want the bot to have commented — this proves nothing otherwise",
+			st.Issues["1"].Bots)
+	}
+	if got := st.Issues["1"].Labels; slices.Contains(got, awaitingAnswerLabel) {
+		t.Errorf("issue 1 labels = %v, want %s cleared once the answer landed", got, awaitingAnswerLabel)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"issue #1 still awaiting a reply (1 new comment(s), none of them from a person)",
+		"somebody replied on #1 — re-running to fold the answers in",
+		"summary: 2 issues merged, 0 issues parked",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
+	}
+	// The bot's comment came between the two runs on issue 1; picking it back up
+	// for that would show as a third "=== issue #1 ===".
+	if got := strings.Count(out, "=== issue #1 ==="); got != 2 {
+		t.Errorf("picked issue 1 up %d times, want 2 — a bot comment must not be one of them\ngot:\n%s",
+			got, out)
 	}
 }
 
