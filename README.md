@@ -862,6 +862,7 @@ human latency
 | `-since` | *(all of it)* | Only count records newer than this, e.g. `-since 168h`. |
 | `-shift` | *(every shift)* | Only count records from one shift — its id, or `last` for the newest shift in scope. |
 | `-by` | *(none)* | Add a breakdown table: `issue`, `model`, `tag` or `shift`. |
+| `-runs` | *(off)* | Add the run log: one row per run, with the session id that reopens it — see [Reopening a past run](#reopening-a-past-run--runs). |
 
 A window can keep an issue's terminal record while clipping away the runs that
 produced it. Those issues still count toward the merge rate, but they cannot be
@@ -944,6 +945,55 @@ Under `-shift <id>` the records *are* that shift's, so the report shows what
 that shift concluded, which for the one that handed the issue on is
 `needs human`. One asks what became of the issues a shift worked; the other
 asks what that shift did.
+
+### Reopening a past run: `-runs`
+
+Everything above is a rollup. `-runs` adds the ledger those numbers were
+derived from — one row per run, in the order they happened, under whatever
+`-repo`, `-since` and `-shift` are already in force:
+
+```bash
+polako stats -runs -since 48h
+```
+
+```
+run log
+  started               issue                 reason     status    outcome           session                               attempt   cost  tokens  wall
+  2026-08-24T09:00:00Z  scharissis/polako#48  implement  ok        posted questions  0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9        0  $1.10    4.2M   20m
+  2026-08-24T12:30:00Z  scharissis/polako#48  answers    ok        opened pr         6a1d90f3-77b2-4e58-8a0c-1b93ce4d2f71        0  $2.50    6.4M   30m
+  2026-08-25T09:00:00Z  scharissis/polako#49  implement  crash     nothing           b2e7c045-19af-4d6a-b7f1-8c02ea3169d4        0  $0.00  746.5k    5m
+  2026-08-25T09:06:00Z  scharissis/polako#49  resume     ok        opened pr         b2e7c045-19af-4d6a-b7f1-8c02ea3169d4        1  $3.00    5.5M   34m
+```
+
+The `session` column is the point of it — the last of the text columns, before
+the numbers. A session id is what the Claude CLI keeps the transcript under, so
+any row turns back into the whole run:
+
+```bash
+claude --resume 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9
+```
+
+That opens the run in Claude Code exactly as it ended — every message, every
+tool call, every file it read — which is the intended way to find out what a
+run actually did. Nothing extra is stored to make it work: the CLI already
+keeps the transcript, and the records already keep the id.
+
+The two rows above sharing an id are a crash and the `--resume` that finished
+its work, which is what that pairing looks like from here. A run that reported
+no session renders `—`: records written before this column existed carry none,
+and neither does a run that died before the CLI announced itself.
+
+The id is in the live log too, on every run's first line, and again beside a
+park — the two moments somebody wants to read a transcript:
+
+```
+[claude] session started (model claude-opus-5, session 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9)
+issue #48 needs a human: claude crashed and 3 resume attempts failed — parking it and moving on
+issue #48: `claude --resume 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9` reopens what the last skill run on it did
+```
+
+It stays local, like every other number here: the id goes to the terminal and
+to the record file, never onto the issue thread the park comment goes to.
 
 ### Comparing configurations
 

@@ -77,6 +77,7 @@ type statsOptions struct {
 	since time.Duration
 	by    string
 	shift string
+	runs  bool
 }
 
 // runStats is the `stats` subcommand: parse its own flags, read the records,
@@ -93,6 +94,10 @@ func runStats(args []string, out io.Writer, now time.Time) error {
 	fs.StringVar(&opt.shift, "shift", "",
 		`only count records from this shift's id, or "`+shiftLast+`" for the newest shift in scope`)
 	fs.StringVar(&opt.by, "by", "", "also break the numbers down by "+orList(byGroups))
+	// No backquotes in this text: the flag package reads the first backquoted
+	// word as the argument's name, and a bool flag has no argument to name.
+	fs.BoolVar(&opt.runs, "runs", false,
+		"also list the individual runs, with the session id that reopens each one")
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako stats [flags]\n\n"+
 			"Reports on the run data recorded by previous shifts. Reads only;\n"+
@@ -527,6 +532,11 @@ func render(w io.Writer, ds dataset, opt statsOptions) {
 	case byModel, byTag, byShift:
 		printGroupTable(w, ds, issues, opt.by)
 	}
+	// Last, because it is the rawest view of the same rows every summary above
+	// it was derived from.
+	if opt.runs {
+		printRunTable(w, ds)
+	}
 	if note := resumeNote(ds); note != "" {
 		fmt.Fprintf(w, "\n%s\n", note)
 	}
@@ -854,6 +864,69 @@ func printIssueTable(w io.Writer, issues []*issueStats) {
 		[]string{"issue", "outcome", "runs", "questions", "cost", "tokens", "wall"}, rows, 2)
 }
 
+// noValue fills a table cell a record has nothing for — most often the session
+// id, which older records carry none of and neither does a run that died before
+// the CLI announced itself. A blank cell in a column of ids reads as a
+// rendering bug rather than as a run there is nothing to reopen.
+const noValue = "—"
+
+// started renders a record's timestamp in the same self-describing UTC form
+// the window line uses. A value that will not parse is shown as it was written
+// rather than as the zero time, which would date a real run to year 1.
+func started(ts string) string {
+	if t := recTime(ts); !t.IsZero() {
+		return stamp(t)
+	}
+	if ts == "" {
+		return noValue
+	}
+	return ts
+}
+
+// printRunTable lists the runs themselves, newest last. Everything else in the
+// report is a rollup; this is the ledger they were computed from, and its last
+// text column is the handle that turns a row back into the whole transcript:
+// `claude --resume <session>`.
+//
+// ds.runs arrives filtered by -repo, -since and -shift and already in
+// timestamp order, so the table composes with every filter without asking.
+//
+// The title is "run log" rather than "runs" because the summary section above
+// already owns that word, and a report with two sections of one name is one
+// nobody can talk about.
+func printRunTable(w io.Writer, ds dataset) {
+	if len(ds.runs) == 0 {
+		// Reached when a window kept issue records but clipped every run away.
+		fmt.Fprint(w, "\nrun log\n  (no runs in this window)\n")
+		return
+	}
+	rows := make([][]string, 0, len(ds.runs))
+	for _, r := range ds.runs {
+		session := r.Session
+		if session == "" {
+			session = noValue
+		}
+		rows = append(rows, []string{
+			started(r.TS),
+			fmt.Sprintf("%s#%d", r.Repo, r.Issue),
+			label(r.Reason),
+			r.Status,
+			label(r.Outcome),
+			session,
+			strconv.Itoa(r.Attempt),
+			usd(r.CostUSD),
+			count(r.Tokens.total()),
+			dur(time.Duration(r.WallMS) * time.Millisecond),
+		})
+	}
+	// The six text columns lead so that the numbers all right-align together —
+	// and so that a session of "—" sits at the left of its column rather than
+	// a UUID's width away from the row it belongs to.
+	printTable(w, "run log",
+		[]string{"started", "issue", "reason", "status", "outcome", "session",
+			"attempt", "cost", "tokens", "wall"}, rows, 6)
+}
+
 // printGroupTable breaks the numbers down by the configuration under test, or
 // by the drain that did the work. An issue whose runs span two models or two
 // tags counts under each — the point of the breakdown is comparing batches,
@@ -928,7 +1001,7 @@ func printGroupTable(w io.Writer, ds dataset, issues []*issueStats, by string) {
 		for key := range g.issues {
 			memberships[key]++
 		}
-		perMerge := "—"
+		perMerge := noValue
 		if wins > 0 {
 			perMerge = usd(g.cost / float64(wins))
 		}

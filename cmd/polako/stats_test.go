@@ -282,6 +282,64 @@ func TestStatsByModelAndTag(t *testing.T) {
 	}
 }
 
+// The ledger every other section is a rollup of, and the only place a run's
+// session id is ever shown. Pinned whole: the columns are the interface.
+func TestStatsRunLog(t *testing.T) {
+	out := stats(t, "-metrics", fixtureDir(t), "-runs")
+	want := `run log
+  started               issue                 reason     status    outcome           session  attempt   cost  tokens  wall
+  2026-08-20T09:00:00Z  scharissis/polako#12  implement  ok        posted questions  s12a           0  $1.10    4.2M   20m
+  2026-08-20T12:30:00Z  scharissis/polako#12  answers    ok        opened pr         s12b           0  $2.50    6.4M   30m
+  2026-08-21T09:00:00Z  scharissis/polako#13  implement  crash     nothing           s13a           0  $0.00  746.5k    5m
+  2026-08-21T09:06:00Z  scharissis/polako#13  resume     ok        opened pr         s13a           1  $3.00    5.5M   34m
+  2026-08-22T09:00:00Z  scharissis/polako#14  implement  no-turns  nothing           —              0  $0.10     53k   30m
+  2026-08-23T09:00:00Z  scharissis/polako#15  remediate  ok        nothing           —              0  $0.40  635.4k   12m
+  2026-08-24T09:00:00Z  scharissis/other#5    implement  ok        opened pr         s5             0  $1.00    1.6M   45m
+`
+	if !strings.Contains(out, want) {
+		t.Errorf("run log differs\n--- got ---\n%s\n--- want ---\n%s", out, want)
+	}
+	// The crash and the resume that finished its work carry one session id
+	// between them: that is the row-to-row chain the whole table exists for.
+	if strings.Count(out, "s13a") != 2 {
+		t.Errorf("the resume should name the session it continued:\n%s", out)
+	}
+	// Off by default — the report is a summary, and seven rows of ledger in it
+	// unasked would bury the numbers above them.
+	if plain := stats(t, "-metrics", fixtureDir(t)); strings.Contains(plain, "run log") {
+		t.Errorf("-runs should be opt-in:\n%s", plain)
+	}
+}
+
+// The same filters as everything else, because it reads the same already
+// filtered slice — asserted rather than assumed, since a table that quietly
+// ignored -repo would be a report about the wrong project.
+func TestStatsRunLogHonoursTheFilters(t *testing.T) {
+	dir := fixtureDir(t)
+
+	one := stats(t, "-metrics", dir, "-runs", "-repo", "scharissis/other")
+	if strings.Contains(one, "scharissis/polako#") {
+		t.Errorf("-repo let another repository's runs into the log:\n%s", one)
+	}
+	if !hasLine(one, "2026-08-24T09:00:00Z scharissis/other#5 implement ok opened pr s5 0 $1.00 1.6M 45m") {
+		t.Errorf("the one run in scope should still be listed:\n%s", one)
+	}
+
+	// 30h back from fixtureNow reaches the 24th only.
+	windowed := stats(t, "-metrics", dir, "-runs", "-since", "30h")
+	if strings.Contains(windowed, "2026-08-20") {
+		t.Errorf("-since let older runs into the log:\n%s", windowed)
+	}
+
+	// A window can keep an issue's terminal record while clipping every run
+	// that produced it — the one way this table has a heading and no rows.
+	// 71h45m back from fixtureNow lands between o/o's run and its merge.
+	clipped := stats(t, "-metrics", drainFixtureDir(t), "-runs", "-since", "71h45m")
+	if !hasLine(clipped, "run log (no runs in this window)") {
+		t.Errorf("want the table to say it is empty rather than vanish:\n%s", clipped)
+	}
+}
+
 // The drain fixture is what a real directory looks like the first time -drain
 // is used: two processes that both worked issue #1 and disagreed about how it
 // ended, the records a version before ids left behind, and a third drain on

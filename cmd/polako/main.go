@@ -863,6 +863,19 @@ func drain(ctx context.Context, cfg config) error {
 			results = append(results, spend(st, issueResult{issue: issue, parked: true, reason: reason}))
 			delete(states, issue)
 			log.Printf("issue #%d needs a human: %s — parking it and moving on", issue, reason)
+			// A park is exactly when somebody wants to read what the run
+			// actually did, and the session is the whole transcript of it. Kept
+			// out of the reason on purpose: that text is posted to the issue
+			// thread, and this id is nobody's business but the operator's.
+			//
+			// "skill run", because a park raised while supervising a PR follows
+			// remediation runs, which report sessions of their own that this
+			// state does not track. Those are in the log above, on their own
+			// "session started" lines.
+			if st.session != "" {
+				log.Printf("issue #%d: `claude --resume %s` reopens what the last skill run on it did",
+					issue, st.session)
+			}
 			parkIssue(ctx, cfg, issue, reason)
 			// After the park, not before: by now the label and the comment
 			// saying why are on the issue, so somebody following the
@@ -2214,7 +2227,15 @@ func logEvent(ev streamEvent) {
 	switch ev.Type {
 	case "system":
 		if ev.Subtype == "init" {
-			log.Printf("[claude] session started (model %s)", ev.Model)
+			// The id is the only handle that reopens this run in full, and the
+			// stream is the only place it is ever announced. Omitted when the
+			// event carries none, rather than logging an empty pair of
+			// parentheses for a CLI that did not report one.
+			session := ""
+			if ev.SessionID != "" {
+				session = ", session " + ev.SessionID
+			}
+			log.Printf("[claude] session started (model %s%s)", ev.Model, session)
 		}
 	case "assistant":
 		for _, c := range ev.Message.Content {
