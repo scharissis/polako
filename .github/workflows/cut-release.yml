@@ -46,9 +46,15 @@ jobs:
 
           # Resolves a tag to the commit it names, empty if there is no such
           # tag; the API dereferences annotated and lightweight tags alike.
-          # Same reasoning as scripts/smoke.sh.
+          # Keyed on the exit status, never the output: on a missing ref
+          # `gh api` prints its error envelope to stdout — the --jq filter
+          # only applies on success — and capturing that as a commit is what
+          # failed this workflow's first run, reading two absent tags as two
+          # different commits. scripts/smoke.sh carries the same warning.
           tagCommit() {
-            gh api "repos/$GITHUB_REPOSITORY/commits/$1" --jq .sha 2>/dev/null || true
+            local sha
+            sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$1" --jq .sha 2>/dev/null) || sha=""
+            printf '%s' "$sha"
           }
           semverCommit=$(tagCommit "$semverTag")
           pluginCommit=$(tagCommit "$pluginTag")
