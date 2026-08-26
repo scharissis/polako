@@ -9,6 +9,25 @@ Entries carry an **Operator impact** line when a release changes what an
 unattended run does, rather than only what the code looks like. Those are the
 lines worth reading before upgrading a machine that works a backlog overnight.
 
+## [0.8.0]
+
+### Added
+
+- automate the release pipeline between the two human gates
+- register each run with Remote Control, on by default
+- name the session in the progress log and beside a park
+- list individual runs in stats with -runs
+
+### Fixed
+
+- catch the refusal that never exits, and bound the stderr wait
+
+### Changed
+
+- name Remote Control as the second thing that leaves the machine
+- fix the anchor, the column claim and the park sample in the -runs section
+- document -runs and the claude --resume recipe
+
 ## [0.7.0]
 
 ### Added
