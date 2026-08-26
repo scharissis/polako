@@ -262,6 +262,11 @@ type config struct {
 	// calls a real gh, but the drain loop is mostly GitHub bookkeeping and is
 	// worth covering end to end. No flag sets it — parseFlags pins it to "gh".
 	ghBin string
+	// ghRepo names the repository on every gh call, for a read that has to work
+	// from a directory which is not a checkout of it. Empty — the drain's own
+	// setting, always — lets gh resolve the repository from cfg.dir, which is
+	// what every call here did before `status` existed. See gh().
+	ghRepo string
 	// ghRetryWait is how long retryRead waits between attempts at a GitHub read
 	// that failed. A seam like ghBin rather than a flag: what it is really
 	// waiting for is a network coming back after a wake, which is not a
@@ -337,18 +342,33 @@ type config struct {
 }
 
 func main() {
-	// One subcommand, dispatched before any flag is parsed so that a bare
-	// invocation still drains and nothing existing changes. `stats` only
-	// reads the run data; it never touches GitHub or starts a run.
-	if len(os.Args) > 1 && os.Args[1] == "stats" {
-		log.SetFlags(0) // a report, not a log
-		if err := runStats(os.Args[2:], os.Stdout, time.Now()); err != nil {
-			if errors.Is(err, errFlagsReported) {
-				os.Exit(2) // the usage is already on screen
+	// Two subcommands, dispatched before any flag is parsed so that a bare
+	// invocation still drains and nothing existing changes. Both are reports
+	// and neither starts a run: `stats` reads the run data and never touches
+	// GitHub, `status` reads GitHub and never touches the run data.
+	if len(os.Args) > 1 {
+		report := func(name string, run func() error) {
+			log.SetFlags(0) // a report, not a log
+			if err := run(); err != nil {
+				if errors.Is(err, errFlagsReported) {
+					os.Exit(2) // the usage is already on screen
+				}
+				log.Fatalf("%s: %v", name, err)
 			}
-			log.Fatalf("stats: %v", err)
 		}
-		return
+		switch os.Args[1] {
+		case "stats":
+			report("stats", func() error { return runStats(os.Args[2:], os.Stdout, time.Now()) })
+			return
+		case "status":
+			// Its own context, cancelled by the same signals a drain honours:
+			// a snapshot makes a handful of gh calls, and Ctrl+C partway
+			// through should end them rather than be ignored.
+			ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
+			defer stop()
+			report("status", func() error { return runStatus(ctx, os.Args[2:], os.Stdout, time.Now()) })
+			return
+		}
 	}
 
 	cfg := parseFlags()
@@ -430,8 +450,9 @@ func parseFlags() config {
 		`directory for run-data records, or "off" (default ~/.backlog-drain/metrics)`)
 	flag.Usage = func() {
 		fmt.Fprint(flag.CommandLine.Output(),
-			"Usage: backlog-drain [flags]        drain the backlog, one issue at a time\n"+
-				"       backlog-drain stats [flags]  report on the run data already recorded\n\n"+
+			"Usage: backlog-drain [flags]         drain the backlog, one issue at a time\n"+
+				"       backlog-drain status [flags]  print where the backlog stands, from GitHub\n"+
+				"       backlog-drain stats [flags]   report on the run data already recorded\n\n"+
 				envUsage+"\nFlags:\n")
 		flag.PrintDefaults()
 	}
@@ -2248,43 +2269,57 @@ func openIssues(ctx context.Context, cfg config) (ready, blocked []int, err erro
 	if err != nil {
 		return nil, nil, err
 	}
-	ready, blocked, err = selectableIssues(out)
+	q, err := selectableIssues(out)
 	if err != nil {
 		return nil, nil, err
 	}
 	if cfg.strictOrder {
-		return append(ready, blocked...), nil, nil
+		return append(q.ready, q.blocked...), nil, nil
 	}
-	return ready, blocked, nil
+	return q.ready, q.blocked, nil
+}
+
+// issueQueues is the open backlog sorted into what a drain does with each
+// issue: work it now, leave it for the human it asked, or leave it alone
+// entirely. The drain reads the first two and throws the third away, since a
+// parked issue is one it has agreed not to touch; `status` is what the third
+// exists for, because "what is parked?" is a question about the backlog rather
+// than about the next run.
+type issueQueues struct {
+	ready   []int
+	blocked []int
+	parked  []int
 }
 
 // selectableIssues reads a `gh issue list --json number,labels` payload and
-// sorts what is worth working into the two queues the drain keeps: issues ready
-// now, and issues already waiting on a human answer. Anything a previous drain
-// parked is dropped from both, which is what stops the queue handing back the
-// same unimplementable issue on every pass. Labels are matched
-// case-insensitively, the way GitHub itself treats them.
+// sorts it into the three queues: issues ready now, issues already waiting on a
+// human answer, and issues a previous drain parked. Only the first two are
+// worth working, which is what stops the queue handing back the same
+// unimplementable issue on every pass. Labels are matched case-insensitively,
+// the way GitHub itself treats them.
 //
-// The blocked list comes back ascending because the drain works it lowest
-// first, and `gh issue list` guarantees no order of its own.
-func selectableIssues(raw []byte) (ready, blocked []int, err error) {
+// Every list comes back ascending because the drain works them lowest first,
+// and `gh issue list` guarantees no order of its own.
+func selectableIssues(raw []byte) (issueQueues, error) {
 	var issues []ghIssue
 	if err := json.Unmarshal(raw, &issues); err != nil {
-		return nil, nil, fmt.Errorf("parsing issue list: %w", err)
+		return issueQueues{}, fmt.Errorf("parsing issue list: %w", err)
 	}
-	ready = make([]int, 0, len(issues))
+	q := issueQueues{ready: make([]int, 0, len(issues))}
 	for _, is := range issues {
 		switch {
 		case is.hasLabel(needsHumanLabel):
-			// Parked: out of both queues until a human removes the label.
+			q.parked = append(q.parked, is.Number)
 		case is.hasLabel(awaitingAnswerLabel):
-			blocked = append(blocked, is.Number)
+			q.blocked = append(q.blocked, is.Number)
 		default:
-			ready = append(ready, is.Number)
+			q.ready = append(q.ready, is.Number)
 		}
 	}
-	slices.Sort(blocked)
-	return ready, blocked, nil
+	slices.Sort(q.ready)
+	slices.Sort(q.blocked)
+	slices.Sort(q.parked)
+	return q, nil
 }
 
 // ghIssue is one row of `gh issue list --json number,labels`.
@@ -2329,6 +2364,10 @@ type issueComment struct {
 		// reporter — and "User" for everyone else.
 		Type string `json:"type"`
 	} `json:"user"`
+	// CreatedAt is read by `status` alone, to say how long a thread has been
+	// quiet. No wait decides on it: comment ids only ever increase, and a
+	// baseline made of them needs no clock and survives an edit.
+	CreatedAt string `json:"created_at"`
 }
 
 func (c issueComment) fromBot() bool { return c.User.Type == "Bot" }
@@ -2342,8 +2381,10 @@ func (c issueComment) fromBot() bool { return c.User.Type == "Bot" }
 // comments are a machine's is simply not in that answer. REST puts a type on
 // every author, which is the whole reason for the detour.
 //
-// Repo-implicit, like every other gh call here: they all run in cfg.dir and let
-// gh resolve the repository from the checkout.
+// The path's {owner}/{repo} are gh's own placeholders, filled in from whatever
+// repository it resolved out of cfg.dir — which is how every call here reads on
+// a drain. ghArgs substitutes them by hand when cfg.ghRepo names one instead,
+// since `gh api` has no --repo to take.
 func issueComments(ctx context.Context, cfg config, issue int) ([]issueComment, error) {
 	path := fmt.Sprintf("repos/{owner}/{repo}/issues/%d/comments?per_page=100", issue)
 	out, err := retryRead(ctx, cfg, fmt.Sprintf("reading #%d's comments", issue), func() ([]byte, error) {
@@ -3134,7 +3175,31 @@ func cleanupWorktree(ctx context.Context, cfg config, issue int) {
 // --- plumbing ---
 
 func gh(ctx context.Context, cfg config, args ...string) ([]byte, error) {
-	return capture(ctx, cfg.dir, cfg.ghBin, args...)
+	return capture(ctx, cfg.dir, cfg.ghBin, ghArgs(cfg.ghRepo, args)...)
+}
+
+// ghArgs names the repository on a call that would otherwise be resolved from
+// the working directory. Two spellings, because gh has two: every subcommand
+// here takes --repo, and `gh api` takes none — it substitutes {owner} and
+// {repo} into the path from the repository it resolved, so naming one means
+// doing that substitution here instead.
+//
+// With no repo — the drain, always — the argv is handed back untouched, which
+// is the repo-implicit call every path here has always made.
+func ghArgs(repo string, args []string) []string {
+	if repo == "" || len(args) == 0 {
+		return args
+	}
+	if args[0] != "api" {
+		return append(slices.Clone(args), "--repo", repo)
+	}
+	owner, name, _ := strings.Cut(repo, "/")
+	sub := strings.NewReplacer("{owner}", owner, "{repo}", name)
+	out := slices.Clone(args)
+	for i := range out {
+		out[i] = sub.Replace(out[i])
+	}
+	return out
 }
 
 // ghReads is how many times a read-only GitHub lookup is attempted before its

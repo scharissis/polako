@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -55,6 +56,11 @@ type fakeIssue struct {
 	// the ids of the ones a GitHub App wrote rather than a person.
 	Comments int   `json:"comments"`
 	Bots     []int `json:"bots"`
+	// CommentedAt stamps every comment on the thread. Only the newest one's
+	// date is ever read — `status` measures how long a thread has been quiet by
+	// it — so one date says everything a per-comment one would. Empty stands
+	// for a thread whose dates GitHub did not report.
+	CommentedAt string `json:"commented_at"`
 
 	// ReplyOnRead is a human answering a question while the supervisor polls:
 	// their comment appears on the Nth read of the thread from now. Counting
@@ -138,8 +144,20 @@ func writeGhState(path string, st *ghState) error {
 	return os.WriteFile(path, b, 0o600)
 }
 
+// fakeGhLogEnv names a file every gh invocation is appended to, one argv per
+// line. It is how a test proves which calls a path made, which the state
+// afterwards cannot: a mutation gh refused leaves the state untouched too, and
+// so does one that wrote back exactly what was already there.
+const fakeGhLogEnv = "BACKLOG_DRAIN_FAKE_GH_LOG"
+
 // fakeGh answers one gh invocation and persists anything it changed.
 func fakeGh(path string, args []string) int {
+	if dest := os.Getenv(fakeGhLogEnv); dest != "" {
+		if f, err := os.OpenFile(dest, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+			fmt.Fprintln(f, strings.Join(args, " "))
+			f.Close()
+		}
+	}
 	st, err := readGhState(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fake gh: %v\n", err)
@@ -245,7 +263,8 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			if slices.Contains(is.Bots, id) {
 				author = "Bot"
 			}
-			comments = append(comments, fmt.Sprintf(`{"id":%d,"user":{"type":%q}}`, id, author))
+			comments = append(comments, fmt.Sprintf(`{"id":%d,"user":{"type":%q},"created_at":%q}`,
+				id, author, is.CommentedAt))
 		}
 		return "[" + strings.Join(comments, ",") + "]", counting, 0
 
@@ -293,12 +312,25 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 		return "", true, 0
 
 	case "pr list":
-		pr, ok := st.PRs[flagVal("--head")]
-		if !ok {
-			return "[]", false, 0
+		// With --head, the branch lookup the drain makes. Without one, every PR
+		// in the requested state — which is how `status` finds the open PRs on
+		// issue branches in a single call.
+		if head := flagVal("--head"); head != "" {
+			pr, ok := st.PRs[head]
+			if !ok {
+				return "[]", false, 0
+			}
+			return "[" + prListJSON(head, pr) + "]", false, 0
 		}
-		return fmt.Sprintf(`[{"number":%d,"state":%q,"url":"https://example.invalid/pr/%d"}]`,
-			pr.Number, pr.State, pr.Number), false, 0
+		var rows []string
+		for _, branch := range slices.Sorted(maps.Keys(st.PRs)) {
+			if pr := st.PRs[branch]; flagVal("--state") == "" ||
+				strings.EqualFold(flagVal("--state"), "all") ||
+				strings.EqualFold(flagVal("--state"), pr.State) {
+				rows = append(rows, prListJSON(branch, pr))
+			}
+		}
+		return "[" + strings.Join(rows, ",") + "]", false, 0
 
 	case "pr view":
 		for _, pr := range st.PRs {
@@ -326,6 +358,14 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 	}
 	fmt.Fprintf(os.Stderr, "fake gh: unhandled call %q\n", strings.Join(args, " "))
 	return "", false, 1
+}
+
+// prListJSON renders one row of `gh pr list --json number,state,url` — plus the
+// headRefName `status` filters on, which the drain's own lookup does not ask
+// for and ignores.
+func prListJSON(branch string, pr *fakePR) string {
+	return fmt.Sprintf(`{"number":%d,"state":%q,"headRefName":%q,"url":"https://example.invalid/pr/%d"}`,
+		pr.Number, pr.State, branch, pr.Number)
 }
 
 // rollupJSON renders the statusCheckRollup half of `pr view --json`. Every
@@ -1188,16 +1228,21 @@ func TestSelectableIssuesDropsParkedOnes(t *testing.T) {
 		{"number":6,"labels":[]},
 		{"number":7,"labels":[{"name":"bug"},{"name":"needs-human"}]}]`)
 
-	ready, blocked, err := selectableIssues(raw)
+	q, err := selectableIssues(raw)
 	if err != nil {
 		t.Fatalf("selectableIssues: %v", err)
 	}
 	// 5 proves the match ignores case, the way GitHub treats label names.
-	if want := []int{4, 6}; !slices.Equal(ready, want) {
-		t.Errorf("ready = %v, want %v", ready, want)
+	if want := []int{4, 6}; !slices.Equal(q.ready, want) {
+		t.Errorf("ready = %v, want %v", q.ready, want)
 	}
-	if len(blocked) != 0 {
-		t.Errorf("blocked = %v, want nothing waiting on an answer", blocked)
+	if len(q.blocked) != 0 {
+		t.Errorf("blocked = %v, want nothing waiting on an answer", q.blocked)
+	}
+	// Out of the drain's way, but still findable: `status` reports what is
+	// parked, and a queue that merely forgot them could not.
+	if want := []int{5, 7}; !slices.Equal(q.parked, want) {
+		t.Errorf("parked = %v, want %v", q.parked, want)
 	}
 }
 
@@ -1209,22 +1254,25 @@ func TestSelectableIssuesSeparatesBlockedOnes(t *testing.T) {
 		{"number":6,"labels":[]},
 		{"number":7,"labels":[{"name":"awaiting-answer"},{"name":"needs-human"}]}]`)
 
-	ready, blocked, err := selectableIssues(raw)
+	q, err := selectableIssues(raw)
 	if err != nil {
 		t.Fatalf("selectableIssues: %v", err)
 	}
-	if want := []int{6}; !slices.Equal(ready, want) {
-		t.Errorf("ready = %v, want %v", ready, want)
+	if want := []int{6}; !slices.Equal(q.ready, want) {
+		t.Errorf("ready = %v, want %v", q.ready, want)
 	}
 	// Ascending, because the drain revisits the lowest first and gh guarantees
 	// no order. 7 is parked as well as flagged, and parked wins.
-	if want := []int{4, 9}; !slices.Equal(blocked, want) {
-		t.Errorf("blocked = %v, want %v", blocked, want)
+	if want := []int{4, 9}; !slices.Equal(q.blocked, want) {
+		t.Errorf("blocked = %v, want %v", q.blocked, want)
+	}
+	if want := []int{7}; !slices.Equal(q.parked, want) {
+		t.Errorf("parked = %v, want %v", q.parked, want)
 	}
 }
 
 func TestSelectableIssuesRejectsJunk(t *testing.T) {
-	if _, _, err := selectableIssues([]byte("not json")); err == nil {
+	if _, err := selectableIssues([]byte("not json")); err == nil {
 		t.Fatal("a payload that is not an issue list must be an error, not an empty queue")
 	}
 }
