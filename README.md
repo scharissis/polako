@@ -1250,6 +1250,19 @@ pipeline only moves when the version in `plugin.json` changes on `main`, so
 ordinary merges never cut anything, and bumping that field stays the
 deliberate act it always was.
 
+**One-time setup, per repository:** the workflows open PRs, and GitHub forbids
+a workflow's own token that by default, whatever permissions the workflow asks
+for. Enable it once — *Settings → Actions → General → Workflow permissions →
+Allow GitHub Actions to create and approve pull requests* — or:
+
+```bash
+gh api -X PUT repos/{owner}/{repo}/actions/permissions/workflow -F can_approve_pull_request_reviews=true
+```
+
+Until then, *Start a release* and the publish step fail at `gh pr create`;
+each says so, names the checkbox, and deletes the branch it pushed so a re-run
+starts clean.
+
 | Tag | Who needs it |
 | --- | --- |
 | `polako--v0.4.0` | The Claude plugin tooling. `claude plugin tag` creates it, and refuses if `plugin.json` and the marketplace entry disagree. It is also what the marketplace entry's `ref` pins to, and what a `dependencies` range would resolve against. |

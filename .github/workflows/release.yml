@@ -147,6 +147,21 @@ jobs:
             echo "a publish PR for $version is already open: $open"
             exit 0
           fi
+          # A previous run may have pushed the branch and then died before
+          # its PR opened. The workflow's own scaffold is regenerated here,
+          # so it is swept aside; a branch carrying anybody else's commits is
+          # not this workflow's to delete.
+          if [ -n "$(git ls-remote origin "refs/heads/$branch")" ]; then
+            committer=$(gh api "repos/$GITHUB_REPOSITORY/commits/$branch" \
+              --jq .commit.committer.email 2>/dev/null || true)
+            if [ "$committer" = "41898282+github-actions[bot]@users.noreply.github.com" ]; then
+              echo "deleting the publish branch $branch a previous run left behind"
+              git push origin ":refs/heads/$branch"
+            else
+              echo "::error::branch $branch already exists with commits this workflow did not make — open a PR from it, or delete it (git push origin :$branch) and re-run this workflow on the tag"
+              exit 1
+            fi
+          fi
 
           # The one-line ref move, branched from main rather than from the tag
           # so it carries nothing but the publish. Merging it is the moment
@@ -178,6 +193,11 @@ jobs:
             echo "CI does not start on its own for a PR a workflow opens; a run was"
             echo "dispatched for this branch, and any push to it triggers CI normally."
           } > body.md
-          gh pr create --base main --head "$branch" \
-            --title "chore: publish $version" --body-file body.md
+          if ! gh pr create --base main --head "$branch" \
+              --title "chore: publish $version" --body-file body.md; then
+            # Leave nothing behind, and name the usual one-checkbox fix.
+            git push origin ":refs/heads/$branch"
+            echo "::error::could not open the publish PR; the branch was deleted again. If the error above says GitHub Actions is not permitted to create pull requests, enable it once — Settings → Actions → General → Workflow permissions → 'Allow GitHub Actions to create and approve pull requests' — then re-run this workflow on the tag."
+            exit 1
+          fi
           gh workflow run ci.yml --ref "$branch"
