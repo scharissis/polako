@@ -386,6 +386,7 @@ func drainConfig(t *testing.T, mode string, st *ghState) (config, string) {
 		poll:           10 * time.Millisecond,
 		stall:          10 * time.Second,
 		ghRetryWait:    time.Millisecond,
+		resumeCeiling:  defaultResumeCeiling,
 	}, path
 }
 
@@ -1377,6 +1378,11 @@ func TestDrainStopsWhenGhKeepsFailing(t *testing.T) {
 // invocation, and the resume is read out of the same log — no state the fakes
 // would have to keep just to be asked about.
 func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
+	// Every resume the ceiling allows costs a fake claude process and the gh
+	// calls around it, so the shipped 20 spends over a minute under -race and
+	// ran the bound below out on CI. Three proves the same thing: it is past
+	// -retries 1, so only the reset can reach it and only the ceiling stops it.
+	const ceiling = 3
 	open := func() map[string]*fakeIssue { return map[string]*fakeIssue{"1": {Open: true}} }
 	parkedFor := func(t *testing.T, err error) string {
 		t.Helper()
@@ -1499,20 +1505,20 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 			name:  "a crash that got work done first does not spend the retry budget",
 			mode:  "partial",
 			state: &ghState{Issues: open()},
-			tune:  func(cfg *config) { cfg.retries = 1 },
+			tune:  func(cfg *config) { cfg.retries, cfg.resumeCeiling = 1, ceiling },
 			// One fresh run and every resume the ceiling allows. The old counter
 			// would have stopped at two.
-			runs: 1 + resumeCeiling,
+			runs: 1 + ceiling,
 			check: func(t *testing.T, err error, st *ghState, out string) {
 				want := fmt.Sprintf("claude has been retried %d times on this issue and still has "+
 					"not finished it — each run gets somewhere and then dies, which needs a human",
-					resumeCeiling)
+					ceiling)
 				if got := parkedFor(t, err); got != want {
 					t.Errorf("park reason = %q, want %q", got, want)
 				}
 				if !strings.Contains(out, "the -retries budget starts over") {
 					t.Errorf("want the reset said out loud, since -retries 1 would not explain "+
-						"%d runs on its own\ngot:\n%s", 1+resumeCeiling, out)
+						"%d runs on its own\ngot:\n%s", 1+ceiling, out)
 				}
 				// The invocation, not only the announcement. Reading "resume this
 				// session or start fresh" off the same counter the reset zeroes

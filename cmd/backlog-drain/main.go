@@ -266,7 +266,12 @@ type config struct {
 	// waiting for is a network coming back after a wake, which is not a
 	// preference anyone has, and the suite sets it low so a proved retry costs
 	// no wall clock. parseFlags pins it to ghRetryDelay.
-	ghRetryWait    time.Duration
+	ghRetryWait time.Duration
+	// resumeCeiling is the backstop below, and a seam for the same reason
+	// ghRetryWait is: reaching it costs one process per resume, and the suite
+	// proves the ceiling stops the loop rather than proving its size.
+	// parseFlags pins it to defaultResumeCeiling.
+	resumeCeiling  int
 	skill          string
 	branchPrefix   string
 	label          string
@@ -447,6 +452,7 @@ func parseFlags() config {
 	cfg.rec = newRecorder(metrics)
 	cfg.ghBin = "gh"
 	cfg.ghRetryWait = ghRetryDelay
+	cfg.resumeCeiling = defaultResumeCeiling
 	cfg.skip = parseSkip(skip)
 	abs, err := filepath.Abs(cfg.dir)
 	if err != nil {
@@ -1266,7 +1272,7 @@ func describeVersion() string {
 	return pluginName + " " + v
 }
 
-// resumeCeiling bounds how many times one issue may be resumed in total,
+// defaultResumeCeiling bounds how many times one issue may be resumed in total,
 // however much each of those runs got done. -retries bounds the consecutive
 // fruitless ones, which is the loop worth giving up on quickly; this is the
 // backstop for the other shape, a run that gets a little further every time,
@@ -1275,7 +1281,7 @@ func describeVersion() string {
 // Crude and generous on purpose. What one issue may really consume is -max-cost
 // and -max-issue-time, and #7 is where a proper ceiling belongs; this only has
 // to guarantee the loop ends.
-const resumeCeiling = 20
+const defaultResumeCeiling = 20
 
 // processIssue advances one issue as far as it will go: to merged, to a park,
 // or — the one way back out that is neither — to a question a human owes an
@@ -1496,7 +1502,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					log.Printf("new activity on #%d — re-running to fold the answers in", issue)
 					fruitless, retrying, st.answered = 0, false, true
 					continue
-				case runErr != nil && fruitless < cfg.retries && resumes < resumeCeiling:
+				case runErr != nil && fruitless < cfg.retries && resumes < cfg.resumeCeiling:
 					// Crash (API drop, stall, tool failure): resume the exact
 					// session by ID, keeping its research context. If no
 					// session was ever created, retry as a fresh run instead.
@@ -1525,7 +1531,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 						fruitless = 0
 						log.Printf("%s (retry %d/%d; the last run got work done before it "+
 							"ended, so the -retries budget starts over) in %s",
-							mode, resumes, resumeCeiling, cfg.retryWait)
+							mode, resumes, cfg.resumeCeiling, cfg.retryWait)
 					} else {
 						fruitless++
 						log.Printf("%s (attempt %d/%d) in %s",
@@ -1538,7 +1544,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 				case runErr != nil:
 					record(0, outcomeNothing)
 					terminal(0, issueNeedsHuman)
-					if resumes >= resumeCeiling {
+					if resumes >= cfg.resumeCeiling {
 						// "retried" rather than "resumed": most of these are
 						// resumes, but a dead session turns one into a fresh
 						// restart, and the count covers both.
