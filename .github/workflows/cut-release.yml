@@ -1,0 +1,133 @@
+name: Cut a release
+
+# The bridge between the two human gates. It watches main for the version in
+# plugin.json changing — a release PR merging — and turns that into the two
+# tags one release wears, then dispatches release.yml on the semver tag for
+# the build. Ordinary merges never trip it: a push that leaves the version
+# already tagged is a no-op, so "not every push is a release" holds by
+# construction rather than by anyone remembering it.
+#
+# Everything is re-derived from GitHub on every run, so re-running this
+# workflow from the Actions tab is the recovery move for any state a previous
+# run died in: a tag already pushed is kept, its missing twin is added on the
+# same commit, and a release that never got built is dispatched again.
+
+on:
+  push:
+    branches: [main]
+    paths: [".claude-plugin/plugin.json"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency: cut-release
+
+jobs:
+  cut:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # Full history: a re-run may need to tag the commit a partial earlier
+      # run already tagged, which is not necessarily the tip it checked out.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: work out what is owed
+        id: state
+        run: |
+          version=$(jq -r .version .claude-plugin/plugin.json)
+          semverTag="v$version"
+          pluginTag="polako--v$version"
+
+          # Resolves a tag to the commit it names, empty if there is no such
+          # tag; the API dereferences annotated and lightweight tags alike.
+          # Same reasoning as scripts/smoke.sh.
+          tagCommit() {
+            gh api "repos/$GITHUB_REPOSITORY/commits/$1" --jq .sha 2>/dev/null || true
+          }
+          semverCommit=$(tagCommit "$semverTag")
+          pluginCommit=$(tagCommit "$pluginTag")
+
+          if [ -n "$semverCommit" ] && [ -n "$pluginCommit" ]; then
+            if [ "$semverCommit" != "$pluginCommit" ]; then
+              echo "::error::$semverTag and $pluginTag name different commits — the two halves would ship from different trees. Delete both (git push origin :refs/tags/$semverTag :refs/tags/$pluginTag) and re-run this workflow."
+              exit 1
+            fi
+            echo "$version is already tagged; nothing to tag"
+            # The build may still be owed — a run that died after tagging —
+            # so re-running this workflow stays the one recovery lever.
+            if ! gh release view "$semverTag" --json tagName >/dev/null 2>&1; then
+              echo "no GitHub release for $semverTag yet; dispatching the Release workflow"
+              gh workflow run release.yml --ref "$semverTag"
+            fi
+            echo "done=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # One tag without its twin is a run that died between the two
+          # pushes. The twin goes on the commit the existing tag names —
+          # never on today's tip, which may have moved on since.
+          commit=$GITHUB_SHA
+          [ -n "$semverCommit" ] && commit=$semverCommit
+          [ -n "$pluginCommit" ] && commit=$pluginCommit
+          {
+            echo "done=false"
+            echo "version=$version"
+            echo "commit=$commit"
+            echo "need_semver=$([ -z "$semverCommit" ] && echo true || echo false)"
+            echo "need_plugin=$([ -z "$pluginCommit" ] && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        if: steps.state.outputs.done == 'false'
+        with:
+          node-version: "22"
+
+      - name: validate, then tag
+        if: steps.state.outputs.done == 'false'
+        env:
+          VERSION: ${{ steps.state.outputs.version }}
+          COMMIT: ${{ steps.state.outputs.commit }}
+          NEED_SEMVER: ${{ steps.state.outputs.need_semver }}
+          NEED_PLUGIN: ${{ steps.state.outputs.need_plugin }}
+        run: |
+          git checkout -q "$COMMIT"
+
+          # Every guard runs before either tag exists, for the same reason
+          # scripts/release.sh puts them there: both tags go public before any
+          # CI sees them, so anything wrong has to be caught while there is
+          # nothing to retract. A missing changelog section fails here — the
+          # release body would be generated commit subjects — and the fix is
+          # to land the section on main and re-run this workflow.
+          if ! grep -q "^## \[*$VERSION\]*" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no section for $VERSION. Write the release notes, merge them to main, then re-run this workflow; no tag was pushed."
+            exit 1
+          fi
+          npm install -g @anthropic-ai/claude-code
+          claude plugin validate .
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "$NEED_PLUGIN" = true ]; then
+            # The plugin tooling's own tagging, exactly as scripts/release.sh
+            # runs it: it refuses if plugin.json and the marketplace entry
+            # disagree, and its message is spelled to match the annotation on
+            # the semver twin below.
+            claude plugin tag --push --message "polako %s"
+          fi
+          if [ "$NEED_SEMVER" = true ]; then
+            git tag -a "v$VERSION" -m "polako $VERSION" "$COMMIT"
+            git push origin "refs/tags/v$VERSION"
+          fi
+
+          # A tag pushed with the workflow's own token does not trigger
+          # release.yml's push trigger — GitHub suppresses workflow runs for
+          # events its token caused — so the build is dispatched explicitly,
+          # on the tag ref, where release.yml behaves exactly as a hand-pushed
+          # tag makes it behave.
+          gh workflow run release.yml --ref "v$VERSION"

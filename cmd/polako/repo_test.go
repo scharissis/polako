@@ -386,6 +386,39 @@ func TestPRBodyKeepsItsSectionsAndClosingLine(t *testing.T) {
 	}
 }
 
+// The release pipeline is workflows coupled by filename: cut-release.yml
+// watches plugin.json for the version changing and dispatches release.yml on
+// the tag it pushes; release.yml dispatches smoke.yml and ci.yml;
+// start-release.yml dispatches ci.yml on the release PR it opens. Every
+// dispatch exists because GitHub suppresses workflow runs for events a
+// workflow's own token caused, and every one resolves its target by filename
+// at run time — so a renamed or restructured workflow does not fail anything,
+// it just quietly never runs, and the merge that should have cut a release
+// does nothing at all.
+func TestReleaseWorkflowsStayCoupled(t *testing.T) {
+	couplings := map[string][]string{
+		// The path filter is how a version bump — and nothing else — starts a
+		// release; workflow_dispatch is the documented recovery re-run.
+		"cut-release.yml": {".claude-plugin/plugin.json", "release.yml", "workflow_dispatch"},
+		// workflow_dispatch is what cut-release.yml calls, since its tag push
+		// cannot trigger the push trigger.
+		"release.yml": {"workflow_dispatch", "smoke.yml", "ci.yml"},
+		"smoke.yml":   {"workflow_dispatch", "scripts/smoke.sh"},
+		// The release commit convention is spelled here as well as in the
+		// README; ci.yml is dispatched onto the PR branch it opens.
+		"start-release.yml": {"ci.yml", "chore(release):"},
+		"ci.yml":            {"workflow_dispatch"},
+	}
+	for file, wants := range couplings {
+		content := readRepoFile(t, ".github", "workflows", file)
+		for _, want := range wants {
+			if !strings.Contains(content, want) {
+				t.Errorf(".github/workflows/%s no longer mentions %q — the release pipeline is held together by that name and breaks silently without it", file, want)
+			}
+		}
+	}
+}
+
 // Every flag is part of the interface, so every flag has to appear in the
 // README. This is the check that catches a new flag shipped undocumented.
 func TestReadmeDocumentsEveryFlag(t *testing.T) {

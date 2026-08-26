@@ -10,10 +10,15 @@
 # The version is read from .claude-plugin/plugin.json. Bump it and commit that
 # bump before running this.
 #
-# Tagging is step 2 of three. Step 1 is the release commit; step 3 is moving the
-# marketplace entry's `ref` to the tag this creates, which is the act of
-# publishing — nobody is exposed to a release until that lands. Keeping them
-# apart is what stops main from ever advertising a tag that does not exist yet.
+# This is the by-hand half of what .github/workflows/cut-release.yml does on
+# its own when a release PR merges; running it first simply beats the workflow
+# to the same tags, and the workflow then finds them and stands down. Tagging
+# is step 2 of three. Step 1 is the release commit; step 3 is merging the
+# publish PR that moves the marketplace entry's `ref` to the tag this creates
+# — the Release workflow opens that PR, and merging it is the act of
+# publishing: nobody is exposed to a release until it lands. Keeping the steps
+# apart is what stops main from ever advertising a tag that does not exist
+# yet.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -72,7 +77,8 @@ git tag -a "v$version" -m "polako $version"
 git push origin "refs/tags/v$version"
 
 echo "pushed polako--v$version and v$version"
-echo "the binary release workflow runs on v$version"
+echo "the Release workflow runs on v$version: binaries, the GitHub release,"
+echo "a Smoke run, and the publish PR"
 
 # Whether step 3 is still owed. The full rule - the pinned ref must never be
 # ahead of plugin.json - is enforced by TestMarketplaceRefIsNotAheadOfTheVersion
@@ -84,9 +90,11 @@ if [ "$ref" = "polako--v$version" ]; then
 else
   echo
   echo "STEP 3 - nobody is on $version yet. The marketplace entry still pins $ref."
-  echo "Smoke-test the release:"
+  echo "Smoke-test the release - the dispatched Smoke run under Actions, or"
+  echo "locally:"
   echo
   echo "  ./scripts/smoke.sh"
   echo
-  echo "then open a PR moving that ref to polako--v$version."
+  echo "then merge the publish PR the Release workflow opens, which moves that"
+  echo "ref to polako--v$version."
 fi

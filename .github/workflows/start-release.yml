@@ -1,0 +1,155 @@
+name: Start a release
+
+# The entry point of the release pipeline: run it from the Actions tab, pick a
+# bump, and it opens the release PR — plugin.json bumped, CHANGELOG.md given a
+# draft section made of the commit subjects since the last release. Rewriting
+# that draft into operator-facing notes and merging the PR is the human half;
+# cut-release.yml takes over from the merge. Nothing here releases anything: a
+# PR this workflow opens can sit, be edited, or be closed unmerged, and nobody
+# downstream ever sees it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Which part to bump — pre-1.0, minor is the breaking axis (see What to bump in the README)"
+        type: choice
+        options: [patch, minor, major]
+        default: minor
+      version:
+        description: "Explicit X.Y.Z instead of a bump (leave empty to use the bump)"
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency: start-release
+
+jobs:
+  start:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # Full history: the changelog draft is the commit subjects since the last
+      # release tag, which a depth-1 clone cannot see.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: pick the next version
+        id: version
+        env:
+          # Through the environment rather than interpolated into the script,
+          # so a crafted input is a value, never shell.
+          INPUT_BUMP: ${{ inputs.bump }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          current=$(jq -r .version .claude-plugin/plugin.json)
+          next=$INPUT_VERSION
+          if [ -z "$next" ]; then
+            IFS=. read -r maj min pat <<<"$current"
+            case "$INPUT_BUMP" in
+              major) next=$((maj + 1)).0.0 ;;
+              minor) next=$maj.$((min + 1)).0 ;;
+              patch) next=$maj.$min.$((pat + 1)) ;;
+            esac
+          fi
+          if ! printf '%s' "$next" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::\"$next\" is not an X.Y.Z version"
+            exit 1
+          fi
+          if [ "$next" = "$current" ]; then
+            echo "::error::the version is already $current — pick a bump, or a different explicit version"
+            exit 1
+          fi
+          if [ -n "$(git ls-remote origin "refs/tags/v$next")" ]; then
+            echo "::error::v$next is already tagged; a tag never moves, so releasing again needs a new number"
+            exit 1
+          fi
+          open=$(gh pr list --head "release-$next" --state open --json url --jq '.[].url')
+          if [ -n "$open" ]; then
+            echo "::error::a release PR for $next is already open — edit and merge that one: $open"
+            exit 1
+          fi
+          {
+            echo "current=$current"
+            echo "next=$next"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: open the release PR
+        env:
+          CURRENT: ${{ steps.version.outputs.current }}
+          NEXT: ${{ steps.version.outputs.next }}
+        run: |
+          # The draft is the raw material for the release notes, grouped the
+          # way Keep a Changelog groups it: feat under Added, fix under Fixed,
+          # the rest under Changed. Release and publish chores are this
+          # pipeline's own plumbing, not changes anyone upgrades for.
+          range="v$CURRENT..HEAD"
+          git rev-parse -q --verify "refs/tags/v$CURRENT^{commit}" >/dev/null || range=HEAD
+          subjects=$(git log --no-merges --format='%s' "$range" \
+            | grep -Ev '^chore\(release\):|^chore: publish ' || true)
+          added=$(printf '%s\n' "$subjects" | grep -E '^feat' || true)
+          fixed=$(printf '%s\n' "$subjects" | grep -E '^fix' || true)
+          changed=$(printf '%s\n' "$subjects" | grep -Ev '^feat|^fix|^$' || true)
+          strip() { sed -E 's/^[a-z]+(\([^)]*\))?!?: //; s/^/- /'; }
+          {
+            echo "## [$NEXT]"
+            if [ -n "$added" ]; then
+              echo; echo '### Added'; echo; printf '%s\n' "$added" | strip
+            fi
+            if [ -n "$fixed" ]; then
+              echo; echo '### Fixed'; echo; printf '%s\n' "$fixed" | strip
+            fi
+            if [ -n "$changed" ]; then
+              echo; echo '### Changed'; echo; printf '%s\n' "$changed" | strip
+            fi
+            if [ -z "$added$fixed$changed" ]; then
+              echo; echo "_No commits since v$CURRENT; write the notes by hand._"
+            fi
+          } > /tmp/section.md
+
+          awk 'NR==FNR { section = section $0 ORS; next }
+               !done && /^## / { printf "%s", section; print ""; done = 1 }
+               { print }' /tmp/section.md CHANGELOG.md > /tmp/changelog.md
+          mv /tmp/changelog.md CHANGELOG.md
+          sed -i 's/"version": *"[^"]*"/"version": "'"$NEXT"'"/' .claude-plugin/plugin.json
+
+          # One commit that bumps plugin.json and writes the section, and does
+          # nothing else — the convention the repo's release history keeps, so
+          # a commit exists that means "this is $NEXT".
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "release-$NEXT"
+          git add .claude-plugin/plugin.json CHANGELOG.md
+          git commit -m "chore(release): $NEXT"
+          git push origin "release-$NEXT"
+
+          {
+            echo "Starts the release of $NEXT. **Merging this PR is what cuts it.**"
+            echo
+            echo "The CHANGELOG.md section in the diff is a draft made from the commit"
+            echo "subjects since v$CURRENT. Rewrite it into what an operator needs to"
+            echo "know before upgrading — add an **Operator impact** line if this"
+            echo "release changes what an unattended run does (the changelog's own"
+            echo "preamble says why) — then merge."
+            echo
+            echo "From the merge, the rest is automatic: *Cut a release* tags the merge"
+            echo "commit twice, *Release* builds the five binaries and publishes the"
+            echo "GitHub release with this changelog section as its body, a *Smoke* run"
+            echo "starts, and a publish PR opens. Nobody is on $NEXT until that publish"
+            echo "PR merges, so this PR can sit, be edited, or be closed unmerged"
+            echo "without anyone seeing a release."
+          } > /tmp/body.md
+          gh pr create --base main --head "release-$NEXT" \
+            --title "chore(release): $NEXT" --body-file /tmp/body.md
+
+          # A PR opened with the workflow's own token gets no pull_request CI
+          # run — GitHub suppresses runs for events its token caused — so ask
+          # for one explicitly; the checks land on the branch head, where the
+          # PR shows them. Any human push to the branch triggers CI normally.
+          gh workflow run ci.yml --ref "release-$NEXT"
