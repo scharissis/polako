@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -98,6 +99,32 @@ func fakeClaude(mode string) int {
 		emit(`{"type":"result","subtype":"success","session_id":"sess-costly","duration_ms":1000,` +
 			`"num_turns":4,"total_cost_usd":9,"usage":{"input_tokens":5,"output_tokens":6}}`)
 		return 7
+	case "crashthenships":
+		// Dies on the fresh attempt and finishes the job on the resume — the
+		// half of the retry decision no run in the suite performed. Which run
+		// this is comes off argv rather than off the pretend repository,
+		// because what it is there to prove is that the supervisor resumed a
+		// session instead of starting one over.
+		if !slices.Contains(os.Args, "--resume") {
+			return fakeClaude("crash")
+		}
+		if err := plantPR("MERGED"); err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		return fakeClaude("stream")
+	case "giant":
+		// One event past the reader's ceiling. The write blocks as soon as the
+		// pipe fills, which is the whole failure: nothing drains it any more, so
+		// a supervisor that waits on this process waits forever.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-giant","model":"claude-opus-5"}`)
+		fmt.Fprint(os.Stdout, `{"type":"assistant","session_id":"sess-giant","message":{"content":[{"type":"text","text":"`)
+		chunk := strings.Repeat("x", 1<<16)
+		for written := 0; written < maxEventBytes+len(chunk); written += len(chunk) {
+			fmt.Fprint(os.Stdout, chunk)
+		}
+		emit(`"}]}}`)
+		return 0
 	case "oddshape":
 		// content as a plain string rather than an array: valid JSON the event
 		// schema cannot hold, and here the only line carrying the session.
@@ -226,12 +253,7 @@ func fakeSkillEffect(mode string) error {
 		return errFakeCrash
 	case slices.Contains(is.Labels, awaitingAnswerLabel):
 		// The question has been answered, so this run folds it in and ships.
-		// `gh pr create` is not in the fake's repertoire, so the PR is planted
-		// directly; what matters downstream is only that the branch has one.
-		if st.PRs == nil {
-			st.PRs = map[string]*fakePR{}
-		}
-		st.PRs["issue-"+n] = &fakePR{Number: 42, State: "MERGED"}
+		plantPRIn(st, n, "MERGED")
 		err = call("edit", n, "--remove-label", awaitingAnswerLabel)
 	default:
 		if err = call("comment", n, "--body", "Which of the two should it do?"); err == nil {
@@ -243,6 +265,32 @@ func fakeSkillEffect(mode string) error {
 	if err != nil {
 		return err
 	}
+	return writeGhState(path, st)
+}
+
+// plantPRIn is the PR a finished run would have opened on the issue's branch.
+// `gh pr create` is not in the fake gh's repertoire, and nothing downstream
+// reads more than that the branch has one, in the state given.
+func plantPRIn(st *ghState, issue, state string) {
+	if st.PRs == nil {
+		st.PRs = map[string]*fakePR{}
+	}
+	st.PRs["issue-"+issue] = &fakePR{Number: 42, State: state}
+}
+
+// plantPR is the same against the state file, for a fake CLI that is not
+// already holding it open — it reads and writes rather than mutating in place.
+func plantPR(state string) error {
+	path := os.Getenv(fakeGhEnv)
+	st, err := readGhState(path)
+	if err != nil {
+		return err
+	}
+	n := promptIssue()
+	if st.Issues[n] == nil {
+		return fmt.Errorf("no issue #%q to work on", n)
+	}
+	plantPRIn(st, n, state)
 	return writeGhState(path, st)
 }
 
@@ -1117,6 +1165,36 @@ func TestExecClaudeKillsAStalledRun(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 10*time.Second {
 		t.Errorf("watchdog took %s to fire", elapsed)
+	}
+}
+
+// An event too large for the reader used to end the scan silently. The child
+// then blocked writing into a pipe nobody was draining, cmd.Wait never
+// returned, and the run died as a -stall kill a quarter of an hour later —
+// reported as a stall, which is the one thing it was not. It has to fail
+// straight away, and say what actually happened.
+func TestExecClaudeReportsAnEventTooLargeToRead(t *testing.T) {
+	captureLog(t)
+	cfg := fakeClaudeConfig(t, "giant")
+	cfg.stall = 0 // the watchdog must not be what rescues this
+
+	// A backstop, not the mechanism: without the fix nothing ends the run, and
+	// a suite that hangs for ten minutes says less than one that fails.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	start := time.Now()
+	rep, err := execClaude(ctx, cfg, "/implement-issue 7", "", "implement-issue", 0)
+	if err == nil || !strings.Contains(err.Error(), "could not read the event stream") {
+		t.Fatalf("an unreadable event should be reported as one, got err=%v", err)
+	}
+	if !errors.Is(err, bufio.ErrTooLong) {
+		t.Errorf("err = %v, want the scanner's own cause wrapped in it", err)
+	}
+	if rep.sessionID != "sess-giant" {
+		t.Errorf("session id = %q, want %q so the retry can resume it", rep.sessionID, "sess-giant")
+	}
+	if elapsed := time.Since(start); elapsed > 15*time.Second {
+		t.Errorf("took %s to give up, so the child was waited out rather than killed", elapsed)
 	}
 }
 

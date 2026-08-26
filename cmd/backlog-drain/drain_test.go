@@ -1290,3 +1290,192 @@ func TestDrainStopsCleanlyOnTheSessionBudget(t *testing.T) {
 		t.Errorf("issue 2 was picked up after the budget was spent\ngot:\n%s", out)
 	}
 }
+
+// --- one issue, decision by decision ---
+
+// processIssue holds the switch that decides resume against wait against give
+// up, and it is the most intricate thing in the package. The drain tests above
+// reach most of its branches, but each one reaches them incidentally, through
+// whichever route the issue it was really about happened to take. These drive
+// the function itself, one case per branch, so a branch that stops behaving
+// fails by name rather than by whichever end-to-end test noticed first.
+//
+// Runs are counted off the init event the supervisor logs for every
+// invocation, and the resume is read out of the same log — no state the fakes
+// would have to keep just to be asked about.
+func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
+	open := func() map[string]*fakeIssue { return map[string]*fakeIssue{"1": {Open: true}} }
+	parkedFor := func(t *testing.T, err error) string {
+		t.Helper()
+		reason, parked := parkReason(err)
+		if !parked {
+			t.Fatalf("err = %v, want the issue handed back to a human", err)
+		}
+		return reason
+	}
+
+	for _, tc := range []struct {
+		name  string
+		mode  string
+		state *ghState
+		tune  func(*config)
+		// runs is how many claude invocations this decision should dispatch.
+		// Zero is the interesting value: it is the restart-safety guarantee.
+		runs  int
+		check func(t *testing.T, err error, st *ghState, out string)
+	}{
+		{
+			// The restart-safety invariant: a PR on the branch means the work is
+			// done, whatever this process remembers, so the skill is never run
+			// again for it. Everything else here is about runs; this is about the
+			// one that must not happen.
+			name: "a PR already open is supervised rather than re-run",
+			mode: "stream",
+			state: &ghState{
+				Issues: open(),
+				PRs: map[string]*fakePR{"issue-1": {
+					Number: 9, State: "OPEN", Mergeable: "MERGEABLE",
+					Head: "abc123", Checks: []string{"SUCCESS"}, MergeOnRead: 1,
+				}},
+			},
+			runs: 0,
+			check: func(t *testing.T, err error, st *ghState, out string) {
+				if err != nil {
+					t.Errorf("err = %v, want a merge to finish the issue", err)
+				}
+				if st.Issues["1"].Open {
+					t.Error("issue 1 should have been closed once its PR merged")
+				}
+			},
+		},
+		{
+			name:  "a run that asked something hands the issue back",
+			mode:  "asks",
+			state: &ghState{Issues: open(), Labels: []string{awaitingAnswerLabel}},
+			runs:  1,
+			check: func(t *testing.T, err error, st *ghState, out string) {
+				deferred, ok := deferReason(err)
+				if !ok {
+					t.Fatalf("err = %v, want the issue put down for a human", err)
+				}
+				// Read after the question was posted, so a reply is anything past
+				// it — a baseline of zero would make the question itself the reply.
+				if deferred.baseline != 1 {
+					t.Errorf("baseline = %d, want the question already counted", deferred.baseline)
+				}
+				if !slices.Contains(st.Issues["1"].Labels, awaitingAnswerLabel) {
+					t.Error("the flag is the only durable trace of the question; it must be left up")
+				}
+			},
+		},
+		{
+			name:  "a crash resumes the session it died in and ships",
+			mode:  "crashthenships",
+			state: &ghState{Issues: open()},
+			tune:  func(cfg *config) { cfg.retries = 2 },
+			runs:  2,
+			check: func(t *testing.T, err error, st *ghState, out string) {
+				if err != nil {
+					t.Errorf("err = %v, want the resume to finish the issue", err)
+				}
+				// By ID: the research the dead run did is the whole reason to
+				// resume rather than start the issue over.
+				if !strings.Contains(out, "resuming session sess-crash") {
+					t.Errorf("want the crashed session resumed by id\ngot:\n%s", out)
+				}
+				if st.Issues["1"].Open {
+					t.Error("issue 1 should have been closed once its PR merged")
+				}
+			},
+		},
+		{
+			name:  "a crash with the resumes spent parks",
+			mode:  "crash",
+			state: &ghState{Issues: open()},
+			tune:  func(cfg *config) { cfg.retries = 1 },
+			runs:  2, // the fresh attempt and the one resume it was allowed
+			check: func(t *testing.T, err error, st *ghState, out string) {
+				if got, want := parkedFor(t, err), "claude crashed and 1 resume attempts failed"; got != want {
+					t.Errorf("park reason = %q, want %q", got, want)
+				}
+			},
+		},
+		{
+			// Nothing crashed, nothing was asked, and nothing was produced. A
+			// machine cannot tell what that means, so it says so rather than
+			// retrying its way around it.
+			name:  "a clean exit that produced nothing parks",
+			mode:  "stream",
+			state: &ghState{Issues: open()},
+			tune:  func(cfg *config) { cfg.retries = 2 },
+			runs:  1, // a clean exit is not a crash, so the resume budget is untouched
+			check: func(t *testing.T, err error, st *ghState, out string) {
+				if got, want := parkedFor(t, err), "the run completed but produced no PR and no questions"; got != want {
+					t.Errorf("park reason = %q, want %q", got, want)
+				}
+			},
+		},
+		{
+			// Fatal rather than parked: a -skill this installation does not have
+			// fails identically on every issue behind this one, so parking them
+			// one at a time only buries the cause.
+			name:  "a skill the session does not have stops the drain",
+			mode:  "unknownskill",
+			state: &ghState{Issues: open()},
+			tune:  func(cfg *config) { cfg.retries = 2 },
+			runs:  1,
+			check: func(t *testing.T, err error, st *ghState, out string) {
+				if !errors.Is(err, errNoWork) {
+					t.Fatalf("err = %v, want %v", err, errNoWork)
+				}
+				if _, parked := parkReason(err); parked {
+					t.Error("a misconfigured -skill dooms every later issue too, so it cannot be a park")
+				}
+				if !strings.Contains(err.Error(), "-skill") {
+					t.Errorf("err = %v, want it to name the flag to fix", err)
+				}
+			},
+		},
+		{
+			// Fatal for the same reason, and the reason nothing here retries it:
+			// no resume changes the token, so each one buys another 401.
+			name:  "refused credentials stop the drain",
+			mode:  "authfail",
+			state: &ghState{Issues: open()},
+			tune:  func(cfg *config) { cfg.retries = 2 },
+			runs:  1,
+			check: func(t *testing.T, err error, st *ghState, out string) {
+				if !errors.Is(err, errAuth) {
+					t.Fatalf("err = %v, want %v", err, errAuth)
+				}
+				if _, parked := parkReason(err); parked {
+					t.Error("a token the API refuses fails every later issue too, so it cannot be a park")
+				}
+				if !strings.Contains(err.Error(), "claude auth status") {
+					t.Errorf("err = %v, want it to say how to fix the token", err)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			buf := captureLog(t)
+			cfg, path := drainConfig(t, tc.mode, tc.state)
+			cfg.retryWait = time.Millisecond
+			if tc.tune != nil {
+				tc.tune(&cfg)
+			}
+			// Bounded: several of these branches are the ones that used to wait
+			// on something forever, and a hung suite says less than a failure.
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+
+			err := processIssue(ctx, cfg, 1, &issueState{})
+
+			out := buf.String()
+			if got := strings.Count(out, "session started"); got != tc.runs {
+				t.Errorf("%d runs dispatched, want %d\ngot:\n%s", got, tc.runs, out)
+			}
+			tc.check(t, err, finalGhState(t, path), out)
+		})
+	}
+}
