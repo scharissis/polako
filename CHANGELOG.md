@@ -196,6 +196,25 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   failure is believed, the way the waiting paths always did — waking from sleep
   is exactly when a `gh` call fails for a few seconds. A `gh` that genuinely
   cannot answer is still fatal, and writes are still made once.
+- A resumed run re-derives where things stand instead of taking the last step
+  for done. It was told to "continue exactly where it stopped", but a resume
+  only ever happens because something cut the previous attempt off mid-action —
+  the CLI's own words are "the response above may be incomplete". An edit could
+  have applied without the check meant to follow it, a commit could be
+  half-staged, a `gh pr create` could have succeeded with only its reply lost.
+  The resumed session is now asked to check `git status`, whether the branch and
+  PR already exist, and the issue thread, before it acts on anything. The thread
+  because a kill between posting a question and raising `awaiting-answer` leaves
+  a question the supervisor cannot see — it reads that run as having produced
+  nothing and parks a healthy issue over it.
+- The skill's Phase 1 no longer recreates a branch that already exists. It had
+  no case for `issue-N` being there already — left locally by a killed run, or
+  on the remote by one that pushed and died before `gh pr create` — so the
+  branch got rebuilt from the default branch and the commits on it went with
+  it. The lookup now comes before the workspace cases rather than after them, so
+  every one of them takes an existing `issue-N` as-is. **Operator impact:** the
+  interrupted run that got furthest is the one whose work survives; the
+  `issue-N` naming contract and `-branch-prefix` are unchanged.
 
 ## [0.6.1]
 

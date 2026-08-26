@@ -406,15 +406,23 @@ func issueFlagged() (bool, error) {
 
 // promptIssue is the issue number this invocation was dispatched for, taken
 // from the prompt the supervisor built. The last number rather than the last
-// word, because a resume is dispatched as a sentence ("Continue the
-// /implement-issue 1 workflow…") rather than as "/implement-issue 1".
+// word, because a resume is dispatched as a paragraph of plain English with the
+// "/implement-issue 1" buried in its first sentence — see resumePrompt — rather
+// than as "/implement-issue 1".
 func promptIssue() string {
 	i := slices.Index(os.Args, "-p")
 	if i < 0 || i+1 >= len(os.Args) {
 		return ""
 	}
+	return lastNumber(os.Args[i+1])
+}
+
+// lastNumber is that reading on its own, so the test guarding the resume
+// prompt's wording checks the same thing the fake CLI will do with it rather
+// than a restatement of it.
+func lastNumber(prompt string) string {
 	n := ""
-	for _, f := range strings.Fields(os.Args[i+1]) {
+	for _, f := range strings.Fields(prompt) {
 		if _, err := strconv.Atoi(f); err == nil {
 			n = f
 		}
@@ -1298,6 +1306,39 @@ func TestRunClaudeResumesRatherThanRestartingTheSkill(t *testing.T) {
 	}
 	if strings.Contains(out, want) {
 		t.Errorf("a resume must not restart the skill from scratch\ngot:\n%s", out)
+	}
+}
+
+// What a resume used to be told was "continue exactly where it stopped", which
+// reads as an assurance that the last step landed. It never was one: the
+// interruption arrives mid-action, so the resumed run has to look before it
+// carries on.
+func TestResumePromptAsksTheRunToRederiveItsState(t *testing.T) {
+	prompt := resumePrompt(defaultSkill, 12)
+
+	// The label is in the list for the same reason the workspace checks are:
+	// a kill between `gh issue comment` and the label leaves a question the
+	// supervisor cannot see, and parks a healthy issue over it.
+	for _, want := range []string{"git status", "branch", "pull request", "incomplete",
+		"issue thread", awaitingAnswerLabel} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("a resume prompt should mention %q, so the run checks rather than assumes\ngot: %s",
+				want, prompt)
+		}
+	}
+
+	// execClaude takes the slash command a prompt invokes as an argument
+	// rather than parsing it back out, and runClaude passes "" for a resume.
+	// A prompt that opened with "/" would make that a lie.
+	if strings.HasPrefix(prompt, "/") {
+		t.Errorf("a resume prompt is plain text and must not open with a slash command\ngot: %s", prompt)
+	}
+
+	// fakeClaude reads the issue number off the end of the prompt. A second
+	// number after it would not fail here — it would quietly point every
+	// resume in the suite at the wrong issue.
+	if got := lastNumber(prompt); got != "12" {
+		t.Errorf("last number in the prompt = %q, want the issue number %q\ngot: %s", got, "12", prompt)
 	}
 }
 

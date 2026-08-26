@@ -1609,9 +1609,44 @@ func runClaude(ctx context.Context, cfg config, issue int, resumeID string, limi
 	if resumeID != "" {
 		// Plain English, so invokes is empty: the resumed session already
 		// holds the skill's context and never re-resolves the command.
-		prompt, invokes = fmt.Sprintf("Continue the /%s %d workflow exactly where it stopped.", cfg.skill, issue), ""
+		prompt, invokes = resumePrompt(cfg.skill, issue), ""
 	}
 	return execClaude(ctx, cfg, prompt, resumeID, invokes, limit)
+}
+
+// resumePrompt is what a resumed session is told, and it is told to re-derive
+// rather than to carry on. Every reason we resume — a stall, a kill, a host
+// that slept — lands mid-action, and the CLI says as much: "The response above
+// may be incomplete". An edit can have applied without the check that was going
+// to follow it, a commit can be half-staged, a `gh pr create` can have
+// succeeded with only its reply lost. Told to continue "exactly where it
+// stopped", a run takes that last step for done.
+//
+// The issue thread is named alongside the branch and the PR because it holds
+// the one piece of orchestration state a mid-action kill can leave inconsistent
+// in a way nothing else recovers: a question posted with `gh issue comment` and
+// awaitingAnswerLabel not yet raised. The supervisor reads an unflagged run as
+// having produced nothing and parks a healthy issue, leaving the question
+// unanswered — so "re-derive" has to reach the thread, not only the workspace.
+//
+// Two properties this wording has to keep, both pinned by a test. It must not
+// begin with "/", or execClaude's contract would want it declared as a slash
+// command it is not. And the issue number must stay the last number in it: a
+// resume carries no "/skill N" for the fake CLI in the tests to read, so that
+// is how an invocation is traced back to the issue it was dispatched for.
+func resumePrompt(skill string, issue int) string {
+	return fmt.Sprintf(
+		"The previous attempt at the /%s %d workflow was interrupted part-way "+
+			"through an action, so whatever it did last may be incomplete. "+
+			"Before doing anything else, re-derive where things actually stand: "+
+			"run `git status`, check whether the branch and the pull request "+
+			"already exist, and re-read the issue thread. A question the last "+
+			"attempt posted there may be missing the %s label it needed, in "+
+			"which case raise the label rather than asking again; a question "+
+			"that already carries the label must not be posted twice. "+
+			"Then continue the workflow from what you found, rather than from "+
+			"what the last step looks like it was doing.",
+		skill, issue, awaitingAnswerLabel)
 }
 
 // issueRun is what a fresh skill run on one issue consists of: the config it
