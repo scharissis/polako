@@ -598,9 +598,10 @@ case the run simply proceeds unwatched.
 
 The same is true of a `claude` that will not take the flag in print mode at all.
 polako finds out rather than assuming: it asks on the shift's first run, and if
-the CLI answers with a usage error — no session started, nothing spent — it says
-so once, re-dispatches that same run without the flag, and stops asking for the
-rest of the shift.
+that run dies before a session ever starts — a usage error, or a CLI that takes
+the flag and then sits waiting for the input an unattended run has nobody to
+give — nothing was spent, so it says so once, re-dispatches that same run
+without the flag, and stops asking for the rest of the shift.
 
 ```
 this claude cannot register headless runs with Remote Control; runs continue unwatched (-remote=false silences this)

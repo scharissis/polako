@@ -1445,14 +1445,19 @@ func TestExecClaudeFallsBackWhenTheCLIRejectsRemoteControl(t *testing.T) {
 	}
 }
 
-// The detection has to be narrow: an ordinary crash also exits nonzero, and
-// reading one as a rejected flag would silently stop registering for the rest
-// of the shift — and, worse, hand the caller a second run it never asked for.
-func TestRejectedRemoteIgnoresEverythingButAUsageError(t *testing.T) {
+// Both shapes a refusal takes, and nothing else: an ordinary crash also exits
+// nonzero and an ordinary hang also stalls, and reading either as a rejected
+// flag would silently stop registering for the rest of the shift — and, worse,
+// hand the caller a second run it never asked for.
+func TestRejectedRemoteCatchesBothRefusalsAndNothingElse(t *testing.T) {
 	usage := &tailWriter{}
 	fmt.Fprintln(usage, "error: unknown option '--remote-control' (--print)")
 	other := &tailWriter{}
 	fmt.Fprintln(other, "No conversation found with the given session ID")
+	// A CLI that documents the flag for interactive sessions is as likely to
+	// refuse by naming the feature as by naming the option.
+	byName := &tailWriter{}
+	fmt.Fprintln(byName, "Error: Remote Control is not available with --print")
 
 	for _, tc := range []struct {
 		name string
@@ -1461,7 +1466,15 @@ func TestRejectedRemoteIgnoresEverythingButAUsageError(t *testing.T) {
 		want bool
 	}{
 		{"refused the flag", runReport{exitCode: 1}, usage, true},
+		{"refused the feature by name", runReport{exitCode: 1}, byName, true},
+		// The shape that matters most: a CLI that takes the flag, turns
+		// interactive on it and waits for input never exits at all, so there is
+		// no status and no usage error — only silence the watchdog ends. Missed,
+		// it would stall every run of the shift and park the whole backlog.
+		{"took the flag and then waited for input", runReport{exitCode: -1, stalled: true}, &tailWriter{}, true},
 		{"registration was never asked for", runReport{exitCode: 1}, nil, false},
+		{"a stall the operator stopped", runReport{exitCode: -1, stalled: true, interrupted: true}, usage, false},
+		{"a stall after the session started", runReport{exitCode: -1, stalled: true, started: true}, usage, false},
 		{"a dead session, which also emits nothing", runReport{exitCode: 1}, other, false},
 		{"the session started, so the flag was taken", runReport{exitCode: 1, started: true}, usage, false},
 		{"a clean exit", runReport{exitCode: 0}, usage, false},

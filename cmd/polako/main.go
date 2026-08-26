@@ -2172,19 +2172,29 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes strin
 }
 
 // rejectedRemote reports whether an attempt died on the registration flags
-// rather than on anything to do with the work. Three things have to hold at
-// once, and each rules out a failure worth reporting honestly:
+// rather than on anything to do with the work. Two things have to hold before
+// anything else is looked at, and each rules out a failure worth reporting
+// honestly:
 //
 //   - the flags were on the command line at all — errTail is nil otherwise;
 //   - no init event ever arrived, so the session never started and no model was
-//     reached, and the run cannot have done anything worth keeping;
-//   - the CLI exited nonzero naming the flag on stderr, which a usage error does
-//     and nothing else here does.
+//     reached, and the run cannot have done anything worth keeping.
+//
+// Given those, a refusal takes one of two shapes. The CLI exits nonzero saying
+// something about Remote Control, which a usage error does and nothing else
+// here does — matched on the feature's name as well as the flag's, because a
+// CLI that documents `--remote-control` for interactive sessions is at least as
+// likely to answer "Remote Control is not available with --print" as it is to
+// answer "unknown option". Or it takes the flag, turns interactive on it and
+// waits for input nobody is there to give, in which case it never exits at all
+// and the stall watchdog is what ends it. The second shape is the one that
+// matters most: undetected, an on-by-default flag would stall every run of the
+// shift and park the whole backlog.
 //
 // Deliberately not "and it exited quickly". A threshold would be an arbitrary
-// constant that a loaded machine trips over, and it buys nothing the three
-// conditions above do not already give: a CLI that got as far as an init event
-// took the flags, whatever it did next.
+// constant that a loaded machine trips over, and it buys nothing the conditions
+// above do not already give: a CLI that got as far as an init event took the
+// flags, whatever it did next.
 //
 // An interrupted run is excluded because a shutdown signal kills the child
 // through the context before it can announce itself, which looks the same from
@@ -2194,11 +2204,26 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes strin
 // re-dispatch carries no flags, so whatever really went wrong goes wrong again
 // and is reported honestly. That is the direction to be wrong in.
 func rejectedRemote(rep runReport, errTail *tailWriter) bool {
-	if errTail == nil || rep.started || rep.interrupted || rep.exitCode <= 0 {
+	if errTail == nil || rep.started || rep.interrupted {
 		return false
 	}
-	return strings.Contains(strings.ToLower(errTail.String()), "remote-control")
+	// Killed rather than exited, so there is no status to read and no usage
+	// error to match: silence before the first event is the whole of the tell.
+	if rep.stalled {
+		return true
+	}
+	if rep.exitCode <= 0 {
+		return false
+	}
+	tail := strings.ToLower(errTail.String())
+	return strings.Contains(tail, "remote-control") || strings.Contains(tail, "remote control")
 }
+
+// stderrWaitDelay is how long cmd.Wait will go on waiting for the stderr pipe
+// once the process itself is gone. Long enough that ordinary output in flight
+// is never truncated, short enough that an orphan holding the pipe costs
+// seconds rather than the rest of the night.
+const stderrWaitDelay = 5 * time.Second
 
 // maxStderrTail bounds what a dispatch remembers of its child's stderr. Only
 // the last few lines can be a usage error, and a run that logs for six hours
@@ -2242,6 +2267,12 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	if cfg.registersRemote() {
 		errTail = &tailWriter{}
 		cmd.Stderr = io.MultiWriter(os.Stderr, errTail)
+		// A writer that is not an *os.File makes os/exec hand the child a pipe
+		// and copy it here, and cmd.Wait then waits on that pipe rather than on
+		// the process — so a background command the run left behind, holding the
+		// inherited stderr, would hold this drain open forever. The bound is what
+		// keeps the promise that registration cannot hang a run.
+		cmd.WaitDelay = stderrWaitDelay
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -2341,6 +2372,12 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	}
 
 	err = cmd.Wait()
+	// Only ever returned in place of a nil: the process exited cleanly and
+	// something it left behind was still holding the stderr pipe when
+	// WaitDelay ran out. That is a fact about an orphan, not about the run.
+	if errors.Is(err, exec.ErrWaitDelay) {
+		err = nil
+	}
 	if cmd.ProcessState != nil {
 		rep.exitCode = cmd.ProcessState.ExitCode()
 	}
