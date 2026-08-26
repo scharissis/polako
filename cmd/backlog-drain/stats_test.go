@@ -382,9 +382,21 @@ func TestStatsDrainLastPicksTheNewestDrainInScope(t *testing.T) {
 	if !hasLine(perRepo, "filtered for r/r from drain bbbb2222") || !hasLine(perRepo, "total $2.00") {
 		t.Errorf("-drain last should resolve inside -repo:\n%s", perRepo)
 	}
-	windowed := stats(t, "-metrics", dir, "-drain", drainLast, "-since", "120h")
-	if !hasLine(windowed, "from drain cccc3333") {
-		t.Errorf("-drain last should resolve inside -since:\n%s", windowed)
+}
+
+// -drain narrows the records -since kept; it does not replace the window.
+// Asserting that on "last" is impossible — the newest record is by
+// construction never the one a window clips — so it takes a named drain whose
+// records sit outside it.
+func TestStatsDrainAndSinceBothApply(t *testing.T) {
+	// 72h back from fixtureNow starts on the 22nd; every aaaa1111 record is
+	// from the 20th.
+	out := stats(t, "-metrics", drainFixtureDir(t), "-drain", "aaaa1111", "-since", "72h")
+	if !strings.Contains(out, "no run data in") {
+		t.Errorf("a window excluding the drain's records should report nothing:\n%s", out)
+	}
+	if !hasLine(out, "in the last 3d from drain aaaa1111") {
+		t.Errorf("the empty report should name both filters, not just one:\n%s", out)
 	}
 }
 

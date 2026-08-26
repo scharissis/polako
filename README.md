@@ -841,9 +841,17 @@ resolves, the report names the id it landed on rather than the word you typed:
 ```
 
 Records written before ids existed group and filter as `(none)`, the same
-spelling an untagged run gets, so older files still load and still count. An
-issue picked up by one drain and finished by another after a restart is counted
-under each, and `-by drain` says when that happened.
+spelling an untagged run gets, so older files still load and still count.
+
+An issue picked up by one drain and finished by another after a restart is
+counted under each, and `-by drain` says when that happened. The two views of
+such an issue differ on purpose. In `-by drain`, **merged** is the issue's own
+final outcome — the same rule as `-by tag`, and what makes `$/merged` "spent by
+this drain per issue of theirs that shipped" — so both drains count the merge.
+Under `-drain <id>` the records *are* that drain's, so the report shows what
+that drain concluded, which for the one that handed the issue on is
+`needs human`. One asks what became of the issues a drain worked; the other
+asks what that drain did.
 
 ### Comparing configurations
 

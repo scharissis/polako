@@ -860,6 +860,14 @@ func printIssueTable(w io.Writer, issues []*issueStats) {
 // and a batch is normally one of both, so the footnote appears only when that
 // assumption does not hold. By drain it holds far less often: an issue picked
 // up by one drain and finished by the next is the ordinary shape of a restart.
+//
+// merged is the issue's own final outcome, so every group that worked it
+// counts the merge — the same rule for a drain as for a tag, and what makes
+// $/merged "spent by this group per issue of theirs that shipped". It is why a
+// -by drain row can read merged 1 for a drain whose own terminal record parked
+// the issue, while -drain <id> on the same drain reads needs human 1: the
+// filter narrows the records to that drain's, so the report is that drain's
+// verdict rather than the issue's fate. Two questions, two right answers.
 func printGroupTable(w io.Writer, ds dataset, issues []*issueStats, by string) {
 	type group struct {
 		name   string
