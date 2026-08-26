@@ -202,16 +202,19 @@ lines worth reading before upgrading a machine that drains a backlog overnight.
   the CLI's own words are "the response above may be incomplete". An edit could
   have applied without the check meant to follow it, a commit could be
   half-staged, a `gh pr create` could have succeeded with only its reply lost.
-  The resumed session is now asked to check `git status` and whether the branch
-  and PR already exist before it acts on anything.
+  The resumed session is now asked to check `git status`, whether the branch and
+  PR already exist, and the issue thread, before it acts on anything. The thread
+  because a kill between posting a question and raising `awaiting-answer` leaves
+  a question the supervisor cannot see — it reads that run as having produced
+  nothing and parks a healthy issue over it.
 - The skill's Phase 1 no longer recreates a branch that already exists. It had
   no case for `issue-N` being there already — left locally by a killed run, or
   on the remote by one that pushed and died before `gh pr create` — so the
   branch got rebuilt from the default branch and the commits on it went with
-  it. Whichever workspace case applies, an existing `issue-N` is now checked
-  out and built on. **Operator impact:** the interrupted run that got furthest
-  is the one whose work survives; the `issue-N` naming contract and
-  `-branch-prefix` are unchanged.
+  it. The lookup now comes before the workspace cases rather than after them, so
+  every one of them takes an existing `issue-N` as-is. **Operator impact:** the
+  interrupted run that got furthest is the one whose work survives; the
+  `issue-N` naming contract and `-branch-prefix` are unchanged.
 
 ## [0.6.1]
 

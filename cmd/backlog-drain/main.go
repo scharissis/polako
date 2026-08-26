@@ -1622,6 +1622,13 @@ func runClaude(ctx context.Context, cfg config, issue int, resumeID string, limi
 // succeeded with only its reply lost. Told to continue "exactly where it
 // stopped", a run takes that last step for done.
 //
+// The issue thread is named alongside the branch and the PR because it holds
+// the one piece of orchestration state a mid-action kill can leave inconsistent
+// in a way nothing else recovers: a question posted with `gh issue comment` and
+// awaitingAnswerLabel not yet raised. The supervisor reads an unflagged run as
+// having produced nothing and parks a healthy issue, leaving the question
+// unanswered — so "re-derive" has to reach the thread, not only the workspace.
+//
 // Two properties this wording has to keep, both pinned by a test. It must not
 // begin with "/", or execClaude's contract would want it declared as a slash
 // command it is not. And the issue number must stay the last number in it: a
@@ -1632,10 +1639,14 @@ func resumePrompt(skill string, issue int) string {
 		"The previous attempt at the /%s %d workflow was interrupted part-way "+
 			"through an action, so whatever it did last may be incomplete. "+
 			"Before doing anything else, re-derive where things actually stand: "+
-			"run `git status`, and check whether the branch and the pull request "+
-			"already exist. Then continue the workflow from what you found, "+
-			"rather than from what the last step looks like it was doing.",
-		skill, issue)
+			"run `git status`, check whether the branch and the pull request "+
+			"already exist, and re-read the issue thread. A question the last "+
+			"attempt posted there may be missing the %s label it needed, in "+
+			"which case raise the label rather than asking again; a question "+
+			"that already carries the label must not be posted twice. "+
+			"Then continue the workflow from what you found, rather than from "+
+			"what the last step looks like it was doing.",
+		skill, issue, awaitingAnswerLabel)
 }
 
 // issueRun is what a fresh skill run on one issue consists of: the config it

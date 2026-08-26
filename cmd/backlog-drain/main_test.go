@@ -406,8 +406,9 @@ func issueFlagged() (bool, error) {
 
 // promptIssue is the issue number this invocation was dispatched for, taken
 // from the prompt the supervisor built. The last number rather than the last
-// word, because a resume is dispatched as a sentence ("Continue the
-// /implement-issue 1 workflow…") rather than as "/implement-issue 1".
+// word, because a resume is dispatched as a paragraph of plain English with the
+// "/implement-issue 1" buried in its first sentence — see resumePrompt — rather
+// than as "/implement-issue 1".
 func promptIssue() string {
 	i := slices.Index(os.Args, "-p")
 	if i < 0 || i+1 >= len(os.Args) {
@@ -1315,7 +1316,11 @@ func TestRunClaudeResumesRatherThanRestartingTheSkill(t *testing.T) {
 func TestResumePromptAsksTheRunToRederiveItsState(t *testing.T) {
 	prompt := resumePrompt(defaultSkill, 12)
 
-	for _, want := range []string{"git status", "branch", "pull request", "incomplete"} {
+	// The label is in the list for the same reason the workspace checks are:
+	// a kill between `gh issue comment` and the label leaves a question the
+	// supervisor cannot see, and parks a healthy issue over it.
+	for _, want := range []string{"git status", "branch", "pull request", "incomplete",
+		"issue thread", awaitingAnswerLabel} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("a resume prompt should mention %q, so the run checks rather than assumes\ngot: %s",
 				want, prompt)

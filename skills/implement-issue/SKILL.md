@@ -25,23 +25,23 @@ elsewhere); do any text extraction yourself — no awk/sed/head pipelines.
 Detect the current phase from what you found and resume from there.
 
 ## Phase 1 — Workspace
+Fetch first, then find out whether branch issue-$issue already exists before
+you create anything: `git branch --list issue-$issue` for a local one left by a
+run that was killed, and `git branch -r --list '*/issue-$issue'` for a remote
+one pushed by a run that died before `gh pr create`. If either finds it, build
+on the commits already there — never recreate the branch from the default
+branch, which would discard them. Then, by case:
+
 - If this session is already inside a Claude-managed worktree (cwd contains
-  `.claude/worktrees/`): stay here. Fetch, then create branch issue-$issue
-  from the remote default branch (`git symbolic-ref refs/remotes/origin/HEAD
-  --short`).
+  `.claude/worktrees/`): stay here. Check out issue-$issue if it exists,
+  otherwise create it from the remote default branch (`git symbolic-ref
+  refs/remotes/origin/HEAD --short`).
 - Else if a worktree for issue-$issue exists: cd into it.
 - Else: take the repo name from the main checkout (first line of
-  `git worktree list`), fetch, and `git worktree add` a sibling folder
-  `<repo>-issue-$issue` with branch issue-$issue.
-
-Whichever case applies, branch issue-$issue may already exist — locally from a
-run that was killed, or on the remote from one that pushed and died before
-`gh pr create`. Check both (`git branch --list issue-$issue`, and
-`git branch -r --list '*/issue-$issue'` after the fetch) before creating
-anything. If it exists, check it out and continue from the commits already on
-it; never recreate it from the default branch, which would discard them. A
-worktree you create for an existing branch takes the branch as-is
-(`git worktree add <path> issue-$issue`) rather than with `-b`.
+  `git worktree list`) and `git worktree add` a sibling folder
+  `<repo>-issue-$issue` for branch issue-$issue — taking an existing branch
+  as-is (`git worktree add <path> issue-$issue`), and only using `-b` off the
+  remote default branch when there is no such branch anywhere.
 
 ## Phase 2 — Plan
 If PLAN.md doesn't exist in the worktree, or new answers have appeared:
