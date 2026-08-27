@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -86,6 +87,14 @@ func TestOpenShiftLogNamesAndProtectsTheFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openShiftLog: %v", err)
 	}
+	// Production holds the handle for the process lifetime; here it has to be
+	// closed before TempDir's cleanup, because Windows cannot delete an open
+	// file.
+	t.Cleanup(func() {
+		if c, ok := u.file.(io.Closer); ok {
+			c.Close()
+		}
+	})
 	if want := filepath.Join(dir, "scharissis--polako--a1b2c3d4.log"); path != want {
 		t.Errorf("path = %q, want %q", path, want)
 	}
