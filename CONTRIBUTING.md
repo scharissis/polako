@@ -41,6 +41,21 @@ which covers the streaming, session-capture, crash and stall-watchdog paths for
 real. A second group of tests keeps the repository honest — the plugin manifest,
 the shipped skill and the documented flags all have to agree with the code.
 
+## Re-recording the demo
+
+The GIF at the top of the README is rendered from
+[docs/demo.tape](docs/demo.tape) by [vhs](https://github.com/charmbracelet/vhs):
+
+```bash
+brew install vhs   # once
+./scripts/demo.sh
+```
+
+The script builds the binary from your working tree and puts it on `PATH`, so
+the recording shows this tree rather than whatever is installed. Both commands
+in the tape are real and read-only, which means the GIF shows whatever your
+backlog actually said when you rendered it — look at it before you commit it.
+
 ## Evaluating the skill
 
 The hermetic suite can only check that

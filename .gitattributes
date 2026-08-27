@@ -1,3 +1,6 @@
 # One line ending everywhere: this repo is built and CI-tested on Linux,
 # macOS and Windows, and scripts/check.sh has to stay runnable on all three.
 * text=auto eol=lf
+
+# Recordings are binary; never let eol normalisation near them.
+*.gif -text
