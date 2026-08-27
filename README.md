@@ -19,7 +19,9 @@ anything itself.
 There are two halves, and they ship as one release:
 
 - **The `/implement-issue` skill** takes one issue from research to a plan to a
-  pull request. You can use it on its own, in any Claude Code session.
+  pull request. You can use it on its own, in any Claude Code session. Its
+  companion `/plan-backlog` writes the issues in the first place, from a vision
+  document — see [Planning a backlog](#planning-a-backlog).
 - **The `polako` binary** supervises the whole queue. It runs the skill on the
   next issue, watches the pull request, repairs it when CI goes red, and
   advances when you merge. One stdlib-only Go binary, no dependencies.
@@ -147,6 +149,42 @@ summary: 3 issues merged, 1 issue parked, $35.00 spent, 6h12m of wall clock
   merged  #14 ($9.80), #15 ($12.40), #17 ($8.60)
   parked  #16 ($4.20) — the run completed but produced no PR and no questions
 ```
+
+## Planning a backlog
+
+Somebody still has to write the issues polako works. The `/plan-backlog` skill
+does the clerical half: point it at a vision or roadmap document and it reads
+that against the code as it stands, decomposes the gap into issues sized to one
+pull request each, groups anything cross-cutting under an epic whose body holds
+the design, and files the lot as **proposals**.
+
+```
+/polako:plan-backlog docs/VISION.md
+```
+
+A proposal is an ordinary issue carrying a `proposed` label, and that label is
+the point: `polako work` skips every issue that has one, so nothing a machine
+proposed can reach an unattended run until you have looked at it. Curation is
+ordinary GitHub triage, and there are three moves:
+
+- **Approve** — remove the `proposed` label. On a `-label`-gated repository, add
+  the gate label in the same command:
+  `gh issue edit 27 28 --remove-label proposed --add-label ready`
+- **Reject** — close the issue.
+- **Rework** — edit the text. A run reads the issue when it picks it up, so your
+  edits *are* the spec; there is no further step.
+
+`polako status` lists what is waiting on you, proposals included, so a forgotten
+batch surfaces rather than rots.
+
+Each proposal carries acceptance criteria, pointers into the code, what is out
+of scope, and a size — `Estimate: M — likely 1–2 runs`. The size is the model's
+judgement of the work's shape, not a price; what a run actually costs comes from
+your own history, via `polako stats`.
+
+This is a Claude Code skill you run yourself, with a second pair of eyes on it.
+An unattended `polako plan` verb — caps, milestones and a much narrower tool
+allowlist — is a later release.
 
 ## The rules it follows
 
