@@ -147,6 +147,105 @@ func parkReason(err error) (string, bool) {
 	return "", false
 }
 
+// leftWork is what a run left on disk for one issue: commits on the branch the
+// skill works on, and uncommitted changes in the worktree it works in.
+//
+// A run that implemented the whole change and never committed it exits exactly
+// as cleanly as one that decided nothing, so the park message is the same for
+// both — and the two are completely different jobs for the human it is
+// addressed to. The first is half an hour of rebase and review; the second
+// needs the issue re-specified. Everything needed to tell them apart is on
+// disk, one git call from a supervisor that already knows the branch name.
+type leftWork struct {
+	branch  string
+	path    string // the worktree holding that branch, "" when none does
+	commits int    // commits on the branch the default branch does not have
+	dirty   int    // paths that worktree reports as changed or untracked
+}
+
+// salvageable reports whether a run got far enough that a person should start
+// from what is there rather than from scratch. It is also the discriminator a
+// caller deciding resume-versus-park would want, which is why it is a predicate
+// on the probe rather than a condition spelled out at the one call site.
+func (w leftWork) salvageable() bool { return w.commits > 0 || w.dirty > 0 }
+
+// describe says what is there, in the words the park reason carries to the log,
+// the run summary and the issue thread alike. Empty when nothing is there, so
+// the message that means "the run decided nothing" still means only that.
+func (w leftWork) describe() string {
+	if !w.salvageable() {
+		return ""
+	}
+	commits := "no commits"
+	if w.commits > 0 {
+		commits = plural(w.commits, "commit")
+	}
+	clauses := []string{fmt.Sprintf("branch %s has %s", w.branch, commits)}
+	if w.path != "" {
+		changes := "no uncommitted changes"
+		if w.dirty > 0 {
+			changes = "uncommitted changes in " + plural(w.dirty, "file")
+		}
+		clauses = append(clauses, fmt.Sprintf("its worktree %s has %s", w.path, changes))
+	}
+	return strings.Join(clauses, " and ") +
+		" — the run left work behind, so start there rather than from scratch"
+}
+
+// inspectLeftWork reads what is on disk for one issue. Best-effort in the same
+// way as claudeVersion: every git call that fails leaves the field it would
+// have filled at zero, so the worst case is the message this had before — a
+// park never becomes an error over its own diagnosis.
+//
+// It reads git and writes nothing, and every answer is derived from the working
+// copy rather than from anything this process remembers between runs, so the
+// orchestration state still lives entirely in GitHub.
+func inspectLeftWork(ctx context.Context, cfg config, issue int) leftWork {
+	w := leftWork{branch: fmt.Sprintf("%s%d", cfg.branchPrefix, issue)}
+	// origin's default branch rather than the local one: the count is the same
+	// either way, and the remote ref does not depend on the operator's checkout
+	// being on the right branch when the park happens.
+	if head, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short"); err == nil {
+		base := strings.TrimSpace(string(head))
+		if out, err := git(ctx, cfg, "rev-list", "--count", base+".."+w.branch); err == nil {
+			w.commits, _ = strconv.Atoi(strings.TrimSpace(string(out)))
+		}
+	}
+	if list, err := git(ctx, cfg, "worktree", "list", "--porcelain"); err == nil {
+		w.path = worktreeFor(string(list), w.branch)
+	}
+	if w.path != "" {
+		if out, err := capture(ctx, w.path, "git", "status", "--porcelain"); err == nil {
+			for _, line := range strings.Split(string(out), "\n") {
+				if strings.TrimSpace(line) != "" {
+					w.dirty++
+				}
+			}
+		}
+	}
+	return w
+}
+
+// worktreeFor finds the worktree holding branch in `git worktree list
+// --porcelain` output. Asked rather than assumed: cleanupWorktree can guess the
+// sibling path the skill normally creates because a wrong guess there simply
+// removes nothing, but a park that names the wrong directory sends a person to
+// an empty one — and a run driven from the desktop app puts its worktree
+// somewhere else entirely.
+func worktreeFor(list, branch string) string {
+	var path string
+	for _, line := range strings.Split(list, "\n") {
+		line = strings.TrimRight(line, "\r")
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			path = strings.TrimPrefix(line, "worktree ")
+		case line == "branch refs/heads/"+branch:
+			return path
+		}
+	}
+	return ""
+}
+
 // overBudget reports which per-issue cap an issue has reached, in the words the
 // park comment and the exit summary go on to carry — or "" while both caps are
 // off, which is the default, or while neither has been reached.
@@ -1682,10 +1781,18 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					return park("claude crashed and %d resume attempts failed", cfg.retries)
 				default:
 					// Clean exit, yet no PR and no questions: Claude decided
-					// nothing, which a machine shouldn't paper over.
+					// nothing, which a machine shouldn't paper over — and it may
+					// not be what happened at all. Say what is on the branch and
+					// in the worktree, because that is the difference between an
+					// issue to re-specify and one whose change is already written
+					// and merely uncommitted.
 					record(0, outcomeNothing)
 					terminal(0, issueNeedsHuman)
-					return park("the run completed but produced no PR and no questions")
+					reason := "the run completed but produced no PR and no questions"
+					if left := inspectLeftWork(ctx, cfg, issue).describe(); left != "" {
+						reason += "; " + left
+					}
+					return park("%s", reason)
 				}
 			}
 			record(pr.Number, outcomeOpenedPR)
