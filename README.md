@@ -25,8 +25,8 @@ claude -p "/implement-issue N"        ← headless, streamed to your terminal
    ↓
 PR opened?  ──no──►  issue labelled `awaiting-answer`?  ──yes──►  put it down, advance to the next
    │                          │                                  (re-run it when the reply lands)
-   │                          └──no──►  crashed? resume the same session (-retries)
-   │                                       │
+   │                          └──no──►  crashed, or left work on the branch?
+   │                                       │        resume the same session
    │                                       └──out of attempts──►  park it, advance to the next
    ↓ yes
 wait for merge (-poll)               ← rebases if GitHub reports CONFLICTING,
@@ -85,22 +85,35 @@ Dollars appear only this shift spent some: one that merely waited on a PR
 an earlier process opened prints the line without them rather than claiming a
 free backlog.
 
-A run that ends cleanly without a PR gets one more sentence, because that exit
-covers two very different situations. `polako` looks at the branch and the
-worktree before it parks, and says what it finds:
+**A run that ends cleanly without a PR is not automatically a failure.** Three
+different runs end that way: one that was stuck or confused and decided nothing,
+one that finished the change and then ended its turn believing something would
+bring it back — under `claude -p` nothing will — and one that simply ran out of
+road mid-task. The last two have the work sitting on disk, so before it parks,
+`polako` asks git what is there: commits on `issue-N` ahead of the default
+branch, and uncommitted changes in the worktree.
+
+If it finds work, it resumes the session to finish it, telling that run outright
+that its turn ended the process and there is no later one. If it finds nothing,
+it parks, because a machine cannot tell what "decided nothing" meant.
+
+Those resumes are capped at **two per issue**, and they spend the same overall
+resume allowance a crash resume does — not `-retries`, which counts consecutive
+*fruitless crashes* and nothing else — so an issue that alternates crashing and
+ending its turn cannot outlive both caps. When a cap is what stopped one, the
+park says which:
 
 ```
   parked  #16 ($2.27) — the run completed but produced no PR and no questions;
-  branch issue-16 has no commits and its worktree has uncommitted changes in
-  6 files — the run left work behind, so start there rather than from scratch
+  it has been resumed 2 times after ending a turn without opening a PR and has
+  still not opened one, which needs a human; branch issue-16 has no commits and
+  its worktree has uncommitted changes in 6 files — the run left work behind,
+  so start there rather than from scratch
 ```
 
-That is a change already written and merely uncommitted, which is usually
-minutes of work to finish. The message above it, with nothing appended, is the
-run that genuinely decided nothing. The worktree's path is printed beside the
-park in the terminal rather than said here, for the same reason the `--resume`
-id is: this text is posted to the issue thread, and a local path is nobody's
-business but yours.
+The worktree's path is printed beside the park in the terminal rather than said
+here, for the same reason the `--resume` id is: this text is posted to the issue
+thread, and a local path is nobody's business but yours.
 
 Parking preserves the no-conflict guarantee: only one issue is ever in flight,
 and a parked issue is simply not in flight.
@@ -468,7 +481,7 @@ sets — see [`status`](#where-the-backlog-stands-polako-status) and
 | `-model` | *(the CLI's own default)* | Passed to `claude --model`. Vary it between batches to compare models — see [Run data & cost tracking](#run-data--cost-tracking). |
 | `-poll` | `5m` | Interval between GitHub checks while waiting. |
 | `-retries` | `3` | Consecutive *fruitless* resume attempts after a crashed run — a crash that got real work done first resets the count rather than spending it — and the bound on remediation runs against an open PR that is conflicting, red, or carrying a request for changes. A run the API refused to authenticate is never one of them — see below. |
-| `-retry-wait` | `30s` | Wait before each resume attempt. |
+| `-retry-wait` | `30s` | Wait before each resume attempt after a *crash*. A clean exit that left work behind is resumed straight away: nothing about it is transient, so there is nothing to wait for. |
 | `-stall` | `15m` | Kill and resume a run that has emitted no events for this long (`0` disables). |
 | `-max-cost` | *(no limit)* | Park an issue once this shift's runs on it have cost this many dollars — see [Capping what a shift spends](#capping-what-a-shift-spends). |
 | `-max-issue-time` | *(no limit)* | Park an issue once this shift's runs on it have taken this much *run time*, e.g. `-max-issue-time 90m`. Unlike `-stall`, it does not care whether events are arriving. |
@@ -978,7 +991,10 @@ authoritative span, which is right even when the run that opened the PR falls
 outside the window or belonged to a shift on another machine.
 
 **On resumed sessions:** a crashed run and the `--resume` that finishes its
-work are two records, and `stats` sums both. If a resumed run's `result` event
+work are two records, and `stats` sums both. The same goes for the `unfinished`
+reason, which is a `--resume` of a run that ended its turn without a PR rather
+than one that crashed — counting how often that happens is how you tell whether
+the skill's one-turn rule is landing. If a resumed run's `result` event
 turns out to report the whole session's total rather than that invocation's,
 those two rows overlap and the sum reads high — so whenever a report contains
 resumes, it says how many.
