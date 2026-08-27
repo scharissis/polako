@@ -644,13 +644,14 @@ func main() {
 	// Timestamps become the sinks' job: the shift log is always stamped, and a
 	// terminal that is not a TTY keeps the same stamps the default flags used
 	// to add, so redirected transcripts look like they always did. A TTY drops
-	// the gutter — the shift log holds every stamp — and gets colour when the
-	// platform and NO_COLOR allow it.
+	// the gutter only while a shift log is there to hold every stamp — with
+	// -log off the terminal is the only record, so it keeps them — and gets
+	// colour when the platform and NO_COLOR allow it.
 	log.SetFlags(0)
 	log.SetOutput(milestoneWriter{u: sinks})
 	sinks.verbose = cfg.verbose
 	if isTerminal(os.Stderr) {
-		sinks.stamp = false
+		sinks.stamp = cfg.logDir == ""
 		sinks.style = styleFor(true)
 	}
 	if err := run(ctx, cfg); err != nil {
@@ -1402,8 +1403,10 @@ func preflight(ctx context.Context, cfg *config) error {
 	if cfg.logDir != "" {
 		path, err := sinks.openShiftLog(cfg.logDir, cfg.repo, cfg.shiftID)
 		if err != nil {
-			log.Printf("shift log not written (%v) — the shift continues on the terminal alone; "+
-				"-log <dir> to move it or -log off to silence this", err)
+			// The stamps were dropped from a TTY on the promise the log would
+			// hold them; without one, the terminal takes them back.
+			sinks.keepStamps()
+			log.Printf(logLostFmt, err)
 		} else {
 			logPath = path
 		}
@@ -1872,12 +1875,6 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 						runErr, cfg.skill)
 				}
 				log.Printf("claude run ended with error (%v) — checking what it left behind", runErr)
-				// The last words on stderr, because for a crash they are often
-				// the only cause on record. Clipped: the full copy is in the
-				// shift log, and under -verbose it already streamed past.
-				if t := strings.TrimSpace(rep.stderrTail); t != "" && !cfg.verbose {
-					log.Printf("last stderr: %s", clip(t, 300))
-				}
 			}
 
 			pr, err = prForBranch(ctx, cfg, branch)
@@ -2727,22 +2724,33 @@ func limitReset(msg string, now time.Time) (time.Time, bool) {
 // tokens whether or not it lived to report them.
 func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes string, limit time.Duration) (runReport, error) {
 	rep, err := dispatchClaude(ctx, cfg, prompt, resumeID, invokes, limit)
-	if !rep.remoteRejected {
-		return rep, err
+	if rep.remoteRejected {
+		// The whole attempt is thrown away, report and all: it never reached a
+		// model, so charging it to -retries or recording it as a run would be
+		// describing something that did not happen. What the caller gets back is
+		// the run that did.
+		log.Println("this claude cannot register headless runs with Remote Control; runs continue " +
+			"unwatched (-remote=false silences this)")
+		cfg.dropRemote() // for the rest of the shift
+		cfg.remote = false
+		// Off on this copy as well as on the shared memo, so the re-dispatch cannot
+		// possibly ask a second time and be refused a second time — which is what a
+		// config carrying no shared memo would otherwise do, handing the caller a
+		// report of a run that never happened.
+		rep, err = dispatchClaude(ctx, cfg, prompt, resumeID, invokes, limit)
 	}
-	// The whole attempt is thrown away, report and all: it never reached a
-	// model, so charging it to -retries or recording it as a run would be
-	// describing something that did not happen. What the caller gets back is
-	// the run that did.
-	log.Println("this claude cannot register headless runs with Remote Control; runs continue " +
-		"unwatched (-remote=false silences this)")
-	cfg.dropRemote() // for the rest of the shift
-	cfg.remote = false
-	// Off on this copy as well as on the shared memo, so the re-dispatch cannot
-	// possibly ask a second time and be refused a second time — which is what a
-	// config carrying no shared memo would otherwise do, handing the caller a
-	// report of a run that never happened.
-	return dispatchClaude(ctx, cfg, prompt, resumeID, invokes, limit)
+	// The last words on stderr, said beside whatever error the caller is about
+	// to report. Here rather than at any one call site, because every dispatch
+	// funnels through this function — a crashed remediation's cause is worth
+	// the line as much as a crashed issue run's. Clipped: the full copy is in
+	// the shift log, under -verbose it already streamed past, and an interrupt
+	// is the operator's own doing, not a cause to explain.
+	if err != nil && ctx.Err() == nil && !cfg.verbose {
+		if t := strings.TrimSpace(rep.stderrTail); t != "" {
+			log.Printf("last stderr: %s", clip(t, 300))
+		}
+	}
+	return rep, err
 }
 
 // rejectedRemote reports whether an attempt died on the registration flags

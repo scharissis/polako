@@ -459,23 +459,31 @@ type recorder struct {
 // checkout — the skill commits things there, and cost data must not become
 // committable by accident.
 func newRecorder(spec string) *recorder {
+	return &recorder{dir: resolveDataDir(spec, "metrics", "metrics", "to record run data in")}
+}
+
+// resolveDataDir resolves one "directory or off" flag — -metrics, -log — in
+// one place, so the two cannot drift apart on the off-spelling, the home-dir
+// fallback or the shape of the warning. An empty result means off; noun says
+// what is being lost when there is no home directory to fall back to.
+func resolveDataDir(spec, sub, flagName, noun string) string {
 	dir := strings.TrimSpace(spec)
 	if strings.EqualFold(dir, metricsOff) {
-		return &recorder{}
+		return ""
 	}
 	if dir == "" {
-		dflt, err := defaultMetricsDir()
+		home, err := os.UserHomeDir()
 		if err != nil {
-			log.Printf("no home directory to record run data in (%v) — continuing without it; "+
-				"pass -metrics <dir> to choose a location, or -metrics off to stop asking", err)
-			return &recorder{}
+			log.Printf("no home directory %s (%v) — continuing without it; "+
+				"pass -%s <dir> to choose a location, or -%s off to stop asking", noun, err, flagName, flagName)
+			return ""
 		}
-		dir = dflt
+		dir = filepath.Join(home, ".polako", sub)
 	}
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
-	return &recorder{dir: dir}
+	return dir
 }
 
 // defaultMetricsDir is where records live unless -metrics says otherwise, and

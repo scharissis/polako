@@ -17,7 +17,8 @@ in the PR body rather than doing it quietly.
   branches. The process keeps no durable state it reads back: kill it at any
   point, rerun it later, and it must re-derive where things stand from GitHub
   alone. Anything that would want a local database is the wrong design here.
-- **Write-only telemetry is the one exception**, and it stays that way. The
+- **Write-only local artifacts are the one exception**, and they stay that
+  way — two share it. The
   run-data recorder (`metrics.go`) appends JSONL under `~/.polako`; the
   drain loop never reads it, no decision depends on it, and deleting the
   directory mid-drain changes no behavior. A read from those files anywhere

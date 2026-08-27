@@ -83,13 +83,29 @@ func (u *ui) emit(p []byte, milestone bool) {
 	if _, err := u.file.Write(append([]byte(now), p...)); err != nil && !u.warned {
 		u.warned = true
 		// Straight to the terminal rather than through the logger, which would
-		// re-enter emit while mu is held.
+		// re-enter emit while mu is held — but still through render, so this
+		// warning gets the same yellow the styler promises it.
 		if u.stamp {
 			io.WriteString(u.terminal, now)
 		}
-		fmt.Fprintf(u.terminal, "shift log not written (%v) — the shift continues on the terminal alone; "+
-			"-log <dir> to move it or -log off to silence this\n", err)
+		io.WriteString(u.terminal, u.style.render(fmt.Sprintf(logLostFmt+"\n", err), true))
 	}
+}
+
+// logLostFmt is said at both moments a shift log can fail — opening it and
+// writing to it — one spelling so the two cannot drift apart, and so the
+// styler's rule for it matches both. It is honest about the stakes: the quiet
+// terminal carries milestones alone, so a lost log is a lost stream, not a
+// duplicate.
+const logLostFmt = "shift log not written (%v) — the shift continues, but the full claude stream " +
+	"is lost unless -verbose mirrors it here; -log <dir> moves the log, -log off silences this"
+
+// keepStamps turns terminal timestamps back on. Called when the shift log —
+// the justification for dropping them on a TTY — turns out not to exist.
+func (u *ui) keepStamps() {
+	u.mu.Lock()
+	u.stamp = true
+	u.mu.Unlock()
 }
 
 // openShiftLog turns the file sink on. Called once preflight learns which
@@ -194,11 +210,22 @@ type lineWriter struct {
 	buf    []byte
 }
 
+// maxStderrLine bounds what lineWriter holds while waiting for a newline. A
+// child painting \r progress into the pipe never sends one, and — as the
+// neighbouring tailWriter's cap already records — a run that logs for hours
+// must not be held in memory. A chunk that long is emitted as a line of its
+// own instead of waiting.
+const maxStderrLine = 64 * 1024
+
 func (w *lineWriter) Write(p []byte) (int, error) {
 	w.buf = append(w.buf, p...)
 	for {
 		i := bytes.IndexByte(w.buf, '\n')
 		if i < 0 {
+			if len(w.buf) > maxStderrLine {
+				w.emit(w.buf)
+				w.buf = w.buf[:0]
+			}
 			return len(p), nil
 		}
 		w.emit(w.buf[:i])
@@ -214,6 +241,8 @@ func (w *lineWriter) flush() {
 }
 
 func (w *lineWriter) emit(line []byte) {
+	// A CRLF child's \r would otherwise land in the shift log on every line.
+	line = bytes.TrimSuffix(line, []byte("\r"))
 	// Blank lines carry nothing worth a timestamp and a prefix.
 	if len(bytes.TrimSpace(line)) == 0 {
 		return
@@ -226,21 +255,5 @@ func (w *lineWriter) emit(line []byte) {
 // the skill commits things there, and a transcript must not become
 // committable by accident.
 func resolveLogDir(spec string) string {
-	dir := strings.TrimSpace(spec)
-	if strings.EqualFold(dir, metricsOff) {
-		return ""
-	}
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			log.Printf("no home directory for the shift log (%v) — continuing without one; "+
-				"pass -log <dir> to choose a location, or -log off to stop asking", err)
-			return ""
-		}
-		dir = filepath.Join(home, ".polako", "logs")
-	}
-	if abs, err := filepath.Abs(dir); err == nil {
-		dir = abs
-	}
-	return dir
+	return resolveDataDir(spec, "logs", "log", "for the shift log")
 }
