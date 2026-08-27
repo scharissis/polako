@@ -766,8 +766,8 @@ func runPairs(ds dataset) [][2]string {
 		{"total", fmt.Sprintf("%d — %s", len(ds.runs),
 			breakdown(statuses, []string{"ok", "error", "no-turns", "crash", "stalled",
 				"interrupted", "no-skill", "auth", "budget"}))},
-		{"reasons", breakdown(reasons, []string{reasonImplement, reasonResume, reasonAnswers,
-			reasonRemediate, reasonChecks, reasonReview})},
+		{"reasons", breakdown(reasons, []string{reasonImplement, reasonResume, reasonUnfinished,
+			reasonAnswers, reasonRemediate, reasonChecks, reasonReview})},
 		{"outcomes", breakdown(outcomes, []string{outcomeOpenedPR, outcomeQuestions, outcomeNothing, outcomeUnknown})},
 		{"work", fmt.Sprintf("%s, %s", plural(turns, "turn"), plural(tools, "tool use"))},
 	}
@@ -848,7 +848,9 @@ func confounded(spans []time.Duration) string {
 func resumeNote(ds dataset) string {
 	resumed := 0
 	for _, r := range ds.runs {
-		if r.Reason == reasonResume {
+		// Both flavours: what is uncertain here is what the CLI reports on a
+		// --resume, and a clean-exit resume is as much a --resume as a crash one.
+		if r.Reason == reasonResume || r.Reason == reasonUnfinished {
 			resumed++
 		}
 	}
