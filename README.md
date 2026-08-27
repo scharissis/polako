@@ -14,6 +14,8 @@ anything itself.
 
 *Polako* is Croatian for "take it slow".
 
+![polako status printing the state of a backlog, then polako work -dry-run resolving the next issue and printing the exact claude invocation it would run](docs/demo.gif)
+
 There are two halves, and they ship as one release:
 
 - **The `/implement-issue` skill** takes one issue from research to a plan to a
