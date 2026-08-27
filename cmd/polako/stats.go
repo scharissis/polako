@@ -551,9 +551,6 @@ func render(w io.Writer, ds dataset, issues []*issueStats, opt statsOptions) {
 	if opt.runs {
 		printRunTable(w, ds)
 	}
-	if note := resumeNote(ds); note != "" {
-		fmt.Fprintf(w, "\n%s\n", note)
-	}
 }
 
 func scopeSuffix(opt statsOptions, ds dataset) string {
@@ -841,25 +838,12 @@ func confounded(spans []time.Duration) string {
 	return " (human availability, not the tool)"
 }
 
-// resumeNote flags the one number in this report that may be double-counted.
-// Whether a --resume'd run's result event reports that invocation's cost or
-// the whole session's is unverified against the real CLI; costs are summed as
-// reported, which is right in the first case and high in the second.
-func resumeNote(ds dataset) string {
-	resumed := 0
-	for _, r := range ds.runs {
-		// Both flavours: what is uncertain here is what the CLI reports on a
-		// --resume, and a clean-exit resume is as much a --resume as a crash one.
-		if r.Reason == reasonResume || r.Reason == reasonUnfinished {
-			resumed++
-		}
-	}
-	if resumed == 0 {
-		return ""
-	}
-	return fmt.Sprintf("note: %s resumed an earlier session. Costs are summed exactly as each\n"+
-		"      run reported them — see \"resumed sessions\" in docs/run-data.md.", plural(resumed, "run"))
-}
+// Resumed runs used to carry a note here, warning that their costs might be
+// double-counted. They are not: a --resume'd result event reports that
+// invocation and not the session, settled on issue #78 against real records —
+// see "resumed sessions" in docs/run-data.md. Summing every row as written is
+// simply right, so there is nothing left to warn about. The `reasons` line
+// already says how many runs were resumes, for anyone who wants the count.
 
 // --- tables ---
 

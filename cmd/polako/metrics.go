@@ -178,11 +178,10 @@ type runRecord struct {
 	Reason  string `json:"reason"`
 	Attempt int    `json:"attempt"`
 	Session string `json:"session"`
-	// ResumedFrom chains a resumed run back to the session it continued.
-	// Unverified against the real CLI: if a --resume'd result event reports
-	// cost cumulatively for the session rather than per invocation, summing
-	// these rows double-counts, and this chain is what a reader needs to take
-	// a per-session maximum instead. Worth settling before anything sums them.
+	// ResumedFrom chains a resumed run back to the session it continued. That
+	// chain is a provenance record, not a correction a reader has to apply: a
+	// --resume'd result event reports the invocation rather than the session
+	// (settled on issue #78), so rows are summed exactly as written.
 	ResumedFrom string `json:"resumed_from"`
 
 	Status   string `json:"status"`

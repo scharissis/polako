@@ -141,9 +141,6 @@ cost
 human latency
   blocked on answers  1 span — 3h10m median, 3h10m max
   pr open to merge    3 spans — 1h20m median, 2h max (human availability, not the tool)
-
-note: 1 run resumed an earlier session. Costs are summed exactly as each
-      run reported them — see "resumed sessions" in docs/run-data.md.
 `, dir)
 
 	if got := stats(t, "-metrics", dir); got != want {
@@ -189,10 +186,15 @@ func TestStatsCountsBothHalvesOfAResumedSession(t *testing.T) {
 	if !strings.Contains(line, "  2  ") {
 		t.Errorf("issue #13 = %q, want both the crash and the resume counted", line)
 	}
-	// And the reader says so, because whether a resumed result reports its own
-	// cost or the session's total is not settled.
-	if !strings.Contains(out, "1 run resumed an earlier session") {
-		t.Errorf("a report containing resumes must flag them:\n%s", out)
+	// Summed as written, with nothing subtracted for overlap and no note
+	// warning of any: a --resume'd result event reports its own invocation and
+	// not the session, settled on issue #78. $0.00 for the crash, $3.00 for the
+	// resume, and the report says neither more nor less than that.
+	if !strings.Contains(line, "$3.00") {
+		t.Errorf("issue #13 = %q, want the resume's cost summed exactly as recorded", line)
+	}
+	if strings.Contains(out, "resumed an earlier session") {
+		t.Errorf("the resumed-cost caveat is settled and should be gone:\n%s", out)
 	}
 }
 

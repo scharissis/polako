@@ -141,7 +141,6 @@ type htmlReport struct {
 	Breakdowns []htmlBreakdown
 	Sections   []htmlSection
 	Tables     []htmlTable
-	Notes      []string
 }
 
 // inFlight is the pseudo-outcome for an issue with no terminal record. The
@@ -195,16 +194,8 @@ func buildHTMLReport(ds dataset, issues []*issueStats, opt statsOptions, now tim
 	if opt.runs {
 		rep.Tables = append(rep.Tables, runLogTable(ds))
 	}
-
-	if note := resumeNote(ds); note != "" {
-		rep.Notes = append(rep.Notes, oneLine(note))
-	}
 	return rep
 }
-
-// oneLine collapses the wrapping a terminal report builds in. The same
-// sentence, laid out by the browser instead.
-func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 // headlineCards are the half-dozen numbers somebody opens this file to see. All
 // six are lifted from the sections below rather than recomputed: same sums,
@@ -809,7 +800,6 @@ footer p { margin: .3rem 0; }
 {{end}}
 
 <footer>
-{{- range .Notes}}<p>{{.}}</p>{{end}}
 <p>Written by polako{{if .Version}} {{.Version}}{{end}} at {{.Generated}}. Dollars are the Claude CLI&#39;s API-equivalent pricing.</p>
 <p>This page is self-contained: it loads nothing from anywhere, and opening it tells nobody that you did.</p>
 </footer>
