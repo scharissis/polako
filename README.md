@@ -324,8 +324,11 @@ with their tag, so `polako -version` tells you what you are running.
 marketplaces, so an installed plugin stays exactly where it is until you ask:
 
 ```bash
-claude plugin marketplace update scharissis && claude plugin update polako
+claude plugin marketplace update scharissis && claude plugin update polako@scharissis
 ```
+
+(`update` wants the full `plugin@marketplace` id; the bare name it reports as
+not found, even installed.)
 
 Then `/reload-plugins`, or restart. **Upgrade the binary in the same breath** —
 the two halves are one release, and mixing them is not a supported combination:
@@ -1262,6 +1265,17 @@ gh api -X PUT repos/{owner}/{repo}/actions/permissions/workflow -F can_approve_p
 Until then, *Start a release* and the publish step fail at `gh pr create`;
 each says so, names the checkbox, and deletes the branch it pushed so a re-run
 starts clean.
+
+**Optional, but worth it:** a `RELEASE_TOKEN` repository secret holding a
+fine-grained personal access token — this repository only, *Contents* and
+*Pull requests* read/write, nothing else. With it, the workflows open the
+release and publish PRs as **you** rather than as `github-actions[bot]`, which
+matters because GitHub holds every bot-authored PR's `pull_request` CI behind
+an *Approve workflows to run* button on a private repository, with no setting
+to turn that off. Your-token PRs run CI on their own; without the secret the
+pipeline still works and each PR just carries that one approval click. Mind
+the token's expiry date: an expired one fails the PR-opening step loudly, and
+refreshing the secret is the fix.
 
 | Tag | Who needs it |
 | --- | --- |

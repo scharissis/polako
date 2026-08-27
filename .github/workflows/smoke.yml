@@ -41,13 +41,15 @@ jobs:
       # The script's own `go install` borrows gh's token, but the plugin
       # checks have claude clone this repository itself, outside the checkout
       # the runner authenticated. On a private repository that clone needs a
-      # credential, so route every https fetch of github.com through the
-      # workflow token. The runner is thrown away with the config.
+      # credential, so let gh answer git's credential prompts for github.com
+      # — it holds the workflow token — and rewrite the ssh URL forms down to
+      # https, since a clone the CLI spells over ssh has no key here to use.
+      # The runner is thrown away with the config.
       - name: let claude clone this repository
         run: |
-          git config --global \
-            "url.https://x-access-token:${GH_TOKEN}@github.com/.insteadOf" \
-            "https://github.com/"
+          gh auth setup-git
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://github.com/".insteadOf "ssh://git@github.com/"
 
       - name: smoke-test the release
         env:

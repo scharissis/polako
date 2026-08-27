@@ -103,6 +103,17 @@ jobs:
         env:
           CURRENT: ${{ steps.version.outputs.current }}
           NEXT: ${{ steps.version.outputs.next }}
+          # Opened with the operator's own token when the repo has one:
+          # GitHub holds the pull_request workflows of every bot-authored PR
+          # behind an "Approve workflows to run" button on a private repo,
+          # with no setting to waive it. A RELEASE_TOKEN secret (fine-grained
+          # PAT: this repo, Contents and Pull requests read/write) makes the
+          # PRs the operator's and the button disappears. The workflow token
+          # is the fallback, so the pipeline still works — bot-authored, one
+          # approval click per PR — where no secret is configured.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          HAS_RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN != '' }}
+          WORKFLOW_TOKEN: ${{ github.token }}
         run: |
           # The draft is the raw material for the release notes, grouped the
           # way Keep a Changelog groups it: feat under Added, fix under Fixed,
@@ -174,8 +185,11 @@ jobs:
             exit 1
           fi
 
-          # A PR opened with the workflow's own token gets no pull_request CI
-          # run — GitHub suppresses runs for events its token caused — so ask
-          # for one explicitly; the checks land on the branch head, where the
-          # PR shows them. Any human push to the branch triggers CI normally.
-          gh workflow run ci.yml --ref "release-$NEXT"
+          # A PR opened with the operator's token triggers pull_request CI by
+          # itself. Only the bot-authored fallback needs this explicit
+          # dispatch — GitHub suppresses runs for events the workflow token
+          # caused — and it runs under the workflow token, since the
+          # fine-grained PAT is deliberately not granted Actions access.
+          if [ "$HAS_RELEASE_TOKEN" != "true" ]; then
+            GH_TOKEN=$WORKFLOW_TOKEN gh workflow run ci.yml --ref "release-$NEXT"
+          fi
