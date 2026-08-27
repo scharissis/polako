@@ -461,13 +461,28 @@ func TestReleaseWorkflowsStayCoupled(t *testing.T) {
 	}
 }
 
-// Every flag is part of the interface, so every flag has to appear in the
-// README. This is the check that catches a new flag shipped undocumented.
-func TestReadmeDocumentsEveryFlag(t *testing.T) {
-	readme := readRepoFile(t, "README.md")
+// Every flag is part of the interface, so every flag has to appear under
+// docs/ — work's and status's in reference.md, stats's beside the report it
+// describes in run-data.md. This is the check that catches a new flag shipped
+// undocumented. The README is the landing page and deliberately carries no
+// flag tables, so it is not what this reads.
+func TestDocsDocumentEveryFlag(t *testing.T) {
+	dir := filepath.Join(repoRoot(), "docs")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("reading %s: %v", dir, err)
+	}
+	var docs, names strings.Builder
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) != ".md" {
+			continue
+		}
+		docs.WriteString(readRepoFile(t, "docs", e.Name()))
+		fmt.Fprintf(&names, " docs/%s", e.Name())
+	}
 	for _, name := range declaredFlags(t) {
-		if !strings.Contains(readme, "-"+name) {
-			t.Errorf("README.md does not document the -%s flag", name)
+		if !strings.Contains(docs.String(), "-"+name) {
+			t.Errorf("the -%s flag is documented nowhere in%s", name, names.String())
 		}
 	}
 }

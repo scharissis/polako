@@ -106,8 +106,10 @@ in the PR body rather than doing it quietly.
 - Errors say what a human should do about it — "needs a human decision", "check
   that -skill names a skill this installation has" — not merely what failed.
   This process runs unattended; its output is often the only diagnostic.
-- Every flag is part of the interface, so every flag is documented in the
-  README. A test enforces it.
+- Every flag is part of the interface, so every flag is documented under
+  `docs/` — `work`'s and `status`'s in `docs/reference.md`, `stats`'s beside
+  the report it describes in `docs/run-data.md`. A test enforces it. The README
+  is the landing page and carries no flag tables.
 - Tests are hermetic: no network, no `gh`, no real `claude`. A run that needs a
   Claude process spawns a fake CLI — this same test package built once without
   the race detector, which then re-enters `TestMain` and impersonates `claude`,
