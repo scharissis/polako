@@ -1589,6 +1589,18 @@ func describeVersion() string {
 // to guarantee the loop ends.
 const defaultResumeCeiling = 20
 
+// cleanExitResumeCeiling bounds the other flavour of resume: a run that ended
+// cleanly, opened no PR, and left work on disk anyway. Small on purpose, and
+// not an operator knob.
+//
+// Every attempt of this kind burns a *complete* run rather than failing fast in
+// seconds the way a crash loop does — the run this exists for cost $3.61 and
+// eight minutes — and -max-cost and -max-issue-time are both off by default, so
+// nothing else is standing between a run that keeps deciding to wait and a
+// three-figure bill. Two buys the case worth buying, a run that was one commit
+// from done, and refuses to fund the other one.
+const cleanExitResumeCeiling = 2
+
 // processIssue advances one issue as far as it will go: to merged, to a park,
 // or — the one way back out that is neither — to a question a human owes an
 // answer to, returned as a *deferredError for the caller to put down.
@@ -1605,12 +1617,20 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 	// resume, and a run that inches a little further each time and never
 	// arrives.
 	//
-	// retrying is a third thing again: whether the last time round this loop was
-	// a crash retry, which is what decides that the session is worth resuming.
-	// Neither counter can answer that — fruitless is zeroed by a crash that got
-	// work done, and reading the resume off it would silently turn every such
-	// retry into a fresh run that threw the crashed session away.
-	fruitless, resumes, retrying := 0, 0, false
+	// cleanResumes counts only the resumes of the second kind — a run that ended
+	// cleanly with no PR and work on disk — and is bounded separately, because
+	// those are the expensive ones. They spend the shared budget too: an issue
+	// alternating crashes and clean exits must not farm two ceilings.
+	//
+	// resumeKind is a different thing again: which sort of resume the next trip
+	// round this loop is, "" for none. It decides both that the session is worth
+	// resuming and what the resumed run is told, and neither counter can answer
+	// it — fruitless is zeroed by a crash that got work done, and reading the
+	// resume off it would silently turn every such retry into a fresh run that
+	// threw the crashed session away. One variable rather than a bool per
+	// flavour: the kinds are exclusive, and a second bool is one more thing every
+	// place that clears the first has to remember.
+	fruitless, resumes, cleanResumes, resumeKind := 0, 0, 0, ""
 
 	// Before the run, not only after the last merge: the gap this closes is also
 	// opened by a teammate's push and by a drain restarted days later, and the
@@ -1667,16 +1687,16 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 			// one, or the one it got turned out to be unresumable — is a fresh
 			// skill run in everything but name, so it is recorded as one. The
 			// skill re-derives where it got to from the worktree.
-			case retrying && st.session != "":
+			case resumeKind != "" && st.session != "":
 				resumeTarget = st.session
-				reason = reasonResume
+				reason = resumeKind
 			case st.answered:
 				reason = reasonAnswers
 			}
 			st.answered = false
 
 			started := time.Now()
-			rep, runErr := runClaude(ctx, cfg, issue, resumeTarget, runLimit(cfg, *tally))
+			rep, runErr := runClaude(ctx, cfg, issue, resumeTarget, reason, runLimit(cfg, *tally))
 			rc := runContext{
 				issue: issue, reason: reason, attempt: resumes,
 				resumedFrom: resumeTarget, started: started, ended: time.Now(),
@@ -1808,7 +1828,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 						return err
 					}
 					log.Printf("somebody replied on #%d — re-running to fold the answers in", issue)
-					fruitless, retrying, st.answered = 0, false, true
+					fruitless, resumeKind, st.answered = 0, "", true
 					continue
 				case runErr != nil && fruitless < cfg.retries && resumes < cfg.resumeCeiling:
 					// Crash (API drop, stall, tool failure): resume the exact
@@ -1826,7 +1846,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 						return park("%s", reason)
 					}
 					resumes++
-					retrying = true
+					resumeKind = reasonResume
 					mode := "restarting fresh"
 					if st.session != "" {
 						mode = "resuming session " + st.session
@@ -1862,16 +1882,67 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					}
 					return park("claude crashed and %d resume attempts failed", cfg.retries)
 				default:
-					// Clean exit, yet no PR and no questions: Claude decided
-					// nothing, which a machine shouldn't paper over — and it may
-					// not be what happened at all. Say what is on the branch and
-					// in the worktree, because that is the difference between an
-					// issue to re-specify and one whose change is already written
-					// and merely uncommitted.
+					// Clean exit, yet no PR and no questions. Three different
+					// runs end this way and only one of them is the "Claude
+					// decided nothing" this used to assume: the other two
+					// believed they had paused for something that will never
+					// come back, or ran out of road mid-task. Both of those have
+					// the change sitting on disk, finished or nearly, and are
+					// exactly what resume exists for.
+					//
+					// The discriminator is that work, not rep.progressed():
+					// every clean exit progressed — the run this was written for
+					// scored 59 turns and 58 tool uses — so progress cannot
+					// separate the three. Whether the branch has commits, or the
+					// worktree is dirty, can.
 					record(0, outcomeNothing)
-					terminal(0, issueNeedsHuman)
+					// One probe, feeding both the decision and, if it turns out
+					// to be a park after all, the message.
 					left := inspectLeftWork(ctx, cfg, issue)
+					// Which bound stopped a resume that was otherwise warranted,
+					// so the park says that rather than the generic sentence
+					// about producing nothing — the run produced plenty.
+					bound := ""
+					if left.salvageable() {
+						switch over := overBudget(cfg, *tally); {
+						case over != "":
+							// As in the crash arm: the gate at the top of the
+							// loop would refuse this dispatch anyway, and a log
+							// promising a resume it never makes is a worse
+							// diagnosis than the park it is really doing.
+							bound = over
+						case cleanResumes >= cleanExitResumeCeiling:
+							bound = fmt.Sprintf("it has been resumed %s after ending a turn "+
+								"without opening a PR and has still not opened one, which needs a human",
+								plural(cleanResumes, "time"))
+						case resumes >= cfg.resumeCeiling:
+							// "retried" rather than "resumed", as in the crash arm
+							// and for the same reason: a dead session turns one of
+							// these into a fresh restart, and the count covers both.
+							bound = fmt.Sprintf("claude has been retried %s on this issue and "+
+								"still has not finished it, which needs a human", plural(resumes, "time"))
+						default:
+							resumes++
+							cleanResumes++
+							resumeKind = reasonUnfinished
+							// No -retry-wait. A crash sleeps because a crash is
+							// often transient — an API drop, a rate limit, a host
+							// that woke mid-run — and this is not: the process
+							// ended because the model ended its turn, and waiting
+							// changes nothing about what the next attempt finds.
+							log.Printf("the run ended its turn without opening a PR but left work "+
+								"behind — resuming it to finish (%d/%d)", cleanResumes, cleanExitResumeCeiling)
+							continue
+						}
+					}
+					terminal(0, issueNeedsHuman)
+					// What happened, why we stopped trying, and what is there for
+					// the person picking it up. With nothing on disk both extra
+					// clauses are empty and this is the sentence it always was.
 					reason := "the run completed but produced no PR and no questions"
+					if bound != "" {
+						reason += "; " + bound
+					}
 					if d := left.describe(); d != "" {
 						reason += "; " + d
 					}
@@ -1879,7 +1950,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 				}
 			}
 			record(pr.Number, outcomeOpenedPR)
-			fruitless, retrying = 0, false
+			fruitless, resumeKind = 0, ""
 		}
 
 		switch pr.State {
@@ -1919,14 +1990,15 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 // --- Claude ---
 
 // runClaude executes one headless skill run. A non-empty resumeID continues
-// that exact session instead of starting the skill fresh, and a nonzero limit
-// is what -max-issue-time has left for this issue.
-func runClaude(ctx context.Context, cfg config, issue int, resumeID string, limit time.Duration) (runReport, error) {
+// that exact session instead of starting the skill fresh, reason says why —
+// which is what picks the wording that session is resumed with — and a nonzero
+// limit is what -max-issue-time has left for this issue.
+func runClaude(ctx context.Context, cfg config, issue int, resumeID, reason string, limit time.Duration) (runReport, error) {
 	cfg, prompt, invokes := issueRun(cfg, issue)
 	if resumeID != "" {
 		// Plain English, so invokes is empty: the resumed session already
 		// holds the skill's context and never re-resolves the command.
-		prompt, invokes = resumePrompt(cfg.skill, issue), ""
+		prompt, invokes = resumePrompt(cfg.skill, issue, reason), ""
 	}
 	return execClaude(ctx, cfg, prompt, resumeID, invokes, limit)
 }
@@ -1946,24 +2018,47 @@ func runClaude(ctx context.Context, cfg config, issue int, resumeID string, limi
 // having produced nothing and parks a healthy issue, leaving the question
 // unanswered — so "re-derive" has to reach the thread, not only the workspace.
 //
+// reasonUnfinished is the other thing we resume, and it needs its own opening
+// and its own closing. "Interrupted part-way through an action" is true of a
+// crash and false here, and the difference is load-bearing: a session that
+// believes it started something in the background and will be brought back to
+// it, resumed with a prompt that does not contradict that belief, has every
+// reason to end its turn waiting again. So that text says outright that ending
+// a turn ended the process, that nothing will wake it, and that there is no
+// later turn to finish in — then names the finish, because "continue the
+// workflow" is what the last turn thought it was doing.
+//
+// The re-derive paragraph in the middle is shared deliberately. It is the part
+// both flavours need identically, and the part that would quietly rot if there
+// were two copies of it.
+//
 // Two properties this wording has to keep, both pinned by a test. It must not
 // begin with "/", or execClaude's contract would want it declared as a slash
 // command it is not. And the issue number must stay the last number in it: a
 // resume carries no "/skill N" for the fake CLI in the tests to read, so that
 // is how an invocation is traced back to the issue it was dispatched for.
-func resumePrompt(skill string, issue int) string {
-	return fmt.Sprintf(
-		"The previous attempt at the /%s %d workflow was interrupted part-way "+
-			"through an action, so whatever it did last may be incomplete. "+
-			"Before doing anything else, re-derive where things actually stand: "+
-			"run `git status`, check whether the branch and the pull request "+
-			"already exist, and re-read the issue thread. A question the last "+
-			"attempt posted there may be missing the %s label it needed, in "+
-			"which case raise the label rather than asking again; a question "+
-			"that already carries the label must not be posted twice. "+
-			"Then continue the workflow from what you found, rather than from "+
-			"what the last step looks like it was doing.",
-		skill, issue, awaitingAnswerLabel)
+func resumePrompt(skill string, issue int, reason string) string {
+	opening := fmt.Sprintf("The previous attempt at the /%s %d workflow was interrupted "+
+		"part-way through an action, so whatever it did last may be incomplete. ", skill, issue)
+	closing := "Then continue the workflow from what you found, rather than from " +
+		"what the last step looks like it was doing."
+	if reason == reasonUnfinished {
+		opening = fmt.Sprintf("The previous attempt at the /%s %d workflow ended its turn without "+
+			"opening a pull request. Ending a turn ends this process: there is no later turn, "+
+			"nothing will wake you, and no background command, monitor or timer will be waited "+
+			"on. Whatever that attempt meant to come back to, it has to be finished now instead. ",
+			skill, issue)
+		closing = "Then finish it in this turn: commit whatever is uncommitted, run the review " +
+			"gate, and open the pull request."
+	}
+	return opening +
+		"Before doing anything else, re-derive where things actually stand: " +
+		"run `git status`, check whether the branch and the pull request " +
+		"already exist, and re-read the issue thread. A question the last " +
+		"attempt posted there may be missing the " + awaitingAnswerLabel + " label it needed, in " +
+		"which case raise the label rather than asking again; a question " +
+		"that already carries the label must not be posted twice. " +
+		closing
 }
 
 // issueRun is what a fresh skill run on one issue consists of: the config it

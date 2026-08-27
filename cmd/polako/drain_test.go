@@ -548,17 +548,13 @@ func TestDrainParksADeadIssueAndKeepsGoing(t *testing.T) {
 // issue that needs re-specifying, and it is sitting on disk — so the park says
 // it, in the log, in the summary and on the thread, which all carry the one
 // reason string.
-func TestDrainParkSaysWhatTheRunLeftBehind(t *testing.T) {
-	buf := captureLog(t)
-	cfg, _ := drainConfig(t, "stream", &ghState{
-		Issues: map[string]*fakeIssue{"1": {Open: true}},
-	})
-	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
-
-	// A real checkout, because git is what answers this and no fake can say it
-	// truthfully: a branch with a commit on it and a worktree holding more work
-	// that was never committed, which is the shape issue #42 parked in.
+// leftBehind points cfg at a real checkout in the state issue #42 parked in: a
+// branch with a commit on it and a worktree holding more work that was never
+// committed. Real, because git is what answers this and no fake can say it
+// truthfully — and it is what both the park message and the resume decision
+// turn on.
+func leftBehind(t *testing.T, cfg *config) {
+	t.Helper()
 	_, checkout := upstream(t)
 	cfg.dir = checkout
 	wt := filepath.Join(t.TempDir(), "checkout-issue-1")
@@ -567,6 +563,19 @@ func TestDrainParkSaysWhatTheRunLeftBehind(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(wt, "the-other-half"), []byte("never committed"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// A clean exit with work on disk is resumed now rather than parked, so reaching
+// the message this test is about takes running the resumes out first — which is
+// what the fake does here, ending every turn without a PR.
+func TestDrainParkSaysWhatTheRunLeftBehind(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	calls := filepath.Join(t.TempDir(), "gh-calls.log")
+	t.Setenv(fakeGhLogEnv, calls)
+	leftBehind(t, &cfg)
 
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("one dead issue must not end the drain: %v", err)
@@ -574,7 +583,9 @@ func TestDrainParkSaysWhatTheRunLeftBehind(t *testing.T) {
 
 	out := buf.String()
 	for _, want := range []string{
-		"the run completed but produced no PR and no questions; branch issue-1 has 1 commit " +
+		"the run completed but produced no PR and no questions; it has been resumed 2 times " +
+			"after ending a turn without opening a PR and has still not opened one, which needs " +
+			"a human; branch issue-1 has 1 commit " +
 			"and its worktree has uncommitted changes in 1 file — the run left work behind, " +
 			"so start there rather than from scratch",
 		// Where it is goes to the terminal only, beside the resume id and for
@@ -635,6 +646,13 @@ func TestDrainParkSaysNothingExtraWhenTheRunLeftNothing(t *testing.T) {
 		if strings.Contains(out, unwanted) {
 			t.Errorf("log says %q about a run that left nothing\ngot:\n%s", unwanted, out)
 		}
+	}
+	// And nothing was resumed. A run with nothing on disk is the one clean exit
+	// that really did decide nothing, and paying for two more of it is exactly
+	// what the branch-state probe is there to prevent.
+	if got := strings.Count(out, "session started"); got != 1 {
+		t.Errorf("%d runs dispatched, want 1 — a run that left nothing must not be resumed\ngot:\n%s",
+			got, out)
 	}
 }
 
@@ -1840,7 +1858,10 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 		name  string
 		mode  string
 		state *ghState
-		tune  func(*config)
+		// tune takes the subtest's *testing.T because several of these branches
+		// turn on what git says about the workspace, which means building a real
+		// checkout for the case rather than only setting a field.
+		tune func(*testing.T, *config)
 		// runs is how many claude invocations this decision should dispatch.
 		// Zero is the interesting value: it is the restart-safety guarantee.
 		runs  int
@@ -1894,7 +1915,7 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 			name:  "a crash resumes the session it died in and ships",
 			mode:  "crashthenships",
 			state: &ghState{Issues: open()},
-			tune:  func(cfg *config) { cfg.retries = 2 },
+			tune:  func(_ *testing.T, cfg *config) { cfg.retries = 2 },
 			runs:  2,
 			check: func(t *testing.T, err error, st *ghState, out string) {
 				if err != nil {
@@ -1919,7 +1940,7 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 			name:  "a session that cannot be resumed falls back to a fresh run",
 			mode:  "deadsession",
 			state: &ghState{Issues: open()},
-			tune:  func(cfg *config) { cfg.retries = 3 },
+			tune:  func(_ *testing.T, cfg *config) { cfg.retries = 3 },
 			// Two init events: the fresh run that crashes, and the fresh run
 			// that ships. The dead resume between them emits none — which is
 			// exactly what the supervisor reads it by.
@@ -1948,7 +1969,7 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 			name:  "a crash that got work done first does not spend the retry budget",
 			mode:  "partial",
 			state: &ghState{Issues: open()},
-			tune:  func(cfg *config) { cfg.retries, cfg.resumeCeiling = 1, ceiling },
+			tune:  func(_ *testing.T, cfg *config) { cfg.retries, cfg.resumeCeiling = 1, ceiling },
 			// One fresh run and every resume the ceiling allows. The old counter
 			// would have stopped at two.
 			runs: 1 + ceiling,
@@ -1977,7 +1998,7 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 			name:  "a crash with the resumes spent parks",
 			mode:  "crash",
 			state: &ghState{Issues: open()},
-			tune:  func(cfg *config) { cfg.retries = 1 },
+			tune:  func(_ *testing.T, cfg *config) { cfg.retries = 1 },
 			runs:  2, // the fresh attempt and the one resume it was allowed
 			check: func(t *testing.T, err error, st *ghState, out string) {
 				if got, want := parkedFor(t, err), "claude crashed and 1 resume attempts failed"; got != want {
@@ -1986,17 +2007,103 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 			},
 		},
 		{
-			// Nothing crashed, nothing was asked, and nothing was produced. A
-			// machine cannot tell what that means, so it says so rather than
-			// retrying its way around it.
+			// Nothing crashed, nothing was asked, nothing was produced, and
+			// there is nothing on the branch or in the worktree either. That is
+			// the clean exit that really did decide nothing, and a machine
+			// cannot tell what it means, so it says so rather than retrying its
+			// way around it.
 			name:  "a clean exit that produced nothing parks",
 			mode:  "stream",
 			state: &ghState{Issues: open()},
-			tune:  func(cfg *config) { cfg.retries = 2 },
-			runs:  1, // a clean exit is not a crash, so the resume budget is untouched
+			tune:  func(_ *testing.T, cfg *config) { cfg.retries = 2 },
+			runs:  1, // nothing to salvage, so nothing to resume
 			check: func(t *testing.T, err error, st *ghState, out string) {
 				if got, want := parkedFor(t, err), "the run completed but produced no PR and no questions"; got != want {
 					t.Errorf("park reason = %q, want %q", got, want)
+				}
+			},
+		},
+		{
+			// Issue #42, which is what this whole branch exists for: the run
+			// implemented the change, started something in the background, ended
+			// its turn expecting to be brought back — and under headless
+			// `claude -p` that ends the process. It had not decided nothing; it
+			// had decided to wait. Resuming it costs one run, and not resuming it
+			// cost a person half an hour of finishing the job by hand.
+			name:  "a clean exit that left work behind is resumed rather than parked",
+			mode:  "waitsthenships",
+			state: &ghState{Issues: open()},
+			tune: func(t *testing.T, cfg *config) {
+				leftBehind(t, cfg)
+				cfg.retries = 2
+			},
+			runs: 2, // the turn that ended, and the resume that opened the PR
+			check: func(t *testing.T, err error, st *ghState, out string) {
+				if err != nil {
+					t.Errorf("err = %v, want the resumed run to finish the issue", err)
+				}
+				if st.Issues["1"].Open {
+					t.Error("issue 1 should have been closed once its PR merged")
+				}
+				// The invocation, not only the decision: a resume that quietly
+				// restarted the skill from scratch would throw away the context
+				// that already holds the whole implementation.
+				if !strings.Contains(out, "--resume sess-xyz") {
+					t.Errorf("want the session resumed rather than restarted\ngot:\n%s", out)
+				}
+				// And told the thing that stops it waiting a second time.
+				if !strings.Contains(out, "no later turn") {
+					t.Errorf("want the resumed run told its turn ends the process\ngot:\n%s", out)
+				}
+			},
+		},
+		{
+			// The bound on the expensive flavour. Every attempt here burns a
+			// complete run rather than failing fast in seconds, and -max-cost is
+			// off by default, so a run that keeps deciding to wait has to stop
+			// being funded by something.
+			name:  "clean-exit resumes stop at their own ceiling",
+			mode:  "stream",
+			state: &ghState{Issues: open()},
+			tune: func(t *testing.T, cfg *config) {
+				leftBehind(t, cfg)
+				// Deliberately generous, so only the clean-exit ceiling can be
+				// what stops this.
+				cfg.retries, cfg.resumeCeiling = 5, ceiling
+			},
+			runs: 1 + cleanExitResumeCeiling,
+			check: func(t *testing.T, err error, st *ghState, out string) {
+				want := "it has been resumed 2 times after ending a turn without opening a PR " +
+					"and has still not opened one, which needs a human"
+				if got := parkedFor(t, err); !strings.Contains(got, want) {
+					t.Errorf("park reason = %q, want it to name the bound it reached: %q", got, want)
+				}
+			},
+		},
+		{
+			// The two budgets are one budget. Without this, an issue that
+			// alternates crashing and ending its turn draws on two separate
+			// ceilings and outlives both of them.
+			name:  "a clean-exit resume spends the shared resume budget too",
+			mode:  "crashthenwaits",
+			state: &ghState{Issues: open()},
+			tune: func(t *testing.T, cfg *config) {
+				leftBehind(t, cfg)
+				// One resume in total, and the crash takes it. The clean exit
+				// that follows has work on disk and its own ceiling untouched,
+				// and must still be refused.
+				cfg.retries, cfg.resumeCeiling = 5, 1
+			},
+			runs: 2, // the crash, and the one resume the shared ceiling allowed
+			check: func(t *testing.T, err error, st *ghState, out string) {
+				want := "claude has been retried 1 time on this issue and still has not finished it"
+				if got := parkedFor(t, err); !strings.Contains(got, want) {
+					t.Errorf("park reason = %q, want it to name the shared budget: %q", got, want)
+				}
+				// The work is still described, because it is still there and
+				// somebody now has to pick it up.
+				if got := parkedFor(t, err); !strings.Contains(got, "the run left work behind") {
+					t.Errorf("park reason = %q, want it to say what is on disk", got)
 				}
 			},
 		},
@@ -2007,7 +2114,7 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 			name:  "a skill the session does not have stops the drain",
 			mode:  "unknownskill",
 			state: &ghState{Issues: open()},
-			tune:  func(cfg *config) { cfg.retries = 2 },
+			tune:  func(_ *testing.T, cfg *config) { cfg.retries = 2 },
 			runs:  1,
 			check: func(t *testing.T, err error, st *ghState, out string) {
 				if !errors.Is(err, errNoWork) {
@@ -2027,7 +2134,7 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 			name:  "refused credentials stop the drain",
 			mode:  "authfail",
 			state: &ghState{Issues: open()},
-			tune:  func(cfg *config) { cfg.retries = 2 },
+			tune:  func(_ *testing.T, cfg *config) { cfg.retries = 2 },
 			runs:  1,
 			check: func(t *testing.T, err error, st *ghState, out string) {
 				if !errors.Is(err, errAuth) {
@@ -2047,7 +2154,7 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 			cfg, path := drainConfig(t, tc.mode, tc.state)
 			cfg.retryWait = time.Millisecond
 			if tc.tune != nil {
-				tc.tune(&cfg)
+				tc.tune(t, &cfg)
 			}
 			// Bounded: several of these branches are the ones that used to wait
 			// on something forever, and a hung suite says less than a failure.

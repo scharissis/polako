@@ -198,6 +198,28 @@ func fakeClaude(mode string) int {
 			return 1
 		}
 		return fakeClaude("stream")
+	case "crashthenwaits":
+		// One of each, so the two resume budgets can be proved to be one budget:
+		// the fresh run dies, and the resume it is granted ends its turn cleanly
+		// with the work still uncommitted.
+		if !slices.Contains(os.Args, "--resume") {
+			return fakeClaude("crash")
+		}
+		return fakeClaude("stream")
+	case "waitsthenships":
+		// Issue #42's shape: the fresh run implements the change, ends its turn
+		// believing something will bring it back, and so exits cleanly with no
+		// PR — and the resume is what actually opens one. Which run this is
+		// comes off argv rather than off the pretend repository, because what
+		// it is there to prove is that a *resume* happened at all.
+		if !slices.Contains(os.Args, "--resume") {
+			return fakeClaude("stream")
+		}
+		if err := plantPR("MERGED"); err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		return fakeClaude("stream")
 	case "deadsession":
 		// A --resume the CLI cannot honour: the session's JSONL was truncated by
 		// a hard kill mid-append, or it has aged out of retention. It says so on
@@ -1595,7 +1617,7 @@ func TestRunClaudeResumesRatherThanRestartingTheSkill(t *testing.T) {
 	buf := captureLog(t)
 	cfg := fakeClaudeConfig(t, "stream")
 
-	if _, err := runClaude(context.Background(), cfg, 12, "", 0); err != nil {
+	if _, err := runClaude(context.Background(), cfg, 12, "", reasonImplement, 0); err != nil {
 		t.Fatalf("fresh run: %v", err)
 	}
 	want := fmt.Sprintf("-p /%s 12", defaultSkill)
@@ -1604,7 +1626,7 @@ func TestRunClaudeResumesRatherThanRestartingTheSkill(t *testing.T) {
 	}
 
 	buf.Reset()
-	if _, err := runClaude(context.Background(), cfg, 12, "sess-old", 0); err != nil {
+	if _, err := runClaude(context.Background(), cfg, 12, "sess-old", reasonResume, 0); err != nil {
 		t.Fatalf("resumed run: %v", err)
 	}
 	out := buf.String()
@@ -1621,31 +1643,69 @@ func TestRunClaudeResumesRatherThanRestartingTheSkill(t *testing.T) {
 // interruption arrives mid-action, so the resumed run has to look before it
 // carries on.
 func TestResumePromptAsksTheRunToRederiveItsState(t *testing.T) {
-	prompt := resumePrompt(defaultSkill, 12)
+	// Both flavours, because the re-derive discipline and the two structural
+	// properties below belong to every resume, not to the crash one.
+	for _, reason := range []string{reasonResume, reasonUnfinished} {
+		t.Run(reason, func(t *testing.T) {
+			prompt := resumePrompt(defaultSkill, 12, reason)
 
-	// The label is in the list for the same reason the workspace checks are:
-	// a kill between `gh issue comment` and the label leaves a question the
-	// supervisor cannot see, and parks a healthy issue over it.
-	for _, want := range []string{"git status", "branch", "pull request", "incomplete",
-		"issue thread", awaitingAnswerLabel} {
+			// The label is in the list for the same reason the workspace checks
+			// are: a kill between `gh issue comment` and the label leaves a
+			// question the supervisor cannot see, and parks a healthy issue
+			// over it.
+			for _, want := range []string{"git status", "branch", "pull request",
+				"issue thread", awaitingAnswerLabel} {
+				if !strings.Contains(prompt, want) {
+					t.Errorf("a resume prompt should mention %q, so the run checks rather than assumes\ngot: %s",
+						want, prompt)
+				}
+			}
+
+			// execClaude takes the slash command a prompt invokes as an argument
+			// rather than parsing it back out, and runClaude passes "" for a
+			// resume. A prompt that opened with "/" would make that a lie.
+			if strings.HasPrefix(prompt, "/") {
+				t.Errorf("a resume prompt is plain text and must not open with a slash command\ngot: %s", prompt)
+			}
+
+			// fakeClaude reads the issue number off the end of the prompt. A
+			// second number after it would not fail here — it would quietly
+			// point every resume in the suite at the wrong issue.
+			if got := lastNumber(prompt); got != "12" {
+				t.Errorf("last number in the prompt = %q, want the issue number %q\ngot: %s", got, "12", prompt)
+			}
+		})
+	}
+}
+
+// The whole reason the second flavour needs its own words. A run that ended its
+// turn believing something would bring it back, resumed with a prompt that says
+// it was "interrupted part-way through an action", is told nothing that
+// contradicts the belief — so it has every reason to end its turn waiting
+// again, and the resume buys a second identical run.
+func TestUnfinishedResumePromptContradictsTheBeliefThatItWasPaused(t *testing.T) {
+	prompt := resumePrompt(defaultSkill, 12, reasonUnfinished)
+
+	for _, want := range []string{
+		"ended its turn",     // what happened
+		"no later turn",      // and what that means
+		"nothing will wake",  // said outright, because a monitor is what it waited on
+		"finish it in this",  // the only turn there is
+		"open the pull requ", // named, rather than left as "continue the workflow"
+	} {
 		if !strings.Contains(prompt, want) {
-			t.Errorf("a resume prompt should mention %q, so the run checks rather than assumes\ngot: %s",
-				want, prompt)
+			t.Errorf("the unfinished resume prompt should say %q\ngot: %s", want, prompt)
 		}
 	}
-
-	// execClaude takes the slash command a prompt invokes as an argument
-	// rather than parsing it back out, and runClaude passes "" for a resume.
-	// A prompt that opened with "/" would make that a lie.
-	if strings.HasPrefix(prompt, "/") {
-		t.Errorf("a resume prompt is plain text and must not open with a slash command\ngot: %s", prompt)
+	// The crash wording is not merely unhelpful here, it is false: nothing
+	// interrupted this run. Left in, it is the sentence the run would reconcile
+	// its own memory against.
+	if strings.Contains(prompt, "interrupted part-way") {
+		t.Errorf("a clean exit was not interrupted, and must not be told it was\ngot: %s", prompt)
 	}
-
-	// fakeClaude reads the issue number off the end of the prompt. A second
-	// number after it would not fail here — it would quietly point every
-	// resume in the suite at the wrong issue.
-	if got := lastNumber(prompt); got != "12" {
-		t.Errorf("last number in the prompt = %q, want the issue number %q\ngot: %s", got, "12", prompt)
+	// And the crash flavour keeps saying what is true of it.
+	if crash := resumePrompt(defaultSkill, 12, reasonResume); !strings.Contains(crash, "incomplete") {
+		t.Errorf("the crash resume prompt stopped warning that the last action may be incomplete\ngot: %s", crash)
 	}
 }
 

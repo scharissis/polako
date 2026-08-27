@@ -46,10 +46,16 @@ const metricsOff = "off"
 const (
 	reasonImplement = "implement" // fresh skill run on an issue
 	reasonResume    = "resume"    // --resume after a crash or a stall
-	reasonAnswers   = "answers"   // fresh re-run after a human replied on the thread
-	reasonRemediate = "remediate" // conflict remediation while a PR is open
-	reasonChecks    = "checks"    // CI remediation while a PR is open
-	reasonReview    = "review"    // answering a reviewer who asked for changes
+	// --resume after a run that exited cleanly, opened no PR and left work on
+	// disk anyway. Kept apart from reasonResume because nothing crashed: this is
+	// the run that decided to wait for something, or ran out of road mid-task,
+	// and how often it happens is the measurement that says whether the skill's
+	// one-turn rule is working.
+	reasonUnfinished = "unfinished"
+	reasonAnswers    = "answers"   // fresh re-run after a human replied on the thread
+	reasonRemediate  = "remediate" // conflict remediation while a PR is open
+	reasonChecks     = "checks"    // CI remediation while a PR is open
+	reasonReview     = "review"    // answering a reviewer who asked for changes
 )
 
 // What a run left behind. A remediation run pushes to a PR that already
