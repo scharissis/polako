@@ -206,6 +206,50 @@ func fakeClaude(mode string) int {
 			return fakeClaude("crash")
 		}
 		return fakeClaude("stream")
+	case "limited":
+		// The CLI refusing to work over the account's usage limit: an init
+		// that names a session, the refusal streamed as the only turn, and an
+		// error result whose text is the refusal — the shape observed on #67.
+		// Deliberately no reset clause the parser can read, because a drain
+		// test on this mode exercises the poll fallback; a readable clock
+		// would have the suite sleeping into real wall time.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-limited","model":"claude-opus-5"}`)
+		emit(`{"type":"assistant","session_id":"sess-limited","message":{"content":[{"type":"text","text":"You've hit your session limit"}]}}`)
+		emit(`{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"sess-limited",` +
+			`"num_turns":1,"duration_ms":100,"total_cost_usd":0,"result":"You've hit your session limit"}`)
+		return 1
+	case "limitedthenships":
+		// Refused over the limit once, and the resume after the wait finishes
+		// the job. Which run this is comes off argv, because what it proves is
+		// that the supervisor resumed the refused session rather than parking
+		// its issue or starting over.
+		if !slices.Contains(os.Args, "--resume") {
+			return fakeClaude("limited")
+		}
+		if err := plantPR("MERGED"); err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		return fakeClaude("stream")
+	case "limitedrepeatthenships":
+		// Refused over the limit more times than -retries would forgive, then
+		// ships — the proof that limit waits are charged to neither retry
+		// budget. Counted off the pretend repository, because every refusal
+		// after the first arrives on a --resume and argv cannot tell them
+		// apart.
+		n, err := countClaudeRun()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		if n <= 5 {
+			return fakeClaude("limited")
+		}
+		if err := plantPR("MERGED"); err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		return fakeClaude("stream")
 	case "waitsthenships":
 		// Issue #42's shape: the fresh run implements the change, ends its turn
 		// believing something will bring it back, and so exits cleanly with no

@@ -251,6 +251,18 @@ with the fix in the last line: check `claude auth status`, then
 lives in GitHub, so starting `polako work` again once the token works picks up
 exactly where it stopped.
 
+**A session limit is waited out, not retried against.** When the account is
+over its usage limit, the CLI refuses every run the same way in seconds and
+says when the limit resets. Retrying against that wall is how a healthy issue
+used to burn its whole resume allowance and park; instead the supervisor reads
+the reset time out of the refusal, sleeps until just past it, and resumes the
+refused session. A refusal whose reset time it cannot read — a wording change,
+a weekly limit's dated reset — falls back to one attempt per `-poll`. Neither
+form of waiting spends `-retries` or the resume ceiling: those bound evidence
+about the issue, and a limit is a fact about the account. Ctrl+C during the
+wait is safe as ever — state lives in GitHub, and rerunning after the reset
+picks the issue back up.
+
 **Human touchpoints are deliberately just two**, both on GitHub:
 
 1. Answering clarification questions the skill posts on an issue thread.
@@ -488,7 +500,7 @@ sets — see [`status`](#where-the-backlog-stands-polako-status) and
 | `-permission-mode` | `acceptEdits` | Passed to `claude --permission-mode`. |
 | `-model` | *(the CLI's own default)* | Passed to `claude --model`. Vary it between batches to compare models — see [Run data & cost tracking](#run-data--cost-tracking). |
 | `-poll` | `5m` | Interval between GitHub checks while waiting. |
-| `-retries` | `3` | Consecutive *fruitless* resume attempts after a crashed run — a crash that got real work done first resets the count rather than spending it — and the bound on remediation runs against an open PR that is conflicting, red, or carrying a request for changes. A run the API refused to authenticate is never one of them — see below. |
+| `-retries` | `3` | Consecutive *fruitless* resume attempts after a crashed run — a crash that got real work done first resets the count rather than spending it — and the bound on remediation runs against an open PR that is conflicting, red, or carrying a request for changes. A run the API refused to authenticate is never one of them, and neither is one refused over the account's session limit, which is waited out instead — see below. |
 | `-retry-wait` | `30s` | Wait before each resume attempt after a *crash*. A clean exit that left work behind is resumed straight away: nothing about it is transient, so there is nothing to wait for. |
 | `-stall` | `15m` | Kill and resume a run that has emitted no events for this long (`0` disables). |
 | `-max-cost` | *(no limit)* | Park an issue once this shift's runs on it have cost this many dollars — see [Capping what a shift spends](#capping-what-a-shift-spends). |
