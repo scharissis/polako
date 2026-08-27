@@ -2998,15 +2998,29 @@ func unknownJSONField(err error) bool {
 // question about the backlog rather than about the next run, and proposed is
 // what the startup line counts.
 //
-// Containers are in no list at all. An issue with sub-issues is a tracking
-// container rather than a work item, and it is not held back by anything a
-// human could release: reporting it as parked would send an operator to take
-// off a label that would change nothing.
+// Containers are in no queue a drain reads. An issue with sub-issues is a
+// tracking container rather than a work item, and it is not held back by
+// anything a human could release: reporting it as parked would send an operator
+// to take off a label that would change nothing. They are still listed, because
+// "not workable" is not "not open" — anything asking which open issues exist,
+// `status` deciding whose PR is still live among them, has to see them.
 type issueQueues struct {
-	ready    []int
-	blocked  []int
-	parked   []int
-	proposed []int
+	ready      []int
+	blocked    []int
+	parked     []int
+	proposed   []int
+	containers []int
+}
+
+// open is every issue the listing found, whichever queue it landed in. The
+// question it answers is "is this issue still open?" rather than "would a drain
+// work it", so an exclusion must not shorten it.
+func (q issueQueues) open() []int {
+	all := make([]int, 0, len(q.ready)+len(q.blocked)+len(q.parked)+len(q.proposed)+len(q.containers))
+	for _, list := range [][]int{q.ready, q.blocked, q.parked, q.proposed, q.containers} {
+		all = append(all, list...)
+	}
+	return all
 }
 
 // selectableIssues reads a `gh issue list --json number,labels,subIssuesSummary`
@@ -3037,6 +3051,7 @@ func selectableIssues(raw []byte) (issueQueues, error) {
 		case is.SubIssues.Total > 0:
 			// A container, and containers are never worked — whatever their
 			// labels, so a parent somebody made by hand is protected too.
+			q.containers = append(q.containers, is.Number)
 		case is.hasLabel(needsHumanLabel):
 			q.parked = append(q.parked, is.Number)
 		case is.hasLabel(proposedLabel):
@@ -3051,6 +3066,7 @@ func selectableIssues(raw []byte) (issueQueues, error) {
 	slices.Sort(q.blocked)
 	slices.Sort(q.parked)
 	slices.Sort(q.proposed)
+	slices.Sort(q.containers)
 	return q, nil
 }
 

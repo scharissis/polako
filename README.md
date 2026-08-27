@@ -708,6 +708,8 @@ scharissis/polako
   ready         3 issues — #14, #19, #23
   awaiting you  1 issue — #9 (quiet 26h)
   parked        1 issue — #5, labelled needs-human
+  proposed      2 issues — #27, #28, labelled proposed
+  containers    1 issue — #12, tracking sub-issues rather than work
   next          #14 — its branch already has PR #61, so it would wait on that rather than run the skill again
 
 open prs on issue branches
@@ -715,7 +717,7 @@ open prs on issue branches
   #61  issue-14  #14    mergeable  failing (test-mac)  clear                        https://github.com/scharissis/polako/pull/61
   #58  issue-19  #19    mergeable  passing             answered, awaiting re-review  https://github.com/scharissis/polako/pull/58
 
-needs you: reply on #9; review and merge PR #58; decide what to do about #5 (drop needs-human to requeue)
+needs you: reply on #9; review and merge PR #58; decide what to do about #5 (drop needs-human to requeue); curate #27, #28 (drop proposed to queue them)
 ```
 
 What it prints is what a shift starting right now would do next — which is the

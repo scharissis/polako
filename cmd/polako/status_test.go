@@ -116,6 +116,11 @@ func TestStatusInheritsTheCurationGate(t *testing.T) {
 			"2": {Open: true, SubIssues: 3},
 			"3": {Open: true},
 		},
+		// #1 was worked before somebody labelled it: excluded from the queue is
+		// not excluded from the report, because that PR still wants merging.
+		PRs: map[string]*fakePR{
+			"issue-1": {Number: 40, State: "OPEN", Mergeable: "MERGEABLE", Checks: []string{"SUCCESS"}},
+		},
 	})
 
 	snap, err := readStatus(context.Background(), cfg, statusNow)
@@ -128,12 +133,58 @@ func TestStatusInheritsTheCurationGate(t *testing.T) {
 	if want := []int{1}; !slices.Equal(snap.queues.proposed, want) {
 		t.Errorf("proposed = %v, want %v", snap.queues.proposed, want)
 	}
+	if want := []int{2}; !slices.Equal(snap.queues.containers, want) {
+		t.Errorf("containers = %v, want %v", snap.queues.containers, want)
+	}
 	if len(snap.queues.blocked)+len(snap.queues.parked) != 0 {
 		t.Errorf("blocked/parked = %v/%v, want a container in neither",
 			snap.queues.blocked, snap.queues.parked)
 	}
 	if snap.next != 3 {
 		t.Errorf("next = %d, want the lowest issue a drain would actually pick up", snap.next)
+	}
+
+	var out strings.Builder
+	renderStatus(&out, cfg, snap)
+	printed := out.String()
+	// What is held back is named, not merely absent: an operator reading a
+	// snapshot that showed neither would have no way to find the batch at all.
+	for _, want := range []string{
+		"ready       1 issue — #3",
+		"proposed    1 issue — #1, labelled proposed",
+		"containers  1 issue — #2, tracking sub-issues rather than work",
+		"#40  issue-1  #1     mergeable  passing  clear",
+		"curate #1 (drop proposed to queue them)",
+	} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("report is missing %q\ngot:\n%s", want, printed)
+		}
+	}
+}
+
+// A backlog of nothing but proposals and containers is not a cleared one, and
+// the two are released differently — so the report names which is holding it
+// rather than sending an operator to drop a label nothing carries.
+func TestStatusDoesNotCallAGatedBacklogCleared(t *testing.T) {
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true, Labels: []string{proposedLabel}},
+			"2": {Open: true, SubIssues: 3},
+		},
+	})
+
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	var out strings.Builder
+	renderStatus(&out, cfg, snap)
+	printed := out.String()
+	if strings.Contains(printed, "backlog cleared") {
+		t.Errorf("two open issues is not a cleared backlog:\n%s", printed)
+	}
+	if want := "next        nothing — every open issue is awaiting curation or a tracking container"; !strings.Contains(printed, want) {
+		t.Errorf("report is missing %q\ngot:\n%s", want, printed)
 	}
 }
 
