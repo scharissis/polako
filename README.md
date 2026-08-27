@@ -1266,6 +1266,17 @@ Until then, *Start a release* and the publish step fail at `gh pr create`;
 each says so, names the checkbox, and deletes the branch it pushed so a re-run
 starts clean.
 
+**Optional, but worth it:** a `RELEASE_TOKEN` repository secret holding a
+fine-grained personal access token — this repository only, *Contents* and
+*Pull requests* read/write, nothing else. With it, the workflows open the
+release and publish PRs as **you** rather than as `github-actions[bot]`, which
+matters because GitHub holds every bot-authored PR's `pull_request` CI behind
+an *Approve workflows to run* button on a private repository, with no setting
+to turn that off. Your-token PRs run CI on their own; without the secret the
+pipeline still works and each PR just carries that one approval click. Mind
+the token's expiry date: an expired one fails the PR-opening step loudly, and
+refreshing the secret is the fix.
+
 | Tag | Who needs it |
 | --- | --- |
 | `polako--v0.4.0` | The Claude plugin tooling. `claude plugin tag` creates it, and refuses if `plugin.json` and the marketplace entry disagree. It is also what the marketplace entry's `ref` pins to, and what a `dependencies` range would resolve against. |

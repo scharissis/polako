@@ -130,7 +130,14 @@ jobs:
 
       - name: open the publish PR
         env:
-          GH_TOKEN: ${{ github.token }}
+          # The operator's token when the repo has one — same reasoning as
+          # start-release.yml: a bot-authored PR has its pull_request CI held
+          # behind an approval button on every PR, and a RELEASE_TOKEN secret
+          # makes the PR the operator's instead. Falls back to the workflow
+          # token, bot-authored, where no secret is configured.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          HAS_RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN != '' }}
+          WORKFLOW_TOKEN: ${{ github.token }}
         run: |
           version=${GITHUB_REF_NAME#v}
           branch="publish-$version"
@@ -192,9 +199,11 @@ jobs:
             echo "- **If the skill half changed, drive one real issue through $version"
             echo "  first** and note here which one — see \"Smoke-testing the skill\" in"
             echo "  the README. If the backlog was empty, say that instead."
-            echo
-            echo "CI does not start on its own for a PR a workflow opens; a run was"
-            echo "dispatched for this branch, and any push to it triggers CI normally."
+            if [ "$HAS_RELEASE_TOKEN" != "true" ]; then
+              echo
+              echo "CI does not start on its own for a bot-opened PR; a run was"
+              echo "dispatched for this branch, and any push to it triggers CI normally."
+            fi
           } > body.md
           if ! gh pr create --base main --head "$branch" \
               --title "chore: publish $version" --body-file body.md; then
@@ -203,4 +212,9 @@ jobs:
             echo "::error::could not open the publish PR; the branch was deleted again. If the error above says GitHub Actions is not permitted to create pull requests, enable it once — Settings → Actions → General → Workflow permissions → 'Allow GitHub Actions to create and approve pull requests' — then re-run this workflow on the tag."
             exit 1
           fi
-          gh workflow run ci.yml --ref "$branch"
+          # The operator-token PR triggers pull_request CI by itself; only
+          # the bot-authored fallback needs the dispatch, under the workflow
+          # token, since the PAT is deliberately not granted Actions access.
+          if [ "$HAS_RELEASE_TOKEN" != "true" ]; then
+            GH_TOKEN=$WORKFLOW_TOKEN gh workflow run ci.yml --ref "$branch"
+          fi
