@@ -14,6 +14,13 @@ package main
 // version does not know (the schema grows by adding, never by migrating),
 // dedupe issue records latest-wins, and order runs by timestamp — never by
 // attempt, which resets whenever the supervisor restarts.
+//
+// One rule that had to be measured rather than reasoned out: a resumed run's
+// row is summed like any other. A --resume'd result event reports that
+// invocation and not the session it continued, settled on issue #78 against
+// real records, so the two halves of a resumed session do not overlap and
+// nothing here has to take a per-session maximum. Reports used to carry a
+// footnote hedging on that; they no longer need one.
 
 import (
 	"bufio"
@@ -551,9 +558,6 @@ func render(w io.Writer, ds dataset, issues []*issueStats, opt statsOptions) {
 	if opt.runs {
 		printRunTable(w, ds)
 	}
-	if note := resumeNote(ds); note != "" {
-		fmt.Fprintf(w, "\n%s\n", note)
-	}
 }
 
 func scopeSuffix(opt statsOptions, ds dataset) string {
@@ -839,26 +843,6 @@ func confounded(spans []time.Duration) string {
 		return ""
 	}
 	return " (human availability, not the tool)"
-}
-
-// resumeNote flags the one number in this report that may be double-counted.
-// Whether a --resume'd run's result event reports that invocation's cost or
-// the whole session's is unverified against the real CLI; costs are summed as
-// reported, which is right in the first case and high in the second.
-func resumeNote(ds dataset) string {
-	resumed := 0
-	for _, r := range ds.runs {
-		// Both flavours: what is uncertain here is what the CLI reports on a
-		// --resume, and a clean-exit resume is as much a --resume as a crash one.
-		if r.Reason == reasonResume || r.Reason == reasonUnfinished {
-			resumed++
-		}
-	}
-	if resumed == 0 {
-		return ""
-	}
-	return fmt.Sprintf("note: %s resumed an earlier session. Costs are summed exactly as each\n"+
-		"      run reported them — see \"resumed sessions\" in docs/run-data.md.", plural(resumed, "run"))
 }
 
 // --- tables ---

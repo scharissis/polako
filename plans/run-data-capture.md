@@ -368,22 +368,52 @@ any A/B aids.
 
 ## Open questions and verification tasks
 
-1. **Resume semantics (verify before phase 1 sums anything).** Confirm
-   empirically whether a `--resume`d run's `result` event reports
-   per-invocation or cumulative-for-session cost/usage. If cumulative, naive
-   summing double-counts every resumed session; `stats` then sums the
-   per-session maximum instead, using the recorded `session` /
-   `resumed_from` chain. One disposable resume against the real CLI answers
-   this. **Still open after phase 2**, which sums exactly what each run
-   reported and names the exposure instead of hiding it: any report containing
-   resumed runs says how many, and the README carries the caveat. Switching to
-   a per-session maximum stays a change to the aggregation in `stats.go`
-   alone — nothing about the records has to change. The probe was attempted
-   on 2026-08-25 and could not run: every `claude` invocation returned
-   `401 OAuth access token is invalid`, from a clean shell as well as under
-   the supervisor, so no run reached a priced `result` event. One thing those
-   failed runs did settle: a `--resume`d run's init event reports the *same*
-   `session_id`, so a per-session grouping can key on `session` alone.
+1. ~~**Resume semantics.**~~ **Settled 2026-08-27 (issue #78): a `--resume`d
+   run's `result` event reports that invocation, not the session.** Summing
+   rows as written is correct, so no per-session maximum is needed and the
+   caveat has come out of `stats` and `docs/run-data.md`.
+
+   The question was whether naive summing double-counts every resumed session.
+   Two attempts at the disposable probe the plan called for did not happen: the
+   2026-08-25 run hit `401 OAuth access token is invalid` on every `claude`
+   invocation, from a clean shell as well as under the supervisor, and the
+   2026-08-27 run could not spawn `claude` at all, because it is not in the
+   `implement-issue` skill's `--allowedTools` set and the invocation raised a
+   permission prompt an unattended run has nobody to answer. The evidence came
+   instead from a resume that had already been recorded — better provenance
+   than a synthetic probe, since it is a real implement run.
+
+   `scharissis/backlog-drain#3`, session `072dd60e-…`, CLI 2.1.245. Both halves
+   carry `usage_source: "result"`, so both reached a priced result event:
+
+   | field | run 0 (`implement`, crash) | run 1 (`resume`, ok) |
+   | --- | --- | --- |
+   | `num_turns` | 62 | 31 |
+   | `usage.output_tokens` | 54,077 | 15,651 |
+   | `usage.cache_read_input_tokens` | 6,194,619 | 4,947,563 |
+   | `total_cost_usd` | 5.7561 | 8.8630 |
+   | `modelUsage` key | `claude-opus-5[1m]` | `claude-opus-5` |
+
+   `num_turns` and every field of `usage` **fell** across the resume. A
+   session-cumulative counter cannot go down, which settles those outright.
+   Cost is the one field that rose, so its own magnitude settles nothing —
+   note that "below the naive run0+run1 sum" is no argument either, since a
+   cumulative total is *by construction* below a sum that counts run 0 twice.
+   What settles it is where the number comes from: `total_cost_usd` equals the
+   sum of `modelUsage`'s `costUSD` in both records, and the resumed run's
+   `modelUsage` map holds a single key that is not even the one run 0 was
+   billed under — a cumulative map would still carry `claude-opus-5[1m]` and
+   its 6.3M cache reads, and would still be priced under it.
+
+   Two facts worth keeping from the attempts. From 2026-08-25: a `--resume`d
+   run's init event reports the *same* `session_id`, so `session` alone would
+   have been a sufficient grouping key had one been needed. From this pair: on
+   the resumed run `modelUsage` exceeded the top-level `usage` about twofold,
+   because `modelUsage` aggregates subagent usage the main-loop `usage` block
+   omits. A record takes `cost_usd` from `total_cost_usd`, which matches that
+   aggregate, and `tokens` from `usage`, which does not — so a record's dollars
+   cover the subagents its token counts leave out. That is now stated in
+   `docs/run-data.md` rather than left to be rediscovered.
 2. **`modelUsage` availability.** Treat as optional everywhere; note the
    minimum CLI version once known.
 3. **Versioning.** New flags are a minor bump per the README's pre-1.0 rules:

@@ -233,10 +233,27 @@ outside the window or belonged to a shift on another machine.
 work are two records, and `stats` sums both. The same goes for the `unfinished`
 reason, which is a `--resume` of a run that ended its turn without a PR rather
 than one that crashed — counting how often that happens is how you tell whether
-the skill's one-turn rule is landing. If a resumed run's `result` event
-turns out to report the whole session's total rather than that invocation's,
-those two rows overlap and the sum reads high — so whenever a report contains
-resumes, it says how many.
+the skill's one-turn rule is landing.
+
+Summing both is right, and that took measuring. A `--resume`d run's `result`
+event reports **that invocation, not the session it continued**, so the two
+rows do not overlap. The evidence is a real resume pair — same session id,
+both sides reaching a priced `result` event — in which the resumed half
+reported *fewer* turns (31 against 62) and fewer tokens on every field of
+`usage` (15,651 output against 54,077; 4.9M cache reads against 6.2M) than the
+run it resumed. A session total cannot go down. `total_cost_usd` rides the same
+event and is exactly the sum of `modelUsage`'s `costUSD`, whose map on the
+resumed run carried a single model key — not the key the earlier half had been
+billed under, which a cumulative map would still be carrying. Reports used to
+count the resumes and warn about this; they no longer need to, though the
+`reasons` line still says how many there were.
+
+One thing to keep straight when reading a record: its `tokens` and its
+`cost_usd` do not cover the same work. `tokens` is the CLI's main-loop `usage`
+block; `cost_usd` is `total_cost_usd`, which matches `modelUsage` — the
+per-model breakdown that also aggregates whatever subagents the run spawned. So
+a run that used subagents is billed for them and does not count their tokens,
+and dividing one figure by the other is not a price per token.
 
 **On approximated runs:** a run that crashed, stalled or was interrupted never
 emitted a `result` event. Its tokens are the tally seen streaming past, an

@@ -141,9 +141,6 @@ cost
 human latency
   blocked on answers  1 span — 3h10m median, 3h10m max
   pr open to merge    3 spans — 1h20m median, 2h max (human availability, not the tool)
-
-note: 1 run resumed an earlier session. Costs are summed exactly as each
-      run reported them — see "resumed sessions" in docs/run-data.md.
 `, dir)
 
 	if got := stats(t, "-metrics", dir); got != want {
@@ -189,10 +186,34 @@ func TestStatsCountsBothHalvesOfAResumedSession(t *testing.T) {
 	if !strings.Contains(line, "  2  ") {
 		t.Errorf("issue #13 = %q, want both the crash and the resume counted", line)
 	}
-	// And the reader says so, because whether a resumed result reports its own
-	// cost or the session's total is not settled.
-	if !strings.Contains(out, "1 run resumed an earlier session") {
-		t.Errorf("a report containing resumes must flag them:\n%s", out)
+	// $0.00 for the crash — it never reached a priced result event — and $3.00
+	// for the resume. That pair cannot tell summing apart from a per-session
+	// maximum, which is what the test below is for; here it only pins that the
+	// crash costs nothing extra and the caveat is gone.
+	if !strings.Contains(line, "$3.00") {
+		t.Errorf("issue #13 = %q, want the resume's cost summed exactly as recorded", line)
+	}
+	if strings.Contains(out, "resumed an earlier session") {
+		t.Errorf("the resumed-cost caveat is settled and should be gone:\n%s", out)
+	}
+}
+
+// Both halves of a resumed session priced, which is the case that distinguishes
+// the aggregation: a --resume'd result event reports its own invocation and not
+// the session (settled on issue #78), so the two costs add. A per-session
+// maximum — the alternative the old caveat hedged against — would report $3.00.
+func TestStatsSumsBothPricedHalvesOfAResumedSession(t *testing.T) {
+	dir := t.TempDir()
+	const both = `{"v":1,"kind":"run","ts":"2026-08-22T09:00:00Z","ended":"2026-08-22T09:30:00Z","repo":"scharissis/paired","issue":21,"reason":"implement","session":"s21","resumed_from":"","status":"ok","subtype":"success","outcome":"nothing","turns":62,"wall_ms":1800000,"cost_usd":2.00,"usage_source":"result","tokens":{"in":100,"out":54077,"cache_read":6194619,"cache_write":1000},"model":"claude-opus-5"}
+{"v":1,"kind":"run","ts":"2026-08-22T09:31:00Z","ended":"2026-08-22T10:00:00Z","repo":"scharissis/paired","issue":21,"pr":9,"reason":"unfinished","attempt":1,"session":"s21","resumed_from":"s21","status":"ok","subtype":"success","outcome":"opened_pr","turns":31,"wall_ms":1740000,"cost_usd":3.00,"usage_source":"result","tokens":{"in":100,"out":15651,"cache_read":4947563,"cache_write":1000},"model":"claude-opus-5"}
+`
+	if err := os.WriteFile(filepath.Join(dir, "scharissis--paired.jsonl"), []byte(both), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+
+	line := issueLine(t, stats(t, "-metrics", dir, "-by", byIssue), "scharissis/paired#21")
+	if !strings.Contains(line, "$5.00") {
+		t.Errorf("issue #21 = %q, want $2.00 + $3.00 summed, not a per-session maximum", line)
 	}
 }
 
