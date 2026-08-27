@@ -453,10 +453,14 @@ type config struct {
 	// ghRetryWait is: reaching it costs one process per resume, and the suite
 	// proves the ceiling stops the loop rather than proving its size.
 	// parseFlags pins it to defaultResumeCeiling.
-	resumeCeiling  int
-	skill          string
-	branchPrefix   string
-	label          string
+	resumeCeiling int
+	skill         string
+	branchPrefix  string
+	label         string
+	// ungated is consent to what queueGate otherwise refuses: working a public
+	// repository's backlog with no label between "anyone opened an issue" and
+	// "an unattended agent implements it".
+	ungated        bool
 	tools          string
 	addTools       string
 	permissionMode string
@@ -655,6 +659,8 @@ func parseFlags() config {
 	flag.StringVar(&cfg.skill, "skill", defaultSkill, "skill to run per issue")
 	flag.StringVar(&cfg.branchPrefix, "branch-prefix", "issue-", "branch name prefix the skill uses")
 	flag.StringVar(&cfg.label, "label", "", "only process issues carrying this label (empty = all)")
+	flag.BoolVar(&cfg.ungated, "ungated", false,
+		"work a public repository without a -label gate (anyone who can open an issue can feed the queue)")
 	flag.StringVar(&cfg.tools, "tools", defaultTools,
 		"comma-separated --allowedTools for unattended runs")
 	flag.StringVar(&cfg.addTools, "add-tools", "",
@@ -1322,11 +1328,33 @@ func preflight(ctx context.Context, cfg *config) error {
 	if _, err := git(ctx, *cfg, "rev-parse", "--git-dir"); err != nil {
 		return fmt.Errorf("-dir %s is not a git checkout: %w", cfg.dir, err)
 	}
-	out, err := gh(ctx, *cfg, "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
+	out, err := gh(ctx, *cfg, "repo", "view", "--json", "nameWithOwner,visibility")
 	if err != nil {
 		return fmt.Errorf("no GitHub repository reachable from %s (is gh authenticated?): %w", cfg.dir, err)
 	}
-	cfg.repo = strings.TrimSpace(string(out))
+	var repoView struct {
+		NameWithOwner string `json:"nameWithOwner"`
+		Visibility    string `json:"visibility"`
+	}
+	if err := json.Unmarshal(out, &repoView); err != nil {
+		return fmt.Errorf("unreadable `gh repo view` reply (is gh current?): %w", err)
+	}
+	cfg.repo = repoView.NameWithOwner
+	if err := queueGate(repoView.Visibility, cfg.label, cfg.ungated); err != nil {
+		// A dry run may still look: it runs nothing and writes nothing, and
+		// seeing what an ungated queue would work is how an operator decides
+		// what to label. It hears about the gate rather than hitting it.
+		if !cfg.dryRun {
+			return err
+		}
+		log.Printf("note: a real run would refuse to start here — %v", err)
+	}
+	if cfg.ungated && strings.EqualFold(repoView.Visibility, "PUBLIC") {
+		// Said out loud like -remote and -post-summary are, and for the same
+		// reason: the environment can set this too, and it is the one flag that
+		// hands the queue to whoever can open an issue.
+		log.Printf("-ungated on a public repository — every open issue is in the queue, whoever filed it")
+	}
 	// Defined up front rather than when a run first needs it: GitHub refuses to
 	// apply a label the repository never declared, and the run that applies this
 	// one is a headless session holding no grant that could create it. Discovering
@@ -1379,6 +1407,27 @@ func preflight(ctx context.Context, cfg *config) error {
 			cfg.shiftID, cfg.shiftID)
 	}
 	return nil
+}
+
+// queueGate refuses to work a public repository's backlog unfiltered. On a
+// public repo anyone can open an issue, an open issue is exactly what a drain
+// picks up, and issue text is attacker-controllable input to an unattended
+// agent. Applying a label takes triage permission or better, so a -label gate
+// turns "anyone can queue work" into "a maintainer chose this one" — the
+// README's Security section has always advised it, and on the one repository
+// shape where the risk is structural, advice is not enough. -ungated is the
+// operator overruling this on purpose, out loud.
+//
+// Anything but PUBLIC passes: on a private or internal repo, everyone who can
+// open an issue was let in by name, and an unknown visibility from a future gh
+// should not strand an operator whose repo the gate was never about.
+func queueGate(visibility, label string, ungated bool) error {
+	if !strings.EqualFold(visibility, "PUBLIC") || label != "" || ungated {
+		return nil
+	}
+	return errors.New("this repository is public, so anyone who can open an issue can queue work for an unattended agent — " +
+		"pass -label <name> to work only issues a maintainer labelled (see the README's Security section), " +
+		"or -ungated to work every open issue anyway")
 }
 
 // checkNotifyCommand fails a misconfigured -notify at startup rather than at
