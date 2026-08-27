@@ -1,6 +1,6 @@
 {
   "name": "polako",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Work a GitHub issue backlog to zero, one issue at a time: /implement-issue takes a single issue from plan to PR, and `polako work` supervises the whole queue unattended.",
   "author": {
     "name": "Stefano Charissis"
