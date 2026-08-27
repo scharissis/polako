@@ -419,7 +419,7 @@ func (is *issueStats) questions() int {
 
 func (is *issueStats) outcome() string {
 	if is.terminal == nil {
-		return "in flight"
+		return inFlight
 	}
 	return is.terminal.Outcome
 }

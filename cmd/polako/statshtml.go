@@ -62,6 +62,15 @@ func writeHTMLReport(path string, ds dataset, issues []*issueStats, opt statsOpt
 		return fmt.Errorf("could not write the HTML report to %s (%w) — "+
 			"check that the directory exists and is writable", path, err)
 	}
+	// O_CREATE's mode applies only to a file it had to create, so overwriting
+	// last night's report — or a path somebody touched first under a default
+	// umask — would keep whatever mode it already had. Re-applied before a byte
+	// of it is written, so the numbers are never briefly world-readable.
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		return fmt.Errorf("could not restrict %s to your account (%w) — "+
+			"nothing was written to it; fix that file's permissions or pass another path", path, err)
+	}
 	if _, err := f.Write(buf.Bytes()); err != nil {
 		f.Close()
 		return fmt.Errorf("could not write the HTML report to %s (%w)", path, err)
@@ -150,8 +159,14 @@ func buildHTMLReport(ds dataset, issues []*issueStats, opt statsOptions, now tim
 		Facts:     sourcePairs(ds, opt),
 	}
 	if len(ds.runs) == 0 && len(ds.issues) == 0 {
-		rep.Empty = "No run data here" + scopeSuffix(opt, ds) + "." +
-			" A work run records automatically, unless it was run with -metrics off."
+		rep.Empty = "No run data here" + scopeSuffix(opt, ds) + "."
+		// Gated exactly as the text report gates it: a -since window that
+		// cleared out a directory full of records says nothing about whether
+		// recording was on, and blaming -metrics sends the operator after the
+		// wrong thing. Files that could not be opened are in the facts above.
+		if ds.files == 0 {
+			rep.Empty += " A work run records automatically, unless it was run with -metrics off."
+		}
 		return rep
 	}
 
@@ -317,7 +332,9 @@ func issueBreakdown(issues []*issueStats) htmlBreakdown {
 	}
 	return htmlBreakdown{
 		Caption: "of " + plural(len(issues), "issue"),
-		Bars:    proportionBars(counts, []string{issueMerged, issueNeedsHuman, issueClosed, inFlight}),
+		// The same order issuePairs lists them in, so the bars and the "terminal"
+		// line further down the page never name them differently.
+		Bars: proportionBars(counts, []string{issueMerged, issueClosed, issueNeedsHuman, inFlight}),
 	}
 }
 
@@ -407,8 +424,24 @@ func costChart(ds dataset) htmlChart {
 	// Every bucket from first to last, empty ones included: a gap in the work
 	// is part of the shape, and skipping the quiet days would draw a batch that
 	// ran solidly for a fortnight.
+	//
+	// maxBuckets is the backstop, because months are the widest bucket there is
+	// and a record file can carry any timestamp that parses — one stray year
+	// 9999 would otherwise be a hundred thousand rectangles and a page weighing
+	// megabytes. Thirty-three years of monthly bars is past the point where the
+	// timestamps, not the chart, are what needs looking at.
+	const maxBuckets = 400
 	var buckets []time.Time
 	for b := first; !b.After(last); b = nextBucket(b, unit) {
+		if len(buckets) == maxBuckets {
+			// The two ends rather than the span between them: a Duration tops
+			// out at 292 years, so subtracting these would report a shorter
+			// stretch than the timestamps actually name.
+			c.Empty = fmt.Sprintf("these runs span %s to %s, which is too long to chart — "+
+				"one record with a stray timestamp does this, and the run log names it",
+				bucketLabel(first, unit), bucketLabel(last, unit))
+			return c
+		}
 		buckets = append(buckets, b)
 	}
 	most := 0.0

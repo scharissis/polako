@@ -162,6 +162,19 @@ func TestStatsHTMLOnAnEmptyDirectory(t *testing.T) {
 	}
 }
 
+// A window that clears out a directory full of records is not a sign that
+// recording was off, and the text report says nothing of the sort. Blaming
+// -metrics here would send the operator after the wrong thing.
+func TestStatsHTMLOnAnEmptyWindowOverFullFiles(t *testing.T) {
+	page := htmlReportOf(t, fixtureDir(t), "-since", "1h")
+	if !strings.Contains(page, "No run data here in the last 1h.") {
+		t.Errorf("want a page that says the window is empty:\n%s", page)
+	}
+	if strings.Contains(page, "-metrics off") {
+		t.Errorf("the records are there, only outside the window — do not blame -metrics:\n%s", page)
+	}
+}
+
 // Errors say what to do about it: this one runs unattended often enough that
 // its output is the only diagnostic.
 func TestStatsHTMLSaysWhatToDoAboutABadPath(t *testing.T) {
@@ -195,14 +208,25 @@ func TestStatsHTMLIsNotWorldReadable(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix permission bits are not how Windows decides this")
 	}
-	path := filepath.Join(t.TempDir(), "report.html")
-	stats(t, "-metrics", fixtureDir(t), "-html", path)
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat %s: %v", path, err)
-	}
-	if mode := info.Mode().Perm(); mode&0o077 != 0 {
-		t.Errorf("%s is mode %04o — group and other must have no access", path, mode)
+	// Both the file -html creates and one it overwrites: O_CREATE's mode applies
+	// only to the former, and a nightly report lands on a path that already
+	// exists every night but the first.
+	for _, existing := range []os.FileMode{0, 0o644} {
+		path := filepath.Join(t.TempDir(), "report.html")
+		if existing != 0 {
+			if err := os.WriteFile(path, []byte("yesterday"), existing); err != nil {
+				t.Fatalf("writing the file to overwrite: %v", err)
+			}
+		}
+		stats(t, "-metrics", fixtureDir(t), "-html", path)
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		if mode := info.Mode().Perm(); mode&0o077 != 0 {
+			t.Errorf("%s is mode %04o after overwriting mode %04o — group and other must have no access",
+				path, mode, existing)
+		}
 	}
 }
 
@@ -336,6 +360,22 @@ func TestCostChartSkipsUndatableRuns(t *testing.T) {
 	if len(chart.Bars) != 1 || chart.Max != "$2.00" {
 		t.Errorf("want the one datable run charted alone, got %d bars topping out at %s",
 			len(chart.Bars), chart.Max)
+	}
+}
+
+// A timestamp centuries out parses perfectly well, and months are the widest
+// bucket there is. Charting it anyway would be a hundred thousand rectangles
+// and a page weighing megabytes.
+func TestCostChartRefusesAnAbsurdSpan(t *testing.T) {
+	chart := costChart(dataset{runs: []runRecord{
+		{TS: "2026-08-20T09:00:00Z", CostUSD: 2},
+		{TS: "9999-01-01T00:00:00Z", CostUSD: 1},
+	}})
+	if chart.Empty == "" {
+		t.Errorf("want the chart to bow out and say why, got %d bars", len(chart.Bars))
+	}
+	if len(chart.Bars) != 0 {
+		t.Errorf("want no bars at all, got %d", len(chart.Bars))
 	}
 }
 
