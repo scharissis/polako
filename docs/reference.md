@@ -38,6 +38,7 @@ sets — see [`status`](#where-the-backlog-stands-polako-status) and
 | `-run-tag` | *(none)* | Freeform label recorded with every run, so one batch can be compared against another. |
 | `-metrics` | `~/.polako/metrics` | Directory for run-data records, or `off` to write nothing. |
 | `-log` | `~/.polako/logs` | Directory for the full per-shift log, or `off` to write none — see [The shift log](#the-shift-log--log). |
+| `-verbose` | `false` | Mirror the full `[claude]` event stream to the terminal as well as the shift log. The default terminal shows milestones only. |
 | `-post-summary` | `false` | Comment one line of run numbers on each merged PR. The only thing that shows run data to anybody but you — see [Run data & cost tracking](run-data.md). |
 | `-version` | `false` | Print which release this binary is, then exit. Use it when startup warns that the binary and the skill disagree — see [Getting updates](install.md#getting-updates). |
 
@@ -205,9 +206,12 @@ logging this shift in full to /Users/you/.polako/logs/example--my-project--3f9a1
 The file holds everything the shift narrates, timestamped: every terminal
 line, plus the full `[claude]` event stream — one line per assistant message
 and tool call — and anything the `claude` process printed to its own stderr.
-It is the record to read when a run did something surprising and the terminal
-has already scrolled past it, and `tail -f` on it is how to watch a shift in
-full without turning the terminal back up.
+The terminal, by contrast, shows milestones alone: issue started, run started
+and finished with its cost, PR opened and merged, parks, warnings, the exit
+summary. A healthy run is two lines there and its whole conversation here.
+The file is the record to read when a run did something surprising, and
+`tail -f` on it — or `-verbose`, which mirrors the stream to the terminal —
+is how to watch a shift work rather than glance at it.
 
 Like the run-data records it is write-only and stays put: nothing in `polako`
 ever reads it back, deleting it mid-shift changes no behaviour, and it never

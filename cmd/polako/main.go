@@ -566,7 +566,8 @@ type config struct {
 
 	// Where the per-shift log lives; empty means -log off. The file itself is
 	// opened by preflight, which learns the repository it is named after.
-	logDir string
+	logDir  string
+	verbose bool
 
 	// Filled in by preflight, recorded with every run: which repository this
 	// is, which CLI produced its numbers, and which release of the skill it
@@ -644,6 +645,7 @@ func main() {
 	// the terminal keeps the same stamps the default flags used to add.
 	log.SetFlags(0)
 	log.SetOutput(milestoneWriter{u: sinks})
+	sinks.verbose = cfg.verbose
 	if err := run(ctx, cfg); err != nil {
 		if errors.Is(err, context.Canceled) {
 			// 130 for every shutdown signal, not only SIGINT. Telling them apart
@@ -733,6 +735,8 @@ func parseFlags() config {
 		`directory for run-data records, or "off" (default ~/.polako/metrics)`)
 	flag.StringVar(&logSpec, "log", "",
 		`directory for the full per-shift log, or "off" (default ~/.polako/logs)`)
+	flag.BoolVar(&cfg.verbose, "verbose", false,
+		"mirror the full claude event stream and its stderr to the terminal, not only the shift log")
 	flag.Usage = func() {
 		fmt.Fprint(flag.CommandLine.Output(),
 			"Usage: polako work [flags]\n\n"+
@@ -2808,7 +2812,7 @@ func (t *tailWriter) String() string { return string(t.buf) }
 func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes string, limit time.Duration) (runReport, error) {
 	rep := runReport{sessionID: resumeID, turns: -1, exitCode: -1}
 	args := buildArgs(cfg, prompt, resumeID)
-	log.Printf("running: %s %s", cfg.claudeBin, strings.Join(args, " "))
+	detail.Printf("running: %s %s", cfg.claudeBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.claudeBin, args...)
 	cmd.Dir = cfg.dir
 	cmd.Stderr = os.Stderr
@@ -2986,7 +2990,10 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	return rep, err
 }
 
-// logEvent renders one stream-json event as a single progress line.
+// logEvent renders one stream-json event as a single progress line. The run's
+// start and finish are milestones; the turns between them — every tool call
+// and assistant message — are detail, so a watching terminal sees a run as a
+// pair of lines and the shift log keeps the whole conversation.
 func logEvent(ev streamEvent) {
 	switch ev.Type {
 	case "system":
@@ -3006,19 +3013,24 @@ func logEvent(ev streamEvent) {
 			switch c.Type {
 			case "text":
 				if t := strings.TrimSpace(c.Text); t != "" {
-					log.Printf("[claude] %s", clip(t, 160))
+					detail.Printf("[claude] %s", clip(t, 160))
 				}
 			case "tool_use":
-				log.Printf("[claude] → %s%s", c.Name, toolDetail(c.Input))
+				detail.Printf("[claude] → %s%s", c.Name, toolDetail(c.Input))
 			}
 		}
 	case "result":
 		// The final text first: for a healthy run it restates the last
 		// assistant message, but a result the CLI synthesized itself —
 		// "Unknown skill: x" — appears nowhere else in the stream, and is
-		// usually the whole diagnosis.
+		// usually the whole diagnosis. That is why an error's text is a
+		// milestone while a healthy run's is detail.
 		if t := strings.TrimSpace(ev.Result); t != "" {
-			log.Printf("[claude] %s", clip(t, 160))
+			if ev.IsError {
+				log.Printf("[claude] %s", clip(t, 160))
+			} else {
+				detail.Printf("[claude] %s", clip(t, 160))
+			}
 		}
 		status := "ok"
 		if ev.IsError {
@@ -4081,7 +4093,7 @@ func syncDefaultBranch(ctx context.Context, cfg config) {
 		return
 	}
 	if after, _ := git(ctx, cfg, "rev-parse", "HEAD"); string(after) != string(before) {
-		log.Printf("fast-forwarded %s to %s", local, remote)
+		detail.Printf("fast-forwarded %s to %s", local, remote)
 	}
 }
 
@@ -4089,7 +4101,7 @@ func cleanupWorktree(ctx context.Context, cfg config, issue int) {
 	repo := filepath.Base(cfg.dir)
 	path := filepath.Join(filepath.Dir(cfg.dir), fmt.Sprintf("%s-issue-%d", repo, issue))
 	if _, err := git(ctx, cfg, "worktree", "remove", path, "--force"); err == nil {
-		log.Printf("removed worktree %s", path)
+		detail.Printf("removed worktree %s", path)
 	}
 	_, _ = git(ctx, cfg, "worktree", "prune")
 }

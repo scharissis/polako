@@ -23,7 +23,13 @@ in the PR body rather than doing it quietly.
   directory mid-drain changes no behavior. A read from those files anywhere
   outside `stats` would turn telemetry back into state. Records hold numbers,
   identifiers and operator-chosen labels only — never issue, comment or PR
-  text. No run-data record goes off the machine except by explicit request:
+  text. The per-shift log (`ui.go`, under `~/.polako/logs`) is the second
+  write-only artifact, and the one that *does* hold transcript text — the
+  full claude event stream — which is why it gets the recorder's 0700/0600
+  permissions; it obeys the same rules (nothing reads it back, deleting it
+  mid-drain changes nothing, it never leaves the machine), and a read from it
+  anywhere in the binary is the same design error as a read from the records.
+  No run-data record goes off the machine except by explicit request:
   `-post-summary`, default off, comments those same numbers on the operator's own
   merged PR.
 - **Two things leave the machine, and they are named here.** `-post-summary`

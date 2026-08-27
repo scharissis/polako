@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -109,6 +110,86 @@ func TestOpenShiftLogNamesAndProtectsTheFile(t *testing.T) {
 		if mode := fi.Mode().Perm(); mode&0o077 != 0 {
 			t.Errorf("%s is mode %04o — the log holds transcript text; group and other must have no access", p, mode)
 		}
+	}
+}
+
+// wireSinks points both narration loggers at one test ui for the duration of
+// a test, so terminal-versus-log presentation can be asserted rather than the
+// union captureLog collapses them into.
+func wireSinks(t *testing.T, u *ui) {
+	t.Helper()
+	log.SetOutput(milestoneWriter{u: u})
+	detail.SetOutput(detailWriter{u: u})
+	t.Cleanup(func() {
+		log.SetOutput(os.Stderr)
+		detail.SetOutput(detailWriter{u: sinks})
+	})
+}
+
+// The terminal's audience is an operator glancing over: a healthy run is a
+// pair of lines, and the conversation between them belongs to the shift log.
+func TestQuietTerminalShowsARunAsMilestones(t *testing.T) {
+	var term, file bytes.Buffer
+	wireSinks(t, &ui{terminal: &term, stamp: true, file: &file})
+
+	for _, line := range []string{
+		`{"type":"system","subtype":"init","model":"claude-opus-5","session_id":"sess-1"}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Gathering context on issue #48."}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"gh issue view 48"}}]}}`,
+		`{"type":"result","subtype":"success","num_turns":74,"duration_ms":1141000,"total_cost_usd":4.12,"result":"Done."}`,
+	} {
+		ev, ok := parseEvent([]byte(line))
+		if !ok {
+			t.Fatalf("parseEvent rejected %s", line)
+		}
+		logEvent(ev)
+	}
+
+	for _, want := range []string{"session started (model claude-opus-5", "finished (ok) — 74 turns"} {
+		if !strings.Contains(term.String(), want) {
+			t.Errorf("terminal missing the %q milestone\ngot:\n%s", want, term.String())
+		}
+	}
+	for _, quiet := range []string{"Gathering context", "→ Bash", "Done."} {
+		if strings.Contains(term.String(), quiet) {
+			t.Errorf("the terminal should not carry %q — that is the shift log's job\ngot:\n%s", quiet, term.String())
+		}
+	}
+	for _, want := range []string{"session started", "Gathering context", "→ Bash: gh issue view 48", "Done.", "finished (ok)"} {
+		if !strings.Contains(file.String(), want) {
+			t.Errorf("shift log missing %q\ngot:\n%s", want, file.String())
+		}
+	}
+}
+
+// An error's result text is the whole diagnosis for a run the CLI answered
+// itself, so unlike a healthy run's it stays on the terminal.
+func TestQuietTerminalStillShowsAnErrorsResultText(t *testing.T) {
+	var term, file bytes.Buffer
+	wireSinks(t, &ui{terminal: &term, stamp: true, file: &file})
+
+	ev, ok := parseEvent([]byte(`{"type":"result","subtype":"success","is_error":true,"result":"Unknown skill: polako:implement-issue"}`))
+	if !ok {
+		t.Fatal("a result event should parse")
+	}
+	logEvent(ev)
+
+	if !strings.Contains(term.String(), "Unknown skill") {
+		t.Errorf("an error's result text is the diagnosis and belongs on the terminal\ngot:\n%s", term.String())
+	}
+}
+
+func TestVerboseMirrorsDetailToTheTerminal(t *testing.T) {
+	var term, file bytes.Buffer
+	u := &ui{terminal: &term, stamp: true, file: &file, verbose: true}
+
+	detailWriter{u: u}.Write([]byte("[claude] → Bash: gh issue view 48\n"))
+
+	if !strings.Contains(term.String(), "→ Bash") {
+		t.Errorf("-verbose should mirror detail to the terminal\ngot:\n%s", term.String())
+	}
+	if !strings.Contains(file.String(), "→ Bash") {
+		t.Errorf("-verbose must not divert detail away from the shift log\ngot:\n%s", file.String())
 	}
 }
 

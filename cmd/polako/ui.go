@@ -33,6 +33,7 @@ type ui struct {
 	terminal io.Writer
 	stamp    bool      // timestamp terminal lines; the shift log is always stamped
 	file     io.Writer // the shift log; nil when -log is off or preflight has not opened it yet
+	verbose  bool      // -verbose: detail lines reach the terminal too
 	warned   bool      // one warning per process: a full disk must not fill the terminal too
 }
 
@@ -42,7 +43,8 @@ type ui struct {
 var sinks = &ui{terminal: os.Stderr, stamp: true}
 
 // detail is the second narration channel: lines worth keeping but not worth an
-// operator's glance. They always reach the shift log and nothing else.
+// operator's glance. They always reach the shift log and, unless -verbose says
+// otherwise, nothing else.
 var detail = log.New(detailWriter{u: sinks}, "", 0)
 
 // milestoneWriter is what the default logger writes to on the work path.
@@ -67,7 +69,7 @@ func (u *ui) emit(p []byte, milestone bool) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	now := time.Now().Format(stampLayout)
-	if milestone {
+	if milestone || u.verbose {
 		if u.stamp {
 			io.WriteString(u.terminal, now)
 		}
