@@ -9,6 +9,33 @@ Entries carry an **Operator impact** line when a release changes what an
 unattended run does, rather than only what the code looks like. Those are the
 lines worth reading before upgrading a machine that works a backlog overnight.
 
+## [0.10.0]
+
+**Operator impact:** the terminal goes quiet and a new local file appears. A
+run now shows on the terminal as milestones only — session started, finished
+with its cost, PR opened and merged, parks, the summary — while the full
+`[claude]` event stream, the claude process's stderr and every milestone go
+to one log file per shift under `~/.polako/logs`, on by default. That file is
+the second write-only local artifact beside the run data, and the one that
+holds transcript text; it never leaves the machine and nothing reads it back.
+Anything that greps the live stderr stream for `[claude] →` lines should read
+the shift log instead. Piped stderr keeps its timestamps; a TTY drops them
+and gains colour.
+
+### Added
+
+- One log file per shift under `~/.polako/logs` (`-log <dir>` moves it,
+  `-log off` disables it), holding everything the shift narrates: milestones,
+  the full claude event stream, and the claude process's stderr as
+  `[claude stderr]` lines — previously passed through raw and unattributed.
+- `-verbose`: mirror the full event stream to the terminal as well, for
+  watching a shift work rather than glancing at it.
+- Colour on a capable TTY, one colour per whole line, honouring `NO_COLOR`
+  and `TERM=dumb`; Windows stays plain. Pipes and redirects see the same
+  plain, timestamped lines as before.
+- A crashed run's last stderr lines are surfaced beside the error milestone,
+  since for a crash they are often the only cause on record.
+
 ## [0.9.0]
 
 **Operator impact:** two changes to what an unattended run does. `polako work`
