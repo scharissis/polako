@@ -12,7 +12,7 @@ the configuration under test — skill, model, permission mode, `-run-tag`, a
 hash of the tool allowlist, the strategy knobs, and the three versions in play
 (this binary, the installed skill, and the
 Claude CLI). One more object per issue records how it ended —
-`merged`, `closed_unmerged` or `needs_human` — why, when it was handed back
+`merged`, `closed_unmerged` or `needs_human` — and, when it was handed back, why
 (`park_reason`: `budget`, `retries_exhausted`, `produced_nothing`, `no_skill`,
 `auth`, `conflict_remediation`, `checks_remediation`, `review_remediation`,
 `pr_state`, or `unknown` when the path could not say) — and, when GitHub could

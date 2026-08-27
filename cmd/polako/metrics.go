@@ -98,9 +98,13 @@ const (
 	parkConflicts = "conflict_remediation"
 	parkChecks    = "checks_remediation"
 	parkReview    = "review_remediation"
-	parkPRState   = "pr_state"  // the PR is in a state the supervisor does not know
-	parkPRClosed  = "pr_closed" // closed without merging — a human's decision
-	parkUnknown   = "unknown"   // the park path could not say
+	parkPRState   = "pr_state" // the PR is in a state the supervisor does not know
+	// Closed without merging — a human's decision, and the one park whose
+	// record says closed_unmerged rather than needs_human. recordIssue drops
+	// the reason there, because the outcome has already said it; the category
+	// exists so the park itself is classified like every other one.
+	parkPRClosed = "pr_closed"
+	parkUnknown  = "unknown" // the park path could not say
 )
 
 // parkReasonOrder is the order stats lists them in: roughly the order they

@@ -650,9 +650,24 @@ func TestDrainParkSaysWhatTheRunLeftBehind(t *testing.T) {
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
 	t.Setenv(fakeGhLogEnv, calls)
 	leftBehind(t, &cfg)
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
 
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("one dead issue must not end the drain: %v", err)
+	}
+
+	// The bound that stopped the resume is what the record files this under.
+	// The sentence below deliberately refuses to blame a run that produced
+	// plenty, and filing it under produced_nothing anyway would aim the
+	// report's ranking at the skill instead of at the ceiling that fired.
+	recs := terminalRecords(t, records, cfg.repo)
+	if len(recs) != 1 {
+		t.Fatalf("wrote %d terminal records, want 1", len(recs))
+	}
+	if recs[0].Outcome != issueNeedsHuman || recs[0].ParkReason != parkRetries {
+		t.Errorf("terminal record = %s / %q, want %s / %q",
+			recs[0].Outcome, recs[0].ParkReason, issueNeedsHuman, parkRetries)
 	}
 
 	out := buf.String()

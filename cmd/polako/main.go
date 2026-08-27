@@ -2095,8 +2095,13 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					left := inspectLeftWork(ctx, cfg, issue)
 					// Which bound stopped a resume that was otherwise warranted,
 					// so the park says that rather than the generic sentence
-					// about producing nothing — the run produced plenty.
-					bound := ""
+					// about producing nothing — the run produced plenty. The
+					// category follows the bound for the same reason: filing a
+					// cap or an exhausted resume budget under "produced
+					// nothing" would point the report's ranking at the skill
+					// when the lever is the operator's own flag, and the crash
+					// arm above files those two identical causes correctly.
+					bound, boundWhy := "", parkNothing
 					if left.salvageable() {
 						switch over := overBudget(cfg, *tally); {
 						case over != "":
@@ -2104,17 +2109,18 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 							// loop would refuse this dispatch anyway, and a log
 							// promising a resume it never makes is a worse
 							// diagnosis than the park it is really doing.
-							bound = over
+							bound, boundWhy = over, parkBudget
 						case cleanResumes >= cleanExitResumeCeiling:
-							bound = fmt.Sprintf("it has been resumed %s after ending a turn "+
+							bound, boundWhy = fmt.Sprintf("it has been resumed %s after ending a turn "+
 								"without opening a PR and has still not opened one, which needs a human",
-								plural(cleanResumes, "time"))
+								plural(cleanResumes, "time")), parkRetries
 						case resumes >= cfg.resumeCeiling:
 							// "retried" rather than "resumed", as in the crash arm
 							// and for the same reason: a dead session turns one of
 							// these into a fresh restart, and the count covers both.
-							bound = fmt.Sprintf("claude has been retried %s on this issue and "+
-								"still has not finished it, which needs a human", plural(resumes, "time"))
+							bound, boundWhy = fmt.Sprintf("claude has been retried %s on this issue and "+
+								"still has not finished it, which needs a human",
+								plural(resumes, "time")), parkRetries
 						default:
 							resumes++
 							cleanResumes++
@@ -2139,7 +2145,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					if d := left.describe(); d != "" {
 						reason += "; " + d
 					}
-					return parked(0, parkAside(parkNothing, left.where(), "%s", reason))
+					return parked(0, parkAside(boundWhy, left.where(), "%s", reason))
 				}
 			}
 			record(pr.Number, outcomeOpenedPR)
