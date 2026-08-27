@@ -3,6 +3,9 @@
 Two halves that ship and version together: the `implement-issue` skill takes a
 single GitHub issue from plan to PR, and the `polako` binary supervises a
 whole backlog of them unattended, never putting two issues in flight at once.
+A second skill, `plan-backlog`, fills the backlog the first one works — it
+turns a vision document into proposals behind the `proposed` gate, and has no
+supervisor verb yet.
 
 ## Invariants
 
@@ -54,7 +57,13 @@ in the PR body rather than doing it quietly.
   comes to create issues applies it to everything it creates, and the supervisor
   is what enforces that — the gate must not depend on a model remembering. The
   `-label` gate label is applied by humans alone, and exclusion beats inclusion:
-  an issue carrying both stays out.
+  an issue carrying both stays out. `plan-backlog` is the skill that applies it
+  today; the supervisor's enforcing label pass arrives with the `plan` verb.
+- **A plan run creates issues and does nothing else.** No commits, no pushes,
+  no PRs, no edits to threads that already exist — an edit that can add the
+  `proposed` label can strip one, which is self-approval. The whole write
+  surface is `gh issue create` plus a scratch body file it deletes, and the
+  blast radius of a fully subverted plan run is spam sitting behind a label.
 - **An issue with sub-issues is a container.** It is never worked, whatever its
   labels — so a parent made by hand is protected too. That detection is
   structural rather than labelled on purpose: a label says what something is
@@ -135,9 +144,10 @@ claude plugin validate .
 ```
 
 The skill half is covered from two directions. `repo_test.go` asserts the
-contract-bearing lines of `SKILL.md` — the review gate, the label spelling, the
-branch name, the PR body's shape — and runs free on every platform. `evals/`
-drives real runs against a scratch repo and grades what they leave behind:
+contract-bearing lines of both `SKILL.md` files — the review gate, the label
+spellings, the branch name, the PR body's shape, the sizing contract — and runs
+free on every platform. `evals/` drives real runs against a scratch repo and
+grades what they leave behind:
 
 ```bash
 claude plugin eval . --scaffold --allow-tools Bash Write Edit
@@ -146,6 +156,6 @@ claude plugin eval . --scaffold --allow-tools Bash Write Edit
 That suite is the one exception to hermetic tests, agreed on issue #9: it needs
 the network, a real `claude` and money, so it is opt-in and stays out of
 `check.sh` and CI. It is also new and has not yet had a green run — see
-`evals/README.md`. Until it has, a change to `skills/implement-issue/SKILL.md`
-still needs verifying by hand against a real issue, and the PR body should say
-what was verified.
+`evals/README.md`. Until it has, a change under `skills/` still needs verifying
+by hand — `implement-issue` against a real issue, `plan-backlog` against a real
+vision document — and the PR body should say what was verified.
