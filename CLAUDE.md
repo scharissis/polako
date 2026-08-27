@@ -166,3 +166,12 @@ the network, a real `claude` and money, so it is opt-in and stays out of
 `evals/README.md`. Until it has, a change under `skills/` still needs verifying
 by hand — `implement-issue` against a real issue, `plan-backlog` against a real
 vision document — and the PR body should say what was verified.
+
+**Once it is green, that hand-verification becomes the suite.** A PR that
+changes a skill's `SKILL.md` runs it — or at minimum the cases its change
+touches, `--case <name>` — and quotes the scores in its body, the same
+"say what was verified" convention in stricter form. `--runs 3` when a case
+wobbles: a flaky grader is worse than no grader, because it teaches the habit
+of ignoring red. Skill wording is also a tagged change, so the next batch runs
+under a fresh `-run-tag` and earns a row in `plans/experiments.md` — the
+ritual around all of this is the README's "Improving polako".
