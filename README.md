@@ -167,6 +167,15 @@ summary: 3 issues merged, 1 issue parked, $35.00 spent, 6h12m of wall clock
   outside your team, that text is written by strangers, and the skill is told to
   read it as a description of a change rather than as orders.
 
+## Why "polako"?
+
+In the Balkans, "polako!" is what you say to someone who's rushing. Slow down,
+you'll get there. It's more a way of living than a word.
+
+It turns out to be a good way to ship code, too. One pull request at a time is
+one you'll actually read. Ten at once and you skim, and the stuff you skim is
+the stuff that bites you later.
+
 ## What it costs
 
 Real money, and more than you might guess. Every run records what it spent, so
@@ -256,10 +265,13 @@ issue on a public repo, and open issues are what a shift works, so polako
 refuses to start there without a maintainer-applied label gate — or an explicit
 `-ungated` if you mean it.
 
-**Why one issue at a time?** Because that is the whole no-conflict guarantee.
-Every run branches from a default branch that already has the last merge in it.
-Two agents working two issues at once would have to resolve each other's
-conflicts, and neither of them can merge.
+**"Wouldn't ten agents be ten times faster?"** They'd open ten pull requests,
+which isn't the same thing. Somebody still has to read them, and they all
+branched from a version of the code that stopped being true the moment the
+first one merged.
+
+polako does one. When you merge it, the next one starts from what you just
+merged.
 
 ## Documentation
 
