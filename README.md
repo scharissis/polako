@@ -85,6 +85,23 @@ Dollars appear only this shift spent some: one that merely waited on a PR
 an earlier process opened prints the line without them rather than claiming a
 free backlog.
 
+A run that ends cleanly without a PR gets one more sentence, because that exit
+covers two very different situations. `polako` looks at the branch and the
+worktree before it parks, and says what it finds:
+
+```
+  parked  #16 ($2.27) — the run completed but produced no PR and no questions;
+  branch issue-16 has no commits and its worktree has uncommitted changes in
+  6 files — the run left work behind, so start there rather than from scratch
+```
+
+That is a change already written and merely uncommitted, which is usually
+minutes of work to finish. The message above it, with nothing appended, is the
+run that genuinely decided nothing. The worktree's path is printed beside the
+park in the terminal rather than said here, for the same reason the `--resume`
+id is: this text is posted to the issue thread, and a local path is nobody's
+business but yours.
+
 Parking preserves the no-conflict guarantee: only one issue is ever in flight,
 and a parked issue is simply not in flight.
 

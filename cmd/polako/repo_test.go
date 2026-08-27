@@ -301,11 +301,15 @@ func TestPlanIsWrittenBeforeImplementation(t *testing.T) {
 		t.Error("Phase 3 — Implement is written before Phase 2 — Plan, so a run reading the" +
 			" skill in order implements before it has a plan to resume from")
 	}
-	if !strings.Contains(skill, "Write PLAN.md BEFORE implementing") {
-		t.Error("Phase 2 no longer tells the run to write PLAN.md before implementing —" +
-			" without it a clear-looking issue gets implemented with no resume point")
+	// Spelled through the supervisor's own constant, which is the other half of
+	// the contract: it discounts this file when it says what a parked run left
+	// on disk, and a rename here that left that behind would have every park
+	// claiming work was left behind.
+	if !strings.Contains(skill, "Write "+planFile+" BEFORE implementing") {
+		t.Errorf("Phase 2 no longer tells the run to write %s before implementing —"+
+			" without it a clear-looking issue gets implemented with no resume point", planFile)
 	}
-	if heading, _, _ := strings.Cut(skill[implement:], "\n"); !strings.Contains(heading, "PLAN.md") {
+	if heading, _, _ := strings.Cut(skill[implement:], "\n"); !strings.Contains(heading, planFile) {
 		t.Errorf("Phase 3's heading no longer gates on PLAN.md existing, so a resumed run"+
 			" cannot tell from it whether planning happened:\n\t%s", heading)
 	}
