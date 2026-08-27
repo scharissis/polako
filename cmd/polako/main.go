@@ -42,12 +42,20 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	// Embedded zone data, because limitReset resolves zone names like
+	// "Europe/London" out of the CLI's limit refusals, and Windows keeps no
+	// zoneinfo on disk for LoadLocation to find. Half a megabyte so the wait
+	// is computed the same on all five targets instead of degrading to the
+	// poll fallback on one of them.
+	_ "time/tzdata"
 )
 
 // skillDir is the per-issue skill this repo ships under skills/.
@@ -90,6 +98,12 @@ var errAuth = errors.New("claude could not authenticate")
 // again on the same issue and reach the same kill, so a run carrying it parks
 // its issue instead of being retried.
 var errBudget = errors.New("the issue's budget is spent")
+
+// errLimit marks a run the CLI refused over the account's usage limit. Neither
+// a dead end nor a crash: unlike a refused token this wall falls on its own —
+// the refusal names when the limit resets — so the run's issue is neither
+// parked nor charged a retry. processIssue waits the reset out and resumes.
+var errLimit = errors.New("claude is over its usage limit")
 
 // authAdvice attaches the fix to an authentication failure. This process runs
 // unattended, so its last log line is usually the whole diagnosis a human
@@ -1832,6 +1846,42 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					terminal(0, issueNeedsHuman)
 					return park("%s", cmp.Or(overBudget(cfg, *tally), runErr.Error()))
 				}
+				// A usage limit is neither this issue's fault nor a crash a
+				// resume can route around: every attempt before the reset is
+				// refused the same way in seconds, and each one used to spend
+				// the retry budgets that exist for real crashes — twenty
+				// refusals thirty seconds apart, and a healthy issue was
+				// parked (#67). Wait for the reset the refusal names instead,
+				// then resume. The wait is charged to neither -retries nor the
+				// resume ceiling, because those bound evidence that the issue
+				// cannot be finished and this run is evidence about the
+				// account; what bounds the wait is the clock — a readable
+				// reset is at most a day away, and a refusal with no clock
+				// this can read falls back to one attempt per -poll rather
+				// than a tight loop.
+				if errors.Is(runErr, errLimit) {
+					record(0, outcomeNothing)
+					wait := cfg.poll
+					if reset, ok := limitReset(rep.limitMsg, time.Now()); ok {
+						// Slack behind the CLI's own clock: a resume
+						// dispatched on the named minute can still be refused
+						// by it.
+						wait = time.Until(reset) + 90*time.Second
+						log.Printf("claude is over its usage limit until %s — waiting %s, then resuming "+
+							"(Ctrl+C is safe: state is on GitHub, and rerunning after the reset "+
+							"picks this issue back up)", reset.Format("15:04 MST"), dur(wait))
+					} else {
+						log.Printf("claude is over its usage limit, and the refusal names no reset time "+
+							"this supervisor can read (%q) — retrying every %s until it lifts "+
+							"(Ctrl+C is safe: state is on GitHub, and rerunning later picks this "+
+							"issue back up)", clip(rep.limitMsg, 120), dur(cfg.poll))
+					}
+					if err := sleep(ctx, wait); err != nil {
+						return err
+					}
+					resumeKind = reasonResume
+					continue
+				}
 				blocked, err := issueHasLabel(ctx, cfg, issue, awaitingAnswerLabel)
 				if err != nil {
 					record(0, outcomeUnknown)
@@ -2327,7 +2377,11 @@ type runReport struct {
 	interrupted  bool
 	skillMissing bool // the session's command list lacks the skill the prompt invokes
 	authFailed   bool // the result text is the CLI reporting refused credentials
-	overBudget   bool // -max-issue-time ran out while this run was still going
+	// limitMsg holds the result text when a failing run was refused over the
+	// account's usage limit, and stays empty otherwise. The text rather than a
+	// bool, because the refusal carries the reset time the wait is read from.
+	limitMsg   string
+	overBudget bool // -max-issue-time ran out while this run was still going
 	// remoteRejected says the CLI refused the Remote Control flags before
 	// starting anything. Unlike every other field here it never reaches the
 	// caller: execClaude re-dispatches without them and returns that report
@@ -2354,6 +2408,8 @@ func (r runReport) status() string {
 		return "stalled"
 	case r.authFailed:
 		return "auth"
+	case r.limitMsg != "":
+		return "limit"
 	case r.exitCode != 0:
 		return "crash"
 	case r.isError:
@@ -2400,6 +2456,9 @@ func (r *runReport) observe(ev streamEvent) {
 		r.hasResult = true
 		r.subtype, r.isError = ev.Subtype, ev.IsError
 		r.authFailed = ev.IsError && authFailure(ev.Result)
+		if ev.IsError && limitRefusal(ev.Result) {
+			r.limitMsg = ev.Result
+		}
 		r.turns = ev.NumTurns
 		r.wallMS, r.apiMS = ev.DurationMS, ev.DurationAPIMS
 		r.costUSD = ev.TotalCost
@@ -2473,6 +2532,74 @@ func authFailure(result string) bool {
 		"api error: 401",       // the bare status, when no wrapper survives
 		"authentication_error", // the raw API envelope, unwrapped
 	}, func(sig string) bool { return strings.HasPrefix(head, sig) })
+}
+
+// limitRefusal reports whether a failing run's result text is the CLI refusing
+// to work over the account's usage limit. Head-anchored for the same reason
+// authFailure is, and here the quoting risk is not hypothetical: issue #67 on
+// this very repository carries these messages verbatim in its body, so a run
+// implementing it could end with a final message that merely repeats one. The
+// residual mis-read costs one bounded wait rather than a park or a stopped
+// drain, which is the cheap side of the same trade authFailure makes.
+func limitRefusal(result string) bool {
+	head := strings.ToLower(strings.TrimLeft(strings.TrimSpace(result), "*# "))
+	return slices.ContainsFunc([]string{
+		"you've hit your session limit", // the CLI's wording, and the one observed
+		"you've hit your usage limit",   // its sibling for the account-wide pools
+		"session limit reached",         // shorter spellings, defensively
+		"usage limit reached",
+		"5-hour limit reached",
+		"weekly limit reached",
+	}, func(sig string) bool { return strings.HasPrefix(head, sig) })
+}
+
+// limitResetRe reads the reset clause out of a limit refusal — "resets 10:50am
+// (Europe/London)". Minutes and the zone are optional; a clause this does not
+// match (a weekly limit's "resets Oct 14, 10am", a wording change) is not an
+// error, it just means the caller polls instead of sleeping to a clock.
+var limitResetRe = regexp.MustCompile(`(?i)\bresets\s+(\d{1,2})(?::([0-5]\d))?([ap]m)(?:\s*\(([^)]+)\))?`)
+
+// limitReset turns a limit refusal into the instant the limit lifts: the next
+// occurrence of the named wall-clock time, in the named zone. False whenever
+// any part cannot be trusted — no clause, an hour that is not one, a zone this
+// build cannot resolve — because a wait computed from a misread clock is worse
+// than the poll fallback the caller has.
+func limitReset(msg string, now time.Time) (time.Time, bool) {
+	m := limitResetRe.FindStringSubmatch(msg)
+	if m == nil {
+		return time.Time{}, false
+	}
+	hour, err := strconv.Atoi(m[1])
+	if err != nil || hour < 1 || hour > 12 {
+		return time.Time{}, false
+	}
+	minute := 0
+	if m[2] != "" {
+		minute, _ = strconv.Atoi(m[2])
+	}
+	if strings.EqualFold(m[3], "pm") {
+		if hour != 12 {
+			hour += 12
+		}
+	} else if hour == 12 {
+		hour = 0
+	}
+	loc := now.Location()
+	if m[4] != "" {
+		l, err := time.LoadLocation(m[4])
+		if err != nil {
+			return time.Time{}, false
+		}
+		loc = l
+	}
+	at := now.In(loc)
+	reset := time.Date(at.Year(), at.Month(), at.Day(), hour, minute, 0, 0, loc)
+	if !reset.After(now) {
+		// The named time is already behind the clock, so it means tomorrow.
+		// AddDate rather than 24h, so a DST change cannot shift the wall time.
+		reset = reset.AddDate(0, 0, 1)
+	}
+	return reset, true
 }
 
 // execClaude runs one headless claude invocation with the shared streaming,
@@ -2753,6 +2880,13 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	// less of a dead end.
 	if rep.authFailed {
 		return rep, errAuth
+	}
+	// The same reasoning one wall over, and equally not gated on the exit code:
+	// the refusal is the result text, whatever the exit said. Unlike a refused
+	// token this wall falls on its own, so the caller waits for the reset the
+	// message names rather than stopping the drain.
+	if rep.limitMsg != "" {
+		return rep, fmt.Errorf("%w: %s", errLimit, rep.limitMsg)
 	}
 	if err == nil && rep.turns == 0 {
 		return rep, fmt.Errorf("%w: %q produced no work", errNoWork, prompt)
