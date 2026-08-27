@@ -613,7 +613,15 @@ func TestDrainParkSaysNothingExtraWhenTheRunLeftNothing(t *testing.T) {
 	})
 	_, checkout := upstream(t)
 	cfg.dir = checkout
-	gitAt(t, checkout, "worktree", "add", filepath.Join(t.TempDir(), "checkout-issue-1"), "-b", "issue-1")
+	wt := filepath.Join(t.TempDir(), "checkout-issue-1")
+	gitAt(t, checkout, "worktree", "add", wt, "-b", "issue-1")
+	// With the plan the skill writes before it implements anything still sitting
+	// there, because that is what this case looks like in production: nothing
+	// commits it, deletes it or ignores it, so counting it would make every park
+	// claim work was left behind.
+	if err := os.WriteFile(filepath.Join(wt, planFile), []byte("## Approach\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("one dead issue must not end the drain: %v", err)
@@ -736,6 +744,28 @@ func TestInspectLeftWorkAgainstARealCheckout(t *testing.T) {
 		w := inspectLeftWork(context.Background(), config{dir: checkout, branchPrefix: "issue-"}, 3)
 		if w.dirty != 3 {
 			t.Errorf("dirty = %d, want 3 — an untracked directory counted as one file", w.dirty)
+		}
+	})
+
+	t.Run("the plan the skill wrote is not work left behind", func(t *testing.T) {
+		_, checkout := upstream(t)
+		wt := filepath.Join(t.TempDir(), "checkout-issue-5")
+		gitAt(t, checkout, "worktree", "add", wt, "-b", "issue-5")
+		if err := os.WriteFile(filepath.Join(wt, planFile), []byte("## Approach\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg := config{dir: checkout, branchPrefix: "issue-"}
+		if w := inspectLeftWork(context.Background(), cfg, 5); w.dirty != 0 || w.salvageable() {
+			t.Errorf("dirty = %d, salvageable = %v for a worktree holding only the plan; "+
+				"counted, every park would claim work was left behind", w.dirty, w.salvageable())
+		}
+		// And it is only the plan that is discounted: real work beside it counts.
+		if err := os.WriteFile(filepath.Join(wt, "half-the-change"), []byte("code"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if w := inspectLeftWork(context.Background(), cfg, 5); w.dirty != 1 {
+			t.Errorf("dirty = %d, want 1 — the plan is discounted, the change beside it is not", w.dirty)
 		}
 	})
 

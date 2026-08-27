@@ -276,12 +276,31 @@ func inspectLeftWork(ctx context.Context, cfg config, issue int) leftWork {
 			w.path = ""
 		}
 		for _, line := range strings.Split(string(out), "\n") {
-			if strings.TrimSpace(line) != "" {
+			if p := porcelainPath(line); p != "" && p != planFile {
 				w.dirty++
 			}
 		}
 	}
 	return w
+}
+
+// planFile is the note the skill writes before it implements anything, and
+// which nothing afterwards commits, deletes or ignores. It is left out of the
+// count deliberately: counted, "the run left work behind" would be true of
+// every run that got as far as planning — which is every run that got anywhere
+// at all — and a message that is always true tells nobody anything. Naming the
+// other half's file here is the same kind of contract as the issue-N branch
+// name, and holds for the same reason: the two halves ship from one commit.
+const planFile = "PLAN.md"
+
+// porcelainPath is the path out of one `git status --porcelain` line, or "" for
+// a blank one. The format is two status columns and a space, then the path.
+func porcelainPath(line string) string {
+	line = strings.TrimRight(line, "\r")
+	if len(line) < 4 {
+		return ""
+	}
+	return line[3:]
 }
 
 // worktreeFor finds the worktree holding branch in `git worktree list
