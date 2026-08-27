@@ -107,7 +107,7 @@ documentation. These are the parts most likely to need a correction:
   command, and it is not obvious that arrives as a `Skill` tool call. The
   ablation notes describe that grader as a plugin-fired indicator rather than
   part of the score, which should make it harmless either way — but if it is
-  scored and always fails, drop it from all four cases. It is the one grader
+  scored and always fails, drop it from all five cases. It is the one grader
   here that asserts nothing about the skill's behaviour.
 
 Fix what the first run finds and delete this section.

@@ -1482,10 +1482,11 @@ closing the issue. Whether a run *keeps* those promises is what
 claude plugin eval . --scaffold --allow-tools Bash Write Edit
 ```
 
-Four cases, each one a real plan-to-PR run against a scratch repo and a
+Five cases, each one a real plan-to-PR run against a scratch repo and a
 stand-in `gh`: a specified issue reaching a PR, an under-specified one producing
-questions instead of guesses, the review gate firing before the PR, and an
-existing plan being resumed rather than rewritten.
+questions instead of guesses, the review gate firing before the PR, an
+existing plan being resumed rather than rewritten, and a slow verification step
+waited out in the turn rather than deferred to one that never comes.
 
 This one is not part of `check.sh` and not in CI. It needs the network, a real
 `claude` and money — a deliberate exception to the hermetic rule, and the

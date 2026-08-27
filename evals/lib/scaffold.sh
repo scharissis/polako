@@ -96,7 +96,8 @@ the project. Worktrees this run creates belong beside it, in \`$workspace\`.
 EOF
 
 # --- per-case extras -------------------------------------------------------
-# resume-existing-plan needs a worktree that already got as far as a plan.
+# resume-existing-plan needs a worktree that already got as far as a plan;
+# one-turn needs a benchmark too slow to be worth putting in the shared fixture.
 if [ -f "$case_dir/seed.sh" ]; then
   # shellcheck source=/dev/null
   . "$case_dir/seed.sh"
