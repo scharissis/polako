@@ -248,10 +248,6 @@ failing an hour into an unattended run.
 
 ## Install
 
-> **This repository is private.** Installing it requires a GitHub account with
-> read access — see [Access](#access) below. Nothing here is published to any
-> public registry.
-
 ### The skill, as a plugin (recommended)
 
 The repo doubles as its own marketplace, so there is no clone step. Register
@@ -331,14 +327,7 @@ silently.
 go install github.com/scharissis/polako/cmd/polako@latest
 ```
 
-For a private module, `go install` needs to be told not to consult the public
-proxy, and to use your git credentials:
-
-```bash
-GOPRIVATE=github.com/scharissis/* go install github.com/scharissis/polako/cmd/polako@latest
-```
-
-Or build from a clone, which avoids the question entirely:
+Or build from a clone:
 
 ```bash
 go build -o polako ./cmd/polako
@@ -364,7 +353,7 @@ Then `/reload-plugins`, or restart. **Upgrade the binary in the same breath** �
 the two halves are one release, and mixing them is not a supported combination:
 
 ```bash
-GOPRIVATE=github.com/scharissis/* go install github.com/scharissis/polako/cmd/polako@latest
+go install github.com/scharissis/polako/cmd/polako@latest
 ```
 
 If they end up mismatched anyway, the supervisor says so at startup and names
@@ -387,20 +376,11 @@ claude plugin marketplace add scharissis/polako#polako--v0.4.0
 
 ### Access
 
-The repository is private, so:
-
-- **Other people cannot install this** unless you grant them access. Adding the
-  marketplace runs a `git clone` as them; without access it fails there.
-- **You can**, on any machine where `git` can already clone your private repos —
-  an SSH key, or the credential helper `gh auth login` sets up.
-- To share it with named people, add them as collaborators
-  (`gh repo add-collaborator`) or move the repo into an organisation.
-- To make it installable by anyone, publish it: `gh repo edit --visibility public`.
-  The skill, the README and the plugin metadata all become public at that point,
-  so read them once with that in mind first. Publishing also changes who can
-  open issues — and open issues are what a drain works — so on a public repo
-  `polako work` refuses to start without a `-label` gate or an explicit
-  `-ungated`; see [Security](#security).
+The repository is public: anyone can install both halves with the commands
+above, no access grant or credential setup needed. The flip side is that
+anyone can open an issue here — and open issues are what a drain works — so
+`polako work` refuses to start on this or any other public repository without
+a `-label` gate or an explicit `-ungated`; see [Security](#security).
 
 ## Usage
 
