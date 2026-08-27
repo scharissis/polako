@@ -627,12 +627,19 @@ func lastNumber(prompt string) string {
 	return n
 }
 
-// captureLog redirects the standard logger for one test and returns the buffer.
+// captureLog redirects both narration loggers into one buffer and returns it.
+// The union is the shift-log view: these tests pin what happened, not how the
+// terminal chose to present it, so a line moving between channels breaks
+// nothing here. Presentation has its own tests in ui_test.go.
+//
+// Wired through a ui rather than pointing both loggers at the buffer, because
+// the buffer needs what production has: one mutex ordering the two loggers'
+// writers — the stderr copier goroutine writes detail while the scan loop and
+// the watchdogs write log, and two loggers' own locks do not know each other.
 func captureLog(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	wireSinks(t, &ui{terminal: io.Discard, file: &buf})
 	return &buf
 }
 
@@ -1463,6 +1470,25 @@ func TestExecClaudeStreamsEventsAndCapturesSession(t *testing.T) {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("stream not rendered: missing %q\ngot:\n%s", want, buf.String())
 		}
+	}
+}
+
+// The child's stderr is narration too: it reaches the shift log as whole
+// attributed lines rather than tearing raw across the terminal.
+func TestExecClaudeCarriesChildStderrIntoTheNarration(t *testing.T) {
+	buf := captureLog(t)
+	cfg := fakeClaudeConfig(t, "deadsession")
+
+	if _, err := execClaude(context.Background(), cfg, "/implement-issue 7", "sess-dead", "implement-issue", 0); err == nil {
+		t.Fatal("a dead session should end the attempt with an error")
+	}
+	if want := "[claude stderr] No conversation found"; !strings.Contains(buf.String(), want) {
+		t.Errorf("child stderr missing from the narration: want %q\ngot:\n%s", want, buf.String())
+	}
+	// The recap milestone, from execClaude itself so remediation dispatches
+	// get it too — for a crash it is often the only cause on record.
+	if want := "last stderr: No conversation found"; !strings.Contains(buf.String(), want) {
+		t.Errorf("a failed run should surface its stderr tail: want %q\ngot:\n%s", want, buf.String())
 	}
 }
 

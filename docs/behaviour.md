@@ -18,9 +18,10 @@ exactly as it is.
 **All state lives in GitHub** — issues, comments, PRs, branches. The process
 itself is stateless and restart-safe: kill it at any point, rerun it later, and
 it re-derives where things stand. If a PR already exists for `issue-N`, it
-never re-runs Claude on that issue; it goes straight to waiting. (The one thing
-it writes locally is a line of numbers per run, which nothing reads back — see
-[Run data & cost tracking](run-data.md).)
+never re-runs Claude on that issue; it goes straight to waiting. (It writes two
+things locally, and nothing reads either back: a line of numbers per run — see
+[Run data & cost tracking](run-data.md) — and a per-shift log of everything it
+narrated — see [The shift log](reference.md#the-shift-log--log).)
 
 **Being interrupted is not the same as failing, and is not treated as one.**
 Ctrl+C, a service manager stopping the unit, a shutdown, a terminal going away:

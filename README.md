@@ -32,7 +32,8 @@ There are two halves, and they ship as one release:
 lowest open issue with no sub-issues and no `needs-human`, `proposed`
 or `awaiting-answer` label
    ↓
-claude -p "/implement-issue N"        ← headless, streamed to your terminal
+claude -p "/implement-issue N"        ← headless; milestones on your terminal,
+   ↓                                    the full stream in a per-shift log
    ↓
 PR opened?  ──no──►  issue labelled `awaiting-answer`?  ──yes──►  put it down, advance to the next
    │                          │                                  (re-run it when the reply lands)

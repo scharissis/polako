@@ -94,7 +94,10 @@ Two things, and only these two:
 
 Everything else stays local. Run data is written to your disk and read by
 nothing but `polako stats`, whose [`-html`](run-data.md#keeping-a-copy--html) writes those
-numbers to a second local file and fetches nothing when you open it; `-notify`
+numbers to a second local file and fetches nothing when you open it; the
+[shift log](reference.md#the-shift-log--log) — the one local file that holds
+transcript text rather than numbers — is written `0600` to your home
+directory, read back by nothing, and turned off with `-log off`; `-notify`
 runs a command of yours on your own machine; and the skill half, being a
 prompt, collects nothing at all.
 

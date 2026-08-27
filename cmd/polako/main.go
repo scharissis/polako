@@ -564,6 +564,11 @@ type config struct {
 	rec         *recorder
 	postSummary bool
 
+	// Where the per-shift log lives; empty means -log off. The file itself is
+	// opened by preflight, which learns the repository it is named after.
+	logDir  string
+	verbose bool
+
 	// Filled in by preflight, recorded with every run: which repository this
 	// is, which CLI produced its numbers, and which release of the skill it
 	// drove. pluginVersion is empty when -skill names a hand-installed skill,
@@ -636,7 +641,19 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 	defer stop()
 
-	log.SetFlags(log.Ldate | log.Ltime)
+	// Timestamps become the sinks' job: the shift log is always stamped, and a
+	// terminal that is not a TTY keeps the same stamps the default flags used
+	// to add, so redirected transcripts look like they always did. A TTY drops
+	// the gutter only while a shift log is there to hold every stamp — with
+	// -log off the terminal is the only record, so it keeps them — and gets
+	// colour when the platform and NO_COLOR allow it.
+	log.SetFlags(0)
+	log.SetOutput(milestoneWriter{u: sinks})
+	sinks.verbose = cfg.verbose
+	if isTerminal(os.Stderr) {
+		sinks.stamp = cfg.logDir == ""
+		sinks.style = styleFor(true)
+	}
 	if err := run(ctx, cfg); err != nil {
 		if errors.Is(err, context.Canceled) {
 			// 130 for every shutdown signal, not only SIGINT. Telling them apart
@@ -682,7 +699,7 @@ func shutdownSignals() []os.Signal {
 
 func parseFlags() config {
 	var cfg config
-	var skip, metrics string
+	var skip, metrics, logSpec string
 	var showVersion bool
 	flag.BoolVar(&showVersion, "version", false, "print the version of this binary and exit")
 	flag.StringVar(&cfg.dir, "dir", ".", "path to the repository's main checkout")
@@ -724,6 +741,10 @@ func parseFlags() config {
 		"comment one line of run numbers on each merged PR (runs, tokens, dollars, wall time)")
 	flag.StringVar(&metrics, "metrics", "",
 		`directory for run-data records, or "off" (default ~/.polako/metrics)`)
+	flag.StringVar(&logSpec, "log", "",
+		`directory for the full per-shift log, or "off" (default ~/.polako/logs)`)
+	flag.BoolVar(&cfg.verbose, "verbose", false,
+		"mirror the full claude event stream and its stderr to the terminal, not only the shift log")
 	flag.Usage = func() {
 		fmt.Fprint(flag.CommandLine.Output(),
 			"Usage: polako work [flags]\n\n"+
@@ -748,13 +769,16 @@ func parseFlags() config {
 		os.Exit(0)
 	}
 
-	// A dry run writes nothing, run data included. -metrics is a preference an
-	// operator may well have set in their environment and forgotten, and a
-	// record of a run that never happened is worse than no record at all.
+	// A dry run writes nothing, run data and shift log included. Both are
+	// preferences an operator may well have set in their environment and
+	// forgotten, and a record of a run that never happened is worse than no
+	// record at all.
 	if cfg.dryRun {
 		metrics = metricsOff
+		logSpec = metricsOff
 	}
 	cfg.rec = newRecorder(metrics)
+	cfg.logDir = resolveLogDir(logSpec)
 	cfg.shiftID = newShiftID()
 	cfg.remoteOff = new(atomic.Bool)
 	cfg.queue = new(queueMemo)
@@ -1372,6 +1396,21 @@ func preflight(ctx context.Context, cfg *config) error {
 		return fmt.Errorf("unreadable `gh repo view` reply (is gh current?): %w", err)
 	}
 	cfg.repo = repoView.NameWithOwner
+	// As soon as the repository is known, because the file is named after it.
+	// Everything logged from here on lands in the shift log too — including a
+	// preflight refusal below, which is often the diagnosis an operator wants.
+	logPath := ""
+	if cfg.logDir != "" {
+		path, err := sinks.openShiftLog(cfg.logDir, cfg.repo, cfg.shiftID)
+		if err != nil {
+			// The stamps were dropped from a TTY on the promise the log would
+			// hold them; without one, the terminal takes them back.
+			sinks.keepStamps()
+			log.Printf(logLostFmt, err)
+		} else {
+			logPath = path
+		}
+	}
 	if err := queueGate(repoView.Visibility, cfg.label, cfg.ungated); err != nil {
 		// A dry run may still look: it runs nothing and writes nothing, and
 		// seeing what an ungated queue would work is how an operator decides
@@ -1437,6 +1476,13 @@ func preflight(ctx context.Context, cfg *config) error {
 		// operator finds it — including while the drain is still running.
 		log.Printf("this shift is %s — `polako stats -shift %s` reports on it alone",
 			cfg.shiftID, cfg.shiftID)
+	}
+	if logPath != "" {
+		// The disclosure, said every time like the recorder's line: unlike the
+		// run-data records this file holds transcript text, so where it lives
+		// and that it stays local is worth a line per shift.
+		log.Printf("logging this shift in full to %s — the whole claude transcript stream, "+
+			"kept on this machine (-log off to disable)", logPath)
 	}
 	return nil
 }
@@ -2442,6 +2488,10 @@ type runReport struct {
 	// bool, because the refusal carries the reset time the wait is read from.
 	limitMsg   string
 	overBudget bool // -max-issue-time ran out while this run was still going
+	// stderrTail is the last few KB the child wrote to stderr — for a crashed
+	// run, often the only cause on record and worth a terminal line, since the
+	// full copy is off in the shift log.
+	stderrTail string
 	// remoteRejected says the CLI refused the Remote Control flags before
 	// starting anything. Unlike every other field here it never reaches the
 	// caller: execClaude re-dispatches without them and returns that report
@@ -2674,22 +2724,33 @@ func limitReset(msg string, now time.Time) (time.Time, bool) {
 // tokens whether or not it lived to report them.
 func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes string, limit time.Duration) (runReport, error) {
 	rep, err := dispatchClaude(ctx, cfg, prompt, resumeID, invokes, limit)
-	if !rep.remoteRejected {
-		return rep, err
+	if rep.remoteRejected {
+		// The whole attempt is thrown away, report and all: it never reached a
+		// model, so charging it to -retries or recording it as a run would be
+		// describing something that did not happen. What the caller gets back is
+		// the run that did.
+		log.Println("this claude cannot register headless runs with Remote Control; runs continue " +
+			"unwatched (-remote=false silences this)")
+		cfg.dropRemote() // for the rest of the shift
+		cfg.remote = false
+		// Off on this copy as well as on the shared memo, so the re-dispatch cannot
+		// possibly ask a second time and be refused a second time — which is what a
+		// config carrying no shared memo would otherwise do, handing the caller a
+		// report of a run that never happened.
+		rep, err = dispatchClaude(ctx, cfg, prompt, resumeID, invokes, limit)
 	}
-	// The whole attempt is thrown away, report and all: it never reached a
-	// model, so charging it to -retries or recording it as a run would be
-	// describing something that did not happen. What the caller gets back is
-	// the run that did.
-	log.Println("this claude cannot register headless runs with Remote Control; runs continue " +
-		"unwatched (-remote=false silences this)")
-	cfg.dropRemote() // for the rest of the shift
-	cfg.remote = false
-	// Off on this copy as well as on the shared memo, so the re-dispatch cannot
-	// possibly ask a second time and be refused a second time — which is what a
-	// config carrying no shared memo would otherwise do, handing the caller a
-	// report of a run that never happened.
-	return dispatchClaude(ctx, cfg, prompt, resumeID, invokes, limit)
+	// The last words on stderr, said beside whatever error the caller is about
+	// to report. Here rather than at any one call site, because every dispatch
+	// funnels through this function — a crashed remediation's cause is worth
+	// the line as much as a crashed issue run's. Clipped: the full copy is in
+	// the shift log, under -verbose it already streamed past, and an interrupt
+	// is the operator's own doing, not a cause to explain.
+	if err != nil && ctx.Err() == nil && !cfg.verbose {
+		if t := strings.TrimSpace(rep.stderrTail); t != "" {
+			log.Printf("last stderr: %s", clip(t, 300))
+		}
+	}
+	return rep, err
 }
 
 // rejectedRemote reports whether an attempt died on the registration flags
@@ -2697,7 +2758,8 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes strin
 // anything else is looked at, and each rules out a failure worth reporting
 // honestly:
 //
-//   - the flags were on the command line at all — errTail is nil otherwise;
+//   - the flags were on the command line at all — the caller only asks when
+//     they were, and a nil errTail answers for one that never ran;
 //   - no init event ever arrived, so the session never started and no model was
 //     reached, and the run cannot have done anything worth keeping.
 //
@@ -2776,25 +2838,24 @@ func (t *tailWriter) String() string { return string(t.buf) }
 func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes string, limit time.Duration) (runReport, error) {
 	rep := runReport{sessionID: resumeID, turns: -1, exitCode: -1}
 	args := buildArgs(cfg, prompt, resumeID)
-	log.Printf("running: %s %s", cfg.claudeBin, strings.Join(args, " "))
+	detail.Printf("running: %s %s", cfg.claudeBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.claudeBin, args...)
 	cmd.Dir = cfg.dir
-	cmd.Stderr = os.Stderr
-	// Remembered only while a registration is being attempted, so a shift with
-	// -remote off passes the same os.Stderr straight through as it always did.
-	// What it is read for is the one diagnosis stdout cannot carry: a CLI that
-	// refuses the flag prints a usage error and emits no events at all.
-	var errTail *tailWriter
-	if cfg.registersRemote() {
-		errTail = &tailWriter{}
-		cmd.Stderr = io.MultiWriter(os.Stderr, errTail)
-		// A writer that is not an *os.File makes os/exec hand the child a pipe
-		// and copy it here, and cmd.Wait then waits on that pipe rather than on
-		// the process — so a background command the run left behind, holding the
-		// inherited stderr, would hold this drain open forever. The bound is what
-		// keeps the promise that registration cannot hang a run.
-		cmd.WaitDelay = stderrWaitDelay
-	}
+	// The child's stderr goes into the narration stream line by line, so it
+	// lands in the shift log stamped and attributed rather than raw across the
+	// terminal. The tail is remembered besides, for the diagnoses stdout
+	// cannot carry: a CLI that refuses the registration flags prints a usage
+	// error and emits no events at all, and a crashed run's last words are
+	// often the only cause on record.
+	stderrLines := &lineWriter{prefix: "[claude stderr]"}
+	errTail := &tailWriter{}
+	cmd.Stderr = io.MultiWriter(stderrLines, errTail)
+	// A writer that is not an *os.File makes os/exec hand the child a pipe
+	// and copy it here, and cmd.Wait then waits on that pipe rather than on
+	// the process — so a background command the run left behind, holding the
+	// inherited stderr, would hold this drain open forever. The bound is what
+	// keeps the promise that capturing stderr cannot hang a run.
+	cmd.WaitDelay = stderrWaitDelay
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return rep, err
@@ -2899,13 +2960,22 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	if errors.Is(err, exec.ErrWaitDelay) {
 		err = nil
 	}
+	// The copier is done once Wait returns, so whatever the child left
+	// unterminated can be rendered now.
+	stderrLines.flush()
 	if cmd.ProcessState != nil {
 		rep.exitCode = cmd.ProcessState.ExitCode()
 	}
 	rep.stalled = stalled.Load()
 	rep.interrupted = ctx.Err() != nil
 	rep.overBudget = overspent.Load()
-	rep.remoteRejected = rejectedRemote(rep, errTail)
+	rep.stderrTail = errTail.String()
+	// Only consulted when the registration flags were on the command line:
+	// a usage error from a run that never carried them proves nothing about
+	// Remote Control.
+	if cfg.registersRemote() {
+		rep.remoteRejected = rejectedRemote(rep, errTail)
+	}
 	if rep.remoteRejected {
 		// Ahead of every report below, and of the error too: nothing about this
 		// attempt is worth telling the caller, because the caller is about to be
@@ -2954,7 +3024,10 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	return rep, err
 }
 
-// logEvent renders one stream-json event as a single progress line.
+// logEvent renders one stream-json event as a single progress line. The run's
+// start and finish are milestones; the turns between them — every tool call
+// and assistant message — are detail, so a watching terminal sees a run as a
+// pair of lines and the shift log keeps the whole conversation.
 func logEvent(ev streamEvent) {
 	switch ev.Type {
 	case "system":
@@ -2974,19 +3047,24 @@ func logEvent(ev streamEvent) {
 			switch c.Type {
 			case "text":
 				if t := strings.TrimSpace(c.Text); t != "" {
-					log.Printf("[claude] %s", clip(t, 160))
+					detail.Printf("[claude] %s", clip(t, 160))
 				}
 			case "tool_use":
-				log.Printf("[claude] → %s%s", c.Name, toolDetail(c.Input))
+				detail.Printf("[claude] → %s%s", c.Name, toolDetail(c.Input))
 			}
 		}
 	case "result":
 		// The final text first: for a healthy run it restates the last
 		// assistant message, but a result the CLI synthesized itself —
 		// "Unknown skill: x" — appears nowhere else in the stream, and is
-		// usually the whole diagnosis.
+		// usually the whole diagnosis. That is why an error's text is a
+		// milestone while a healthy run's is detail.
 		if t := strings.TrimSpace(ev.Result); t != "" {
-			log.Printf("[claude] %s", clip(t, 160))
+			if ev.IsError {
+				log.Printf("[claude] %s", clip(t, 160))
+			} else {
+				detail.Printf("[claude] %s", clip(t, 160))
+			}
 		}
 		status := "ok"
 		if ev.IsError {
@@ -4049,7 +4127,7 @@ func syncDefaultBranch(ctx context.Context, cfg config) {
 		return
 	}
 	if after, _ := git(ctx, cfg, "rev-parse", "HEAD"); string(after) != string(before) {
-		log.Printf("fast-forwarded %s to %s", local, remote)
+		detail.Printf("fast-forwarded %s to %s", local, remote)
 	}
 }
 
@@ -4057,7 +4135,7 @@ func cleanupWorktree(ctx context.Context, cfg config, issue int) {
 	repo := filepath.Base(cfg.dir)
 	path := filepath.Join(filepath.Dir(cfg.dir), fmt.Sprintf("%s-issue-%d", repo, issue))
 	if _, err := git(ctx, cfg, "worktree", "remove", path, "--force"); err == nil {
-		log.Printf("removed worktree %s", path)
+		detail.Printf("removed worktree %s", path)
 	}
 	_, _ = git(ctx, cfg, "worktree", "prune")
 }
