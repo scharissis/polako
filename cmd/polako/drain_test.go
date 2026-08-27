@@ -572,15 +572,16 @@ func TestDrainParkSaysWhatTheRunLeftBehind(t *testing.T) {
 		t.Fatalf("one dead issue must not end the drain: %v", err)
 	}
 
-	// The worktree path is matched by its tail: git reports the path with
-	// symlinks resolved, so on macOS the temp dir it prints is not the one
-	// spelled here.
 	out := buf.String()
 	for _, want := range []string{
-		"the run completed but produced no PR and no questions; branch issue-1 has 1 commit",
-		"and its worktree ",
-		"checkout-issue-1 has uncommitted changes in 1 file — the run left work behind, " +
+		"the run completed but produced no PR and no questions; branch issue-1 has 1 commit " +
+			"and its worktree has uncommitted changes in 1 file — the run left work behind, " +
 			"so start there rather than from scratch",
+		// Where it is goes to the terminal only, beside the resume id and for
+		// the same reason. Matched by its tail: git reports the path with
+		// symlinks resolved, so on macOS what it prints is not what is spelled
+		// here.
+		"checkout-issue-1\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log is missing %q\ngot:\n%s", want, out)
@@ -588,13 +589,17 @@ func TestDrainParkSaysWhatTheRunLeftBehind(t *testing.T) {
 	}
 	// The park comment is a second audience for the same fact, and the operator
 	// reading the summary a third. Both are fed the reason verbatim, so seeing
-	// it in the argv of the comment gh was asked to post proves the round trip.
+	// it in the argv of the comment gh was asked to post proves the round trip
+	// — and proves what the thread does *not* get.
 	posted, err := os.ReadFile(calls)
 	if err != nil {
 		t.Fatalf("reading the fake gh call log: %v", err)
 	}
 	if want := "the run left work behind"; !strings.Contains(string(posted), want) {
 		t.Errorf("no gh call carried %q to the thread\ngot:\n%s", want, posted)
+	}
+	if strings.Contains(string(posted), "checkout-issue-1") {
+		t.Errorf("a gh call carried the operator's local worktree path to the thread\ngot:\n%s", posted)
 	}
 }
 
@@ -618,7 +623,7 @@ func TestDrainParkSaysNothingExtraWhenTheRunLeftNothing(t *testing.T) {
 	if want := "parked  #1 ($0.50) — the run completed but produced no PR and no questions\n"; !strings.Contains(out, want) {
 		t.Errorf("log is missing %q\ngot:\n%s", want, out)
 	}
-	for _, unwanted := range []string{"left work behind", "branch issue-1 has"} {
+	for _, unwanted := range []string{"left work behind", "branch issue-1 has", "the work it left is in"} {
 		if strings.Contains(out, unwanted) {
 			t.Errorf("log says %q about a run that left nothing\ngot:\n%s", unwanted, out)
 		}
@@ -636,25 +641,58 @@ func TestLeftWorkDescribe(t *testing.T) {
 		w    leftWork
 		want string
 	}{
-		{"nothing at all", leftWork{branch: "issue-9"}, ""},
-		{"a worktree with nothing in it", leftWork{branch: "issue-9", path: "/w"}, ""},
+		{"nothing at all", leftWork{branch: "issue-9", counted: true}, ""},
+		{"a worktree with nothing in it", leftWork{branch: "issue-9", counted: true, path: "/w"}, ""},
 		{"issue #42: implemented and never committed",
-			leftWork{branch: "issue-42", path: "/w", dirty: 6},
-			"branch issue-42 has no commits and its worktree /w has uncommitted changes in 6 files " +
+			leftWork{branch: "issue-42", counted: true, path: "/w", dirty: 6},
+			"branch issue-42 has no commits and its worktree has uncommitted changes in 6 files " +
 				"— the run left work behind, so start there rather than from scratch"},
 		{"committed but never pushed, worktree tidy",
-			leftWork{branch: "issue-42", path: "/w", commits: 2},
-			"branch issue-42 has 2 commits and its worktree /w has no uncommitted changes " +
+			leftWork{branch: "issue-42", counted: true, path: "/w", commits: 2},
+			"branch issue-42 has 2 commits and its worktree has no uncommitted changes " +
 				"— the run left work behind, so start there rather than from scratch"},
 		{"a worktree somebody already removed",
-			leftWork{branch: "issue-42", commits: 1},
+			leftWork{branch: "issue-42", counted: true, commits: 1},
 			"branch issue-42 has 1 commit — the run left work behind, so start there rather than from scratch"},
+		// A checkout with no origin/HEAD to compare against. "no commits" is the
+		// half of this a person acts on, so an uncounted branch says so rather
+		// than reporting the zero it never established.
+		{"the branch could not be compared with anything",
+			leftWork{branch: "issue-42", path: "/w", dirty: 6},
+			"branch issue-42 could not be compared with the default branch and its worktree has " +
+				"uncommitted changes in 6 files — the run left work behind, so start there " +
+				"rather than from scratch"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.w.describe(); got != tc.want {
 				t.Errorf("describe() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// The path is the one thing a person cannot get off the issue thread, and the
+// one thing that must not go on it: the thread may be public, and an absolute
+// path names the operator's account and how their disk is laid out. So it
+// travels beside the park rather than inside its reason.
+func TestLeftWorkWhereIsForTheLogAlone(t *testing.T) {
+	w := leftWork{branch: "issue-42", counted: true, path: "/src/repo-issue-42", dirty: 6}
+	if got, want := w.where(), "the work it left is in /src/repo-issue-42"; got != want {
+		t.Errorf("where() = %q, want %q", got, want)
+	}
+	if strings.Contains(w.describe(), w.path) {
+		t.Errorf("describe() carries the path to the issue thread: %q", w.describe())
+	}
+	// Nothing to point at is nothing to say: a worktree that is merely clean
+	// leaves no work, and a park that named it would be sending a person to a
+	// directory with nothing in it.
+	for _, empty := range []leftWork{
+		{branch: "issue-42", counted: true, path: "/src/repo-issue-42"},
+		{branch: "issue-42", counted: true, commits: 3},
+	} {
+		if got := empty.where(); got != "" {
+			t.Errorf("where() = %q for %+v, want \"\"", got, empty)
+		}
 	}
 }
 
@@ -672,6 +710,56 @@ func TestWorktreeForFindsTheWorktreeHoldingABranch(t *testing.T) {
 	if got := worktreeFor(list, "issue-8"); got != "" {
 		t.Errorf("worktreeFor for a branch with no worktree = %q, want \"\"", got)
 	}
+}
+
+// Two things only a real repository can answer, which is why they are not in
+// the table above: what git counts as changed, and what it says about a
+// worktree whose directory is gone.
+func TestInspectLeftWorkAgainstARealCheckout(t *testing.T) {
+	t.Run("a whole new directory is counted file by file", func(t *testing.T) {
+		_, checkout := upstream(t)
+		wt := filepath.Join(t.TempDir(), "checkout-issue-3")
+		gitAt(t, checkout, "worktree", "add", wt, "-b", "issue-3")
+		if err := os.MkdirAll(filepath.Join(wt, "newpkg"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"a", "b", "c"} {
+			if err := os.WriteFile(filepath.Join(wt, "newpkg", name), []byte(name), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		// `git status --porcelain` alone answers "1 file" here: it folds an
+		// untracked directory into one `newpkg/` line. That is the run this
+		// message exists for — a change written and never committed — so the
+		// number it reports has to be the number of files.
+		w := inspectLeftWork(context.Background(), config{dir: checkout, branchPrefix: "issue-"}, 3)
+		if w.dirty != 3 {
+			t.Errorf("dirty = %d, want 3 — an untracked directory counted as one file", w.dirty)
+		}
+	})
+
+	t.Run("a worktree deleted by hand is not named", func(t *testing.T) {
+		_, checkout := upstream(t)
+		wt := filepath.Join(t.TempDir(), "checkout-issue-4")
+		gitAt(t, checkout, "worktree", "add", wt, "-b", "issue-4")
+		commit(t, wt, "half-the-change")
+		// rm -rf, not `git worktree remove`: git goes on listing the worktree
+		// until something prunes it, and a park that reads that list at face
+		// value sends a person to a directory that is not there any more.
+		if err := os.RemoveAll(wt); err != nil {
+			t.Fatal(err)
+		}
+
+		w := inspectLeftWork(context.Background(), config{dir: checkout, branchPrefix: "issue-"}, 4)
+		if w.path != "" {
+			t.Errorf("path = %q, want \"\" — the directory is gone", w.path)
+		}
+		want := "branch issue-4 has 1 commit — the run left work behind, so start there rather than from scratch"
+		if got := w.describe(); got != want {
+			t.Errorf("describe() = %q, want %q", got, want)
+		}
+	})
 }
 
 // The whole question round, end to end, under -strict-order: a run that asks

@@ -127,7 +127,15 @@ func deferReason(err error) (*deferredError, bool) {
 // before anyone looks at the terminal. Fatal is reserved for conditions where
 // no further progress is possible at all: a bad -dir, a gh that cannot answer,
 // a -skill this installation does not have, a token the API refuses.
-type parkedError struct{ reason string }
+type parkedError struct {
+	reason string
+	// aside is for the operator's terminal and goes nowhere else. The reason is
+	// posted to the issue thread verbatim, so anything that is nobody's business
+	// but the operator's — a local absolute path, which names their account and
+	// the layout of their disk — travels here instead, for the same reason the
+	// resume id is kept out of the reason where the park is logged.
+	aside string
+}
 
 func (e *parkedError) Error() string { return e.reason }
 
@@ -138,6 +146,11 @@ func park(format string, a ...any) error {
 	return &parkedError{reason: fmt.Sprintf(format, a...)}
 }
 
+// parkAside is park with one line the log gets and the issue thread does not.
+func parkAside(aside, format string, a ...any) error {
+	return &parkedError{reason: fmt.Sprintf(format, a...), aside: aside}
+}
+
 // parkReason reports whether an error parks its issue, and why.
 func parkReason(err error) (string, bool) {
 	var pe *parkedError
@@ -145,6 +158,15 @@ func parkReason(err error) (string, bool) {
 		return pe.reason, true
 	}
 	return "", false
+}
+
+// parkAsideOf reports what a park has to say to the operator alone, or "".
+func parkAsideOf(err error) string {
+	var pe *parkedError
+	if errors.As(err, &pe) {
+		return pe.aside
+	}
+	return ""
 }
 
 // leftWork is what a run left on disk for one issue: commits on the branch the
@@ -157,10 +179,16 @@ func parkReason(err error) (string, bool) {
 // needs the issue re-specified. Everything needed to tell them apart is on
 // disk, one git call from a supervisor that already knows the branch name.
 type leftWork struct {
-	branch  string
-	path    string // the worktree holding that branch, "" when none does
-	commits int    // commits on the branch the default branch does not have
-	dirty   int    // paths that worktree reports as changed or untracked
+	branch string
+	path   string // the worktree holding that branch, "" when none does
+	// commits on the branch the default branch does not have, and whether that
+	// comparison could be made at all. A checkout with no origin/HEAD to compare
+	// against must not be reported as a branch with nothing on it: "no commits"
+	// is the half of this message a person acts on, so it is only ever said when
+	// it was actually counted.
+	commits int
+	counted bool
+	dirty   int // paths that worktree reports as changed or untracked
 }
 
 // salvageable reports whether a run got far enough that a person should start
@@ -172,24 +200,41 @@ func (w leftWork) salvageable() bool { return w.commits > 0 || w.dirty > 0 }
 // describe says what is there, in the words the park reason carries to the log,
 // the run summary and the issue thread alike. Empty when nothing is there, so
 // the message that means "the run decided nothing" still means only that.
+//
+// The worktree's path is deliberately not in here; see where.
 func (w leftWork) describe() string {
 	if !w.salvageable() {
 		return ""
 	}
-	commits := "no commits"
-	if w.commits > 0 {
-		commits = plural(w.commits, "commit")
+	branch := fmt.Sprintf("branch %s could not be compared with the default branch", w.branch)
+	if w.counted {
+		commits := "no commits"
+		if w.commits > 0 {
+			commits = plural(w.commits, "commit")
+		}
+		branch = fmt.Sprintf("branch %s has %s", w.branch, commits)
 	}
-	clauses := []string{fmt.Sprintf("branch %s has %s", w.branch, commits)}
+	clauses := []string{branch}
 	if w.path != "" {
 		changes := "no uncommitted changes"
 		if w.dirty > 0 {
 			changes = "uncommitted changes in " + plural(w.dirty, "file")
 		}
-		clauses = append(clauses, fmt.Sprintf("its worktree %s has %s", w.path, changes))
+		clauses = append(clauses, "its worktree has "+changes)
 	}
 	return strings.Join(clauses, " and ") +
 		" — the run left work behind, so start there rather than from scratch"
+}
+
+// where names the worktree on disk, for the log and nothing else. It is the one
+// part of this a person cannot get from the issue thread, and the one part that
+// must not go there: an absolute path names the operator's account and how their
+// disk is laid out, and the thread may be public. See parkedError.aside.
+func (w leftWork) where() string {
+	if w.path == "" || !w.salvageable() {
+		return ""
+	}
+	return "the work it left is in " + w.path
 }
 
 // inspectLeftWork reads what is on disk for one issue. Best-effort in the same
@@ -208,18 +253,31 @@ func inspectLeftWork(ctx context.Context, cfg config, issue int) leftWork {
 	if head, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short"); err == nil {
 		base := strings.TrimSpace(string(head))
 		if out, err := git(ctx, cfg, "rev-list", "--count", base+".."+w.branch); err == nil {
-			w.commits, _ = strconv.Atoi(strings.TrimSpace(string(out)))
+			if n, err := strconv.Atoi(strings.TrimSpace(string(out))); err == nil {
+				w.commits, w.counted = n, true
+			}
 		}
 	}
 	if list, err := git(ctx, cfg, "worktree", "list", "--porcelain"); err == nil {
 		w.path = worktreeFor(string(list), w.branch)
 	}
 	if w.path != "" {
-		if out, err := capture(ctx, w.path, "git", "status", "--porcelain"); err == nil {
-			for _, line := range strings.Split(string(out), "\n") {
-				if strings.TrimSpace(line) != "" {
-					w.dirty++
-				}
+		// --untracked-files=all, because the default folds a whole new directory
+		// into one `?? pkg/` line — and a run that wrote a new package and never
+		// committed it is exactly the case this message exists for, so "1 file"
+		// there would understate it by however many files it added.
+		out, err := capture(ctx, w.path, "git", "status", "--porcelain", "--untracked-files=all")
+		if err != nil {
+			// git goes on listing a worktree whose directory somebody deleted by
+			// hand until the next prune, and sending a person to a path that is
+			// not there is worse than sending them nowhere. A worktree that
+			// cannot be read is reported as no worktree at all — the branch
+			// clause still says what is there.
+			w.path = ""
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.TrimSpace(line) != "" {
+				w.dirty++
 			}
 		}
 	}
@@ -986,6 +1044,11 @@ func drain(ctx context.Context, cfg config) error {
 			results = append(results, spend(st, issueResult{issue: issue, parked: true, reason: reason}))
 			delete(states, issue)
 			log.Printf("issue #%d needs a human: %s — parking it and moving on", issue, reason)
+			// Whatever the park had to say that the issue thread must not carry.
+			// Today that is where on this disk the work it left is sitting.
+			if aside := parkAsideOf(err); aside != "" {
+				log.Printf("issue #%d: %s", issue, aside)
+			}
 			// A park is exactly when somebody wants to read what the run
 			// actually did, and the session is the whole transcript of it. Kept
 			// out of the reason on purpose: that text is posted to the issue
@@ -1788,11 +1851,12 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					// and merely uncommitted.
 					record(0, outcomeNothing)
 					terminal(0, issueNeedsHuman)
+					left := inspectLeftWork(ctx, cfg, issue)
 					reason := "the run completed but produced no PR and no questions"
-					if left := inspectLeftWork(ctx, cfg, issue).describe(); left != "" {
-						reason += "; " + left
+					if d := left.describe(); d != "" {
+						reason += "; " + d
 					}
-					return park("%s", reason)
+					return parkAside(left.where(), "%s", reason)
 				}
 			}
 			record(pr.Number, outcomeOpenedPR)
