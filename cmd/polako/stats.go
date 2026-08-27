@@ -78,6 +78,7 @@ type statsOptions struct {
 	by    string
 	shift string
 	runs  bool
+	html  string
 }
 
 // runStats is the `stats` subcommand: parse its own flags, read the records,
@@ -98,6 +99,8 @@ func runStats(args []string, out io.Writer, now time.Time) error {
 	// word as the argument's name, and a bool flag has no argument to name.
 	fs.BoolVar(&opt.runs, "runs", false,
 		"also list the individual runs, with the session id that reopens each one")
+	fs.StringVar(&opt.html, "html", "",
+		"also write the report to this `path`, as one self-contained HTML file")
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako stats [flags]\n\n"+
 			"Reports on the run data recorded by previous shifts. Reads only;\n"+
@@ -127,6 +130,7 @@ func runStats(args []string, out io.Writer, now time.Time) error {
 		return fmt.Errorf("-by %q: choose one of %s", opt.by, orList(byGroups))
 	}
 	opt.shift = strings.TrimSpace(opt.shift)
+	opt.html = strings.TrimSpace(opt.html)
 
 	dir, err := statsDir(metrics)
 	if err != nil {
@@ -136,7 +140,18 @@ func runStats(args []string, out io.Writer, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	render(out, ds, opt)
+	issues := rollUpIssues(ds)
+	render(out, ds, issues, opt)
+	if opt.html == "" {
+		return nil
+	}
+	// A second view of the report just printed, never a replacement for it: an
+	// operator who asked for a file still wants to see what went into it, and a
+	// command that printed nothing would look like one that did nothing.
+	if err := writeHTMLReport(opt.html, ds, issues, opt, now); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "\nwrote the HTML report to %s\n", opt.html)
 	return nil
 }
 
@@ -504,7 +519,7 @@ func mergeSpan(is *issueStats) (time.Duration, bool) {
 
 // --- rendering ---
 
-func render(w io.Writer, ds dataset, opt statsOptions) {
+func render(w io.Writer, ds dataset, issues []*issueStats, opt statsOptions) {
 	if len(ds.runs) == 0 && len(ds.issues) == 0 {
 		fmt.Fprintf(w, "no run data in %s%s\n", ds.dir, scopeSuffix(opt, ds))
 		if len(ds.unread) > 0 {
@@ -517,7 +532,6 @@ func render(w io.Writer, ds dataset, opt statsOptions) {
 		}
 		return
 	}
-	issues := rollUpIssues(ds)
 
 	fmt.Fprintf(w, "run data from %s\n", ds.dir)
 	printPairs(w, "", sourcePairs(ds, opt))
@@ -847,7 +861,15 @@ func resumeNote(ds dataset) string {
 
 // --- tables ---
 
-func printIssueTable(w io.Writer, issues []*issueStats) {
+// issueHeader and issueRows are split out from the printing so the HTML report
+// can lay out the very same cells. Two renderers deriving the same table twice
+// is two chances to disagree about what a column means.
+var issueHeader = []string{"issue", "outcome", "runs", "questions", "cost", "tokens", "wall"}
+
+// issueLeft is how many of issueHeader's columns are names rather than numbers.
+const issueLeft = 2
+
+func issueRows(issues []*issueStats) [][]string {
 	rows := make([][]string, 0, len(issues))
 	for _, is := range issues {
 		rows = append(rows, []string{
@@ -860,8 +882,11 @@ func printIssueTable(w io.Writer, issues []*issueStats) {
 			dur(time.Duration(is.wallMS) * time.Millisecond),
 		})
 	}
-	printTable(w, "by issue",
-		[]string{"issue", "outcome", "runs", "questions", "cost", "tokens", "wall"}, rows, 2)
+	return rows
+}
+
+func printIssueTable(w io.Writer, issues []*issueStats) {
+	printTable(w, "by issue", issueHeader, issueRows(issues), issueLeft)
 }
 
 // noValue fills a table cell a record has nothing for — most often the session
@@ -894,12 +919,15 @@ func started(ts string) string {
 // The title is "run log" rather than "runs" because the summary section above
 // already owns that word, and a report with two sections of one name is one
 // nobody can talk about.
-func printRunTable(w io.Writer, ds dataset) {
-	if len(ds.runs) == 0 {
-		// Reached when a window kept issue records but clipped every run away.
-		fmt.Fprint(w, "\nrun log\n  (no runs in this window)\n")
-		return
-	}
+// The six text columns lead so that the numbers all right-align together — and
+// so that a session of "—" sits at the left of its column rather than a UUID's
+// width away from the row it belongs to.
+var runHeader = []string{"started", "issue", "reason", "status", "outcome", "session",
+	"attempt", "cost", "tokens", "wall"}
+
+const runLeft = 6
+
+func runRows(ds dataset) [][]string {
 	rows := make([][]string, 0, len(ds.runs))
 	for _, r := range ds.runs {
 		session := r.Session
@@ -919,18 +947,49 @@ func printRunTable(w io.Writer, ds dataset) {
 			dur(time.Duration(r.WallMS) * time.Millisecond),
 		})
 	}
-	// The six text columns lead so that the numbers all right-align together —
-	// and so that a session of "—" sits at the left of its column rather than
-	// a UUID's width away from the row it belongs to.
-	printTable(w, "run log",
-		[]string{"started", "issue", "reason", "status", "outcome", "session",
-			"attempt", "cost", "tokens", "wall"}, rows, 6)
+	return rows
 }
 
-// printGroupTable breaks the numbers down by the configuration under test, or
-// by the drain that did the work. An issue whose runs span two models or two
-// tags counts under each — the point of the breakdown is comparing batches,
-// and a batch is normally one of both, so the footnote appears only when that
+func printRunTable(w io.Writer, ds dataset) {
+	if len(ds.runs) == 0 {
+		// Reached when a window kept issue records but clipped every run away.
+		fmt.Fprint(w, "\nrun log\n  (no runs in this window)\n")
+		return
+	}
+	printTable(w, "run log", runHeader, runRows(ds), runLeft)
+}
+
+func printGroupTable(w io.Writer, ds dataset, issues []*issueStats, by string) {
+	rows, spanning := groupRows(ds, issues, by)
+	printTable(w, "by "+by, groupHeader(by), rows, groupLeft)
+	if note := spanningNote(spanning, by); note != "" {
+		fmt.Fprintf(w, "  %s\n", note)
+	}
+}
+
+// groupHeader names the first column after whatever is being grouped by, so
+// the same builder serves -by model, -by tag and -by shift.
+func groupHeader(by string) []string {
+	return []string{by, "issues", "merged", "runs", "cost", "$/merged", "tokens"}
+}
+
+const groupLeft = 1
+
+// spanningNote reports how many issues fell into more than one group — not how
+// many surplus memberships they add up to, which is a different and larger
+// number whenever one spans three.
+func spanningNote(spanning int, by string) string {
+	if spanning == 0 {
+		return ""
+	}
+	return fmt.Sprintf("(%s more than one %s, and is counted under each)",
+		plural(spanning, "issue")+" spans", by)
+}
+
+// groupRows breaks the numbers down by the configuration under test, or by the
+// drain that did the work. An issue whose runs span two models or two tags
+// counts under each — the point of the breakdown is comparing batches, and a
+// batch is normally one of both, so the footnote appears only when that
 // assumption does not hold. By drain it holds far less often: an issue picked
 // up by one drain and finished by the next is the ordinary shape of a restart.
 //
@@ -941,7 +1000,7 @@ func printRunTable(w io.Writer, ds dataset) {
 // the issue, while -drain <id> on the same drain reads needs human 1: the
 // filter narrows the records to that drain's, so the report is that drain's
 // verdict rather than the issue's fate. Two questions, two right answers.
-func printGroupTable(w io.Writer, ds dataset, issues []*issueStats, by string) {
+func groupRows(ds dataset, issues []*issueStats, by string) (rows [][]string, spanning int) {
 	type group struct {
 		name   string
 		runs   int
@@ -989,7 +1048,7 @@ func printGroupTable(w io.Writer, ds dataset, issues []*issueStats, by string) {
 	})
 
 	memberships := map[issueKey]int{}
-	rows := make([][]string, 0, len(order))
+	rows = make([][]string, 0, len(order))
 	for _, name := range order {
 		g := groups[name]
 		wins := 0
@@ -1010,20 +1069,12 @@ func printGroupTable(w io.Writer, ds dataset, issues []*issueStats, by string) {
 			strconv.Itoa(g.runs), usd(g.cost), perMerge, count(g.tokens),
 		})
 	}
-	printTable(w, "by "+by,
-		[]string{by, "issues", "merged", "runs", "cost", "$/merged", "tokens"}, rows, 1)
-	// How many issues span groups — not how many surplus memberships they add
-	// up to, which is a different and larger number whenever one spans three.
-	spanning := 0
 	for _, n := range memberships {
 		if n > 1 {
 			spanning++
 		}
 	}
-	if spanning > 0 {
-		fmt.Fprintf(w, "  (%s more than one %s, and is counted under each)\n",
-			plural(spanning, "issue")+" spans", by)
-	}
+	return rows, spanning
 }
 
 // --- plain aligned text ---
