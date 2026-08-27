@@ -9,6 +9,50 @@ Entries carry an **Operator impact** line when a release changes what an
 unattended run does, rather than only what the code looks like. Those are the
 lines worth reading before upgrading a machine that works a backlog overnight.
 
+## [0.9.0]
+
+**Operator impact:** two changes to what an unattended run does. `polako work`
+now refuses to start on a public repository unless the queue is gated with
+`-label` or the new `-ungated` flag consents to the open backlog — a drain
+that ran there yesterday stops today, on purpose. And a run that exits cleanly
+but leaves uncommitted work or an unpushed branch behind is now resumed to
+finish the job, where it used to be parked for a human to unpick.
+
+### Added
+
+- `-ungated`: work a public repository without a `-label` gate. Without one or
+  the other, `polako work` refuses to start there, because anyone who can open
+  an issue can feed an unattended agent's queue — the Security section's
+  standing advice, enforced on the one repository shape where the risk is
+  structural rather than a judgement call. A `-dry-run` may still look.
+- A clean exit that left work on disk is resumed to finish the job instead of
+  parked unread, and such a resume is recorded in the run data under its own
+  reason, so `stats` can tell it apart from a crash recovery.
+- A park now says what the run left on disk — branch, commits, uncommitted
+  files — instead of only that it produced nothing.
+- `polako stats -html` writes the report as one self-contained HTML file that
+  fetches nothing when opened.
+- The release workflows open their PRs as you when a `RELEASE_TOKEN` secret is
+  set, so those PRs run CI without the bot-PR approval click.
+
+### Fixed
+
+- The skill's own plan file no longer counts as work a run left behind, so a
+  run that planned and then found nothing to do exits clean rather than
+  looking interrupted.
+- The operator's local worktree path stays off the issue thread when a run
+  reports where it stopped.
+- The skill is told it gets one turn, so it waits out slow work in that turn
+  instead of deferring it to a next one that never comes.
+- The CI smoke run clones the way `claude` itself does, and says more when it
+  cannot.
+
+### Changed
+
+- The repository is public. Installing needs no access grant and no
+  `GOPRIVATE` any more; the README's Install and Access sections say so, and
+  the `-ungated` gate above is the flip side of the same coin.
+
 ## [0.8.0]
 
 ### Added
