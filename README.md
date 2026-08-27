@@ -241,6 +241,83 @@ money; on a subscription plan it is notional. Run `polako stats` for your own
 figures, and set `-max-cost`, `-max-issue-time` or `-max-session-cost` if you
 want a ceiling. [docs/run-data.md](docs/run-data.md) has the whole report.
 
+## Improving polako
+
+Every run records what it did, and those records are only worth keeping if
+something reads them. That something is you, on a cadence. The loop —
+measure, review, change one thing, tag the next batch — runs through the
+operator and the backlog, never through the supervisor reading its own
+telemetry. [plans/continuous-improvement.md](plans/continuous-improvement.md)
+is the long version and the reasoning.
+
+**After a shift worth learning from**, the retro:
+
+1. `polako stats -by shift` to find the batch, then
+   `polako stats -shift <id> -by issue` to see inside it.
+2. Read the **park reasons** line. A count of parks says how often; that line
+   says which half of the tool the next change belongs in.
+3. For every parked issue and every outlier — cost or runs well above the
+   batch median — run `polako stats -runs`, take the session id from its row,
+   and reopen the transcript:
+
+   ```bash
+   claude --resume 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9
+   ```
+
+   Answer one question: *what would have let this run finish?*
+4. Classify the answer — skill wording, a missing tool, supervisor logic, an
+   under-specified issue, a model too weak for that step. Each lands in a
+   different place.
+5. File it as an issue on this repository. polako then works it, which is why
+   the loop is self-hosting. Do it promptly: the transcript is the Claude
+   CLI's, kept under the session id, and nothing here holds a copy.
+
+**Change one thing, then tag the next batch.** Any change to a `SKILL.md`, to
+the model, or to a strategy knob — `-stall`, `-retries`, `-poll`, the spend
+caps — runs its next batch under a fresh `-run-tag` and gets a row in
+[plans/experiments.md](plans/experiments.md). An untagged batch after a change
+can never be compared to anything, and a verdict nobody wrote down is one you
+will pay to measure again next year.
+
+**After a `claude` CLI upgrade**, count run statuses by version. The `no-skill`
+status exists because an upgrade once changed behaviour silently, and this is
+what catches the next one. `stats` keeps its `-by` list short on purpose, so
+this is a one-liner over the JSONL rather than a flag:
+
+```bash
+jq -rs 'map(select(.kind=="run")) | group_by(.claude_version)[]
+        | "\(.[0].claude_version)  \(length) runs  " +
+          ([.[].status] | group_by(.) | map("\(.[0]) \(length)") | join(", "))' \
+  ~/.polako/metrics/*.jsonl
+```
+
+```
+2.1.84  1 runs  ok 1
+2.1.85  3 runs  crash 1, no-skill 1, ok 1
+```
+
+**Occasionally, audit past the merge.** Merge rate is the headline number and
+it is blind to the failure that matters most: a pull request that merged and
+was then reverted, or hand-patched two days later, counts as a win. GitHub
+knows, so ask it. Run these in the repository polako is working:
+
+```bash
+# what polako merged (issue- is -branch-prefix's default)
+gh pr list --state merged --search 'head:issue-' --limit 20 \
+  --json number,headRefName,title,mergedAt
+
+# did anything revert one of those merges?
+git log origin/main --oneline --grep='^Revert' --since=4.weeks
+
+# did somebody patch the same files soon afterwards? (one PR at a time)
+git log origin/main --oneline --since=1.week -- \
+  $(gh pr view 111 --json files --jq '.files[].path')
+```
+
+A hit is a finding, and a finding becomes an issue. None of this is a verb or
+a flag, deliberately: a recipe earns promotion by being typed often enough to
+resent, the same rule that has kept `stats` small.
+
 ## What it will not do
 
 - **It will not merge for you**, and there is no flag that changes that.
