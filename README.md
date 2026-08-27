@@ -269,8 +269,10 @@ is the long version and the reasoning.
    under-specified issue, a model too weak for that step. Each lands in a
    different place.
 5. File it as an issue on this repository. polako then works it, which is why
-   the loop is self-hosting. Do it promptly: the transcript is the Claude
-   CLI's, kept under the session id, and nothing here holds a copy.
+   the loop is self-hosting. Do it promptly: the resumable transcript is the
+   Claude CLI's, kept under the session id, and all polako keeps is the
+   shift's own [log](docs/reference.md#the-shift-log--log) — the event stream
+   as it was narrated, which you cannot resume from.
 
 **Change one thing, then tag the next batch.** Any change to a `SKILL.md`, to
 the model, or to a strategy knob — `-stall`, `-retries`, `-poll`, the spend
@@ -310,8 +312,17 @@ gh pr list --state merged --search 'head:issue-' --limit 20 \
 git log origin/main --oneline --grep='^Revert' --since=4.weeks
 
 # did somebody patch the same files soon afterwards? (one PR at a time)
-git log origin/main --oneline --since=1.week -- \
-  $(gh pr view 111 --json files --jq '.files[].path')
+# The window is the fortnight after *that* merge, not the last fortnight:
+# anchored to now, an older PR reports a clean bill it has not earned. git
+# cannot do the arithmetic — it reads '<date> + 2 weeks' as nothing and says
+# nothing — so jq adds the fortnight in seconds.
+pr=111
+from=$(gh pr view "$pr" --json mergedAt --jq '.mergedAt')
+to=$(gh pr view "$pr" --json mergedAt --jq '.mergedAt | fromdate + 1209600 | todate')
+paths=$(gh pr view "$pr" --json files --jq '.files[].path')
+# An empty $paths would drop the pathspec and list every commit in the window.
+[ -n "$paths" ] && git log origin/main --oneline --no-merges \
+  --since="$from" --until="$to" -- $paths
 ```
 
 A hit is a finding, and a finding becomes an issue. None of this is a verb or
