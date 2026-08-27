@@ -1,0 +1,16 @@
+# Blank issues are off so every issue arrives with the context an unattended
+# run needs. Neither template applies a label that gates the queue: `ready` is
+# the -label gate on this repository and a maintainer applies it by hand, and
+# `proposed` marks an issue a machine filed. A template that handed out either
+# would let anyone queue work for an agent — see docs/security.md.
+blank_issues_enabled: false
+contact_links:
+  - name: How does polako behave when …?
+    url: https://github.com/scharissis/polako/blob/main/docs/behaviour.md
+    about: Crashes, parks, questions, PR repair and session limits are all written down.
+  - name: What does this flag do?
+    url: https://github.com/scharissis/polako/blob/main/docs/reference.md
+    about: Every flag, plus the two read-only reports.
+  - name: Report a security vulnerability
+    url: https://github.com/scharissis/polako/security/advisories/new
+    about: Please report privately rather than opening an issue.

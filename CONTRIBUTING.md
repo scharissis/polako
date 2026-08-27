@@ -3,6 +3,12 @@
 Bug reports and pull requests are welcome. Run the checks below before opening
 one, and see [docs/releasing.md](docs/releasing.md) for how a release is cut.
 
+Two things to know first. This project ships a
+[Code of Conduct](CODE_OF_CONDUCT.md), and taking part means keeping to it. And
+if what you have found is a security problem, please
+[report it privately](SECURITY.md) rather than opening an issue — issues here
+are public, and they are also the queue an unattended agent works.
+
 ## Checking your work
 
 ```bash

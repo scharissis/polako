@@ -225,7 +225,8 @@ outright: `-remote`, on by default, registers each run with Remote Control so
 you can watch it from claude.ai or the app under your own account, and
 `-remote=false` turns it off; `-post-summary`, off by default, comments one line
 of numbers on your own merged PR. [docs/security.md](docs/security.md) has the
-reasoning and the limits.
+reasoning and the limits, and [SECURITY.md](SECURITY.md) says how to report a
+vulnerability privately.
 
 ## Questions
 
