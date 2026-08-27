@@ -126,11 +126,26 @@ starts, with a random delay of up to ten minutes, and the new version loads on
 covered; that is still yours to run.
 
 To hold a machine at one release, pin the marketplace itself and it stops
-moving:
+moving — but mind *what* you pin it to. **A release tag is the wrong target:**
+`polako--vX.Y.Z` is pushed on the release PR's merge commit, and the `ref`
+inside `marketplace.json` only moves when the separate publish PR merges after
+it ([Publishing and versioning](releasing.md#cutting-a-release) says why the two
+are apart). So the `marketplace.json` frozen inside a release tag still declares
+the *previous* release, and pinning at `polako--v0.9.0` holds the plugin at
+0.8.0.
+
+Pin at the publish commit instead — the `chore: publish X.Y.Z` commit on `main`
+is the first one whose `marketplace.json` names X.Y.Z:
 
 ```bash
-claude plugin marketplace add scharissis/polako#polako--v0.4.0
+sha=$(gh search commits --repo scharissis/polako "chore: publish 0.9.0" --json sha --jq '.[0].sha')
+claude plugin marketplace add scharissis/polako#$sha
 ```
+
+The `publish-X.Y.Z` branch has the same content, but it may be deleted once the
+PR merges, so the SHA is the handle that keeps working. To stop holding, remove
+the marketplace and add it back bare — a pinned marketplace does not move when
+the next release ships, and says nothing about it.
 
 
 ## Using it on another project

@@ -129,8 +129,23 @@ loop is a human. The cheapest honest test is therefore not a scratch repo and a
 seeded fake issue — it is to make the first issue you were going to work
 anyway the smoke test.
 
-Before merging the publish PR, install the release for real and run one issue,
-watched rather than unattended:
+Before merging the publish PR, install the release for real. **Not from the new
+tag:** at this point the tag exists but the `ref` in `marketplace.json` has not
+moved yet — that is what the publish PR is for — so a marketplace pinned at
+`polako--vX.Y.Z` installs the *previous* plugin, and the run opens with the
+`version skew` line the checklist below says must be absent. Pin at the publish
+branch, which carries the moved `ref`:
+
+```bash
+claude plugin uninstall polako && claude plugin marketplace remove scharissis
+claude plugin marketplace add scharissis/polako#publish-X.Y.Z && claude plugin install polako@scharissis
+```
+
+That also tests the very line the publish PR is about to merge. The binary half
+needs nothing special — `vX.Y.Z` was pushed in step 2, so `go install
+...@latest` already resolves to it.
+
+Then run one issue, watched rather than unattended:
 
 ```bash
 polako work -once
@@ -146,6 +161,15 @@ What to watch for, in order:
   skill over the top of it.
 - You merge. The supervisor notices and exits.
 - `polako stats` counts that issue as `merged`.
+
+**Unpin afterwards**, whichever way the test went — a marketplace left pinned
+at `publish-X.Y.Z` silently holds the machine there when the next release
+ships, and the branch may be deleted out from under it:
+
+```bash
+claude plugin uninstall polako && claude plugin marketplace remove scharissis
+claude plugin marketplace add scharissis/polako && claude plugin install polako@scharissis
+```
 
 Then say in the publish PR's body which issue you drove. If the backlog is
 empty at release time, say **that** instead — "the skill half went
