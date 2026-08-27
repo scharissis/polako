@@ -12,9 +12,12 @@ the configuration under test — skill, model, permission mode, `-run-tag`, a
 hash of the tool allowlist, the strategy knobs, and the three versions in play
 (this binary, the installed skill, and the
 Claude CLI). One more object per issue records how it ended —
-`merged`, `closed_unmerged` or `needs_human` — and, when GitHub could be asked,
-what the PR turned out to be: additions, deletions, changed files, how many
-reviews it drew, and when it opened and merged. That is one extra `gh pr view`
+`merged`, `closed_unmerged` or `needs_human` — why, when it was handed back
+(`park_reason`: `budget`, `retries_exhausted`, `produced_nothing`, `no_skill`,
+`auth`, `conflict_remediation`, `checks_remediation`, `review_remediation`,
+`pr_state`, or `unknown` when the path could not say) — and, when GitHub could
+be asked, what the PR turned out to be: additions, deletions, changed files,
+how many reviews it drew, and when it opened and merged. That is one extra `gh pr view`
 as each issue ends, and none at all under `-metrics off`.
 
 **What is never written:** issue titles, issue bodies, PR titles, comment text,
@@ -171,6 +174,7 @@ run data from /Users/you/.polako/metrics
 
 issues
   terminal          4 — merged 3 (75%), needs human 1
+  park reasons      produced nothing 1
   in flight         1
   runs per issue    1.5 mean, 1.5 median
   cost per issue    $1.92 mean, $2.00 median
@@ -220,6 +224,17 @@ is the gap between the run that posted questions and the re-run that folded the
 reply in. **PR open to merge** ends whenever somebody got round to pressing the
 button — reported because it is part of the elapsed time, but it is not a
 property of the automation, and no change to the skill will move it.
+
+**On park reasons:** `needs human` is one bucket on the `terminal` line, and
+**park reasons** is what it is made of — `budget 3, checks remediation 1` says
+which half of the tool the next change belongs in, which the count alone never
+could. The value is an identifier chosen at the park itself, never the sentence
+posted to the issue thread: that text quotes issue numbers, dollar figures and
+branch names, and records hold none of those. A park path that genuinely cannot
+say records `unknown`, which is deliberately not the same as a record written
+before the field existed — those count as `unrecorded`, so an old file cannot
+pass for a supervisor that stopped classifying its parks. The line is absent
+when nothing in the window was parked.
 
 **On PR size:** an issue whose terminal record carries GitHub's answer about
 its PR adds a **change per issue** line — the median additions, deletions,
