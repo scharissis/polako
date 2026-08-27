@@ -224,6 +224,52 @@ func TestLineWriterSplitsPrefixesAndFlushes(t *testing.T) {
 	}
 }
 
+func TestStyleForGatesColour(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("NO_COLOR", "x") // registers restoration of the real value…
+	os.Unsetenv("NO_COLOR")   // …so the test can run with it truly unset
+	if s := styleFor(false); s.on {
+		t.Error("no colour off a TTY")
+	}
+	if s := styleFor(true); s.on != ansiCapable {
+		t.Errorf("on a clean TTY, colour should follow the platform (ansiCapable=%v)", ansiCapable)
+	}
+	// Presence disables, even set to nothing — per no-color.org.
+	t.Setenv("NO_COLOR", "")
+	if s := styleFor(true); s.on {
+		t.Error("NO_COLOR set (even empty) must disable colour")
+	}
+	os.Unsetenv("NO_COLOR")
+	t.Setenv("TERM", "dumb")
+	if s := styleFor(true); s.on {
+		t.Error("TERM=dumb must disable colour")
+	}
+}
+
+func TestRenderStylesWholeLinesByContent(t *testing.T) {
+	s := styler{on: true}
+	cases := map[string]string{
+		"=== issue #14 ===\n":                          "\x1b[1m=== issue #14 ===\x1b[0m\n",
+		"finished (ok) — 74 turns, 19m1s, $4.12\n":     "\x1b[32mfinished (ok) — 74 turns, 19m1s, $4.12\x1b[0m\n",
+		"[claude] finished (ERROR: error_max_turns)\n": "\x1b[31m[claude] finished (ERROR: error_max_turns)\x1b[0m\n",
+		"transient: listing open issues failed\n":      "\x1b[33mtransient: listing open issues failed\x1b[0m\n",
+		"-remote is on — each run registers\n":         "\x1b[2m-remote is on — each run registers\x1b[0m\n",
+		"PR #61 open — waiting for merge\n":            "PR #61 open — waiting for merge\n", // no rule: plain
+	}
+	for in, want := range cases {
+		if got := s.render(in, true); got != want {
+			t.Errorf("render(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := s.render("[claude] → Bash: ls\n", false); got != "\x1b[2m[claude] → Bash: ls\x1b[0m\n" {
+		t.Errorf("detail on a colour TTY should render dim, got %q", got)
+	}
+	off := styler{}
+	if got := off.render("=== issue #14 ===\n", true); got != "=== issue #14 ===\n" {
+		t.Errorf("a styler that is off must pass lines through untouched, got %q", got)
+	}
+}
+
 func TestResolveLogDirHonoursOff(t *testing.T) {
 	if got := resolveLogDir("off"); got != "" {
 		t.Errorf(`resolveLogDir("off") = %q, want ""`, got)

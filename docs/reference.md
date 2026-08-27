@@ -226,6 +226,13 @@ issue across restarts.
 written warns once and the shift continues on the terminal alone. A
 `-dry-run` writes no log at all.
 
+The terminal adapts to where it is pointed. On a TTY the timestamp gutter is
+dropped — every stamp is in the shift log — and milestones are coloured,
+sparingly; set `NO_COLOR` (to anything, even nothing) to keep a TTY plain,
+and Windows is plain regardless. Piped or redirected stderr keeps the
+timestamps and carries no colour, so `polako work 2> shift.err` looks exactly
+like it did before the shift log existed.
+
 ### Setting defaults from the environment
 
 Any flag can take its default from `POLAKO_<FLAG>`, so a preference you

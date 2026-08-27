@@ -33,6 +33,7 @@ type ui struct {
 	mu       sync.Mutex
 	terminal io.Writer
 	stamp    bool      // timestamp terminal lines; the shift log is always stamped
+	style    styler    // ANSI on a capable TTY; the zero value renders plain
 	file     io.Writer // the shift log; nil when -log is off or preflight has not opened it yet
 	verbose  bool      // -verbose: detail lines reach the terminal too
 	warned   bool      // one warning per process: a full disk must not fill the terminal too
@@ -74,7 +75,7 @@ func (u *ui) emit(p []byte, milestone bool) {
 		if u.stamp {
 			io.WriteString(u.terminal, now)
 		}
-		u.terminal.Write(p)
+		io.WriteString(u.terminal, u.style.render(string(p), milestone))
 	}
 	if u.file == nil {
 		return
@@ -112,6 +113,75 @@ func (u *ui) openShiftLog(dir, repo, shiftID string) (string, error) {
 	u.file = f
 	u.mu.Unlock()
 	return path, nil
+}
+
+// styler is the terminal's one concession to presentation: whole lines get a
+// colour when their content earns one, and nothing gets coloured anywhere but
+// a capable TTY. The zero value is off, which is what every test and every
+// pipe sees.
+type styler struct{ on bool }
+
+// isTerminal reports whether f is a character device — the portable half of
+// the decision; whether ANSI is worth emitting there is ansiCapable's half.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+// styleFor decides whether a terminal gets ANSI colour: only on a TTY, on a
+// platform that renders ANSI (see ui_windows.go), with NO_COLOR unset —
+// presence disables, even set to nothing, per no-color.org — and TERM not
+// declaring itself "dumb".
+func styleFor(tty bool) styler {
+	_, noColor := os.LookupEnv("NO_COLOR")
+	return styler{on: tty && ansiCapable && !noColor && os.Getenv("TERM") != "dumb"}
+}
+
+func (s styler) wrap(code, line string) string {
+	if !s.on {
+		return line
+	}
+	return code + line + "\x1b[0m"
+}
+
+// render styles one terminal record. Detail lines (seen only under -verbose)
+// are dimmed as a block so the milestones keep standing out; milestones are
+// matched on their own wording, because colour is cosmetic — a rule that
+// misses leaves a plain line, never a lost one — and that keeps every call
+// site free of presentation.
+func (s styler) render(line string, milestone bool) string {
+	if !s.on {
+		return line
+	}
+	text, nl, _ := strings.Cut(line, "\n")
+	if !milestone {
+		return s.wrap("\x1b[2m", text) + "\n" + nl
+	}
+	switch {
+	case strings.HasPrefix(text, "=== "), strings.HasPrefix(text, "summary:"):
+		text = s.wrap("\x1b[1m", text) // bold: the shift's section marks
+	case strings.Contains(text, "finished (ERROR"), strings.HasPrefix(text, "stopping:"):
+		text = s.wrap("\x1b[31m", text) // red: the shift lost something here
+	case strings.Contains(text, "finished (ok"),
+		strings.Contains(text, "merged — cleaning up"),
+		strings.Contains(text, "backlog cleared"):
+		text = s.wrap("\x1b[32m", text) // green: forward progress
+	case strings.HasPrefix(text, "transient:"),
+		strings.Contains(text, "needs a human"),
+		strings.HasPrefix(text, "could not "),
+		strings.HasPrefix(text, "no activity for "),
+		strings.HasPrefix(text, "shift log not written"),
+		strings.HasPrefix(text, "run data not recorded"):
+		text = s.wrap("\x1b[33m", text) // yellow: needs an eye, not a stop
+	case strings.HasPrefix(text, "-remote is on"),
+		strings.HasPrefix(text, "-post-summary is on"),
+		strings.HasPrefix(text, "-notify is on"),
+		strings.HasPrefix(text, "recording run data in"),
+		strings.HasPrefix(text, "this shift is "),
+		strings.HasPrefix(text, "logging this shift in full"):
+		text = s.wrap("\x1b[2m", text) // dim: the startup preference recap
+	}
+	return text + "\n" + nl
 }
 
 // lineWriter carries a child process's stderr into the narration stream one

@@ -641,11 +641,18 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 	defer stop()
 
-	// Timestamps become the sinks' job: the shift log is always stamped, and
-	// the terminal keeps the same stamps the default flags used to add.
+	// Timestamps become the sinks' job: the shift log is always stamped, and a
+	// terminal that is not a TTY keeps the same stamps the default flags used
+	// to add, so redirected transcripts look like they always did. A TTY drops
+	// the gutter — the shift log holds every stamp — and gets colour when the
+	// platform and NO_COLOR allow it.
 	log.SetFlags(0)
 	log.SetOutput(milestoneWriter{u: sinks})
 	sinks.verbose = cfg.verbose
+	if isTerminal(os.Stderr) {
+		sinks.stamp = false
+		sinks.style = styleFor(true)
+	}
 	if err := run(ctx, cfg); err != nil {
 		if errors.Is(err, context.Canceled) {
 			// 130 for every shutdown signal, not only SIGINT. Telling them apart
