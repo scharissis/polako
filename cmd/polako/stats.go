@@ -858,7 +858,7 @@ func resumeNote(ds dataset) string {
 		return ""
 	}
 	return fmt.Sprintf("note: %s resumed an earlier session. Costs are summed exactly as each\n"+
-		"      run reported them — see \"resumed sessions\" in the README.", plural(resumed, "run"))
+		"      run reported them — see \"resumed sessions\" in docs/run-data.md.", plural(resumed, "run"))
 }
 
 // --- tables ---

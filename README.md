@@ -1,20 +1,26 @@
 # polako
 
-*Polako* is Croatian for "take it slow". Point it at any GitHub repository and
-it works the issue backlog to zero — one issue at a time, strictly in
-ascending order, unattended, with a human at every gate.
+[![ci](https://img.shields.io/github/actions/workflow/status/scharissis/polako/ci.yml?branch=main&label=ci)](https://github.com/scharissis/polako/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/scharissis/polako?color=orange)](https://github.com/scharissis/polako/releases/latest)
+[![license](https://img.shields.io/github/license/scharissis/polako)](LICENSE)
+[![go](https://img.shields.io/github/go-mod/go-version/scharissis/polako)](go.mod)
+[![claude code plugin](https://img.shields.io/badge/claude%20code-plugin-8A63D2)](#install)
+[![docs](https://img.shields.io/badge/docs-polako-blue)](docs/)
 
-It has two halves:
+**polako works a GitHub issue backlog to zero.** It takes the lowest open issue,
+hands it to Claude Code, waits for you to merge the pull request, and moves on
+to the next one. It runs unattended, one issue at a time. It never merges
+anything itself.
 
-| Half | What it does |
-| --- | --- |
-| **`/implement-issue` skill** | Takes a *single* issue from research → `PLAN.md` → implementation → code review → pull request. Usable on its own, interactively. |
-| **`polako` binary** | Supervises the *whole queue*: `polako work` runs the skill on the lowest open issue, waits for that PR to merge — or parks the issue for a human — then advances. `status` and `stats` are its two read-only reports. Stdlib-only Go, single binary, any platform. |
+*Polako* is Croatian for "take it slow".
 
-The binary never has two issues in flight: it advances only once the issue it is
-working is merged, or parked for a human. Every run therefore branches from a
-default branch that already contains the previous merge, so sequential runs
-cannot conflict with each other.
+There are two halves, and they ship as one release:
+
+- **The `/implement-issue` skill** takes one issue from research to a plan to a
+  pull request. You can use it on its own, in any Claude Code session.
+- **The `polako` binary** supervises the whole queue. It runs the skill on the
+  next issue, watches the pull request, repairs it when CI goes red, and
+  advances when you merge. One stdlib-only Go binary, no dependencies.
 
 ## How it works
 
@@ -36,33 +42,41 @@ wait for merge (-poll)               ← rebases if GitHub reports CONFLICTING,
 close the issue, remove the worktree, advance to the next
 ```
 
-[docs/behaviour.md](docs/behaviour.md) is the long version of that picture: what
-happens when a run crashes, when an issue cannot be finished, when a PR goes
-red, and when polako needs you.
+Only one issue is ever in flight. polako moves on when the issue it is working
+on has merged, or when it has given up on it and left it for you. So every run
+starts from a branch that already contains the previous merge, and two runs
+cannot conflict with each other.
+
+You have two jobs, both on GitHub. Answer a question when a run asks one on an
+issue thread, and merge the pull requests. Neither is on a clock. Nothing else
+needs you.
+
+[docs/behaviour.md](docs/behaviour.md) is the long version: what happens when a
+run crashes, when an issue cannot be finished, when a PR goes red, and when
+polako needs you.
 
 ## Requirements
 
 - [`claude`](https://claude.com/claude-code), authenticated
 - [`gh`](https://cli.github.com), authenticated (`gh auth login`)
 - `git`
-- Go 1.26+ — only to build from source
+- Go 1.26+, only if you build from source
 
-All three must be on `PATH`; `polako` checks at startup rather than
-failing an hour into an unattended run.
-
+polako checks for all three at startup, rather than failing an hour into an
+unattended run.
 
 ## Install
 
-The skill installs as a Claude Code plugin. This repository doubles as its own
-marketplace, so there is no clone step:
+The skill installs as a Claude Code plugin. This repository is its own
+marketplace, so there is nothing to clone:
 
 ```bash
 claude plugin marketplace add scharissis/polako
 claude plugin install polako@scharissis
 ```
 
-Restart Claude Code, and `/polako:implement-issue 48` is available. Claude
-prefixes plugin skills with the plugin name, which is why the command is not
+Restart Claude Code and `/polako:implement-issue 48` is available. Claude
+prefixes plugin skills with the plugin name, so the command is not
 `/implement-issue` on this path.
 
 Then the binary:
@@ -71,92 +85,178 @@ Then the binary:
 go install github.com/scharissis/polako/cmd/polako@latest
 ```
 
-Prebuilt binaries for Linux, macOS and Windows are attached to each tagged
-release, and are the easiest option on a machine without Go.
+Prebuilt binaries for Linux, macOS and Windows are attached to every release,
+which is easier on a machine without Go.
 
-The two halves are one release and are meant to move together. Installing the
-skill by hand, updating, pinning to a version, and setting a project up for
-your whole team are all in [docs/install.md](docs/install.md).
+Both halves come from the same release and are meant to move together.
+Installing the skill by hand, updating, pinning a version and setting a project
+up for your team are all in [docs/install.md](docs/install.md).
 
-## Usage
+## Try it
 
-The binary takes a verb — `work`, `status` or `stats` — and a bare `polako`
-prints that table rather than starting anything: an unattended agent loop
-should take a word that says so.
-
-Work the whole backlog of the repository in the current directory:
+Start by looking. `-dry-run` resolves the next issue and prints the command it
+would run, and does nothing else:
 
 ```bash
-polako work
+polako work -dir ../my-project -dry-run
 ```
 
-Drive a repository somewhere else, and stop after the first issue is done with
-— merged, or parked for a human. A good way to try it out:
+Then work a single issue and stop:
 
 ```bash
 polako work -dir ../my-project -once
 ```
 
-Only work issues carrying a label, and check GitHub more often:
-
-```bash
-polako work -label ready-for-claude -poll 90s
-```
-
-Leave a couple of issues alone this time round:
-
-```bash
-polako work -skip 12,17
-```
-
-Work strictly lowest-first, waiting on any issue that stops to ask you
-something:
-
-```bash
-polako work -strict-order
-```
-
-See what it would do to an unfamiliar repository, without doing any of it:
-
-```bash
-polako work -dir ../someone-elses-project -dry-run
-```
-
-Be told when it needs you, instead of finding out in the morning:
+When you trust it, let it work the whole backlog and tell you when it needs
+you:
 
 ```bash
 polako work -notify ~/bin/tell-me
 ```
 
-Ask where the backlog stands, from anywhere — including about a shift running
-on another machine:
+You can ask where things stand at any time, from any machine, including about a
+shift running somewhere else:
 
 ```bash
 polako status -repo scharissis/polako
 ```
 
-Ask what all of that cost, once some runs have been recorded:
+```
+scharissis/polako
+  ready         3 issues — #14, #19, #23
+  awaiting you  1 issue — #9 (quiet 26h)
+  parked        1 issue — #5, labelled needs-human
+  proposed      2 issues — #27, #28, labelled proposed
+  containers    1 issue — #12, tracking sub-issues rather than work
+  next          #14 — its branch already has PR #61, so it would wait on that rather than run the skill again
 
-```bash
-polako stats
+open prs on issue branches
+  pr   branch    issue  mergeable  checks              review                       url
+  #61  issue-14  #14    mergeable  failing (test-mac)  clear                        https://github.com/scharissis/polako/pull/61
+  #58  issue-19  #19    mergeable  passing             answered, awaiting re-review  https://github.com/scharissis/polako/pull/58
+
+needs you: reply on #9; review and merge PR #58; decide what to do about #5 (drop needs-human to requeue); curate #27, #28 (drop proposed to queue them)
 ```
 
+A shift ends by telling you what it did:
+
+```
+summary: 3 issues merged, 1 issue parked, $35.00 spent, 6h12m of wall clock
+  merged  #14 ($9.80), #15 ($12.40), #17 ($8.60)
+  parked  #16 ($4.20) — the run completed but produced no PR and no questions
+```
+
+## The rules it follows
+
+- **One issue at a time.** Never two. That is what makes the runs unable to
+  conflict.
+- **Nothing merges itself.** polako opens, updates and repairs pull requests. It
+  never merges one, and it never commits to your default branch.
+- **All the state is in GitHub** — issues, labels, comments, branches, PRs. Kill
+  polako at any point and start it again later. It works out where things stand
+  by asking GitHub, not by reading anything it saved.
+- **An issue it cannot finish is parked, not retried forever.** It gets a
+  `needs-human` label and a comment saying what happened, and the shift carries
+  on with the rest of the backlog.
+- **Your checkout is never written to.** polako fast-forwards your default
+  branch so a review has the right base, and refuses rather than rebase, reset
+  or commit.
+- **Issue text is data, not instructions.** On a repo that takes issues from
+  outside your team, that text is written by strangers, and the skill is told to
+  read it as a description of a change rather than as orders.
+
+## What it costs
+
+Real money, and more than you might guess. Every run records what it spent, so
+these are measured rather than estimated — from one 33-hour shift on a small Go
+project, eight issues finished:
+
+| | |
+| --- | --- |
+| Issues that merged | 7 of 8 |
+| Cost per issue | $10.38 mean, $11.31 median |
+| Runs per issue | 1.4 mean |
+| Size of the change | +505 / −40 across 5 files, median |
+| Time from PR opened to merged | 10m median, because someone was watching |
+
+Your numbers will differ, and the ones that move them most are how big your
+issues are and how often runs crash. A crashed run is resumed, and the resume
+pays to read the context again, so a rough night costs noticeably more per
+merged PR than a smooth one.
+
+Dollars are the Claude CLI's API-equivalent pricing. On an API key that is real
+money; on a subscription plan it is notional. Run `polako stats` for your own
+figures, and set `-max-cost`, `-max-issue-time` or `-max-session-cost` if you
+want a ceiling. [docs/run-data.md](docs/run-data.md) has the whole report.
+
+## What it will not do
+
+- **It will not merge for you**, and there is no flag that changes that.
+- **It is not a sandbox.** The tool allowlist narrows what a run can do, but
+  build commands run whatever your repository's scripts contain. Point `-dir` at
+  repositories you would run `make test` in yourself.
+- **It is not finished.** This is pre-1.0. Flags and defaults still change, and
+  the release notes say when.
+- **It cannot tell a good issue from a bad one.** A vague issue produces either
+  a question on the thread or a park, and both cost money to find out.
+- **The skill's eval suite has not had a green run yet.** Changes to the skill
+  are still verified by driving a real issue by hand. See
+  [evals/README.md](evals/README.md).
 
 ## Flags
 
-`polako work` takes about twenty flags, and `status` and `stats` take their own
-smaller sets. They are all in [docs/reference.md](docs/reference.md), along with
-`-dry-run`, `-notify`, `-remote` and the `POLAKO_*` environment defaults.
+`polako work` takes around two dozen flags, and `status` and `stats` have their own
+smaller sets. They are all in [docs/reference.md](docs/reference.md), together
+with `-dry-run`, `-notify`, `-remote` and the `POLAKO_*` environment defaults.
+Any flag can take its default from the environment, so a preference you always
+want can live in your shell profile.
 
 ## Security
 
 An unattended run is a Claude session whose only input is issue and comment
-text, which on a repository that accepts outside issues is written by anyone.
-Two things bound it: the tool allowlist, enforced by Claude Code rather than by
-the model's good behaviour, and `-label`, which means a maintainer has to opt
-each issue in. On a public repository the second one is required, and `polako
-work` refuses to start without it. The reasoning, and what those bounds do not
-cover, is in [docs/security.md](docs/security.md).
+text. On a repository that accepts issues from outside your team, anyone writes
+that input. Two things bound it. The tool allowlist is enforced by Claude Code
+rather than by the model behaving well, and `-label` means a maintainer has to
+opt each issue in before polako will touch it. On a public repository that
+label gate is required, and `polako work` refuses to start without one.
+
+Nothing you run leaves your machine unless you ask. Two exceptions are named
+outright: `-remote`, on by default, registers each run with Remote Control so
+you can watch it from claude.ai or the app under your own account, and
+`-remote=false` turns it off; `-post-summary`, off by default, comments one line
+of numbers on your own merged PR. [docs/security.md](docs/security.md) has the
+reasoning and the limits.
+
+## Questions
+
+**Can I use the skill without the binary?** Yes. Run
+`/polako:implement-issue 48` in Claude Code and it takes that one issue to a PR.
+The binary exists to run it over a whole backlog while you are asleep.
+
+**What happens if it breaks something at 3am?** It cannot merge, so nothing it
+does reaches your default branch without you. An issue it cannot finish is
+parked and the shift carries on. `-notify` runs a command of yours when that
+happens, so you can be told rather than find out in the morning.
+
+**Does it work with my language?** Yes — `-dir` points anywhere. The one thing
+worth tuning per project is the tool allowlist, so a build command it needs
+never stops on a permission prompt.
+
+**How is this different from a hosted coding agent?** Those run on someone
+else's machine and keep their own state. polako runs on yours, under the Claude
+Code login you already have, and keeps every piece of orchestration state in
+GitHub itself. There is no database and no dashboard: kill it whenever, restart
+whenever, and read the whole picture off the issue tracker.
+
+**Can I run it on a public repository?** Yes, with `-label`. Anyone can open an
+issue on a public repo, and open issues are what a shift works, so polako
+refuses to start there without a maintainer-applied label gate — or an explicit
+`-ungated` if you mean it.
+
+**Why one issue at a time?** Because that is the whole no-conflict guarantee.
+Every run branches from a default branch that already has the last merge in it.
+Two agents working two issues at once would have to resolve each other's
+conflicts, and neither of them can merge.
 
 ## Documentation
 
