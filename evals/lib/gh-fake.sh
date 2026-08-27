@@ -7,9 +7,12 @@
 # graders fixed paths to read instead of having to work out where the run put
 # its worktree.
 #
-# Only the subcommands the skill's allowlist grants are answered. Anything else
+# Only the subcommands a shipped skill is permitted are answered. Anything else
 # exits non-zero, because a case passing on a call the real run would never be
-# permitted to make is a case that proves nothing.
+# permitted to make is a case that proves nothing. For implement-issue that set
+# is defaultTools in main.go; the plan-backlog reads and the one `issue create`
+# it is allowed are not in defaultTools and deliberately so — there is no plan
+# verb yet, and the allowlist that grants them ships with it.
 set -euo pipefail
 
 record=$1
@@ -60,6 +63,45 @@ case "$subcommand" in
   cat "$case_dir/issue.json"
   ;;
 
+# The backlog a plan run reads before it proposes anything. Open and closed are
+# separate fixtures because dedupe treats them differently — an open issue means
+# "already proposed", a closed one means "already shipped" — and a case that
+# served the same list for both could not tell the two apart. Either may be
+# absent: a greenfield repository has no backlog, and that is a valid state.
+"issue list")
+  state=$(value_of --state "$@" || true)
+  if [ "$state" = closed ]; then
+    fixture=$case_dir/issues-closed.json
+  else
+    fixture=$case_dir/issues.json
+  fi
+  if [ -f "$fixture" ]; then cat "$fixture"; else echo "[]"; fi
+  ;;
+"search issues")
+  echo "[]"
+  ;;
+
+# The one write a plan run is allowed. Recorded rather than performed, like the
+# rest — but this one has to answer as well as record: the run files the epic
+# first and passes the number it gets back as `--parent` for every child, so a
+# stand-in that printed a fixed number would make the hierarchy ungradeable.
+# Numbers start above any fixture's so a created issue is never confused for a
+# seeded one.
+"issue create")
+  mkdir -p "$record/created"
+  number=$((100 + $(ls "$record/created" | wc -l | tr -d ' ')))
+  {
+    printf 'number: %s\n' "$number"
+    printf 'argv: %s\n' "$*"
+    printf 'title: %s\n' "$(value_of --title "$@" || true)"
+    printf 'labels: %s\n' "$(value_of --label "$@" || true)"
+    printf 'parent: %s\n' "$(value_of --parent "$@" || true)"
+    printf -- '---\n'
+    body_of "$@"
+  } > "$record/created/$number.md"
+  echo "https://github.com/eval/scratch/issues/$number"
+  ;;
+
 "issue comment")
   mkdir -p "$record/comments"
   body_of "$@" > "$record/comments/$(ls "$record/comments" | wc -l | tr -d ' ').md"
@@ -100,7 +142,8 @@ case "$subcommand" in
 
 *)
   echo "eval stand-in gh: unsupported subcommand '$subcommand'." >&2
-  echo "The unattended allowlist would not grant it either — see defaultTools in main.go." >&2
+  echo "No shipped skill is permitted it either — see defaultTools in main.go, and the" >&2
+  echo "write surface each SKILL.md names." >&2
   exit 1
   ;;
 esac

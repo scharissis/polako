@@ -21,11 +21,12 @@ claude plugin install polako@scharissis
 
 `polako` is the plugin, `scharissis` is the marketplace it came from —
 the name declared in [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json),
-not the GitHub username, though here they happen to match. The plugin ships one
-component, the `implement-issue` skill, and costs ~40 tokens of always-on
-context; the skill body is only loaded when it fires.
+not the GitHub username, though here they happen to match. The plugin ships two
+skills — `implement-issue` and `plan-backlog` — and costs a few dozen tokens of
+always-on context; a skill body is only loaded when that skill fires.
 
-Restart Claude Code, and `/polako:implement-issue 48` is available.
+Restart Claude Code, and `/polako:implement-issue 48` and
+`/polako:plan-backlog docs/VISION.md` are available.
 
 Note the namespace. Claude prefixes plugin skills with the plugin name, so the
 command is *not* `/implement-issue` on this path. The supervisor's `-skill`
@@ -56,19 +57,20 @@ claude plugin uninstall polako && claude plugin marketplace remove scharissis
 
 ## The skill, by hand
 
-If you would rather not involve the plugin system, copy the skill directory in.
-It behaves identically; it just will not update itself.
+If you would rather not involve the plugin system, copy the skill directories
+in. They behave identically; they just will not update themselves. Take both, or
+only `implement-issue` if you do not want the planning half.
 
 ```bash
-cp -r skills/implement-issue ~/.claude/skills/
+cp -r skills/implement-issue skills/plan-backlog ~/.claude/skills/
 ```
 
 ```powershell
-Copy-Item -Recurse skills\implement-issue $HOME\.claude\skills\
+Copy-Item -Recurse skills\implement-issue,skills\plan-backlog $HOME\.claude\skills\
 ```
 
-A skill installed this way is invoked bare, with no plugin prefix, so the
-supervisor needs telling:
+A skill installed this way is invoked bare, with no plugin prefix — so
+`/plan-backlog`, not `/polako:plan-backlog`, and the supervisor needs telling:
 
 ```bash
 polako work -skill implement-issue
@@ -124,11 +126,37 @@ starts, with a random delay of up to ten minutes, and the new version loads on
 covered; that is still yours to run.
 
 To hold a machine at one release, pin the marketplace itself and it stops
-moving:
+moving — but mind *what* you pin it to. **A release tag is the wrong target:**
+`polako--vX.Y.Z` is pushed on the release PR's merge commit, and the `ref`
+inside `marketplace.json` only moves when the separate publish PR merges after
+it ([Publishing and versioning](releasing.md#cutting-a-release) says why the two
+are apart). So the `marketplace.json` frozen inside a release tag still declares
+the *previous* release, and pinning at `polako--v0.9.0` holds the plugin at
+0.8.0.
+
+Pin at the publish commit instead — the `chore: publish X.Y.Z` commit on `main`
+is the first one whose `marketplace.json` names X.Y.Z:
 
 ```bash
-claude plugin marketplace add scharissis/polako#polako--v0.4.0
+version=0.9.0
+sha=$(gh api "repos/scharissis/polako/commits?path=.claude-plugin/marketplace.json&per_page=100" \
+  --jq "map(select(.commit.message | startswith(\"chore: publish $version\")))[0].sha // empty")
+[ -n "$sha" ] && claude plugin marketplace add "scharissis/polako#$sha"
 ```
+
+Both halves of that are load-bearing. Matching the commit-message prefix on the
+file's own history picks the publish commit and nothing else — a free-text
+search also matches the `Revert "chore: publish X.Y.Z"` that a
+[rollback](releasing.md#cutting-a-release) leaves behind, whose
+`marketplace.json` names the release *before* X.Y.Z. And the `[ -n "$sha" ]`
+guard is what stops an empty result — wrong version, unauthenticated `gh` —
+from pinning the marketplace at nothing and quietly leaving it tracking the
+default branch, which is the opposite of holding still.
+
+The `publish-X.Y.Z` branch has the same content, but it may be deleted once the
+PR merges, so the SHA is the handle that keeps working. To stop holding, remove
+the marketplace and add it back bare — a pinned marketplace does not move when
+the next release ships, and says nothing about it.
 
 
 ## Using it on another project
