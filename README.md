@@ -932,6 +932,7 @@ human latency
 | `-shift` | *(every shift)* | Only count records from one shift — its id, or `last` for the newest shift in scope. |
 | `-by` | *(none)* | Add a breakdown table: `issue`, `model`, `tag` or `shift`. |
 | `-runs` | *(off)* | Add the run log: one row per run, with the session id that reopens it — see [Reopening a past run](#reopening-a-past-run--runs). |
+| `-html` | *(off)* | Also write the report to this path, as one self-contained HTML file — see [Keeping a copy](#keeping-a-copy--html). |
 
 A window can keep an issue's terminal record while clipping away the runs that
 produced it. Those issues still count toward the merge rate, but they cannot be
@@ -1063,6 +1064,42 @@ issue #48: `claude --resume 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9` reopens what t
 
 It stays local, like every other number here: the id goes to the terminal and
 to the record file, never onto the issue thread the park comment goes to.
+
+### Keeping a copy: `-html`
+
+The text report answers one question per invocation, sized to a terminal.
+`-html` writes the same report as one HTML file you can keep, send to a
+teammate, or open next month without still having the records that produced it:
+
+```bash
+polako stats -html ~/polako-report.html
+```
+
+The text report still prints — `-html` adds an output, it does not swap one out
+— and the last line names the file it wrote. The page holds everything the text
+report does, laid out rather than listed: the headline numbers as cards, spend
+over time as a chart, how the issues and runs ended as proportion bars, then
+the same summary sections and the `by shift` and `by issue` tables. Issue
+numbers link out to GitHub. `-repo`, `-since` and `-shift` narrow it exactly as
+they narrow the text; `-by model` or `-by tag` adds that table too, and `-runs`
+adds the run log.
+
+**Self-contained means self-contained.** No script, no external stylesheet, no
+webfont, no image — the chart is inline SVG, and the whole file is markup and
+styles in one document. It renders with the network cable pulled, and opening
+it tells nobody that you did. A test asserts that against the rendered bytes,
+because the file holds your private numbers and "it happens to work offline" is
+not the same promise. The links to github.com are the one thing that names a
+remote host, and a link is fetched when it is clicked, not when the page loads.
+
+The file is written `0600`, like the records themselves — it is those same
+numbers laid out, and the same rule applies to who on the machine can read it.
+It contains no issue, comment or PR text, for the same reason [the records
+don't](#run-data--cost-tracking): numbers, identifiers and your own labels, so
+it is safe to hand to a teammate without re-reading it first.
+
+An empty window still gets a file, saying so. A nightly `stats -html` that
+skipped the write would leave yesterday's numbers on disk looking like today's.
 
 ### Comparing configurations
 
@@ -1216,8 +1253,10 @@ Two things, and only these two:
 | [`-post-summary`](#putting-it-on-the-pr--post-summary) | One line of run numbers, as a comment on your own merged PR — readable by exactly the people who can already see that PR. | Off. |
 
 Everything else stays local. Run data is written to your disk and read by
-nothing but `polako stats`; `-notify` runs a command of yours on your own
-machine; and the skill half, being a prompt, collects nothing at all.
+nothing but `polako stats`, whose [`-html`](#keeping-a-copy--html) writes those
+numbers to a second local file and fetches nothing when you open it; `-notify`
+runs a command of yours on your own machine; and the skill half, being a
+prompt, collects nothing at all.
 
 `-remote` is the one of the two that is on by default and the one that carries
 *text* rather than numbers, so it is worth being explicit about: a registered
