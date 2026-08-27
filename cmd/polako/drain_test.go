@@ -46,6 +46,12 @@ type ghState struct {
 	// the two-word call so a test can be flaky about exactly one lookup.
 	FailReads map[string]int `json:"fail_reads"`
 
+	// OldGh is a gh from before sub-issues, which rejects the whole --json set
+	// rather than the one field it does not know — and does so before it asks
+	// GitHub anything, so the listing that follows the rejection is the first
+	// one the repository sees.
+	OldGh bool `json:"old_gh"`
+
 	// ClaudeRuns counts the invocations a fake CLI has made, for the modes whose
 	// answer depends on how far the supervisor has got. See countClaudeRun.
 	ClaudeRuns int `json:"claude_runs"`
@@ -54,6 +60,9 @@ type ghState struct {
 type fakeIssue struct {
 	Open   bool     `json:"open"`
 	Labels []string `json:"labels"`
+	// SubIssues is how many children the issue has, which is what makes it a
+	// container. Only the total is modelled: it is all the queue reads.
+	SubIssues int `json:"sub_issues"`
 	// Comments is how many comments the thread has; they carry ids 1..Comments
 	// in the order they were written, the way GitHub hands them out. Bots holds
 	// the ids of the ones a GitHub App wrote rather than a person.
@@ -225,8 +234,7 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 		return fmt.Sprintf(`{"nameWithOwner":%q,"visibility":%q}`, st.Repo, vis), false, 0
 
 	case "issue list":
-		out, changed := listIssues(st, flagVal("--label"))
-		return out, changed, 0
+		return listIssues(st, flagVal("--label"), flagVal("--json"))
 
 	case "issue view":
 		is := issue()
@@ -421,11 +429,22 @@ func commitsJSON(committedAt string) string {
 	return fmt.Sprintf(`[{"committedDate":%q}]`, committedAt)
 }
 
-// listIssues renders `gh issue list --json number,labels` in ascending order,
-// which is the order the real thing is only relied on not to guarantee. It also
-// ticks the countdowns that stand in for a human acting on the repository
-// between one listing and the next, so it reports whether it changed anything.
-func listIssues(st *ghState, label string) (out string, changed bool) {
+// listIssues renders `gh issue list --json ...` in ascending order, which is
+// the order the real thing is only relied on not to guarantee. It also ticks
+// the countdowns that stand in for a human acting on the repository between one
+// listing and the next, so it reports whether it changed anything.
+//
+// fields is what the caller asked for, because two things turn on it: an old gh
+// refuses the call outright rather than the field, and a payload only carries
+// the sub-issue rollup when the rollup was asked for.
+func listIssues(st *ghState, label, fields string) (out string, changed bool, code int) {
+	subIssues := strings.Contains(fields, "subIssuesSummary")
+	if subIssues && st.OldGh {
+		// Refused before any listing happens, so no countdown ticks: what gh
+		// checks here is its own field table, not the repository.
+		fmt.Fprintf(os.Stderr, "unknown JSON field: %q\nAvailable fields:\n  labels\n  number\n", "subIssuesSummary")
+		return "", false, 1
+	}
 	numbers := make([]int, 0, len(st.Issues))
 	for k := range st.Issues {
 		n, err := strconv.Atoi(k)
@@ -453,9 +472,16 @@ func listIssues(st *ghState, label string) (out string, changed bool) {
 		for _, l := range is.Labels {
 			labels = append(labels, fmt.Sprintf(`{"name":%q}`, l))
 		}
-		rows = append(rows, fmt.Sprintf(`{"number":%d,"labels":[%s]}`, n, strings.Join(labels, ",")))
+		row := fmt.Sprintf(`{"number":%d,"labels":[%s]`, n, strings.Join(labels, ","))
+		if subIssues {
+			// The whole rollup rather than the one number the queue reads, so
+			// the payload is the shape gh really hands back.
+			row += fmt.Sprintf(`,"subIssuesSummary":{"total":%d,"completed":0,"percentCompleted":0}`,
+				is.SubIssues)
+		}
+		rows = append(rows, row+"}")
 	}
-	return "[" + strings.Join(rows, ",") + "]", changed
+	return "[" + strings.Join(rows, ",") + "]", changed, 0
 }
 
 // --- the drain loop, end to end ---
@@ -488,6 +514,10 @@ func drainConfig(t *testing.T, mode string, st *ghState) (config, string) {
 		stall:          10 * time.Second,
 		ghRetryWait:    time.Millisecond,
 		resumeCeiling:  defaultResumeCeiling,
+		// parseFlags gives every shift one of these, and the drain lists the
+		// backlog once per issue: without it a test would watch the gate say the
+		// same two things on every pass round the loop.
+		queue: new(queueMemo),
 	}, path
 }
 
@@ -1508,6 +1538,97 @@ func TestDrainHonoursOnceAfterAPark(t *testing.T) {
 	}
 }
 
+// The gate, end to end: a shift leaves a proposal and a container exactly as it
+// found them, works what is left, and says on its way past what it is ignoring
+// — once, not once per issue, so the line is a startup notice rather than noise
+// down the length of a long shift.
+func TestDrainWorksNeitherProposalsNorContainers(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true, Labels: []string{proposedLabel}},
+			"2": {Open: true, SubIssues: 2},
+			// Its PR is already merged, so the shift advances past it without a
+			// claude run and then finds nothing else workable.
+			"3": {Open: true},
+		},
+		PRs: map[string]*fakePR{"issue-3": {Number: 9, State: "MERGED"}},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	// Untouched means untouched: still open, no park, no comment on the thread,
+	// and the labels they were filed with.
+	for n, labels := range map[string][]string{"1": {proposedLabel}, "2": nil} {
+		is := st.Issues[n]
+		if !is.Open || is.Comments != 0 || !slices.Equal(is.Labels, labels) {
+			t.Errorf("issue %s = %+v, want it open and unlabelled beyond %v", n, is, labels)
+		}
+	}
+	if st.Issues["3"].Open {
+		t.Error("issue 3 should have been closed once its merged PR was seen")
+	}
+	out := buf.String()
+	want := "ignoring 1 proposed issue(s) awaiting curation — remove the proposed label to queue them"
+	if got := strings.Count(out, want); got != 1 {
+		t.Errorf("the ignored proposals should be named exactly once, got %d\n%s", got, out)
+	}
+	if !strings.Contains(out, "backlog cleared") {
+		t.Errorf("a backlog of nothing but proposals and containers is cleared\ngot:\n%s", out)
+	}
+}
+
+// A gh from before sub-issues rejects the whole --json set rather than the one
+// field it does not know, so the listing asks again without it. Containers are
+// workable on such a host — that is the price, and the warning is what makes it
+// visible — but the curation gate is labels alone and does not depend on it.
+func TestOldGhListsWithoutTheSubIssueRollup(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		OldGh: true,
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true},
+			"2": {Open: true, SubIssues: 2},
+			"3": {Open: true, Labels: []string{proposedLabel}},
+		},
+	})
+	calls := filepath.Join(t.TempDir(), "gh-calls.log")
+	t.Setenv(fakeGhLogEnv, calls)
+
+	// Twice, because both the fallback and the warning have to be paid for once
+	// a shift rather than once per issue — and the drain lists once per issue.
+	for range 2 {
+		q, err := openQueues(context.Background(), cfg)
+		if err != nil {
+			t.Fatalf("an old gh must still produce a queue: %v", err)
+		}
+		if want := []int{1, 2}; !slices.Equal(q.ready, want) {
+			t.Errorf("ready = %v, want %v — a container it cannot see is ordinary work", q.ready, want)
+		}
+		if want := []int{3}; !slices.Equal(q.proposed, want) {
+			t.Errorf("proposed = %v, want %v — the gate is labels, and labels every gh has", q.proposed, want)
+		}
+	}
+
+	if got := strings.Count(buf.String(), "gh too old to see sub-issues"); got != 1 {
+		t.Errorf("the warning should come once a shift, got %d\n%s", got, buf.String())
+	}
+	argv, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatalf("reading the gh call log: %v", err)
+	}
+	if got := strings.Count(string(argv), subIssuesField); got != 1 {
+		t.Errorf("the rollup should be asked for once and then given up on, asked %d times:\n%s", got, argv)
+	}
+	if got := strings.Count(string(argv), "issue list"); got != 3 {
+		t.Errorf("issue list calls = %d, want 3: the rejected one, its fallback, "+
+			"and one listing that no longer asks\n%s", got, argv)
+	}
+}
+
 // --- the pieces, on their own ---
 
 func TestSelectableIssuesDropsParkedOnes(t *testing.T) {
@@ -1556,6 +1677,63 @@ func TestSelectableIssuesSeparatesBlockedOnes(t *testing.T) {
 	}
 	if want := []int{7}; !slices.Equal(q.parked, want) {
 		t.Errorf("parked = %v, want %v", q.parked, want)
+	}
+}
+
+// The curation gate: an issue a machine proposed is nobody's to work until a
+// human takes the label off, so it is in neither queue a drain reads.
+func TestSelectableIssuesDropsProposals(t *testing.T) {
+	raw := []byte(`[{"number":4,"labels":[{"name":"Proposed"}]},
+		{"number":5,"labels":[{"name":"bug"}]},
+		{"number":6,"labels":[{"name":"proposed"},{"name":"awaiting-answer"}]},
+		{"number":7,"labels":[{"name":"proposed"},{"name":"needs-human"}]}]`)
+
+	q, err := selectableIssues(raw)
+	if err != nil {
+		t.Fatalf("selectableIssues: %v", err)
+	}
+	if want := []int{5}; !slices.Equal(q.ready, want) {
+		t.Errorf("ready = %v, want %v", q.ready, want)
+	}
+	if len(q.blocked) != 0 {
+		t.Errorf("blocked = %v, want a proposal to be out of that queue too", q.blocked)
+	}
+	// 4 proves the match ignores case, the way GitHub treats label names. 7 is
+	// parked as well as proposed, and parked wins: it is a decision a human has
+	// already made, and counting it as a proposal would have the startup line
+	// promise that removing one label would queue it.
+	if want := []int{4, 6}; !slices.Equal(q.proposed, want) {
+		t.Errorf("proposed = %v, want %v", q.proposed, want)
+	}
+	if want := []int{7}; !slices.Equal(q.parked, want) {
+		t.Errorf("parked = %v, want %v", q.parked, want)
+	}
+}
+
+// An issue with sub-issues is a tracking container rather than a work item, and
+// what makes it one is its shape rather than anything written on it — which is
+// what also protects a parent somebody made by hand.
+func TestSelectableIssuesDropsContainers(t *testing.T) {
+	raw := []byte(`[{"number":4,"subIssuesSummary":{"total":3,"completed":1}},
+		{"number":5,"labels":[{"name":"bug"}],"subIssuesSummary":{"total":1}},
+		{"number":6,"labels":[{"name":"needs-human"}],"subIssuesSummary":{"total":2}},
+		{"number":7,"labels":[{"name":"proposed"}],"subIssuesSummary":{"total":2}},
+		{"number":8,"labels":[],"subIssuesSummary":{"total":0}},
+		{"number":9}]`)
+
+	q, err := selectableIssues(raw)
+	if err != nil {
+		t.Fatalf("selectableIssues: %v", err)
+	}
+	// 8 and 9 are the controls: a rollup that says zero and a payload with no
+	// rollup at all are both ordinary work.
+	if want := []int{8, 9}; !slices.Equal(q.ready, want) {
+		t.Errorf("ready = %v, want %v", q.ready, want)
+	}
+	if len(q.blocked)+len(q.parked)+len(q.proposed) != 0 {
+		t.Errorf("blocked/parked/proposed = %v/%v/%v, want a container in no queue at all: "+
+			"it is not held back by anything a human could release",
+			q.blocked, q.parked, q.proposed)
 	}
 }
 

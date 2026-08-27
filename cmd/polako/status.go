@@ -121,6 +121,9 @@ func statusConfig(ctx context.Context, opt statusOptions) (config, error) {
 		label:        opt.label,
 		branchPrefix: opt.branchPrefix,
 		strictOrder:  opt.strictOrder,
+		// The same memo a shift carries, so a snapshot that ever grows a second
+		// listing pays for an old gh once rather than once per call.
+		queue: new(queueMemo),
 	}
 	if _, err := exec.LookPath(cfg.ghBin); err != nil {
 		return cfg, fmt.Errorf("%q not found on PATH (%w) — status reads GitHub through it", cfg.ghBin, err)
@@ -192,19 +195,14 @@ type statusPR struct {
 func readStatus(ctx context.Context, cfg config, now time.Time) (statusSnapshot, error) {
 	snap := statusSnapshot{quiet: map[int]time.Duration{}}
 
-	args := []string{"issue", "list", "--state", "open", "--limit", "200", "--json", "number,labels"}
-	if cfg.label != "" {
-		args = append(args, "--label", cfg.label)
-	}
-	raw, err := retryRead(ctx, cfg, "listing open issues", func() ([]byte, error) {
-		return gh(ctx, cfg, args...)
-	})
+	// The drain's own listing, exclusions and all: what `status` says a drain
+	// would work has to be derived the way the drain derives it, or the two
+	// disagree the moment one of them learns a new exclusion.
+	queues, err := openQueues(ctx, cfg)
 	if err != nil {
 		return snap, err
 	}
-	if snap.queues, err = selectableIssues(raw); err != nil {
-		return snap, err
-	}
+	snap.queues = queues
 	// The drain's own rule, in dryRun's words: the lowest ready issue, and with
 	// none, the lowest issue waiting on an answer. -strict-order is the one
 	// thing that changes it — openIssues folds the two queues into one there, so
@@ -325,7 +323,11 @@ func branchPRs(raw []byte, prefix string, q issueQueues) ([]statusPR, error) {
 	if err := json.Unmarshal(raw, &listed); err != nil {
 		return nil, fmt.Errorf("parsing PR list: %w", err)
 	}
-	open := append(append(slices.Clone(q.ready), q.blocked...), q.parked...)
+	// Every open issue, not only the workable ones: a PR opened before its issue
+	// was labelled `proposed` or grew sub-issues is still a PR waiting to be
+	// merged, and dropping it here would take the one line telling the operator
+	// so out of the report.
+	open := q.open()
 	var out []statusPR
 	for _, p := range listed {
 		issue, ok := issueForBranch(p.HeadRefName, prefix)
@@ -396,7 +398,7 @@ func statusScope(cfg config) string {
 
 func queuePairs(snap statusSnapshot) [][2]string {
 	q := snap.queues
-	if len(q.ready)+len(q.blocked)+len(q.parked) == 0 {
+	if len(q.open()) == 0 {
 		return [][2]string{{"queue", "nothing open — a shift starting now would find the backlog cleared"}}
 	}
 	pairs := [][2]string{{"ready", queueLine(q.ready)}}
@@ -416,6 +418,19 @@ func queuePairs(snap statusSnapshot) [][2]string {
 		pairs = append(pairs, [2]string{"parked",
 			fmt.Sprintf("%s — %s, labelled %s", plural(len(q.parked), "issue"),
 				issueRefs(q.parked), needsHumanLabel)})
+	}
+	// The curation gate and the containers, said here rather than left to be
+	// inferred from an issue's absence: a batch of proposals nobody has looked at
+	// is exactly the thing a snapshot exists to surface.
+	if len(q.proposed) > 0 {
+		pairs = append(pairs, [2]string{"proposed",
+			fmt.Sprintf("%s — %s, labelled %s", plural(len(q.proposed), "issue"),
+				issueRefs(q.proposed), proposedLabel)})
+	}
+	if len(q.containers) > 0 {
+		pairs = append(pairs, [2]string{"containers",
+			fmt.Sprintf("%s — %s, tracking sub-issues rather than work",
+				plural(len(q.containers), "issue"), issueRefs(q.containers))})
 	}
 	// Last, because it is the answer the rest of the table is context for.
 	pairs = append(pairs, [2]string{"next", nextLine(snap)})
@@ -441,7 +456,23 @@ func queueLine(ready []int) string {
 // supervised, not re-run.
 func nextLine(snap statusSnapshot) string {
 	if snap.next == 0 {
-		return "nothing — every open issue is parked"
+		// Which exclusion is holding the backlog matters, because each one is
+		// released differently — and naming the wrong one sends an operator to
+		// take off a label the issues do not carry.
+		var held []string
+		if len(snap.queues.parked) > 0 {
+			held = append(held, "parked")
+		}
+		if len(snap.queues.proposed) > 0 {
+			held = append(held, "awaiting curation")
+		}
+		if len(snap.queues.containers) > 0 {
+			held = append(held, "a tracking container")
+		}
+		if len(held) == 0 {
+			return "nothing — no open issue at all"
+		}
+		return "nothing — every open issue is " + strings.Join(held, " or ")
 	}
 	if pr := findPR(snap, snap.next); pr != nil {
 		return fmt.Sprintf("#%d — its branch already has PR #%d, so it would wait on that rather "+
@@ -565,6 +596,12 @@ func needsYou(snap statusSnapshot) string {
 	if len(snap.queues.parked) > 0 {
 		parts = append(parts, fmt.Sprintf("decide what to do about %s (drop %s to requeue)",
 			issueRefs(snap.queues.parked), needsHumanLabel))
+	}
+	// Curation is a person's job by construction — nothing else takes the label
+	// off — so a backlog of proposals is one of the things only a person moves.
+	if len(snap.queues.proposed) > 0 {
+		parts = append(parts, fmt.Sprintf("curate %s (drop %s to queue them)",
+			issueRefs(snap.queues.proposed), proposedLabel))
 	}
 	if len(parts) == 0 {
 		return ""
