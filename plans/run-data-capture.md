@@ -396,19 +396,23 @@ any A/B aids.
 
    `num_turns` and every field of `usage` **fell** across the resume. A
    session-cumulative counter cannot go down, which settles those outright.
-   Cost rides the same event: `total_cost_usd` equals the sum of `modelUsage`'s
-   `costUSD` in both records, and the resumed run's `modelUsage` map holds a
-   single key that is not even the one run 0 was billed under — a cumulative
-   map would still carry `claude-opus-5[1m]` and its 6.3M cache reads. Its
-   totals also land ~12% below the naive run0+run1 sum, which a running session
-   total could not.
+   Cost is the one field that rose, so its own magnitude settles nothing —
+   note that "below the naive run0+run1 sum" is no argument either, since a
+   cumulative total is *by construction* below a sum that counts run 0 twice.
+   What settles it is where the number comes from: `total_cost_usd` equals the
+   sum of `modelUsage`'s `costUSD` in both records, and the resumed run's
+   `modelUsage` map holds a single key that is not even the one run 0 was
+   billed under — a cumulative map would still carry `claude-opus-5[1m]` and
+   its 6.3M cache reads, and would still be priced under it.
 
    Two facts worth keeping from the attempts. From 2026-08-25: a `--resume`d
    run's init event reports the *same* `session_id`, so `session` alone would
    have been a sufficient grouping key had one been needed. From this pair: on
    the resumed run `modelUsage` exceeded the top-level `usage` about twofold,
    because `modelUsage` aggregates subagent usage the main-loop `usage` block
-   omits — which is why `cost_usd` is taken from it. That is now stated in
+   omits. A record takes `cost_usd` from `total_cost_usd`, which matches that
+   aggregate, and `tokens` from `usage`, which does not — so a record's dollars
+   cover the subagents its token counts leave out. That is now stated in
    `docs/run-data.md` rather than left to be rediscovered.
 2. **`modelUsage` availability.** Treat as optional everywhere; note the
    minimum CLI version once known.

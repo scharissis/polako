@@ -248,11 +248,12 @@ billed under, which a cumulative map would still be carrying. Reports used to
 count the resumes and warn about this; they no longer need to, though the
 `reasons` line still says how many there were.
 
-One thing to keep straight when reading a record: `usage` and `modelUsage` are
-not two spellings of the same number. `usage` is the main loop's; `modelUsage`
-also aggregates whatever subagents the run spawned, so it is the larger of the
-two on a run that used any. `cost_usd` follows `modelUsage`, which is what
-makes it the whole invocation's bill rather than the main loop's share of it.
+One thing to keep straight when reading a record: its `tokens` and its
+`cost_usd` do not cover the same work. `tokens` is the CLI's main-loop `usage`
+block; `cost_usd` is `total_cost_usd`, which matches `modelUsage` — the
+per-model breakdown that also aggregates whatever subagents the run spawned. So
+a run that used subagents is billed for them and does not count their tokens,
+and dividing one figure by the other is not a price per token.
 
 **On approximated runs:** a run that crashed, stalled or was interrupted never
 emitted a `result` event. Its tokens are the tally seen streaming past, an

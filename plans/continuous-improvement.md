@@ -64,22 +64,16 @@ The suite stays opt-in and out of CI, per the agreement on issue #9 — it
 needs network, a real `claude` and money. The gate is the release ritual, not
 the push.
 
-## Pillar 2 — sums you can trust: the resume probe
+## Pillar 2 — sums you can trust: the resume probe *(settled)*
 
-Open question 1 of `run-data-capture.md` is still open: whether a `--resume`d
-run's result event reports per-invocation or cumulative-for-session cost. If
-cumulative, every sum that includes resumed runs double-counts, and every
-report says so in a footnote instead of knowing. The 2026-08-25 probe died on
-an OAuth 401 before reaching a priced result event.
+**Closed 2026-08-27 on issue #78.** A `--resume`d run's result event reports
+that invocation, not the session, so summing rows as `stats` already does is
+correct and the footnote it used to print is gone. See open question 1 of
+`run-data-capture.md` for the evidence — a recorded resume pair, not the
+disposable probe this pillar asked for, which never ran.
 
-One disposable resume against a working CLI settles it. Either outcome is
-cheap: per-invocation means deleting the caveat from `stats` and the README;
-cumulative means switching the aggregation in `stats.go` to a per-session
-maximum, keyed on `session` alone (the failed probe did establish that a
-resumed run keeps its session id). No record changes either way.
-
-This lands before pillar 4 leans on tag comparisons, because a comparison
-whose batches contain different resume rates is otherwise comparing the bug.
+Nothing here blocks pillar 4 any longer: a tag comparison across batches with
+different resume rates is comparing the resumes, not a bug.
 
 ## Pillar 3 — the shift retro: reviewing runs without storing text
 
@@ -199,9 +193,8 @@ flag, `claude plugin validate .` — per the standing convention.
 
 **Phase 1 — verification, no production code.** The eval suite's first green
 run (a budgeted debugging session; fixes to `evals/` as they surface; the
-"Known-unverified" section deleted). The resume probe, and whichever of the
-two cheap outcomes it dictates in `stats.go` and the README. Both close
-caveats that other work currently has to route around.
+"Known-unverified" section deleted). The resume question is already closed
+(issue #78), so what remains of this phase is the eval suite alone.
 
 **Phase 2 — the one schema addition.** `park_reason` on terminal issue
 records, the enum derived from the park callsites; the `stats` breakdown

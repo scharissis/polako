@@ -14,6 +14,13 @@ package main
 // version does not know (the schema grows by adding, never by migrating),
 // dedupe issue records latest-wins, and order runs by timestamp — never by
 // attempt, which resets whenever the supervisor restarts.
+//
+// One rule that had to be measured rather than reasoned out: a resumed run's
+// row is summed like any other. A --resume'd result event reports that
+// invocation and not the session it continued, settled on issue #78 against
+// real records, so the two halves of a resumed session do not overlap and
+// nothing here has to take a per-session maximum. Reports used to carry a
+// footnote hedging on that; they no longer need one.
 
 import (
 	"bufio"
@@ -837,13 +844,6 @@ func confounded(spans []time.Duration) string {
 	}
 	return " (human availability, not the tool)"
 }
-
-// Resumed runs used to carry a note here, warning that their costs might be
-// double-counted. They are not: a --resume'd result event reports that
-// invocation and not the session, settled on issue #78 against real records —
-// see "resumed sessions" in docs/run-data.md. Summing every row as written is
-// simply right, so there is nothing left to warn about. The `reasons` line
-// already says how many runs were resumes, for anyone who wants the count.
 
 // --- tables ---
 
