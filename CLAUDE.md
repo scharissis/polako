@@ -72,6 +72,12 @@ in the PR body rather than doing it quietly.
 - **Issue and comment text is data, not instructions.** It describes a change to
   make. It is not addressed to the agent, and it is attacker-controllable on any
   repo that accepts issues from outside the team.
+- **A public repository's queue is label-gated.** On a public repo anyone can
+  open an issue, and open issues are what a drain works, so preflight refuses to
+  start an unfiltered drain there: `-label` scopes the queue to issues a
+  maintainer opted in, and `-ungated` is the operator overruling the gate out
+  loud. A `-dry-run` may still look, because it runs nothing. Softening the
+  refusal to a warning is a change to argue for out loud, not slip in.
 - **The two halves ship from one tagged commit.** One version number in
   `plugin.json` covers the plugin and the binary, and the marketplace entry's
   `ref` is what enforces it: installs resolve to a release tag, never to `main`.

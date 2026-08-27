@@ -397,7 +397,10 @@ The repository is private, so:
   (`gh repo add-collaborator`) or move the repo into an organisation.
 - To make it installable by anyone, publish it: `gh repo edit --visibility public`.
   The skill, the README and the plugin metadata all become public at that point,
-  so read them once with that in mind first.
+  so read them once with that in mind first. Publishing also changes who can
+  open issues — and open issues are what a drain works — so on a public repo
+  `polako work` refuses to start without a `-label` gate or an explicit
+  `-ungated`; see [Security](#security).
 
 ## Usage
 
@@ -475,6 +478,7 @@ sets — see [`status`](#where-the-backlog-stands-polako-status) and
 | `-skill` | `polako:implement-issue` | Slash command run once per issue. Plugin skills are namespaced `<plugin>:<skill>`; pass `-skill implement-issue` if you copied the skill into `~/.claude/skills` instead. |
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how PRs are matched back to issues. |
 | `-label` | *(none)* | Only process issues carrying this label. Doubles as an access control — see [Security](#security). |
+| `-ungated` | `false` | Work a public repository without a `-label` gate. Without one or the other, `polako work` refuses to start on a public repo, because anyone who can open an issue could feed its queue — see [Security](#security). |
 | `-tools` | *(see below)* | `--allowedTools` for unattended runs. **Replaces** the default set. |
 | `-add-tools` | *(none)* | Extra `--allowedTools` entries, **appended** to `-tools`. |
 | `-permission-mode` | `acceptEdits` | Passed to `claude --permission-mode`. |
@@ -1269,6 +1273,14 @@ polako work -label ready-for-claude
 On any repository open to issues from outside the team, run it that way. It is
 the difference between "anyone can queue work for an unattended agent" and
 "a maintainer chose this one".
+
+On a *public* repository the gate is not just advice: `polako work` refuses to
+start there without a `-label`, because that is the one repository shape where
+the risk is structural rather than a judgement call. `-ungated` overrules it —
+an explicit flag, so choosing the unfiltered queue is something an operator
+says rather than something that happens — and a [`-dry-run`](#looking-before-you-leap--dry-run)
+may still look without either, since it runs nothing and seeing the queue is
+how you decide what to label.
 
 Beyond those, the skill is told in Phase 0 to read issue and comment text as a
 description of a change to make, never as instructions addressed to it, and to

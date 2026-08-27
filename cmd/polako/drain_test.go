@@ -32,10 +32,13 @@ var ghSubcommands = []string{"repo", "issue", "pr", "label", "api"}
 
 // ghState is the whole of a pretend repository.
 type ghState struct {
-	Repo   string                `json:"repo"`
-	Issues map[string]*fakeIssue `json:"issues"`
-	PRs    map[string]*fakePR    `json:"prs"`    // keyed by head branch
-	Labels []string              `json:"labels"` // labels the repo has defined
+	Repo string `json:"repo"`
+	// Visibility is what queueGate reads; empty stands for PRIVATE so the many
+	// tests that predate the gate keep describing the ungated private case.
+	Visibility string                `json:"visibility"`
+	Issues     map[string]*fakeIssue `json:"issues"`
+	PRs        map[string]*fakePR    `json:"prs"`    // keyed by head branch
+	Labels     []string              `json:"labels"` // labels the repo has defined
 
 	// FailReads is a network that has not come back yet after the host woke:
 	// the next N calls of a kind ("issue list", "pr list") fail the way gh does
@@ -210,7 +213,16 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 
 	switch call {
 	case "repo view":
-		return st.Repo + "\n", false, 0
+		// Two shapes: status resolves the name alone through --jq, preflight
+		// asks for plain JSON so visibility comes back with it.
+		if flagVal("--jq") != "" {
+			return st.Repo + "\n", false, 0
+		}
+		vis := st.Visibility
+		if vis == "" {
+			vis = "PRIVATE"
+		}
+		return fmt.Sprintf(`{"nameWithOwner":%q,"visibility":%q}`, st.Repo, vis), false, 0
 
 	case "issue list":
 		out, changed := listIssues(st, flagVal("--label"))
