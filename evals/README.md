@@ -1,6 +1,6 @@
 # Eval suite for the implement-issue skill
 
-Four cases that grade what a run *does*, not what `SKILL.md` says. Each one
+Five cases that grade what a run *does*, not what `SKILL.md` says. Each one
 scaffolds a scratch git repo, points a stand-in `gh` at a fixture issue, runs
 `/polako:implement-issue 1` for real, and scores the artifacts left
 behind.
@@ -11,6 +11,12 @@ behind.
 | `ambiguous-issue` | an under-specified issue produces questions and the `awaiting-answer` label — and no PR |
 | `review-gate` | `/code-review` fires, aimed at `issue-1`, before `gh pr create` |
 | `resume-existing-plan` | an existing worktree and PLAN.md are resumed, not rewritten |
+| `one-turn` | a slow verification step is waited out in the turn, not deferred to one that never comes |
+
+`one-turn` is the slow one, and knowingly so: its issue asks for before and
+after numbers from a benchmark that takes a minute and a quarter each time, and
+waiting those out is the behaviour under test. `seed.sh` puts that benchmark in
+the scratch repo for this case alone, so the other four stay quick.
 
 ## Running it
 
