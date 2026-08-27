@@ -12,6 +12,7 @@ package main
 // which is why it gets the recorder's private-by-default permissions.
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -111,6 +112,43 @@ func (u *ui) openShiftLog(dir, repo, shiftID string) (string, error) {
 	u.file = f
 	u.mu.Unlock()
 	return path, nil
+}
+
+// lineWriter carries a child process's stderr into the narration stream one
+// line at a time, so it lands in the shift log stamped and prefixed instead of
+// tearing raw and unattributed across whatever else is printing. Written from
+// os/exec's copier goroutine alone; the detail logger and the sinks do their
+// own locking downstream.
+type lineWriter struct {
+	prefix string
+	buf    []byte
+}
+
+func (w *lineWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			return len(p), nil
+		}
+		w.emit(w.buf[:i])
+		w.buf = w.buf[i+1:]
+	}
+}
+
+// flush renders whatever a child left unterminated. Call it after cmd.Wait,
+// when the copier is done writing.
+func (w *lineWriter) flush() {
+	w.emit(w.buf)
+	w.buf = nil
+}
+
+func (w *lineWriter) emit(line []byte) {
+	// Blank lines carry nothing worth a timestamp and a prefix.
+	if len(bytes.TrimSpace(line)) == 0 {
+		return
+	}
+	detail.Printf("%s %s", w.prefix, line)
 }
 
 // resolveLogDir resolves the -log flag: a directory, or "off". The default

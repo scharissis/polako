@@ -1865,6 +1865,12 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 						runErr, cfg.skill)
 				}
 				log.Printf("claude run ended with error (%v) — checking what it left behind", runErr)
+				// The last words on stderr, because for a crash they are often
+				// the only cause on record. Clipped: the full copy is in the
+				// shift log, and under -verbose it already streamed past.
+				if t := strings.TrimSpace(rep.stderrTail); t != "" && !cfg.verbose {
+					log.Printf("last stderr: %s", clip(t, 300))
+				}
 			}
 
 			pr, err = prForBranch(ctx, cfg, branch)
@@ -2478,6 +2484,10 @@ type runReport struct {
 	// bool, because the refusal carries the reset time the wait is read from.
 	limitMsg   string
 	overBudget bool // -max-issue-time ran out while this run was still going
+	// stderrTail is the last few KB the child wrote to stderr — for a crashed
+	// run, often the only cause on record and worth a terminal line, since the
+	// full copy is off in the shift log.
+	stderrTail string
 	// remoteRejected says the CLI refused the Remote Control flags before
 	// starting anything. Unlike every other field here it never reaches the
 	// caller: execClaude re-dispatches without them and returns that report
@@ -2733,7 +2743,8 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes strin
 // anything else is looked at, and each rules out a failure worth reporting
 // honestly:
 //
-//   - the flags were on the command line at all — errTail is nil otherwise;
+//   - the flags were on the command line at all — the caller only asks when
+//     they were, and a nil errTail answers for one that never ran;
 //   - no init event ever arrived, so the session never started and no model was
 //     reached, and the run cannot have done anything worth keeping.
 //
@@ -2815,22 +2826,21 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	detail.Printf("running: %s %s", cfg.claudeBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.claudeBin, args...)
 	cmd.Dir = cfg.dir
-	cmd.Stderr = os.Stderr
-	// Remembered only while a registration is being attempted, so a shift with
-	// -remote off passes the same os.Stderr straight through as it always did.
-	// What it is read for is the one diagnosis stdout cannot carry: a CLI that
-	// refuses the flag prints a usage error and emits no events at all.
-	var errTail *tailWriter
-	if cfg.registersRemote() {
-		errTail = &tailWriter{}
-		cmd.Stderr = io.MultiWriter(os.Stderr, errTail)
-		// A writer that is not an *os.File makes os/exec hand the child a pipe
-		// and copy it here, and cmd.Wait then waits on that pipe rather than on
-		// the process — so a background command the run left behind, holding the
-		// inherited stderr, would hold this drain open forever. The bound is what
-		// keeps the promise that registration cannot hang a run.
-		cmd.WaitDelay = stderrWaitDelay
-	}
+	// The child's stderr goes into the narration stream line by line, so it
+	// lands in the shift log stamped and attributed rather than raw across the
+	// terminal. The tail is remembered besides, for the diagnoses stdout
+	// cannot carry: a CLI that refuses the registration flags prints a usage
+	// error and emits no events at all, and a crashed run's last words are
+	// often the only cause on record.
+	stderrLines := &lineWriter{prefix: "[claude stderr]"}
+	errTail := &tailWriter{}
+	cmd.Stderr = io.MultiWriter(stderrLines, errTail)
+	// A writer that is not an *os.File makes os/exec hand the child a pipe
+	// and copy it here, and cmd.Wait then waits on that pipe rather than on
+	// the process — so a background command the run left behind, holding the
+	// inherited stderr, would hold this drain open forever. The bound is what
+	// keeps the promise that capturing stderr cannot hang a run.
+	cmd.WaitDelay = stderrWaitDelay
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return rep, err
@@ -2935,13 +2945,22 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	if errors.Is(err, exec.ErrWaitDelay) {
 		err = nil
 	}
+	// The copier is done once Wait returns, so whatever the child left
+	// unterminated can be rendered now.
+	stderrLines.flush()
 	if cmd.ProcessState != nil {
 		rep.exitCode = cmd.ProcessState.ExitCode()
 	}
 	rep.stalled = stalled.Load()
 	rep.interrupted = ctx.Err() != nil
 	rep.overBudget = overspent.Load()
-	rep.remoteRejected = rejectedRemote(rep, errTail)
+	rep.stderrTail = errTail.String()
+	// Only consulted when the registration flags were on the command line:
+	// a usage error from a run that never carried them proves nothing about
+	// Remote Control.
+	if cfg.registersRemote() {
+		rep.remoteRejected = rejectedRemote(rep, errTail)
+	}
 	if rep.remoteRejected {
 		// Ahead of every report below, and of the error too: nothing about this
 		// attempt is worth telling the caller, because the caller is about to be

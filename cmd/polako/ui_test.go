@@ -193,6 +193,37 @@ func TestVerboseMirrorsDetailToTheTerminal(t *testing.T) {
 	}
 }
 
+// A child's stderr arrives in arbitrary chunks; the shift log gets it back as
+// whole attributed lines, blank ones dropped, the unterminated remainder
+// flushed when the run ends.
+func TestLineWriterSplitsPrefixesAndFlushes(t *testing.T) {
+	var term, file bytes.Buffer
+	wireSinks(t, &ui{terminal: &term, stamp: true, file: &file})
+
+	w := &lineWriter{prefix: "[claude stderr]"}
+	w.Write([]byte("first li"))
+	w.Write([]byte("ne\n\nsecond line\ntrail"))
+	w.Write([]byte("ing"))
+	w.flush()
+
+	got := file.String()
+	for _, want := range []string{
+		"[claude stderr] first line\n",
+		"[claude stderr] second line\n",
+		"[claude stderr] trailing\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("shift log missing %q\ngot:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "[claude stderr] \n") {
+		t.Errorf("a blank stderr line is not worth a timestamp and a prefix\ngot:\n%s", got)
+	}
+	if term.Len() != 0 {
+		t.Errorf("stderr chatter is detail and should stay off the quiet terminal\ngot:\n%s", term.String())
+	}
+}
+
 func TestResolveLogDirHonoursOff(t *testing.T) {
 	if got := resolveLogDir("off"); got != "" {
 		t.Errorf(`resolveLogDir("off") = %q, want ""`, got)

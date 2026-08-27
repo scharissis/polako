@@ -1473,6 +1473,20 @@ func TestExecClaudeStreamsEventsAndCapturesSession(t *testing.T) {
 	}
 }
 
+// The child's stderr is narration too: it reaches the shift log as whole
+// attributed lines rather than tearing raw across the terminal.
+func TestExecClaudeCarriesChildStderrIntoTheNarration(t *testing.T) {
+	buf := captureLog(t)
+	cfg := fakeClaudeConfig(t, "deadsession")
+
+	if _, err := execClaude(context.Background(), cfg, "/implement-issue 7", "sess-dead", "implement-issue", 0); err == nil {
+		t.Fatal("a dead session should end the attempt with an error")
+	}
+	if want := "[claude stderr] No conversation found"; !strings.Contains(buf.String(), want) {
+		t.Errorf("child stderr missing from the narration: want %q\ngot:\n%s", want, buf.String())
+	}
+}
+
 // The whole point of feature-detecting rather than assuming: against a CLI that
 // will not take the flags in print mode, a default shift has to behave exactly
 // as it did before they existed.
