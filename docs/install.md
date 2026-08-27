@@ -126,11 +126,37 @@ starts, with a random delay of up to ten minutes, and the new version loads on
 covered; that is still yours to run.
 
 To hold a machine at one release, pin the marketplace itself and it stops
-moving:
+moving — but mind *what* you pin it to. **A release tag is the wrong target:**
+`polako--vX.Y.Z` is pushed on the release PR's merge commit, and the `ref`
+inside `marketplace.json` only moves when the separate publish PR merges after
+it ([Publishing and versioning](releasing.md#cutting-a-release) says why the two
+are apart). So the `marketplace.json` frozen inside a release tag still declares
+the *previous* release, and pinning at `polako--v0.9.0` holds the plugin at
+0.8.0.
+
+Pin at the publish commit instead — the `chore: publish X.Y.Z` commit on `main`
+is the first one whose `marketplace.json` names X.Y.Z:
 
 ```bash
-claude plugin marketplace add scharissis/polako#polako--v0.4.0
+version=0.9.0
+sha=$(gh api "repos/scharissis/polako/commits?path=.claude-plugin/marketplace.json&per_page=100" \
+  --jq "map(select(.commit.message | startswith(\"chore: publish $version\")))[0].sha // empty")
+[ -n "$sha" ] && claude plugin marketplace add "scharissis/polako#$sha"
 ```
+
+Both halves of that are load-bearing. Matching the commit-message prefix on the
+file's own history picks the publish commit and nothing else — a free-text
+search also matches the `Revert "chore: publish X.Y.Z"` that a
+[rollback](releasing.md#cutting-a-release) leaves behind, whose
+`marketplace.json` names the release *before* X.Y.Z. And the `[ -n "$sha" ]`
+guard is what stops an empty result — wrong version, unauthenticated `gh` —
+from pinning the marketplace at nothing and quietly leaving it tracking the
+default branch, which is the opposite of holding still.
+
+The `publish-X.Y.Z` branch has the same content, but it may be deleted once the
+PR merges, so the SHA is the handle that keeps working. To stop holding, remove
+the marketplace and add it back bare — a pinned marketplace does not move when
+the next release ships, and says nothing about it.
 
 
 ## Using it on another project
