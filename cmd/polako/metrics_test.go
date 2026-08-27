@@ -224,7 +224,7 @@ func TestRunStatusPrecedence(t *testing.T) {
 func TestIssueRecordHoldsOnlyTheTerminalOutcome(t *testing.T) {
 	dir := t.TempDir()
 	cfg := metricsConfig(t, dir)
-	cfg.rec.recordIssue(cfg, 12, 34, issueMerged, prFacts{})
+	cfg.rec.recordIssue(cfg, 12, 34, issueMerged, "", prFacts{})
 
 	lines := readRecords(t, dir, cfg.repo)
 	if len(lines) != 1 {
@@ -269,7 +269,7 @@ func TestRecorderAppendsOneLinePerRecord(t *testing.T) {
 
 	cfg.rec.recordRun(cfg, rc, sampleReport())
 	cfg.rec.recordRun(cfg, rc, sampleReport())
-	cfg.rec.recordIssue(cfg, 12, 34, issueMerged, prFacts{})
+	cfg.rec.recordIssue(cfg, 12, 34, issueMerged, "", prFacts{})
 
 	lines := readRecords(t, dir, cfg.repo)
 	if len(lines) != 3 {
@@ -296,11 +296,11 @@ func TestRecorderAppendsOneLinePerRecord(t *testing.T) {
 func TestRecorderRecreatesADeletedDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "metrics")
 	cfg := metricsConfig(t, dir)
-	cfg.rec.recordIssue(cfg, 1, 0, issueMerged, prFacts{})
+	cfg.rec.recordIssue(cfg, 1, 0, issueMerged, "", prFacts{})
 	if err := os.RemoveAll(dir); err != nil {
 		t.Fatalf("removing the directory mid-drain: %v", err)
 	}
-	cfg.rec.recordIssue(cfg, 2, 0, issueMerged, prFacts{})
+	cfg.rec.recordIssue(cfg, 2, 0, issueMerged, "", prFacts{})
 
 	if lines := readRecords(t, dir, cfg.repo); len(lines) != 1 {
 		t.Errorf("wrote %d lines after the delete, want 1", len(lines))
@@ -314,7 +314,7 @@ func TestRecorderOffWritesNothing(t *testing.T) {
 		t.Fatal("-metrics off must disable the recorder")
 	}
 	cfg.rec.recordRun(cfg, runContext{issue: 1, started: time.Now(), ended: time.Now()}, sampleReport())
-	cfg.rec.recordIssue(cfg, 1, 2, issueMerged, prFacts{})
+	cfg.rec.recordIssue(cfg, 1, 2, issueMerged, "", prFacts{})
 
 	entries, err := os.ReadDir(home)
 	if err != nil {
@@ -330,7 +330,7 @@ func TestRecorderOffWritesNothing(t *testing.T) {
 func TestNilRecorderIsSafe(t *testing.T) {
 	var cfg config
 	cfg.rec.recordRun(cfg, runContext{started: time.Now(), ended: time.Now()}, runReport{})
-	cfg.rec.recordIssue(cfg, 1, 2, issueMerged, prFacts{})
+	cfg.rec.recordIssue(cfg, 1, 2, issueMerged, "", prFacts{})
 	if cfg.rec.enabled() {
 		t.Error("a nil recorder is disabled")
 	}
@@ -362,7 +362,7 @@ func TestRecorderFailsQuietlyAndOnlyOnce(t *testing.T) {
 	}
 	cfg := metricsConfig(t, blocked)
 	for range 3 {
-		cfg.rec.recordIssue(cfg, 1, 0, issueMerged, prFacts{})
+		cfg.rec.recordIssue(cfg, 1, 0, issueMerged, "", prFacts{})
 	}
 	if n := strings.Count(buf.String(), "run data not recorded"); n != 1 {
 		t.Errorf("warned %d times, want exactly 1\ngot:\n%s", n, buf.String())
@@ -377,7 +377,7 @@ func TestRecordsAreNotWorldReadable(t *testing.T) {
 	}
 	dir := filepath.Join(t.TempDir(), "metrics")
 	cfg := metricsConfig(t, dir)
-	cfg.rec.recordIssue(cfg, 1, 2, issueMerged, prFacts{})
+	cfg.rec.recordIssue(cfg, 1, 2, issueMerged, "", prFacts{})
 
 	for _, path := range []string{dir, filepath.Join(dir, recordFile(cfg.repo))} {
 		info, err := os.Stat(path)
@@ -445,7 +445,7 @@ func TestEveryRecordOneDrainWritesCarriesItsID(t *testing.T) {
 	rc := runContext{issue: 12, reason: reasonImplement, outcome: outcomeOpenedPR,
 		started: time.Now(), ended: time.Now()}
 	cfg.rec.recordRun(cfg, rc, sampleReport())
-	cfg.rec.recordIssue(cfg, 12, 34, issueMerged, prFacts{})
+	cfg.rec.recordIssue(cfg, 12, 34, issueMerged, "", prFacts{})
 
 	// A second process, same directory, same repository: the ordinary case of
 	// a drain restarted after the first was killed.
@@ -478,7 +478,7 @@ func TestEveryRecordOneDrainWritesCarriesItsID(t *testing.T) {
 func TestIssueRecordCarriesTheGitHubEnrichment(t *testing.T) {
 	dir := t.TempDir()
 	cfg := metricsConfig(t, dir)
-	cfg.rec.recordIssue(cfg, 12, 34, issueMerged, prFacts{
+	cfg.rec.recordIssue(cfg, 12, 34, issueMerged, "", prFacts{
 		Additions: 412, Deletions: 38, ChangedFiles: 7, Reviews: 2,
 		Opened: "2026-08-24T10:34:02Z", Merged: "2026-08-24T14:02:00Z",
 	})
@@ -509,7 +509,7 @@ func TestIssueRecordCarriesTheGitHubEnrichment(t *testing.T) {
 func TestIssueRecordOmitsAnEnrichmentItNeverGot(t *testing.T) {
 	dir := t.TempDir()
 	cfg := metricsConfig(t, dir)
-	cfg.rec.recordIssue(cfg, 12, 0, issueNeedsHuman, prFacts{})
+	cfg.rec.recordIssue(cfg, 12, 0, issueNeedsHuman, parkNothing, prFacts{})
 
 	var got map[string]any
 	if err := json.Unmarshal([]byte(readRecords(t, dir, cfg.repo)[0]), &got); err != nil {
@@ -521,6 +521,36 @@ func TestIssueRecordOmitsAnEnrichmentItNeverGot(t *testing.T) {
 	for _, key := range []string{"additions", "deletions", "changed_files", "reviews", "pr_opened", "pr_merged"} {
 		if _, ok := got[key]; ok {
 			t.Errorf("record carries %q with nothing to put in it", key)
+		}
+	}
+}
+
+// The park reason is the one field with a rule attached, and the rule lives in
+// the recorder rather than at the callsites: written for a hand-back and
+// nowhere else, and never omitted from one. That is what makes an absent field
+// mean "older than this field" and nothing else.
+func TestIssueRecordCarriesTheParkReasonOnHandBacksAlone(t *testing.T) {
+	dir := t.TempDir()
+	cfg := metricsConfig(t, dir)
+	cfg.rec.recordIssue(cfg, 12, 0, issueNeedsHuman, parkBudget, prFacts{})
+	// A park path that could not say why still says so, out loud.
+	cfg.rec.recordIssue(cfg, 13, 0, issueNeedsHuman, "", prFacts{})
+	// A merge has no park reason, and a caller offering one is ignored rather
+	// than trusted: the field would read as a merge that also needed a human.
+	cfg.rec.recordIssue(cfg, 14, 34, issueMerged, parkBudget, prFacts{})
+
+	lines := readRecords(t, dir, cfg.repo)
+	if len(lines) != 3 {
+		t.Fatalf("wrote %d records, want 3", len(lines))
+	}
+	want := []any{parkBudget, parkUnknown, nil}
+	for i, line := range lines {
+		var got map[string]any
+		if err := json.Unmarshal([]byte(line), &got); err != nil {
+			t.Fatalf("record is not JSON: %v", err)
+		}
+		if got["park_reason"] != want[i] {
+			t.Errorf("record %d park_reason = %v, want %v", i, got["park_reason"], want[i])
 		}
 	}
 }

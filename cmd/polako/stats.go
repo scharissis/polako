@@ -673,7 +673,14 @@ func issuePairs(issues []*issueStats) [][2]string {
 		terminal += ", " + other
 	}
 
-	pairs := [][2]string{{"terminal", terminal}, {"in flight", strconv.Itoa(inFlight)}}
+	pairs := [][2]string{{"terminal", terminal}}
+	// What "needs human" above is made of — the most actionable ranking in the
+	// report, because it says which half of the tool the next change belongs
+	// in. Absent when nothing was parked, rather than a line of zeroes.
+	if why := parkReasons(done); why != "" {
+		pairs = append(pairs, [2]string{"park reasons", why})
+	}
+	pairs = append(pairs, [2]string{"in flight", strconv.Itoa(inFlight)})
 
 	// Only issues whose runs are in scope can be priced. An issue that merged
 	// inside a -since window after running for two days outside it has a
@@ -720,6 +727,24 @@ func issuePairs(issues []*issueStats) [][2]string {
 			count(int64(mean(tokens))), count(median(tokens)), split(sum, n))},
 	)
 	return append(pairs, change...)
+}
+
+// parkReasons breaks the hand-backs down by why they happened, or "" when
+// there were none. A record written before the field existed counts as
+// unrecorded — never as unknown, which is the field's own value for a park
+// path that could not say, and folding the two together would make an old file
+// look like a supervisor that had stopped classifying its parks.
+func parkReasons(done []*issueStats) string {
+	counts := map[string]int{}
+	for _, is := range done {
+		if is.terminal.Outcome == issueNeedsHuman {
+			counts[is.terminal.ParkReason]++
+		}
+	}
+	if len(counts) == 0 {
+		return ""
+	}
+	return breakdown(counts, parkReasonOrder)
 }
 
 // changePairs summarizes what the work actually changed, from the GitHub

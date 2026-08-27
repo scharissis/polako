@@ -143,6 +143,12 @@ func deferReason(err error) (*deferredError, bool) {
 // a -skill this installation does not have, a token the API refuses.
 type parkedError struct {
 	reason string
+	// category is the same park in one identifier, for the terminal issue
+	// record: the reason above is written for a person and quotes issue
+	// numbers, dollars and branch names, none of which a record may hold. It is
+	// an argument rather than something derived from the text so that a park
+	// added later cannot forget to classify itself.
+	category string
 	// aside is for the operator's terminal and goes nowhere else. The reason is
 	// posted to the issue thread verbatim, so anything that is nobody's business
 	// but the operator's — a local absolute path, which names their account and
@@ -155,14 +161,32 @@ func (e *parkedError) Error() string { return e.reason }
 
 // park stops an issue and states why in terms a person can act on — the text
 // goes on the issue thread and into the exit summary, so it is written for a
-// reader who was not watching.
-func park(format string, a ...any) error {
-	return &parkedError{reason: fmt.Sprintf(format, a...)}
+// reader who was not watching. why is the same thing said in one of the park
+// reason identifiers, for the record.
+func park(why, format string, a ...any) error {
+	return &parkedError{reason: fmt.Sprintf(format, a...), category: why}
 }
 
 // parkAside is park with one line the log gets and the issue thread does not.
-func parkAside(aside, format string, a ...any) error {
-	return &parkedError{reason: fmt.Sprintf(format, a...), aside: aside}
+func parkAside(why, aside, format string, a ...any) error {
+	return &parkedError{reason: fmt.Sprintf(format, a...), category: why, aside: aside}
+}
+
+// parkCategoryOf classifies an error that ended an issue, for the record that
+// says how it ended. A park carries its own category; the two fatal conditions
+// that also end an issue name themselves; anything else genuinely cannot say,
+// and says so rather than being filed under a category it did not earn.
+func parkCategoryOf(err error) string {
+	var pe *parkedError
+	switch {
+	case errors.As(err, &pe) && pe.category != "":
+		return pe.category
+	case errors.Is(err, errAuth):
+		return parkAuth
+	case errors.Is(err, errNoWork):
+		return parkNoSkill
+	}
+	return parkUnknown
 }
 
 // parkReason reports whether an error parks its issue, and why.
@@ -1777,8 +1801,18 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 	// issue: merged, or parked for a human and left behind. Transient GitHub
 	// errors and Ctrl+C are deliberately not outcomes: the issue is still open
 	// and unparked, and the next drain resumes it.
-	terminal := func(prNumber int, outcome string) {
-		cfg.rec.recordIssue(cfg, issue, prNumber, outcome, lookupPRFacts(ctx, cfg, prNumber))
+	terminal := func(prNumber int, outcome, why string) {
+		cfg.rec.recordIssue(cfg, issue, prNumber, outcome, why, lookupPRFacts(ctx, cfg, prNumber))
+	}
+
+	// parked is terminal for the hand-backs, and the reason it files them under
+	// is the one the park itself named. Classifying the error here rather than
+	// at each callsite is what keeps the record and the sentence on the issue
+	// thread describing the same thing: a park raised inside supervisePR is
+	// several calls away from the record that reports it.
+	parked := func(prNumber int, err error) error {
+		terminal(prNumber, issueNeedsHuman, parkCategoryOf(err))
+		return err
 	}
 
 	for {
@@ -1795,8 +1829,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 			// all: cost arrives on the result event, so it can bound the next
 			// run and never the one that spent it.
 			if reason := overBudget(cfg, *tally); reason != "" {
-				terminal(0, issueNeedsHuman)
-				return park("%s", reason)
+				return parked(0, park(parkBudget, "%s", reason))
 			}
 
 			// The label is durable, so "it is up after the run" does not by
@@ -1868,11 +1901,10 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 				// cause. Say what is actually wrong and stop.
 				if errors.Is(runErr, errNoWork) {
 					record(0, outcomeNothing)
-					terminal(0, issueNeedsHuman)
-					return fmt.Errorf("%w — check that -skill %q names a skill this "+
+					return parked(0, fmt.Errorf("%w — check that -skill %q names a skill this "+
 						"installation has; plugin skills are namespaced <plugin>:<skill>, "+
 						"a skill copied into ~/.claude/skills is not",
-						runErr, cfg.skill)
+						runErr, cfg.skill))
 				}
 				log.Printf("claude run ended with error (%v) — checking what it left behind", runErr)
 			}
@@ -1897,8 +1929,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 				// would bias every questions rate stats computes.
 				if errors.Is(runErr, errAuth) {
 					record(0, outcomeNothing)
-					terminal(0, issueNeedsHuman)
-					return authAdvice(runErr)
+					return parked(0, authAdvice(runErr))
 				}
 				// A cap killed this run, so it is a dead end for the same reason
 				// a refused token is: a resume would spend the same budget over
@@ -1907,8 +1938,8 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 				// carried the issue over the line and the reason quotes them.
 				if errors.Is(runErr, errBudget) {
 					record(0, outcomeNothing)
-					terminal(0, issueNeedsHuman)
-					return park("%s", cmp.Or(overBudget(cfg, *tally), runErr.Error()))
+					return parked(0, park(parkBudget, "%s",
+						cmp.Or(overBudget(cfg, *tally), runErr.Error())))
 				}
 				// A usage limit is neither this issue's fault nor a crash a
 				// resume can route around: every attempt before the reset is
@@ -2005,8 +2036,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					// makes, after sleeping -retry-wait for it, is a worse
 					// diagnosis than the park it is really doing.
 					if reason := overBudget(cfg, *tally); reason != "" {
-						terminal(0, issueNeedsHuman)
-						return park("%s", reason)
+						return parked(0, park(parkBudget, "%s", reason))
 					}
 					resumes++
 					resumeKind = reasonResume
@@ -2034,16 +2064,17 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					continue
 				case runErr != nil:
 					record(0, outcomeNothing)
-					terminal(0, issueNeedsHuman)
 					if resumes >= cfg.resumeCeiling {
 						// "retried" rather than "resumed": most of these are
 						// resumes, but a dead session turns one into a fresh
 						// restart, and the count covers both.
-						return park("claude has been retried %d times on this issue and still has "+
-							"not finished it — each run gets somewhere and then dies, which needs "+
-							"a human", resumes)
+						return parked(0, park(parkRetries,
+							"claude has been retried %d times on this issue and still has "+
+								"not finished it — each run gets somewhere and then dies, which needs "+
+								"a human", resumes))
 					}
-					return park("claude crashed and %d resume attempts failed", cfg.retries)
+					return parked(0, park(parkRetries,
+						"claude crashed and %d resume attempts failed", cfg.retries))
 				default:
 					// Clean exit, yet no PR and no questions. Three different
 					// runs end this way and only one of them is the "Claude
@@ -2098,7 +2129,6 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 							continue
 						}
 					}
-					terminal(0, issueNeedsHuman)
 					// What happened, why we stopped trying, and what is there for
 					// the person picking it up. With nothing on disk both extra
 					// clauses are empty and this is the sentence it always was.
@@ -2109,7 +2139,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					if d := left.describe(); d != "" {
 						reason += "; " + d
 					}
-					return parkAside(left.where(), "%s", reason)
+					return parked(0, parkAside(parkNothing, left.where(), "%s", reason))
 				}
 			}
 			record(pr.Number, outcomeOpenedPR)
@@ -2122,7 +2152,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 			state, err := supervisePR(ctx, cfg, issue, pr.Number, tally)
 			if err != nil {
 				if ctx.Err() == nil { // not Ctrl+C: remediation ran out of attempts
-					terminal(pr.Number, issueNeedsHuman)
+					return parked(pr.Number, err)
 				}
 				return err
 			}
@@ -2136,16 +2166,17 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 				// would sync anyway; doing it here too is what leaves the operator a
 				// current checkout when this was the last issue in the backlog.
 				syncDefaultBranch(ctx, cfg)
-				terminal(pr.Number, issueMerged)
+				terminal(pr.Number, issueMerged, "")
 				postSummary(ctx, cfg, pr.Number, *tally)
 				return ensureIssueClosed(ctx, cfg, issue, pr.Number)
 			}
-			terminal(pr.Number, issueClosed)
-			return park("PR #%d was closed without merging, which is a decision only a human can make",
+			terminal(pr.Number, issueClosed, "")
+			return park(parkPRClosed,
+				"PR #%d was closed without merging, which is a decision only a human can make",
 				pr.Number)
 		default:
-			terminal(pr.Number, issueNeedsHuman)
-			return park("PR #%d is in the unexpected state %q", pr.Number, pr.State)
+			return parked(pr.Number,
+				park(parkPRState, "PR #%d is in the unexpected state %q", pr.Number, pr.State))
 		}
 	}
 }
@@ -3472,7 +3503,7 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, tally *is
 		case pr.state != "OPEN":
 			return pr.state, nil
 		case overspent != "" && pr.remediable():
-			return "", park("%s", overspent)
+			return "", park(parkBudget, "%s", overspent)
 		case pr.mergeable == "CONFLICTING":
 			log.Printf("PR #%d has merge conflicts — dispatching remediation", prNumber)
 			if rerr := remediateConflicts(ctx, cfg, issue, prNumber, tally); rerr != nil {
@@ -3485,7 +3516,8 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, tally *is
 				failures++
 				log.Printf("remediation attempt %d/%d failed (%v)", failures, cfg.retries, rerr)
 				if failures >= cfg.retries {
-					return "", park("conflict remediation for PR #%d failed %d times", prNumber, failures)
+					return "", park(parkConflicts,
+						"conflict remediation for PR #%d failed %d times", prNumber, failures)
 				}
 			} else {
 				failures = 0
@@ -3496,14 +3528,14 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, tally *is
 				// The last run finished and left the branch where it was, so the
 				// same checks are red against the same code. Reading the same
 				// logs again lands in the same place.
-				return "", park("CI on PR #%d is still red and remediation left the branch "+
+				return "", park(parkChecks, "CI on PR #%d is still red and remediation left the branch "+
 					"unchanged — needs a human", prNumber)
 			}
 			// -retries is a crash-resume budget; borrowing it bounds the runs
 			// dispatched here. The floor is 1 because the first attempt at a red
 			// build is not a retry, so -retries=0 must not skip it.
 			if budget := max(cfg.retries, 1); redRuns >= budget {
-				return "", park("CI on PR #%d is still red after %d remediation runs — "+
+				return "", park(parkChecks, "CI on PR #%d is still red after %d remediation runs — "+
 					"needs a human", prNumber, redRuns)
 			}
 			redRuns++
@@ -3530,7 +3562,7 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, tally *is
 				// The last run finished and left the branch where it was, so the
 				// same review still asks for the same changes. Sending another run
 				// at the same words lands in the same place.
-				return "", park("changes are still requested on PR #%d and remediation left "+
+				return "", park(parkReview, "changes are still requested on PR #%d and remediation left "+
 					"the branch unchanged — needs a human", prNumber)
 			}
 			// Bounded like the red-build budget, and for the same reason: -retries
@@ -3538,7 +3570,7 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, tally *is
 			// PR can consume. The floor is 1 because the first attempt at a review
 			// is not a retry.
 			if budget := max(cfg.retries, 1); reviewRuns >= budget {
-				return "", park("changes requested on PR #%d are still outstanding after %d "+
+				return "", park(parkReview, "changes requested on PR #%d are still outstanding after %d "+
 					"remediation runs — needs a human", prNumber, reviewRuns)
 			}
 			reviewRuns++
