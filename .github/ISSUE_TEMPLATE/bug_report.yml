@@ -1,0 +1,50 @@
+name: Bug report
+description: Something polako did that it should not have, or did not do that it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If this is a security problem, please
+        [report it privately](https://github.com/scharissis/polako/security/advisories/new)
+        instead. Issues here are public, and they are also the queue an
+        unattended agent works.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: The command you ran
+      description: The whole command line, plus any `POLAKO_*` variables set in your environment.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: >
+        The relevant lines from the terminal. polako prints a session id on
+        every run's first line, so `claude --resume <id>` reopens the run if you
+        need to look at what it did.
+      render: shell
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Output of `polako -version`, `claude --version` and `gh --version`.
+      placeholder: polako v0.9.0, claude 2.x, gh 2.x
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15, Ubuntu 24.04, Windows 11
+    validations:
+      required: true

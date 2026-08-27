@@ -1,0 +1,28 @@
+name: Feature request
+description: Something polako should be able to do.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what stops you today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+      description: A flag, a behaviour, a report — whatever shape you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: invariants
+    attributes:
+      label: Does it touch an invariant?
+      description: >
+        CLAUDE.md lists the rules this project keeps: one issue in flight at a
+        time, all state in GitHub, nothing merges itself, stdlib-only Go, and a
+        few more. If your idea needs one of them to bend, say which and why —
+        that is the interesting part of the discussion, not a reason to stay
+        quiet.

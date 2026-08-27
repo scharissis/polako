@@ -486,3 +486,54 @@ func TestDocsDocumentEveryFlag(t *testing.T) {
 		}
 	}
 }
+
+// A queue is derived by excluding orchestration labels, and the -label gate is
+// the one thing standing between "anyone can open an issue" and "anyone can
+// queue work for an unattended agent". An issue form's `labels:` key is applied
+// on creation whoever files it, so a template that handed one of these out
+// would hand out the gate with it — the failure docs/security.md warns about,
+// arriving through a file nobody thinks of as code.
+func TestIssueTemplatesApplyNoOrchestrationLabel(t *testing.T) {
+	dir := filepath.Join(repoRoot(), ".github", "ISSUE_TEMPLATE")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("reading %s: %v", dir, err)
+	}
+	// The gate label is the operator's choice, so it cannot be named here.
+	// These are the three this repository's own queue rules turn on, plus the
+	// label its README documents as the gate it runs with.
+	forbidden := []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel, "ready"}
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) != ".yml" && filepath.Ext(e.Name()) != ".yaml" {
+			continue
+		}
+		for _, line := range applied(readRepoFile(t, ".github", "ISSUE_TEMPLATE", e.Name())) {
+			for _, label := range forbidden {
+				if strings.Contains(line, `"`+label+`"`) || strings.Contains(line, "- "+label) {
+					t.Errorf(".github/ISSUE_TEMPLATE/%s applies the %q label (%s):"+
+						" a template's labels are applied on creation whoever files the issue,"+
+						" so this lets an outsider queue work for an unattended run",
+						e.Name(), label, strings.TrimSpace(line))
+				}
+			}
+		}
+	}
+}
+
+// applied returns the lines of an issue form that name labels: the `labels:`
+// key itself and, when it is a block list, the items under it.
+func applied(form string) []string {
+	var out []string
+	list := false
+	for _, line := range strings.Split(form, "\n") {
+		switch {
+		case strings.HasPrefix(line, "labels:"):
+			out, list = append(out, line), true
+		case list && strings.HasPrefix(strings.TrimSpace(line), "- "):
+			out = append(out, line)
+		default:
+			list = false
+		}
+	}
+	return out
+}
