@@ -138,9 +138,20 @@ Pin at the publish commit instead — the `chore: publish X.Y.Z` commit on `main
 is the first one whose `marketplace.json` names X.Y.Z:
 
 ```bash
-sha=$(gh search commits --repo scharissis/polako "chore: publish 0.9.0" --json sha --jq '.[0].sha')
-claude plugin marketplace add scharissis/polako#$sha
+version=0.9.0
+sha=$(gh api "repos/scharissis/polako/commits?path=.claude-plugin/marketplace.json&per_page=100" \
+  --jq "map(select(.commit.message | startswith(\"chore: publish $version\")))[0].sha // empty")
+[ -n "$sha" ] && claude plugin marketplace add "scharissis/polako#$sha"
 ```
+
+Both halves of that are load-bearing. Matching the commit-message prefix on the
+file's own history picks the publish commit and nothing else — a free-text
+search also matches the `Revert "chore: publish X.Y.Z"` that a
+[rollback](releasing.md#cutting-a-release) leaves behind, whose
+`marketplace.json` names the release *before* X.Y.Z. And the `[ -n "$sha" ]`
+guard is what stops an empty result — wrong version, unauthenticated `gh` —
+from pinning the marketplace at nothing and quietly leaving it tracking the
+default branch, which is the opposite of holding still.
 
 The `publish-X.Y.Z` branch has the same content, but it may be deleted once the
 PR merges, so the SHA is the handle that keeps working. To stop holding, remove

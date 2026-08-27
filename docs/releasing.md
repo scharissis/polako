@@ -143,7 +143,13 @@ claude plugin marketplace add scharissis/polako#publish-X.Y.Z && claude plugin i
 
 That also tests the very line the publish PR is about to merge. The binary half
 needs nothing special — `vX.Y.Z` was pushed in step 2, so `go install
-...@latest` already resolves to it.
+...@latest` already resolves to it — but it does need running, or the plugin is
+X.Y.Z beside whatever binary the machine already had, and the first line of the
+checklist below fails for the opposite reason:
+
+```bash
+go install github.com/scharissis/polako/cmd/polako@latest
+```
 
 Then run one issue, watched rather than unattended:
 
@@ -164,7 +170,11 @@ What to watch for, in order:
 
 **Unpin afterwards**, whichever way the test went — a marketplace left pinned
 at `publish-X.Y.Z` silently holds the machine there when the next release
-ships, and the branch may be deleted out from under it:
+ships, and the branch may be deleted out from under it. Wait until the publish
+PR has merged, though: bare `scharissis/polako` reads `main`'s
+`marketplace.json`, and until that PR lands its `ref` still names the previous
+release, so unpinning early swaps the plugin back a version and leaves it
+skewed against the X.Y.Z binary.
 
 ```bash
 claude plugin uninstall polako && claude plugin marketplace remove scharissis
