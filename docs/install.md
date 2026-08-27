@@ -21,11 +21,12 @@ claude plugin install polako@scharissis
 
 `polako` is the plugin, `scharissis` is the marketplace it came from —
 the name declared in [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json),
-not the GitHub username, though here they happen to match. The plugin ships one
-component, the `implement-issue` skill, and costs ~40 tokens of always-on
-context; the skill body is only loaded when it fires.
+not the GitHub username, though here they happen to match. The plugin ships two
+skills — `implement-issue` and `plan-backlog` — and costs a few dozen tokens of
+always-on context; a skill body is only loaded when that skill fires.
 
-Restart Claude Code, and `/polako:implement-issue 48` is available.
+Restart Claude Code, and `/polako:implement-issue 48` and
+`/polako:plan-backlog docs/VISION.md` are available.
 
 Note the namespace. Claude prefixes plugin skills with the plugin name, so the
 command is *not* `/implement-issue` on this path. The supervisor's `-skill`
@@ -56,19 +57,20 @@ claude plugin uninstall polako && claude plugin marketplace remove scharissis
 
 ## The skill, by hand
 
-If you would rather not involve the plugin system, copy the skill directory in.
-It behaves identically; it just will not update itself.
+If you would rather not involve the plugin system, copy the skill directories
+in. They behave identically; they just will not update themselves. Take both, or
+only `implement-issue` if you do not want the planning half.
 
 ```bash
-cp -r skills/implement-issue ~/.claude/skills/
+cp -r skills/implement-issue skills/plan-backlog ~/.claude/skills/
 ```
 
 ```powershell
-Copy-Item -Recurse skills\implement-issue $HOME\.claude\skills\
+Copy-Item -Recurse skills\implement-issue,skills\plan-backlog $HOME\.claude\skills\
 ```
 
-A skill installed this way is invoked bare, with no plugin prefix, so the
-supervisor needs telling:
+A skill installed this way is invoked bare, with no plugin prefix — so
+`/plan-backlog`, not `/polako:plan-backlog`, and the supervisor needs telling:
 
 ```bash
 polako work -skill implement-issue

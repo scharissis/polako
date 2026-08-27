@@ -239,6 +239,155 @@ func TestShippedSkillMatchesTheDefaultFlag(t *testing.T) {
 	}
 }
 
+// planSkillDir is the intake-side skill this repo ships under skills/. It lives
+// here rather than beside skillDir in main.go because the binary has no plan
+// verb yet — that is phase 3 — and a constant no shipped code path reads is
+// dead weight in the binary. It moves to main.go when the verb that runs it
+// does.
+const planSkillDir = "plan-backlog"
+
+func planSkill(t *testing.T) string {
+	t.Helper()
+	return readRepoFile(t, "skills", planSkillDir, "SKILL.md")
+}
+
+// The plan skill is invoked as a slash command with a document to work from, so
+// its frontmatter is the whole of its calling convention: the hint is what a
+// human reads before typing, and every name under `arguments` is what the body
+// interpolates. A body referring to an argument the frontmatter never declared
+// gets the literal `$name` instead of the operator's path.
+func TestPlanSkillDeclaresItsArguments(t *testing.T) {
+	skill := planSkill(t)
+
+	front, body, ok := strings.Cut(strings.TrimPrefix(skill, "---\n"), "\n---")
+	if !ok {
+		t.Fatalf("skills/%s/SKILL.md has no YAML frontmatter", planSkillDir)
+	}
+	for _, key := range []string{"description:", "argument-hint:", "arguments:", "disable-model-invocation: true"} {
+		if !strings.Contains(front, key) {
+			t.Errorf("SKILL.md frontmatter is missing %q\ngot:\n%s", key, front)
+		}
+	}
+
+	declared := regexp.MustCompile(`(?m)^arguments:\s*\[([^\]]*)\]`).FindStringSubmatch(front)
+	if declared == nil {
+		t.Fatalf("frontmatter's `arguments:` is not the [name, name] list form:\n%s", front)
+	}
+	for _, name := range strings.Split(declared[1], ",") {
+		if name = strings.TrimSpace(name); name == "" {
+			continue
+		}
+		if !strings.Contains(body, "$"+name) {
+			t.Errorf("frontmatter declares argument %q but the body never interpolates $%s,"+
+				" so whatever the operator typed for it is silently dropped", name, name)
+		}
+	}
+}
+
+// Everything this skill creates is a proposal, and the label is the entire
+// difference between a proposal and queued work: selectableIssues excludes it,
+// so an issue filed without it is one an unattended run picks up before any
+// human chose it. The spelling is checked against the binary's own constant
+// because the two are one contract — the skill applies the label, the
+// supervisor derives the queue by excluding it, and neither reads the other.
+func TestPlanSkillLabelsEverythingItCreates(t *testing.T) {
+	skill := planSkill(t)
+
+	// The full invocation form is the one carrying --title; the other mentions
+	// of `gh issue create` in the file are prose about it, not a command.
+	invocations := 0
+	for _, line := range strings.Split(skill, "\n") {
+		if !strings.Contains(line, "gh issue create") || !strings.Contains(line, "--title") {
+			continue
+		}
+		invocations++
+		if !strings.Contains(line, "--label "+proposedLabel) {
+			t.Errorf("SKILL.md spells an issue-creating command with no `--label %s`:\n\t%s\n"+
+				"an unlabelled proposal is one a shift works before anybody approved it", proposedLabel, strings.TrimSpace(line))
+		}
+	}
+	if invocations == 0 {
+		t.Errorf("SKILL.md never spells `gh issue create --title ...`, so nothing tells the run"+
+			" which form to file proposals in — only that form carries `--label %s`", proposedLabel)
+	}
+
+	// Children hang off the epic structurally rather than by a label, which is
+	// also what makes the supervisor's container skip work: an issue with
+	// sub-issues is never worked, whatever it is called.
+	if !strings.Contains(skill, "--parent") {
+		t.Error("SKILL.md never spells `--parent`, so an epic's children would be filed as loose" +
+			" issues and the epic would be worked as if it were one of them")
+	}
+}
+
+// The sizing contract is what keeps proposals workable: an issue too big for one
+// PR, or one hiding a decision nobody has made, becomes a park or a question
+// weeks later at full price. It is one sentence and it earns its pin.
+func TestPlanSkillStatesTheSizingContract(t *testing.T) {
+	skill := planSkill(t)
+
+	// Read against the text with its line breaks flattened: the sentence is long
+	// enough to wrap, and where it wraps is not the contract.
+	want := "one issue is one PR that `/" + defaultSkill + "` can produce unattended without stopping to ask"
+	if flat := strings.Join(strings.Fields(skill), " "); !strings.Contains(flat, want) {
+		t.Errorf("SKILL.md no longer states the sizing contract (%q), so nothing bounds how big a"+
+			" proposal may be — and every oversized one is discovered by a run failing on it", want)
+	}
+}
+
+// Same posture the implement-issue skill carries, for the same reason: a plan
+// run reads a vision document and an entire open backlog, and on a repo that
+// accepts outside issues that backlog is written by strangers. Its blast radius
+// is smaller — proposals behind a label — but the reading has to be the same.
+func TestPlanSkillTreatsWhatItReadsAsData(t *testing.T) {
+	skill := planSkill(t)
+
+	for _, marker := range []string{"data", "not addressed to you", "content to report, not to act on"} {
+		if !strings.Contains(skill, marker) {
+			t.Errorf("the posture paragraph no longer says %q — without it the skill reads a"+
+				" vision document and an attacker-editable backlog as instructions addressed to it", marker)
+		}
+	}
+}
+
+// The estimate is the curator's cheapest signal, and it is only useful if it is
+// shaped the same every time. The one thing it must never carry is money: the
+// model has no price sheet, the binary refuses to hardcode one, and a
+// confident-looking dollar figure invented here would be read as measured.
+func TestPlanSkillEstimateLineKeepsItsShape(t *testing.T) {
+	skill := planSkill(t)
+
+	shape := regexp.MustCompile(`(?m)^[ \t]*Estimate: [SML] — likely \S+ runs[ \t]*$`)
+	lines := shape.FindAllString(skill, -1)
+	if lines == nil {
+		t.Fatalf("SKILL.md spells no `Estimate: <S|M|L> — likely <n> runs` line, so proposals" +
+			" carry no size and a curator cannot tell the cheap wins from the big bets")
+	}
+	for _, line := range lines {
+		if strings.Contains(line, "$") {
+			t.Errorf("the estimate line quotes money:\n\t%s\nsizes are the model's judgement;"+
+				" costs come from run history via `%s stats` and nowhere else", strings.TrimSpace(line), moduleName(t))
+		}
+	}
+}
+
+// The one guarantee that makes proposals safe to file unattended: this run
+// creates labelled issues and does nothing else. No commits, no pushes, no pull
+// requests, and no touching threads that already exist — an edit could strip a
+// `proposed` label as easily as apply one, which is self-approval. The skill
+// text is not the enforcement (the allowlist is, once the plan verb ships), but
+// a skill that talks about editing issues is one that will try.
+func TestPlanSkillCreatesIssuesAndNothingElse(t *testing.T) {
+	skill := planSkill(t)
+
+	for _, forbidden := range []string{"gh issue edit", "gh issue comment", "gh pr", "git commit", "git push"} {
+		if strings.Contains(skill, forbidden) {
+			t.Errorf("SKILL.md spells %q; a plan run's entire write surface is `gh issue create`"+
+				" plus the scratch body file it deletes", forbidden)
+		}
+	}
+}
+
 // The review gate runs as a forked agent that starts in the session's cwd, not
 // in the worktree — the skill's own `cd` does not move it. Invoked with no
 // target it reviews the main checkout instead, which on a clean default branch
