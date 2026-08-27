@@ -188,11 +188,9 @@ writes no run-data record. Nothing about the answer is remembered past the
 process, either, so a CLI that grows support for the combination starts working
 with no change here and no flag to set.
 
-**What this means for what leaves your machine** — a Remote Control session is
-visible through your own claude.ai account, which is the one place a shift's
-session content is readable off this machine. It goes to you and nobody else,
-over Claude Code's own channel, and `-remote=false` closes it. See
-[Security](security.md).
+A registered session is readable through your own claude.ai account and
+nobody else's. It is the one place a shift's session content is readable off
+this machine, and [security.md](security.md) is where that trade is argued.
 
 ### Setting defaults from the environment
 

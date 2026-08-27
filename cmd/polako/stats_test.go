@@ -143,7 +143,7 @@ human latency
   pr open to merge    3 spans — 1h20m median, 2h max (human availability, not the tool)
 
 note: 1 run resumed an earlier session. Costs are summed exactly as each
-      run reported them — see "resumed sessions" in the README.
+      run reported them — see "resumed sessions" in docs/run-data.md.
 `, dir)
 
 	if got := stats(t, "-metrics", dir); got != want {

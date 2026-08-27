@@ -107,13 +107,3 @@ and it is the same visibility an interactive session started with
 `claude --remote-control` has. If that is not a trade you want on a given
 repository, turn it off; a shift with `-remote=false` invokes `claude` exactly
 as it did before the flag existed.
-
-
-## Access
-
-The repository is public: anyone can install both halves with the commands
-above, no access grant or credential setup needed. The flip side is that
-anyone can open an issue here — and open issues are what a drain works — so
-`polako work` refuses to start on this or any other public repository without
-a `-label` gate or an explicit `-ungated`; see [Security](#security).
-
