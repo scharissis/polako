@@ -67,10 +67,14 @@ check it is *kept*.
 - `.eval/bin/gh` — a stand-in that answers reads from the case's fixtures
   (`issue.json` for `issue view`, `issues.json` and `issues-closed.json` for
   `issue list`) and *records* every write into `.eval/` instead of performing
-  it. It refuses any subcommand the unattended allowlist would not grant, so a
-  case cannot pass on a call the real run could never make. `issue create` both
-  records and answers: it hands back an incrementing number from 100 up, so a
-  plan run can file an epic and parent children to the number it got.
+  it. It refuses any subcommand no shipped skill is permitted, so a case cannot
+  pass on a call the real run could never make — `defaultTools` is the set for
+  `implement-issue`, and for `plan-backlog` it is the write surface its
+  `SKILL.md` names, whose `issue list` and `issue create` are outside
+  `defaultTools` because the `plan` verb that would grant them has not shipped.
+  `issue create` both records and answers: it hands back an incrementing number
+  from 100 up, so a plan run can file an epic and parent children to the number
+  it got.
 - `.claude/settings.json` — puts that `gh` first on `PATH`.
 - `CLAUDE.md` — says the project is `repo/`. The prompt is a bare slash command
   with nowhere to name a directory, and Phase 0's `git worktree list` otherwise

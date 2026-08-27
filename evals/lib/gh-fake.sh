@@ -7,9 +7,12 @@
 # graders fixed paths to read instead of having to work out where the run put
 # its worktree.
 #
-# Only the subcommands the skill's allowlist grants are answered. Anything else
+# Only the subcommands a shipped skill is permitted are answered. Anything else
 # exits non-zero, because a case passing on a call the real run would never be
-# permitted to make is a case that proves nothing.
+# permitted to make is a case that proves nothing. For implement-issue that set
+# is defaultTools in main.go; the plan-backlog reads and the one `issue create`
+# it is allowed are not in defaultTools and deliberately so — there is no plan
+# verb yet, and the allowlist that grants them ships with it.
 set -euo pipefail
 
 record=$1
@@ -139,7 +142,8 @@ case "$subcommand" in
 
 *)
   echo "eval stand-in gh: unsupported subcommand '$subcommand'." >&2
-  echo "The unattended allowlist would not grant it either — see defaultTools in main.go." >&2
+  echo "No shipped skill is permitted it either — see defaultTools in main.go, and the" >&2
+  echo "write surface each SKILL.md names." >&2
   exit 1
   ;;
 esac

@@ -8,9 +8,9 @@
   },
   {
     "number": 2,
-    "title": "README says the script lives in bin/",
+    "title": "There is no LICENSE file",
     "state": "OPEN",
     "labels": [],
-    "body": "The README's usage block shows `./bin/greet.sh`. There is no `bin/` directory\nand there never was; the script is at the repository root. Fix the path.\n"
+    "body": "The repository ships `greet.sh`, `test.sh` and a README, and nothing that says\nwhat terms any of it is offered under. Add a LICENSE file and link it from the\nREADME.\n"
   }
 ]
