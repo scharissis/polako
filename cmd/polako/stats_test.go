@@ -25,7 +25,7 @@ const fixtureMain = `
 {"v":1,"kind":"run","ts":"2026-08-21T09:06:00Z","ended":"2026-08-21T09:40:00Z","repo":"scharissis/polako","issue":13,"pr":35,"reason":"resume","attempt":1,"session":"s13a","resumed_from":"s13a","status":"ok","subtype":"success","outcome":"opened_pr","turns":31,"tool_uses":27,"wall_ms":2040000,"api_ms":1500000,"cost_usd":3.00,"usage_source":"result","tokens":{"in":2500,"out":42000,"cache_read":5200000,"cache_write":260000},"model":"claude-opus-5","tag":"baseline"}
 {"v":1,"kind":"issue","ts":"2026-08-21T11:00:00Z","repo":"scharissis/polako","issue":13,"pr":35,"outcome":"merged","tag":"baseline"}
 {"v":1,"kind":"run","ts":"2026-08-22T09:00:00Z","ended":"2026-08-22T09:30:00Z","repo":"scharissis/polako","issue":14,"reason":"implement","status":"no-turns","subtype":"success","outcome":"nothing","turns":0,"wall_ms":1800000,"cost_usd":0.10,"usage_source":"result","tokens":{"in":100,"out":900,"cache_read":50000,"cache_write":2000},"model":"claude-sonnet-5","tag":"baseline"}
-{"v":1,"kind":"issue","ts":"2026-08-22T09:31:00Z","repo":"scharissis/polako","issue":14,"pr":0,"outcome":"needs_human","tag":"baseline"}
+{"v":1,"kind":"issue","ts":"2026-08-22T09:31:00Z","repo":"scharissis/polako","issue":14,"pr":0,"outcome":"needs_human","park_reason":"produced_nothing","tag":"baseline"}
 {"v":1,"kind":"pr","ts":"2026-08-22T10:00:00Z","repo":"scharissis/polako","issue":14,"note":"a record kind written by a newer version"}
 {"v":1,"kind":"run","ts":"2026-08-23T09:00:00Z","ended":"2026-08-23T09:12:00Z","repo":"scharissis/polako","issue":15,"pr":36,"reason":"remediate","status":"ok","subtype":"success","outcome":"nothing","turns":9,"tool_uses":8,"wall_ms":720000,"cost_usd":0.40,"usage_source":"result","tokens":{"in":400,"out":5000,"cache_read":600000,"cache_write":30000},"model":"claude-opus-5","tag":"terse-plan"}
 {"v":1,"kind":"run","ts":"2026-08-23T10:00:00Z","ended":"2026-08-2`
@@ -121,6 +121,7 @@ func TestStatsReport(t *testing.T) {
 
 issues
   terminal          4 — merged 3 (75%%), needs human 1
+  park reasons      produced nothing 1
   in flight         1
   runs per issue    1.5 mean, 1.5 median
   cost per issue    $1.92 mean, $2.00 median
@@ -214,6 +215,46 @@ func TestStatsSumsBothPricedHalvesOfAResumedSession(t *testing.T) {
 	line := issueLine(t, stats(t, "-metrics", dir, "-by", byIssue), "scharissis/paired#21")
 	if !strings.Contains(line, "$5.00") {
 		t.Errorf("issue #21 = %q, want $2.00 + $3.00 summed, not a per-session maximum", line)
+	}
+}
+
+// The ranking the field exists for: needs_human is one bucket in the terminal
+// line, and this is what it is made of. The fixture mixes the two eras
+// deliberately — a park that named its reason, one that could not, and two
+// written before the field existed at all.
+func TestStatsBreaksParksDownByReason(t *testing.T) {
+	dir := t.TempDir()
+	const parks = `{"v":1,"kind":"issue","ts":"2026-08-22T09:00:00Z","repo":"scharissis/parked","issue":1,"outcome":"needs_human","park_reason":"budget"}
+{"v":1,"kind":"issue","ts":"2026-08-22T09:01:00Z","repo":"scharissis/parked","issue":2,"outcome":"needs_human","park_reason":"budget"}
+{"v":1,"kind":"issue","ts":"2026-08-22T09:02:00Z","repo":"scharissis/parked","issue":3,"outcome":"needs_human","park_reason":"checks_remediation"}
+{"v":1,"kind":"issue","ts":"2026-08-22T09:03:00Z","repo":"scharissis/parked","issue":4,"outcome":"needs_human","park_reason":"unknown"}
+{"v":1,"kind":"issue","ts":"2026-08-22T09:04:00Z","repo":"scharissis/parked","issue":5,"outcome":"needs_human"}
+{"v":1,"kind":"issue","ts":"2026-08-22T09:05:00Z","repo":"scharissis/parked","issue":6,"outcome":"needs_human"}
+{"v":1,"kind":"issue","ts":"2026-08-22T09:06:00Z","repo":"scharissis/parked","issue":7,"pr":9,"outcome":"merged"}
+`
+	if err := os.WriteFile(filepath.Join(dir, "scharissis--parked.jsonl"), []byte(parks), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+
+	out := stats(t, "-metrics", dir)
+	// Reasons in the report's own order, then the records that predate the
+	// field — counted as unrecorded, never folded into the unknown that a park
+	// path writes when it cannot say. The two are different findings: one is an
+	// old file, the other is a gap in the taxonomy.
+	if !hasLine(out, "park reasons budget 2, checks remediation 1, unknown 1, unrecorded 2") {
+		t.Errorf("park reasons line differs:\n%s", out)
+	}
+	// The merged issue is not a park, whatever else it carries.
+	if !hasLine(out, "terminal 7 — merged 1 (14%), needs human 6") {
+		t.Errorf("terminal line differs:\n%s", out)
+	}
+}
+
+// A window with nothing parked in it gets no line, rather than a row of zeroes
+// for every reason nothing happened for.
+func TestStatsOmitsParkReasonsWhenNothingParked(t *testing.T) {
+	if out := stats(t, "-metrics", drainFixtureDir(t)); strings.Contains(out, "park reasons") {
+		t.Errorf("no issue was parked, so there is nothing to break down:\n%s", out)
 	}
 }
 

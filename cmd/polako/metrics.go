@@ -79,6 +79,41 @@ const (
 	issueNeedsHuman = "needs_human"
 )
 
+// Why an issue was handed back. issueNeedsHuman is one bucket, and "what parks
+// issues most" is the ranking that says which half of the tool to spend the
+// next change on — so every park names one of these, and the taxonomy is the
+// park callsites themselves rather than a guess about them.
+//
+// Identifiers, never the park's message: the reason text quotes issue numbers,
+// dollar figures and branch names, and records hold no text. parkUnknown is
+// what a path that cannot name itself writes, which is not the same as a
+// record written before this field existed — that one carries nothing at all,
+// and stats counts it as unrecorded.
+const (
+	parkBudget    = "budget"            // a -max-cost or -max-issue-time cap
+	parkRetries   = "retries_exhausted" // claude kept dying and the resumes ran out
+	parkNothing   = "produced_nothing"  // a clean run that opened no PR and asked nothing
+	parkNoSkill   = "no_skill"          // -skill names nothing this installation has
+	parkAuth      = "auth"              // the API refused the token
+	parkConflicts = "conflict_remediation"
+	parkChecks    = "checks_remediation"
+	parkReview    = "review_remediation"
+	parkPRState   = "pr_state" // the PR is in a state the supervisor does not know
+	// Closed without merging — a human's decision, and the one park whose
+	// record says closed_unmerged rather than needs_human. recordIssue drops
+	// the reason there, because the outcome has already said it; the category
+	// exists so the park itself is classified like every other one.
+	parkPRClosed = "pr_closed"
+	parkUnknown  = "unknown" // the park path could not say
+)
+
+// parkReasonOrder is the order stats lists them in: roughly the order they
+// happen in an issue's life, from a run that never started to a PR nobody
+// merged. breakdown appends anything a newer version wrote, so the list never
+// has to be exhaustive.
+var parkReasonOrder = []string{parkNoSkill, parkAuth, parkBudget, parkRetries,
+	parkNothing, parkConflicts, parkChecks, parkReview, parkPRState, parkPRClosed, parkUnknown}
+
 // Where a run's numbers came from. Crash, stall and interrupt never emit a
 // result event, yet burned real tokens; those runs report the tally observed
 // as they streamed, and say so.
@@ -237,6 +272,12 @@ type issueRecord struct {
 	PR      int    `json:"pr"`
 	Outcome string `json:"outcome"`
 	Tag     string `json:"tag"`
+
+	// Why it was handed back, on issueNeedsHuman records alone: one of the
+	// park reasons above, never the park's message. Absent everywhere else,
+	// and absent on every record written before the field existed — which is
+	// why parkUnknown is a value rather than an omission.
+	ParkReason string `json:"park_reason,omitempty"`
 
 	// What GitHub knew about the PR when the issue ended, folded in at
 	// terminal state. Absent when there was no PR, when -metrics is off, or
@@ -508,17 +549,28 @@ func (r *recorder) recordRun(cfg config, rc runContext, rep runReport) runRecord
 	return rec
 }
 
-func (r *recorder) recordIssue(cfg config, issue, pr int, outcome string, facts prFacts) {
+// recordIssue writes the terminal record. why is the park reason, and this is
+// the one place the rule about it is kept: it is written for a hand-back and
+// nowhere else, and a hand-back that named nothing records parkUnknown — so a
+// missing field can only ever mean a record older than the field, and never a
+// park nobody categorised.
+func (r *recorder) recordIssue(cfg config, issue, pr int, outcome, why string, facts prFacts) {
+	if outcome != issueNeedsHuman {
+		why = ""
+	} else if why == "" {
+		why = parkUnknown
+	}
 	r.append(cfg.repo, issueRecord{
-		V:       recordVersion,
-		Kind:    "issue",
-		TS:      stamp(time.Now()),
-		Shift:   cfg.shiftID,
-		Repo:    cfg.repo,
-		Issue:   issue,
-		PR:      pr,
-		Outcome: outcome,
-		Tag:     cfg.tag,
+		V:          recordVersion,
+		Kind:       "issue",
+		TS:         stamp(time.Now()),
+		Shift:      cfg.shiftID,
+		Repo:       cfg.repo,
+		Issue:      issue,
+		PR:         pr,
+		Outcome:    outcome,
+		Tag:        cfg.tag,
+		ParkReason: why,
 
 		Additions:    facts.Additions,
 		Deletions:    facts.Deletions,

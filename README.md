@@ -198,7 +198,9 @@ allowlist — is a later release.
   by asking GitHub, not by reading anything it saved.
 - **An issue it cannot finish is parked, not retried forever.** It gets a
   `needs-human` label and a comment saying what happened, and the shift carries
-  on with the rest of the backlog.
+  on with the rest of the backlog. The reason is recorded as one identifier
+  too, so `polako stats` can rank what parks issues most — see
+  [docs/run-data.md](docs/run-data.md).
 - **Your checkout is never written to.** polako fast-forwards your default
   branch so a review has the right base, and refuses rather than rebase, reset
   or commit.

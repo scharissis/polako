@@ -521,6 +521,23 @@ func drainConfig(t *testing.T, mode string, st *ghState) (config, string) {
 	}, path
 }
 
+// terminalRecords is the terminal issue records one drain wrote — the rows a
+// later report ranks, read back here and nowhere in the binary.
+func terminalRecords(t *testing.T, dir, repo string) []issueRecord {
+	t.Helper()
+	var recs []issueRecord
+	for _, line := range readRecords(t, dir, repo) {
+		var rec issueRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("record is not JSON: %v\n%s", err, line)
+		}
+		if rec.Kind == "issue" {
+			recs = append(recs, rec)
+		}
+	}
+	return recs
+}
+
 func finalGhState(t *testing.T, path string) *ghState {
 	t.Helper()
 	st, err := readGhState(path)
@@ -543,9 +560,24 @@ func TestDrainParksADeadIssueAndKeepsGoing(t *testing.T) {
 		// issue 1 has none, and the fake CLI opens none.
 		PRs: map[string]*fakePR{"issue-2": {Number: 9, State: "MERGED"}},
 	})
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
 
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("one dead issue must not end the drain: %v", err)
+	}
+
+	// Both ends of the same drain: the park says why in an identifier the
+	// report can rank, and the merge carries no such field to be ranked by.
+	for _, rec := range terminalRecords(t, records, cfg.repo) {
+		want := ""
+		if rec.Outcome == issueNeedsHuman {
+			want = parkNothing
+		}
+		if rec.ParkReason != want {
+			t.Errorf("issue #%d ended %s with park_reason %q, want %q",
+				rec.Issue, rec.Outcome, rec.ParkReason, want)
+		}
 	}
 
 	st := finalGhState(t, path)
@@ -618,9 +650,24 @@ func TestDrainParkSaysWhatTheRunLeftBehind(t *testing.T) {
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
 	t.Setenv(fakeGhLogEnv, calls)
 	leftBehind(t, &cfg)
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
 
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("one dead issue must not end the drain: %v", err)
+	}
+
+	// The bound that stopped the resume is what the record files this under.
+	// The sentence below deliberately refuses to blame a run that produced
+	// plenty, and filing it under produced_nothing anyway would aim the
+	// report's ranking at the skill instead of at the ceiling that fired.
+	recs := terminalRecords(t, records, cfg.repo)
+	if len(recs) != 1 {
+		t.Fatalf("wrote %d terminal records, want 1", len(recs))
+	}
+	if recs[0].Outcome != issueNeedsHuman || recs[0].ParkReason != parkRetries {
+		t.Errorf("terminal record = %s / %q, want %s / %q",
+			recs[0].Outcome, recs[0].ParkReason, issueNeedsHuman, parkRetries)
 	}
 
 	out := buf.String()
@@ -1302,6 +1349,8 @@ func TestDrainParksWhenCIRemediationChangesNothing(t *testing.T) {
 		}},
 		Labels: []string{needsHumanLabel},
 	})
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
 
 	// Bounded, because the regression this guards is an unbounded wait: without
 	// the fix the drain never returns, and a hung suite says less than a failure.
@@ -1325,6 +1374,18 @@ func TestDrainParksWhenCIRemediationChangesNothing(t *testing.T) {
 	}
 	if want := "CI on PR #9 is still red and remediation left the branch unchanged"; !strings.Contains(out, want) {
 		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+	// The park that ends this issue is raised several calls down, inside the PR
+	// supervisor, and the record is written by its caller. So this is the path
+	// that proves the reason travels: classify it anywhere but on the error and
+	// the most actionable ranking in the report reads "unknown".
+	recs := terminalRecords(t, records, cfg.repo)
+	if len(recs) != 1 {
+		t.Fatalf("wrote %d terminal records, want 1", len(recs))
+	}
+	if recs[0].Outcome != issueNeedsHuman || recs[0].ParkReason != parkChecks {
+		t.Errorf("terminal record = %s / %q, want %s / %q",
+			recs[0].Outcome, recs[0].ParkReason, issueNeedsHuman, parkChecks)
 	}
 }
 
@@ -1744,13 +1805,18 @@ func TestSelectableIssuesRejectsJunk(t *testing.T) {
 }
 
 func TestParkedErrorsSurviveWrapping(t *testing.T) {
-	err := fmt.Errorf("issue #3: %w", park("PR #%d was closed", 12))
+	err := fmt.Errorf("issue #3: %w", park(parkPRClosed, "PR #%d was closed", 12))
 	reason, parked := parkReason(err)
 	if !parked {
 		t.Fatalf("%v should still park after wrapping", err)
 	}
 	if want := "PR #12 was closed"; reason != want {
 		t.Errorf("reason = %q, want %q", reason, want)
+	}
+	// The category the record files it under travels the same way: the park
+	// that raises it is several wraps away from the record that reports it.
+	if got := parkCategoryOf(err); got != parkPRClosed {
+		t.Errorf("park category = %q, want %q", got, parkPRClosed)
 	}
 	if _, parked := parkReason(errAuth); parked {
 		t.Error("a credentials failure must stay fatal")
@@ -1760,7 +1826,7 @@ func TestParkedErrorsSurviveWrapping(t *testing.T) {
 	}
 	// The two have to stay apart: a question is not a decision, so reading one
 	// as the other would label a perfectly workable issue needs-human.
-	if _, deferred := deferReason(park("PR #12 was closed")); deferred {
+	if _, deferred := deferReason(park(parkPRClosed, "PR #12 was closed")); deferred {
 		t.Error("a park is not a deferral")
 	}
 	if _, parked := parkReason(&deferredError{}); parked {
