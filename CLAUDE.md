@@ -48,6 +48,18 @@ in the PR body rather than doing it quietly.
   Fatal is for conditions where nothing further can succeed at all — a bad
   `-dir`, a `gh` that cannot answer, a `-skill` this installation lacks, a token
   the API refuses.
+- **The `proposed` label is orchestration state**, the intake-side twin of
+  `needs-human`: it marks an issue a machine proposed and nobody has approved,
+  the queue is derived by excluding it, and only a human takes it off. Whatever
+  comes to create issues applies it to everything it creates, and the supervisor
+  is what enforces that — the gate must not depend on a model remembering. The
+  `-label` gate label is applied by humans alone, and exclusion beats inclusion:
+  an issue carrying both stays out.
+- **An issue with sub-issues is a container.** It is never worked, whatever its
+  labels — so a parent made by hand is protected too. That detection is
+  structural rather than labelled on purpose: a label says what something is
+  called, the sub-issue rollup says what it *is*. Its body is the design record
+  for its children; closing it is a human judgment.
 - **`issue-N` branch naming is a contract.** The supervisor finds a PR by its
   head branch; the skill is what names the branch. Changing either side means
   changing both, and `-branch-prefix` has to keep working.

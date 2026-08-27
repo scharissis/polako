@@ -33,6 +33,7 @@ func statusConfigFor(t *testing.T, st *ghState) (config, string) {
 		ghRepo:       drainCfg.repo,
 		branchPrefix: "issue-",
 		ghRetryWait:  time.Millisecond,
+		queue:        new(queueMemo),
 	}, path
 }
 
@@ -102,6 +103,37 @@ func TestStatusReportsWhereTheBacklogStands(t *testing.T) {
 			t.Errorf("report names %q, which is not part of where the backlog stands\ngot:\n%s",
 				unwanted, printed)
 		}
+	}
+}
+
+// `status` answers "what would a drain work here?", so it has to exclude
+// exactly what a drain excludes — which is why it derives the queue through the
+// drain's own call rather than a second copy of it.
+func TestStatusInheritsTheCurationGate(t *testing.T) {
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true, Labels: []string{proposedLabel}},
+			"2": {Open: true, SubIssues: 3},
+			"3": {Open: true},
+		},
+	})
+
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	if want := []int{3}; !slices.Equal(snap.queues.ready, want) {
+		t.Errorf("ready = %v, want %v", snap.queues.ready, want)
+	}
+	if want := []int{1}; !slices.Equal(snap.queues.proposed, want) {
+		t.Errorf("proposed = %v, want %v", snap.queues.proposed, want)
+	}
+	if len(snap.queues.blocked)+len(snap.queues.parked) != 0 {
+		t.Errorf("blocked/parked = %v/%v, want a container in neither",
+			snap.queues.blocked, snap.queues.parked)
+	}
+	if snap.next != 3 {
+		t.Errorf("next = %d, want the lowest issue a drain would actually pick up", snap.next)
 	}
 }
 

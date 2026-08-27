@@ -192,19 +192,14 @@ type statusPR struct {
 func readStatus(ctx context.Context, cfg config, now time.Time) (statusSnapshot, error) {
 	snap := statusSnapshot{quiet: map[int]time.Duration{}}
 
-	args := []string{"issue", "list", "--state", "open", "--limit", "200", "--json", "number,labels"}
-	if cfg.label != "" {
-		args = append(args, "--label", cfg.label)
-	}
-	raw, err := retryRead(ctx, cfg, "listing open issues", func() ([]byte, error) {
-		return gh(ctx, cfg, args...)
-	})
+	// The drain's own listing, exclusions and all: what `status` says a drain
+	// would work has to be derived the way the drain derives it, or the two
+	// disagree the moment one of them learns a new exclusion.
+	queues, err := openQueues(ctx, cfg)
 	if err != nil {
 		return snap, err
 	}
-	if snap.queues, err = selectableIssues(raw); err != nil {
-		return snap, err
-	}
+	snap.queues = queues
 	// The drain's own rule, in dryRun's words: the lowest ready issue, and with
 	// none, the lowest issue waiting on an answer. -strict-order is the one
 	// thing that changes it — openIssues folds the two queues into one there, so

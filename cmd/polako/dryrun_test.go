@@ -88,6 +88,36 @@ func TestDryRunSaysWhatItWouldDoAndChangesNothing(t *testing.T) {
 	}
 }
 
+// The queue a dry run prints is the queue a shift would work, exclusions and
+// all: it derives it through the same call, so a proposal and a container are
+// no more offered here than they would be worked there.
+func TestDryRunInheritsTheCurationGate(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true, Labels: []string{proposedLabel}},
+			"2": {Open: true, SubIssues: 3},
+			"3": {Open: true},
+		},
+	})
+
+	var out strings.Builder
+	if err := dryRun(context.Background(), cfg, &out); err != nil {
+		t.Fatalf("dryRun: %v", err)
+	}
+
+	said := buf.String()
+	for _, want := range []string{
+		"ready: #3\n", // and nothing else on that line
+		"issue #3 would be worked next",
+		"ignoring 1 proposed issue(s) awaiting curation",
+	} {
+		if !strings.Contains(said, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, said)
+		}
+	}
+}
+
 // "The exact invocation" is the whole value of the flag, so it is checked
 // against the one a real run makes rather than against a second rendering of
 // itself — the pair that would otherwise drift the first time either changed.

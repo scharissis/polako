@@ -19,7 +19,8 @@ cannot conflict with each other.
 ## How it works
 
 ```
-lowest open issue without a `needs-human` or `awaiting-answer` label
+lowest open issue with no sub-issues and no `needs-human`, `proposed`
+or `awaiting-answer` label
    ↓
 claude -p "/implement-issue N"        ← headless, streamed to your terminal
    ↓
@@ -117,6 +118,29 @@ thread, and a local path is nobody's business but yours.
 
 Parking preserves the no-conflict guarantee: only one issue is ever in flight,
 and a parked issue is simply not in flight.
+
+**A `proposed` issue is one nobody has approved yet, and it is never worked.**
+The label is the curation gate for issues a machine proposed rather than a
+person: `polako` counts them, says so on startup, and leaves them alone until
+you take the label off. Approving is ordinary GitHub triage — `gh issue edit 12
+14 19 --remove-label proposed` approves three at once; rejecting is closing the
+issue; reworking is editing its text, since the text is read at dispatch time.
+Exclusion beats inclusion, so an issue carrying both the `-label` gate label
+*and* `proposed` stays out. Nothing in this release applies the label — it is
+the gate, shipped first, so no version of the binary exists that would work an
+uncurated proposal:
+
+```
+ignoring 3 proposed issue(s) awaiting curation — remove the proposed label to queue them
+```
+
+**An issue with sub-issues is a container, and containers are never worked.**
+A parent issue tracks the work rather than being it, so it is dropped from the
+queue whatever its labels — which also protects the epics you group things under
+by hand. That one is structural rather than labelled: it is read off GitHub's
+own sub-issue rollup. A `gh` too old to report that rollup gets one warning and
+carries on, with container issues treated as ordinary work; the `proposed`
+exclusion is labels alone and never depends on it.
 
 **A run that has to ask something labels the issue `awaiting-answer`**, and the
 supervisor keys off that label rather than off the thread getting busier. The

@@ -388,6 +388,14 @@ func capNotes(cfg config) string {
 // straight back up. Removing the label is how an operator puts it back in.
 const needsHumanLabel = "needs-human"
 
+// proposedLabel is the curation gate: an issue a machine proposed and no human
+// has approved yet. The intake-side twin of needsHumanLabel — the queue is
+// derived by excluding both — and the reason the exclusion ships before
+// anything that applies the label exists: at no commit may a shift work an
+// issue nobody chose. Only a human takes it off, which is the whole of what
+// approving a proposal means.
+const proposedLabel = "proposed"
+
 // awaitingAnswerLabel says a run stopped to ask something. It is the only
 // evidence the supervisor has that "no PR" means "blocked on a human" rather
 // than "the run produced nothing at all": the count of comments on the thread
@@ -515,6 +523,15 @@ type config struct {
 	remote     bool
 	remoteOff  *atomic.Bool
 	remoteName string
+	// queue is what a shift learns about listing its own backlog and only wants
+	// to find out — and say — once: that this gh is too old to see sub-issues,
+	// and that there are proposals it is leaving behind the curation gate. A
+	// pointer for the same reason remoteOff is one, and nil-safe the same way:
+	// the drain lists the backlog once per issue, so a bool on a config passed
+	// by value would re-probe an old gh and re-log both lines every time round
+	// the loop. Nothing durable — a fact about this gh and this shift, not
+	// orchestration state.
+	queue *queueMemo
 	// notifyCmd is run whenever the drain reaches a state a person has to move
 	// past. Empty, the default, means no hook at all. See notify.go.
 	notifyCmd string
@@ -726,6 +743,7 @@ func parseFlags() config {
 	cfg.rec = newRecorder(metrics)
 	cfg.shiftID = newShiftID()
 	cfg.remoteOff = new(atomic.Bool)
+	cfg.queue = new(queueMemo)
 	cfg.ghBin = "gh"
 	cfg.ghRetryWait = ghRetryDelay
 	cfg.resumeCeiling = defaultResumeCeiling
@@ -2176,6 +2194,48 @@ func (c config) dropRemote() {
 	}
 }
 
+// queueMemo is the two things a shift finds out while listing its backlog that
+// it only wants to act on, and say, once. Neither is durable and neither is
+// read back after the process ends: one is a fact about this gh binary, the
+// other is a line an operator needs at the top of a shift rather than once per
+// issue. See config.queue.
+type queueMemo struct {
+	subIssuesOff atomic.Bool
+	saidProposed atomic.Bool
+}
+
+// seesSubIssues reports whether the listing should still ask for the sub-issue
+// rollup — true until a gh turns out not to have it.
+func (c config) seesSubIssues() bool {
+	return c.queue == nil || !c.queue.subIssuesOff.Load()
+}
+
+// dropSubIssues gives up on the rollup for the rest of the shift and says so.
+// Nil-safe like dropRemote, and losing the memo costs the same kind of nothing:
+// one rejected call per listing, and the warning repeated with it.
+func (c config) dropSubIssues() {
+	if c.queue != nil && c.queue.subIssuesOff.Swap(true) {
+		return
+	}
+	log.Print("gh too old to see sub-issues; container issues will be treated as workable — upgrade gh")
+}
+
+// sayProposals names what the curation gate is holding back, once a shift, so a
+// forgotten batch of proposals surfaces on every startup instead of rotting
+// silently. Said only when there are some, so a shift with none is as quiet as
+// it was before the gate existed — which also means proposals filed mid-shift
+// are still named the first time a listing sees them.
+func (c config) sayProposals(n int) {
+	if n == 0 {
+		return
+	}
+	if c.queue != nil && c.queue.saidProposed.Swap(true) {
+		return
+	}
+	log.Printf("ignoring %d proposed issue(s) awaiting curation — remove the %s label to queue them",
+		n, proposedLabel)
+}
+
 // buildArgs assembles one headless claude invocation.
 func buildArgs(cfg config, prompt, resumeID string) []string {
 	var args []string
@@ -2859,17 +2919,7 @@ func pickLowest(numbers []int, skip map[int]bool) int {
 // back into the first, which is the whole of what the flag does — a flagged
 // issue keeps its place in the queue, and everything behind it waits.
 func openIssues(ctx context.Context, cfg config) (ready, blocked []int, err error) {
-	args := []string{"issue", "list", "--state", "open", "--limit", "200", "--json", "number,labels"}
-	if cfg.label != "" {
-		args = append(args, "--label", cfg.label)
-	}
-	out, err := retryRead(ctx, cfg, "listing open issues", func() ([]byte, error) {
-		return gh(ctx, cfg, args...)
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	q, err := selectableIssues(out)
+	q, err := openQueues(ctx, cfg)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2879,24 +2929,100 @@ func openIssues(ctx context.Context, cfg config) (ready, blocked []int, err erro
 	return q.ready, q.blocked, nil
 }
 
-// issueQueues is the open backlog sorted into what a drain does with each
-// issue: work it now, leave it for the human it asked, or leave it alone
-// entirely. The drain reads the first two and throws the third away, since a
-// parked issue is one it has agreed not to touch; `status` is what the third
-// exists for, because "what is parked?" is a question about the backlog rather
-// than about the next run.
-type issueQueues struct {
-	ready   []int
-	blocked []int
-	parked  []int
+// What the queue is derived from: the labels the exclusions read, and the
+// sub-issue rollup that says an issue is a container rather than a work item.
+// See listOpenIssues for the gh that cannot serve the second one.
+const (
+	issueFields    = "number,labels"
+	subIssuesField = "subIssuesSummary"
+)
+
+// openQueues reads the open backlog off GitHub and sorts it. Both readers of
+// the queue come through here — the drain and `-dry-run` by way of openIssues,
+// `status` directly — so an exclusion added to selectableIssues reaches every
+// one of them at once and cannot drift between two copies of the same argv.
+func openQueues(ctx context.Context, cfg config) (issueQueues, error) {
+	out, err := retryRead(ctx, cfg, "listing open issues", func() ([]byte, error) {
+		return listOpenIssues(ctx, cfg)
+	})
+	if err != nil {
+		return issueQueues{}, err
+	}
+	q, err := selectableIssues(out)
+	if err != nil {
+		return issueQueues{}, err
+	}
+	cfg.sayProposals(len(q.proposed))
+	return q, nil
 }
 
-// selectableIssues reads a `gh issue list --json number,labels` payload and
-// sorts it into the three queues: issues ready now, issues already waiting on a
-// human answer, and issues a previous drain parked. Only the first two are
-// worth working, which is what stops the queue handing back the same
-// unimplementable issue on every pass. Labels are matched case-insensitively,
-// the way GitHub itself treats them.
+// listOpenIssues makes the listing call, and copes with a gh too old to know
+// what a sub-issue is: that one rejects the whole --json set before it asks
+// GitHub anything, so the fallback is to ask again without the field. Inside
+// one retryRead attempt rather than around it, so the fallback costs the caller
+// no part of its retry allowance, and remembered for the shift, so the rejected
+// call is paid for once rather than once per issue.
+func listOpenIssues(ctx context.Context, cfg config) ([]byte, error) {
+	args := func(fields string) []string {
+		a := []string{"issue", "list", "--state", "open", "--limit", "200", "--json", fields}
+		if cfg.label != "" {
+			a = append(a, "--label", cfg.label)
+		}
+		return a
+	}
+	if !cfg.seesSubIssues() {
+		return gh(ctx, cfg, args(issueFields)...)
+	}
+	out, err := gh(ctx, cfg, args(issueFields+","+subIssuesField)...)
+	if unknownJSONField(err) {
+		cfg.dropSubIssues()
+		return gh(ctx, cfg, args(issueFields)...)
+	}
+	return out, err
+}
+
+// unknownJSONField reports whether gh turned the listing down because it does
+// not have one of the fields asked for. Matched on gh's own wording rather than
+// on the exit status: every other way that call can fail — a network that has
+// not come back, a token GitHub refuses — has to keep its retry rather than
+// quietly costing the shift its container skip for good.
+func unknownJSONField(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "json field")
+}
+
+// issueQueues is the open backlog sorted into what a drain does with each
+// issue: work it now, leave it for the human it asked, or leave it alone
+// entirely. The drain reads the first two and throws the rest away, since a
+// parked issue is one it has agreed not to touch and a proposed one is not its
+// to choose; `status` is what parked exists for, because "what is parked?" is a
+// question about the backlog rather than about the next run, and proposed is
+// what the startup line counts.
+//
+// Containers are in no list at all. An issue with sub-issues is a tracking
+// container rather than a work item, and it is not held back by anything a
+// human could release: reporting it as parked would send an operator to take
+// off a label that would change nothing.
+type issueQueues struct {
+	ready    []int
+	blocked  []int
+	parked   []int
+	proposed []int
+}
+
+// selectableIssues reads a `gh issue list --json number,labels,subIssuesSummary`
+// payload and sorts it into the queues: issues ready now, issues already
+// waiting on a human answer, issues a previous drain parked, and issues a
+// machine proposed that nobody has approved. Only the first two are worth
+// working, which is what stops the queue handing back the same unimplementable
+// issue on every pass. Labels are matched case-insensitively, the way GitHub
+// itself treats them.
+//
+// The order of the cases is the precedence, and two of them are decisions. A
+// container is dropped ahead of every label, because "never a work item" is
+// structural and outranks anything written on it. And needs-human beats
+// proposed, because parking is a judgement a human has already made about that
+// issue — which also keeps the ignoring-proposals line honest, since every
+// issue it counts really would queue if the label came off.
 //
 // Every list comes back ascending because the drain works them lowest first,
 // and `gh issue list` guarantees no order of its own.
@@ -2908,8 +3034,13 @@ func selectableIssues(raw []byte) (issueQueues, error) {
 	q := issueQueues{ready: make([]int, 0, len(issues))}
 	for _, is := range issues {
 		switch {
+		case is.SubIssues.Total > 0:
+			// A container, and containers are never worked — whatever their
+			// labels, so a parent somebody made by hand is protected too.
 		case is.hasLabel(needsHumanLabel):
 			q.parked = append(q.parked, is.Number)
+		case is.hasLabel(proposedLabel):
+			q.proposed = append(q.proposed, is.Number)
 		case is.hasLabel(awaitingAnswerLabel):
 			q.blocked = append(q.blocked, is.Number)
 		default:
@@ -2919,13 +3050,22 @@ func selectableIssues(raw []byte) (issueQueues, error) {
 	slices.Sort(q.ready)
 	slices.Sort(q.blocked)
 	slices.Sort(q.parked)
+	slices.Sort(q.proposed)
 	return q, nil
 }
 
-// ghIssue is one row of `gh issue list --json number,labels`.
+// ghIssue is one row of `gh issue list --json number,labels,subIssuesSummary`.
+//
+// SubIssues is absent from the payload of a gh too old to know the field, and
+// absent on GitHub for an issue with no children — the same zero either way,
+// which is the whole of what the old-gh degradation costs: containers read as
+// ordinary work items, and a warning says so.
 type ghIssue struct {
-	Number int       `json:"number"`
-	Labels []ghLabel `json:"labels"`
+	Number    int       `json:"number"`
+	Labels    []ghLabel `json:"labels"`
+	SubIssues struct {
+		Total int `json:"total"`
+	} `json:"subIssuesSummary"`
 }
 
 type ghLabel struct {
