@@ -311,6 +311,44 @@ func TestPlanIsWrittenBeforeImplementation(t *testing.T) {
 	}
 }
 
+// Under headless `claude -p` — the only way the supervisor invokes the skill —
+// the model ending its turn is the process exiting. So a run that stops to wait
+// on something does not pause, it terminates: exit 0, no error, work left
+// uncommitted and no PR. That lands on the drain's default branch, which reads
+// it as "Claude decided nothing" and parks the issue — correctly, on a premise
+// it has no way to see through, since a run that paused and a run that decided
+// nothing look identical from outside. No guard can tell them apart, which
+// leaves the skill knowing what kind of process it is as the only defence.
+func TestSkillSaysTheRunGetsOneTurn(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	if !strings.Contains(skill, "one turn") {
+		t.Error("SKILL.md never tells the run it gets one turn, so nothing stops it ending a" +
+			" turn to wait on work it means to pick up later — under `claude -p` that exits" +
+			" the process with the branch unpushed and no PR, and the issue gets parked")
+	}
+	if !strings.Contains(skill, "Never end a turn intending to resume") {
+		t.Error("SKILL.md no longer forbids ending a turn intending to resume; stating that the" +
+			" run is one-shot is not the same as saying what not to do about it")
+	}
+
+	// The failure is a shape, not a mechanism. A Monitor, a background job meant
+	// to be polled on a later turn, a scheduled wake-up and an unawaited subagent
+	// all end the same way, and a rule that named only the one that happened to
+	// bite first would leave the rest wide open.
+	var named []string
+	for _, mechanism := range []string{"Monitor", "wake-up", "background", "subagent"} {
+		if strings.Contains(skill, mechanism) {
+			named = append(named, mechanism)
+		}
+	}
+	if len(named) < 2 {
+		t.Errorf("the one-turn rule names %v, which reads as a ban on one mechanism rather than"+
+			" on ending a turn with work outstanding — every way of deferring to a later turn"+
+			" fails identically, so name more than one", named)
+	}
+}
+
 // The label command is allowlisted per run by issueLabelTools, as a prefix with
 // the issue number ahead of the flag. SKILL.md is where that command is
 // actually spelled, so the grant and the spelling are one contract with two

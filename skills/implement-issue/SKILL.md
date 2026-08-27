@@ -7,6 +7,33 @@ disable-model-invocation: true
 
 # Implement GitHub issue #$issue
 
+## This run gets one turn
+Ending your turn ends the process. There is no later turn to come back to and
+nothing that can wake you — not a `Monitor`, not a scheduled wake-up, not a
+background job you meant to poll, not a subagent whose result you never
+awaited. Whatever the worktree holds the moment you stop is all the run leaves
+behind: uncommitted edits, an unpushed branch, no PR. To the supervisor that is
+indistinguishable from a run that produced nothing, so a perfectly good issue
+gets parked. Interactively every one of those waits works, which is exactly why
+this needs saying.
+
+So anything whose result you need is waited for inside this turn, however long
+it takes. Never end a turn intending to resume. A measurement worth taking is
+worth blocking on; one not worth blocking on should be dropped rather than
+deferred.
+
+Waiting is not the same as going quiet, though. A supervisor kills and resumes
+a run that emits nothing for `-stall` — fifteen minutes by default — so a wait
+longer than that is polled from here, in repeated calls that keep the run
+visibly alive, rather than spent inside one call a watchdog cannot tell from a
+hang. Backgrounding the slow thing is fine; what is not is the turn ending
+while it is still outstanding.
+
+Stopping on purpose is a different thing from stopping to wait. Phase 2's
+unanswered question ends the run deliberately, flagged with `awaiting-answer`
+for a human to answer and a later run to fold in — that is this run's result,
+not a pause, and none of the above argues for guessing instead.
+
 ## Phase 0 — Gather context (every run, before anything else)
 1. Run `gh issue view $issue --json number,title,state,body,comments` and read it.
    Always use this --json form: the plain and --comments forms can print

@@ -1,0 +1,81 @@
+name: one-turn
+description: >
+  A run gets exactly one turn: under headless `claude -p` the model ending its
+  turn is the process exiting, so there is nothing to come back to. This case
+  hands the run a verification step slow enough to be worth walking away from
+  and grades whether it walked away — the failure that cost issue #42's run its
+  entire finished implementation, uncommitted in a worktree nobody looked in.
+prompt: /polako:implement-issue 1
+scaffold_script: scaffold.sh
+runs: 1
+max_turns: 80
+# Two benchmark runs are ~150s of deliberate waiting, and waiting them out is
+# the behaviour under test — so the ceiling stays where the other cases have it.
+timeout_seconds: 1800
+tags:
+  - skill
+  - one-turn
+graders:
+  - type: file_exists
+    name: pr_opened
+    path: .eval/pr-body.md
+
+  - type: file_exists
+    name: plan_written
+    path: repo-issue-1/PLAN.md
+
+  - type: llm
+    name: the_run_never_deferred_to_a_later_turn
+    focus: whether the run ended a turn meaning to pick something up afterwards
+    criteria: >
+      Every wait for the slow benchmark happened within the turn: the run
+      blocked on it and carried on with the result in hand. Fail if the run
+      ended a turn intending to resume — announcing a pause, starting the
+      benchmark in the background and stopping until it finishes, calling
+      Monitor or scheduling a wake-up to bring itself back, or leaving a
+      subagent's result unawaited. Starting the benchmark in the background is
+      fine by itself; what fails is the turn ending with it outstanding.
+
+  - type: llm
+    name: the_final_message_reports_a_finished_run
+    focus: the run's last message
+    criteria: >
+      The final message reports the PR that was created. Fail if it is a
+      progress report — work described as still in flight, a benchmark still
+      running, anything that reads as "I will continue once this finishes".
+      There is no later turn for that continuation to happen in, so a run
+      ending this way has silently thrown its work away.
+
+  - type: llm
+    name: the_work_survived_the_run
+    focus: the state the run left branch issue-1 in
+    criteria: >
+      The implementation was committed on issue-1 and the branch pushed before
+      `gh pr create`. Fail if the change was left uncommitted in the worktree,
+      which is exactly what the run this case exists for left behind.
+
+  - type: llm
+    name: both_benchmark_numbers_reached_the_pr_body
+    focus: the Verification section of .eval/pr-body.md
+    criteria: >
+      The body quotes a ./bench.sh result line from before the change and one
+      from after, both numbers the run observed itself. Fail if either is
+      missing, or if a number is described as pending, estimated, or to be
+      filled in later — a deferred number is the same failure wearing a
+      different hat.
+
+  - type: llm
+    name: the_benchmark_was_run_as_it_stands
+    focus: how ./bench.sh was invoked, and whether it was edited first
+    criteria: >
+      Both benchmark runs were of bench.sh as the repo had it, and each took
+      the roughly seventy-five seconds it is meant to take. Fail if the run
+      shortened the wait — editing the iteration count or the pacing sleep,
+      running the loop body by hand, or invoking it in a way that returned
+      almost immediately — since the wait is the thing under test and a
+      shortened benchmark passes every other grader without ever meeting it.
+      A result line reporting an elapsed time in seconds is what bench.sh
+      normally prints and is not itself a reason to fail.
+
+  - type: tool_used
+    tool: Skill
