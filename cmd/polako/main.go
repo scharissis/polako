@@ -716,7 +716,7 @@ func parseFlags() config {
 	flag.BoolVar(&cfg.dryRun, "dry-run", false,
 		"resolve the next issue, print the claude invocation it would get, and exit without running or writing anything")
 	flag.StringVar(&cfg.notifyCmd, "notify", "",
-		"command to run when polako needs a human, with context in "+notifyPrefix+"* (see the README)")
+		"command to run when polako needs a human, with context in "+notifyPrefix+"* (see docs/reference.md)")
 	flag.BoolVar(&cfg.remote, "remote", true,
 		"register each run with Remote Control, so you can watch it from claude.ai/code or the phone")
 	flag.StringVar(&cfg.tag, "run-tag", "", "label recorded with every run, for comparing one batch against another")
@@ -1446,7 +1446,7 @@ func preflight(ctx context.Context, cfg *config) error {
 // picks up, and issue text is attacker-controllable input to an unattended
 // agent. Applying a label takes triage permission or better, so a -label gate
 // turns "anyone can queue work" into "a maintainer chose this one" — the
-// README's Security section has always advised it, and on the one repository
+// docs/security.md has always advised it, and on the one repository
 // shape where the risk is structural, advice is not enough. -ungated is the
 // operator overruling this on purpose, out loud.
 //
@@ -1458,7 +1458,7 @@ func queueGate(visibility, label string, ungated bool) error {
 		return nil
 	}
 	return errors.New("this repository is public, so anyone who can open an issue can queue work for an unattended agent — " +
-		"pass -label <name> to work only issues a maintainer labelled (see the README's Security section), " +
+		"pass -label <name> to work only issues a maintainer labelled (see docs/security.md), " +
 		"or -ungated to work every open issue anyway")
 }
 
