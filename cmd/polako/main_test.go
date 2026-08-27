@@ -627,12 +627,19 @@ func lastNumber(prompt string) string {
 	return n
 }
 
-// captureLog redirects the standard logger for one test and returns the buffer.
+// captureLog redirects both narration loggers into one buffer and returns it.
+// The union is the shift-log view: these tests pin what happened, not how the
+// terminal chose to present it, so a line moving between channels breaks
+// nothing here. Presentation has its own tests in ui_test.go.
 func captureLog(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
 	log.SetOutput(&buf)
-	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	detail.SetOutput(&buf)
+	t.Cleanup(func() {
+		log.SetOutput(os.Stderr)
+		detail.SetOutput(detailWriter{u: sinks})
+	})
 	return &buf
 }
 

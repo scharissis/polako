@@ -37,6 +37,7 @@ sets — see [`status`](#where-the-backlog-stands-polako-status) and
 | `-remote` | `true` | Register each run with Remote Control, so you can watch and steer it from claude.ai/code or the app — see [Watching a shift from anywhere](#watching-a-shift-from-anywhere--remote). |
 | `-run-tag` | *(none)* | Freeform label recorded with every run, so one batch can be compared against another. |
 | `-metrics` | `~/.polako/metrics` | Directory for run-data records, or `off` to write nothing. |
+| `-log` | `~/.polako/logs` | Directory for the full per-shift log, or `off` to write none — see [The shift log](#the-shift-log--log). |
 | `-post-summary` | `false` | Comment one line of run numbers on each merged PR. The only thing that shows run data to anybody but you — see [Run data & cost tracking](run-data.md). |
 | `-version` | `false` | Print which release this binary is, then exit. Use it when startup warns that the binary and the skill disagree — see [Getting updates](install.md#getting-updates). |
 
@@ -60,8 +61,9 @@ It resolves the next issue exactly as a real shift would — same queue, same
 `-skip`, same `needs-human` exclusions, same preference for an issue waiting on
 an answer when nothing else is ready — and then stops. Nothing is run and
 nothing is written: every GitHub call it makes is a read, it declares no labels,
-and run-data recording is forced off for the run, so `-metrics` in your
-environment cannot leave a record of a run that never happened.
+and run-data recording and the shift log are both forced off for the run, so
+`-metrics` or `-log` in your environment cannot leave a record of a run that
+never happened.
 
 The narration goes to stderr and the invocation alone to stdout, so
 `polako work -dry-run | pbcopy` gives you something to paste and run by hand.
@@ -191,6 +193,34 @@ with no change here and no flag to set.
 A registered session is readable through your own claude.ai account and
 nobody else's. It is the one place a shift's session content is readable off
 this machine, and [security.md](security.md) is where that trade is argued.
+
+### The shift log: `-log`
+
+Each shift writes one complete log of itself to a file, named at startup:
+
+```
+logging this shift in full to /Users/you/.polako/logs/example--my-project--3f9a1c02.log — the whole claude transcript stream, kept on this machine (-log off to disable)
+```
+
+The file holds everything the shift narrates, timestamped: every terminal
+line, plus the full `[claude]` event stream — one line per assistant message
+and tool call — and anything the `claude` process printed to its own stderr.
+It is the record to read when a run did something surprising and the terminal
+has already scrolled past it, and `tail -f` on it is how to watch a shift in
+full without turning the terminal back up.
+
+Like the run-data records it is write-only and stays put: nothing in `polako`
+ever reads it back, deleting it mid-shift changes no behaviour, and it never
+leaves this machine. Unlike them it contains transcript text, which is why it
+gets the same private-by-default permissions (`0700` directory, `0600` files)
+and lives deliberately outside any checkout. There is no rotation or
+retention: one file per shift, yours to delete — a restarted shift starts a
+fresh file under its new shift id, so sort by modification time to follow an
+issue across restarts.
+
+`-log <dir>` moves it, `-log off` disables it, and a directory that cannot be
+written warns once and the shift continues on the terminal alone. A
+`-dry-run` writes no log at all.
 
 ### Setting defaults from the environment
 

@@ -574,6 +574,12 @@ func (r *recorder) warn(err error) {
 // The name is only partitioning: the repo field inside each record is
 // authoritative, and nothing ever parses a filename back.
 func recordFile(repo string) string {
+	return repoSlug(repo) + ".jsonl"
+}
+
+// repoSlug flattens owner/repo into one filesystem-safe name, shared with the
+// shift log so the two artifacts for one repository sort together.
+func repoSlug(repo string) string {
 	slug := strings.ReplaceAll(strings.TrimSpace(repo), "/", "--")
 	slug = strings.Map(func(r rune) rune {
 		switch {
@@ -587,5 +593,5 @@ func recordFile(repo string) string {
 	if slug == "" {
 		slug = "unknown"
 	}
-	return slug + ".jsonl"
+	return slug
 }

@@ -564,6 +564,10 @@ type config struct {
 	rec         *recorder
 	postSummary bool
 
+	// Where the per-shift log lives; empty means -log off. The file itself is
+	// opened by preflight, which learns the repository it is named after.
+	logDir string
+
 	// Filled in by preflight, recorded with every run: which repository this
 	// is, which CLI produced its numbers, and which release of the skill it
 	// drove. pluginVersion is empty when -skill names a hand-installed skill,
@@ -636,7 +640,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 	defer stop()
 
-	log.SetFlags(log.Ldate | log.Ltime)
+	// Timestamps become the sinks' job: the shift log is always stamped, and
+	// the terminal keeps the same stamps the default flags used to add.
+	log.SetFlags(0)
+	log.SetOutput(milestoneWriter{u: sinks})
 	if err := run(ctx, cfg); err != nil {
 		if errors.Is(err, context.Canceled) {
 			// 130 for every shutdown signal, not only SIGINT. Telling them apart
@@ -682,7 +689,7 @@ func shutdownSignals() []os.Signal {
 
 func parseFlags() config {
 	var cfg config
-	var skip, metrics string
+	var skip, metrics, logSpec string
 	var showVersion bool
 	flag.BoolVar(&showVersion, "version", false, "print the version of this binary and exit")
 	flag.StringVar(&cfg.dir, "dir", ".", "path to the repository's main checkout")
@@ -724,6 +731,8 @@ func parseFlags() config {
 		"comment one line of run numbers on each merged PR (runs, tokens, dollars, wall time)")
 	flag.StringVar(&metrics, "metrics", "",
 		`directory for run-data records, or "off" (default ~/.polako/metrics)`)
+	flag.StringVar(&logSpec, "log", "",
+		`directory for the full per-shift log, or "off" (default ~/.polako/logs)`)
 	flag.Usage = func() {
 		fmt.Fprint(flag.CommandLine.Output(),
 			"Usage: polako work [flags]\n\n"+
@@ -748,13 +757,16 @@ func parseFlags() config {
 		os.Exit(0)
 	}
 
-	// A dry run writes nothing, run data included. -metrics is a preference an
-	// operator may well have set in their environment and forgotten, and a
-	// record of a run that never happened is worse than no record at all.
+	// A dry run writes nothing, run data and shift log included. Both are
+	// preferences an operator may well have set in their environment and
+	// forgotten, and a record of a run that never happened is worse than no
+	// record at all.
 	if cfg.dryRun {
 		metrics = metricsOff
+		logSpec = metricsOff
 	}
 	cfg.rec = newRecorder(metrics)
+	cfg.logDir = resolveLogDir(logSpec)
 	cfg.shiftID = newShiftID()
 	cfg.remoteOff = new(atomic.Bool)
 	cfg.queue = new(queueMemo)
@@ -1372,6 +1384,19 @@ func preflight(ctx context.Context, cfg *config) error {
 		return fmt.Errorf("unreadable `gh repo view` reply (is gh current?): %w", err)
 	}
 	cfg.repo = repoView.NameWithOwner
+	// As soon as the repository is known, because the file is named after it.
+	// Everything logged from here on lands in the shift log too — including a
+	// preflight refusal below, which is often the diagnosis an operator wants.
+	logPath := ""
+	if cfg.logDir != "" {
+		path, err := sinks.openShiftLog(cfg.logDir, cfg.repo, cfg.shiftID)
+		if err != nil {
+			log.Printf("shift log not written (%v) — the shift continues on the terminal alone; "+
+				"-log <dir> to move it or -log off to silence this", err)
+		} else {
+			logPath = path
+		}
+	}
 	if err := queueGate(repoView.Visibility, cfg.label, cfg.ungated); err != nil {
 		// A dry run may still look: it runs nothing and writes nothing, and
 		// seeing what an ungated queue would work is how an operator decides
@@ -1437,6 +1462,13 @@ func preflight(ctx context.Context, cfg *config) error {
 		// operator finds it — including while the drain is still running.
 		log.Printf("this shift is %s — `polako stats -shift %s` reports on it alone",
 			cfg.shiftID, cfg.shiftID)
+	}
+	if logPath != "" {
+		// The disclosure, said every time like the recorder's line: unlike the
+		// run-data records this file holds transcript text, so where it lives
+		// and that it stays local is worth a line per shift.
+		log.Printf("logging this shift in full to %s — the whole claude transcript stream, "+
+			"kept on this machine (-log off to disable)", logPath)
 	}
 	return nil
 }
