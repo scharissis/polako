@@ -413,10 +413,10 @@ func TestPlanSkillCreatesIssuesAndNothingElse(t *testing.T) {
 }
 
 // The review gate runs as a forked agent that starts in the session's cwd, not
-// in the worktree — the skill's own `cd` does not move it. Invoked with no
-// target it reviews the main checkout instead, which on a clean default branch
-// means reviewing an already-merged change and writing the fixes there. Naming
-// the branch is the entire defence, and it is one word easy to drop.
+// in the worktree — nothing in the skill ever moves it there. Invoked with no
+// target it reviews whatever that cwd holds instead, which on a clean default
+// branch means reviewing an already-merged change and writing the fixes there.
+// Naming the branch is the entire defence, and it is one word easy to drop.
 func TestReviewGateNamesTheBranch(t *testing.T) {
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
