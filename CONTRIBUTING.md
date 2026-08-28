@@ -69,11 +69,19 @@ closing the issue. Whether a run *keeps* those promises is what
 claude plugin eval . --scaffold --allow-tools Bash Write Edit
 ```
 
-Five cases, each one a real plan-to-PR run against a scratch repo and a
-stand-in `gh`: a specified issue reaching a PR, an under-specified one producing
-questions instead of guesses, the review gate firing before the PR, an
-existing plan being resumed rather than rewritten, and a slow verification step
-waited out in the turn rather than deferred to one that never comes.
+Read [`evals/README.md`](evals/README.md) before you run that, not after: as
+written it runs every case twice — `--ablation` defaults to a no-plugin
+baseline arm — and publishes an HTML report of the prompts and grader verdicts
+to claude.ai. `--ablation none --no-publish` is the debugging shape, and the
+README spells out the rest of the flags and a ceiling.
+
+Six cases, each one a real run against a scratch repo and a stand-in `gh`. Five
+drive `implement-issue` from plan to PR: a specified issue reaching a PR, an
+under-specified one producing questions instead of guesses, the review gate
+firing before the PR, an existing plan being resumed rather than rewritten, and
+a slow verification step waited out in the turn rather than deferred to one that
+never comes. The sixth drives `plan-backlog`, and is the one whose subject
+writes no code: a vision document becoming labelled, sized, parented proposals.
 
 This one is not part of `check.sh` and not in CI. It needs the network, a real
 `claude` and money — a deliberate exception to the hermetic rule, and the

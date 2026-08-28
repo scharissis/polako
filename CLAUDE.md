@@ -164,6 +164,14 @@ grades what they leave behind:
 claude plugin eval . --scaffold --allow-tools Bash Write Edit
 ```
 
+Two of that command's defaults are worth knowing before running it, and both
+are in `evals/README.md`: `--ablation` defaults to a second, no-plugin baseline
+arm, so every case runs twice; and the HTML report — prompts and grader
+verdicts — is published to the operator's claude.ai account unless
+`--no-publish` says otherwise. The second is a developer tool rather than the
+binary, so it is not a third destination under the invariant above, but it is
+named here for the same reason that invariant exists.
+
 That suite is the one exception to hermetic tests, agreed on issue #9: it needs
 the network, a real `claude` and money, so it is opt-in and stays out of
 `check.sh` and CI. It is also new and has not yet had a green run — see
