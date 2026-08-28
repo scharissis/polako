@@ -698,7 +698,8 @@ func renderStatusJSON(w io.Writer, cfg config, snap statusSnapshot) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(statusDocFrom(cfg, snap)); err != nil {
-		return fmt.Errorf("could not encode the status report as JSON (%w) — this is a bug in polako", err)
+		return fmt.Errorf("could not encode the status report as JSON (%w) — this is a bug in polako; "+
+			"dropping -json still gets you the text report", err)
 	}
 	return nil
 }
@@ -731,32 +732,24 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 		Repo:  cfg.repo,
 		Scope: statusDocScope{Label: cfg.label, StrictOrder: cfg.strictOrder},
 		Queue: statusDocQueue{
-			Ready:      nonNilInts(snap.queues.ready),
+			Ready:      nonNilSlice(snap.queues.ready),
 			Blocked:    blocked,
-			Parked:     nonNilInts(snap.queues.parked),
-			Proposed:   nonNilInts(snap.queues.proposed),
-			Containers: nonNilInts(snap.queues.containers),
+			Parked:     nonNilSlice(snap.queues.parked),
+			Proposed:   nonNilSlice(snap.queues.proposed),
+			Containers: nonNilSlice(snap.queues.containers),
 		},
 		Next:          statusDocNext{Issue: snap.next, Reason: nextLine(snap)},
 		PRs:           prs,
-		UndetailedPRs: nonNilInts(snap.undetailed),
-		NeedsYou:      nonNilStrings(needsYouParts(snap)),
+		UndetailedPRs: nonNilSlice(snap.undetailed),
+		NeedsYou:      nonNilSlice(needsYouParts(snap)),
 	}
 }
 
-// nonNilInts and nonNilStrings keep every array field a `[]`, never a JSON
-// `null`, so a script can `.[]` into any of them without special-casing the
-// empty case.
-func nonNilInts(s []int) []int {
+// nonNilSlice keeps every array field a `[]`, never a JSON `null`, so a
+// script can `.[]` into any of them without special-casing the empty case.
+func nonNilSlice[T any](s []T) []T {
 	if s == nil {
-		return []int{}
-	}
-	return s
-}
-
-func nonNilStrings(s []string) []string {
-	if s == nil {
-		return []string{}
+		return []T{}
 	}
 	return s
 }

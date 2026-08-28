@@ -166,16 +166,20 @@ func TestStatusJSONMatchesTheTextReport(t *testing.T) {
 	if doc.Repo != "example/repo" {
 		t.Errorf("repo = %q, want %q", doc.Repo, "example/repo")
 	}
-	if want := (statusDocQueue{
+	want := statusDocQueue{
 		Ready:      []int{3, 5},
 		Blocked:    []statusDocBlocked{{Issue: 7, QuietSeconds: ptrInt64(26 * 3600)}},
 		Parked:     []int{9},
 		Proposed:   []int{},
 		Containers: []int{},
-	}); !slices.Equal(doc.Queue.Ready, want.Ready) ||
-		len(doc.Queue.Blocked) != 1 || doc.Queue.Blocked[0].Issue != 7 ||
-		doc.Queue.Blocked[0].QuietSeconds == nil || *doc.Queue.Blocked[0].QuietSeconds != 26*3600 ||
-		!slices.Equal(doc.Queue.Parked, want.Parked) {
+	}
+	if !slices.Equal(doc.Queue.Ready, want.Ready) ||
+		!slices.Equal(doc.Queue.Parked, want.Parked) ||
+		!slices.Equal(doc.Queue.Proposed, want.Proposed) ||
+		!slices.Equal(doc.Queue.Containers, want.Containers) ||
+		!slices.EqualFunc(doc.Queue.Blocked, want.Blocked, func(a, b statusDocBlocked) bool {
+			return a.Issue == b.Issue && a.QuietSeconds != nil && b.QuietSeconds != nil && *a.QuietSeconds == *b.QuietSeconds
+		}) {
 		t.Errorf("queue = %+v, want %+v", doc.Queue, want)
 	}
 	if doc.Next.Issue != 3 || !strings.Contains(doc.Next.Reason, "its branch already has PR #40") {
@@ -601,6 +605,55 @@ func TestStatusSaysWhichPRsItLeftUndetailed(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("report is missing %q\ngot:\n%s", want, out.String())
 		}
+	}
+}
+
+// The same cap, this time through -json: undetailed_prs names the PRs past
+// the eighth by number, and each of those PRs still gets a row in prs — with
+// "not read" in the fields nobody queried, the same distinction unknownCell
+// preserves in the text table.
+func TestStatusJSONSaysWhichPRsItLeftUndetailed(t *testing.T) {
+	issues := map[string]*fakeIssue{}
+	prs := map[string]*fakePR{}
+	for n := 1; n <= statusPRs+2; n++ {
+		issues[fmt.Sprint(n)] = &fakeIssue{Open: true}
+		prs[fmt.Sprintf("issue-%d", n)] = &fakePR{Number: 100 + n, State: "OPEN", Mergeable: "MERGEABLE"}
+	}
+	cfg, _ := statusConfigFor(t, &ghState{Issues: issues, PRs: prs})
+
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	var out strings.Builder
+	if err := renderStatusJSON(&out, cfg, snap); err != nil {
+		t.Fatalf("renderStatusJSON: %v", err)
+	}
+	var doc statusDoc
+	if err := json.Unmarshal([]byte(out.String()), &doc); err != nil {
+		t.Fatalf("output did not parse as JSON: %v\n%s", err, out.String())
+	}
+
+	wantUndetailed := []int{100 + statusPRs + 1, 100 + statusPRs + 2}
+	if !slices.Equal(doc.UndetailedPRs, wantUndetailed) {
+		t.Errorf("undetailed_prs = %v, want %v", doc.UndetailedPRs, wantUndetailed)
+	}
+	if len(doc.PRs) != statusPRs+2 {
+		t.Fatalf("prs = %d entries, want %d", len(doc.PRs), statusPRs+2)
+	}
+	for _, n := range wantUndetailed {
+		i := slices.IndexFunc(doc.PRs, func(p statusDocPR) bool { return p.Number == n })
+		if i < 0 {
+			t.Fatalf("prs is missing #%d entirely", n)
+		}
+		if pr := doc.PRs[i]; pr.Mergeable != unknownCell || pr.Checks != unknownCell || pr.Review != unknownCell {
+			t.Errorf("PR #%d = %+v, want mergeable/checks/review all %q", n, pr, unknownCell)
+		}
+	}
+	// A PR inside the cap was queried and does not carry the "not read" cells.
+	if i := slices.IndexFunc(doc.PRs, func(p statusDocPR) bool { return p.Number == 101 }); i < 0 ||
+		doc.PRs[i].Mergeable == unknownCell {
+		t.Errorf("PR #101 should have been detailed, got %+v", doc.PRs[i])
 	}
 }
 
