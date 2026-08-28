@@ -170,6 +170,12 @@ func fakeClaude(mode string) int {
 		// verbatim and no event type exists to hold it.
 		fmt.Fprintf(os.Stderr, "canary=%s\n", os.Getenv(envCanaryVar))
 		return fakeClaude("stream")
+	case "envcanaryout":
+		// The same canary standing in for gh and git rather than for claude:
+		// capture() runs those for their stdout and throws stderr away on
+		// success, and no stream-json is expected of them.
+		emit("canary=" + os.Getenv(envCanaryVar))
+		return 0
 	case "oldcli":
 		// A CLI old enough to report a result with no per-model breakdown.
 		emit(`{"type":"system","subtype":"init","session_id":"sess-old","model":"claude-opus-5"}`)
@@ -1535,6 +1541,25 @@ func TestDispatchGivesTheChildTheOperatorsEnvironment(t *testing.T) {
 	}
 	if want := "canary=http://localhost:8443"; !strings.Contains(buf.String(), want) {
 		t.Errorf("the claude child did not inherit the environment it was started with: want %q\ngot:\n%s", want, buf.String())
+	}
+}
+
+// The same promise one funnel over: every gh and git the supervisor runs goes
+// through capture, and that is the likelier place for a cmd.Env to appear — a
+// GH_TOKEN, a GIT_TERMINAL_PROMPT=0, added for a reason that has nothing to do
+// with proxies. An assignment there takes the branch pushes out of the
+// firewall, which docs/hardening.md calls the flow most worth watching, and
+// every other test in this package still passes.
+func TestGhAndGitInheritTheOperatorsEnvironmentToo(t *testing.T) {
+	t.Setenv(fakeClaudeEnv, "envcanaryout") // inherited by the child process
+	t.Setenv(envCanaryVar, "http://localhost:8443")
+
+	out, err := capture(context.Background(), t.TempDir(), fakeCLI(t), "status")
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if want := "canary=http://localhost:8443"; !strings.Contains(string(out), want) {
+		t.Errorf("a gh or git child did not inherit the environment polako was started with: want %q\ngot:\n%s", want, out)
 	}
 }
 

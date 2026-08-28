@@ -62,7 +62,7 @@ clients a shift runs read three different variables for that:
 | Process | Proxy | CA certificate |
 | --- | --- | --- |
 | `claude` | `HTTPS_PROXY` | `NODE_EXTRA_CA_CERTS` — it is a JavaScript runtime, and those do not read `SSL_CERT_FILE` |
-| `gh` | `HTTPS_PROXY` | `SSL_CERT_FILE` |
+| `gh` | `HTTPS_PROXY` | `SSL_CERT_FILE` — Linux only; Go ignores it on macOS (below) |
 | `git` | `HTTPS_PROXY` | `GIT_SSL_CAINFO` (libcurl, so `CURL_CA_BUNDLE` also works) |
 
 So export all of them, pointed at the same file:
@@ -74,6 +74,21 @@ export NODE_EXTRA_CA_CERTS=$SSL_CERT_FILE
 export GIT_SSL_CAINFO=$SSL_CERT_FILE
 polako work -dir ../my-project -label ready
 ```
+
+**On macOS the variables are not the whole story.** Go reads `SSL_CERT_FILE`
+only on Unix systems *other than* macOS — there it verifies against the system
+keychain instead — so `gh` ignores that file however you point it. The system
+`git` can ignore `GIT_SSL_CAINFO` too, depending on the TLS backend its libcurl
+was built against. Trust the CA at the machine level:
+
+```bash
+sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain /path/to/iron-ca.pem
+```
+
+`claude` is unaffected — `NODE_EXTRA_CA_CERTS` is Node's own and works
+everywhere. Adding a trusted root is exactly the system-footprint change the
+last section gives as a reason polako does not do this for you.
 
 Getting one of these wrong does not fail loudly in a useful place. It fails as
 a TLS error inside a child, which reaches you as a crashed run or a park — see
@@ -99,6 +114,11 @@ default: deny
 allow:
   # The model.
   - api.anthropic.com
+  # Signing in. An API key needs neither of these; a CLI authenticated as a
+  # claude.ai account refreshes a short-lived token against them, and a
+  # refresh denied four hours into a shift fails every run after it.
+  - claude.ai
+  - console.anthropic.com
   # Claude Code's own telemetry and error reporting. Denying these is
   # survivable; it is not silent, so decide deliberately rather than by
   # omission.
