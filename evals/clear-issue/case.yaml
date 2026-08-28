@@ -35,10 +35,16 @@ graders:
     name: pr_body_is_complete
     focus: the recorded PR body at .eval/pr-body.md
     criteria: >
-      The body has all four sections — Summary, Design decisions, Scope,
-      Verification — and its last line is exactly "Closes #1". Fail if any
-      section is missing, if the body is a bare diff summary, or if the closing
-      line is absent or buried mid-paragraph.
+      The body has all five sections — Summary, Evidence, Design decisions,
+      Scope, Verification — and its last line is exactly "Closes #1". Fail if
+      any section is missing, if the body is a bare diff summary, or if the
+      closing line is absent or buried mid-paragraph. The issue's own change is
+      exactly the kind Evidence exists for: `--help` printing a usage line is
+      visible CLI output. Fail if Evidence is missing, empty, or omitted; also
+      fail if it does not read like real captured `--help` output (a usage
+      line naming greet.sh and its one argument) — a bare description of the
+      output in prose, or an invented/hand-typed line inconsistent with what
+      greet.sh --help would actually print, both fail this grader.
 
   - type: llm
     name: no_question_was_asked
