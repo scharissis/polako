@@ -40,7 +40,7 @@ import (
 )
 
 // writeHTMLReport renders the page and puts it at path.
-func writeHTMLReport(path string, ds dataset, issues []*issueStats, opt statsOptions, now time.Time) error {
+func writeHTMLReport(path string, ds dataset, issues []*issueStats, summary statsSummary, opt statsOptions, now time.Time) error {
 	// Named early: a directory here is the easy mistake, and OpenFile's own
 	// "is a directory" says nothing about what to type instead.
 	if info, err := os.Stat(path); err == nil && info.IsDir() {
@@ -50,7 +50,7 @@ func writeHTMLReport(path string, ds dataset, issues []*issueStats, opt statsOpt
 	// Rendered whole before anything is opened, so a template that fails leaves
 	// yesterday's report intact rather than a truncated page that still opens.
 	var buf bytes.Buffer
-	if err := htmlPage().Execute(&buf, buildHTMLReport(ds, issues, opt, now)); err != nil {
+	if err := htmlPage().Execute(&buf, buildHTMLReport(ds, issues, summary, opt, now)); err != nil {
 		return fmt.Errorf("could not render the HTML report (%w) — this is a bug in polako; "+
 			"the text report above is unaffected", err)
 	}
@@ -149,13 +149,13 @@ type htmlReport struct {
 // everything and say so nowhere.
 const inFlight = "in flight"
 
-func buildHTMLReport(ds dataset, issues []*issueStats, opt statsOptions, now time.Time) htmlReport {
+func buildHTMLReport(ds dataset, issues []*issueStats, summary statsSummary, opt statsOptions, now time.Time) htmlReport {
 	rep := htmlReport{
 		Title:     "polako run data",
 		Dir:       ds.dir,
 		Generated: stamp(now),
 		Version:   polakoVersion(),
-		Facts:     sourcePairs(ds, opt),
+		Facts:     sourcePairs(summary.source),
 	}
 	if len(ds.runs) == 0 && len(ds.issues) == 0 {
 		rep.Empty = "No run data here" + scopeSuffix(opt, ds) + "."
@@ -177,10 +177,10 @@ func buildHTMLReport(ds dataset, issues []*issueStats, opt statsOptions, now tim
 		}
 	}
 	rep.Sections = []htmlSection{
-		{"issues", issuePairs(issues)},
-		{"runs", runPairs(ds)},
-		{"cost", costPairs(ds, issues)},
-		{"human latency", latencyPairs(issues)},
+		{"issues", issuePairs(summary.issues)},
+		{"runs", runPairs(summary.runs)},
+		{"cost", costPairs(summary.cost)},
+		{"human latency", latencyPairs(summary.latency)},
 	}
 
 	// By shift and by issue always: they are the two breakdowns this page

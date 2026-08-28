@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -187,7 +188,7 @@ func TestStatsHTMLSaysWhatToDoAboutABadPath(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			clearEnvDefaults(t)
 			var buf strings.Builder
-			err := runStats([]string{"-metrics", dir, "-html", path}, &buf, fixtureNow, report{})
+			err := runStats([]string{"-metrics", dir, "-html", path}, &buf, io.Discard, fixtureNow, report{})
 			if err == nil {
 				t.Fatalf("-html %s succeeded, want an error explaining what to type instead", path)
 			}

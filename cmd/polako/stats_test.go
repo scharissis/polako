@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -64,12 +65,20 @@ func hasLine(out, want string) bool { return strings.Contains(flat(out), flat(wa
 
 func stats(t *testing.T, args ...string) string {
 	t.Helper()
+	out, _ := statsOutErr(t, args...)
+	return out
+}
+
+// statsOutErr is stats' full form, for the tests that care what landed on
+// errOut (the -html confirmation under -json) as well as stdout.
+func statsOutErr(t *testing.T, args ...string) (string, string) {
+	t.Helper()
 	clearEnvDefaults(t)
-	var buf bytes.Buffer
-	if err := runStats(args, &buf, fixtureNow, report{}); err != nil {
+	var out, errOut bytes.Buffer
+	if err := runStats(args, &out, &errOut, fixtureNow, report{}); err != nil {
 		t.Fatalf("stats %v: %v", args, err)
 	}
-	return buf.String()
+	return out.String(), errOut.String()
 }
 
 // clearEnvDefaults keeps a test hermetic against the shell it runs in. Flags
@@ -94,7 +103,7 @@ func TestStatsReadsTheMetricsDirectoryFromTheEnvironment(t *testing.T) {
 	t.Setenv("POLAKO_METRICS", fixtureDir(t))
 
 	var buf bytes.Buffer
-	if err := runStats(nil, &buf, fixtureNow, report{}); err != nil {
+	if err := runStats(nil, &buf, io.Discard, fixtureNow, report{}); err != nil {
 		t.Fatalf("stats: %v", err)
 	}
 	if !hasLine(buf.String(), "terminal 4 — merged 3 (75%)") {
@@ -102,7 +111,7 @@ func TestStatsReadsTheMetricsDirectoryFromTheEnvironment(t *testing.T) {
 	}
 	// An argument is a decision about this run, and beats the preference.
 	var override bytes.Buffer
-	if err := runStats([]string{"-metrics", t.TempDir()}, &override, fixtureNow, report{}); err != nil {
+	if err := runStats([]string{"-metrics", t.TempDir()}, &override, io.Discard, fixtureNow, report{}); err != nil {
 		t.Fatalf("stats: %v", err)
 	}
 	if !strings.Contains(override.String(), "no run data in") {
@@ -592,7 +601,7 @@ func TestStatsRejectsBadInput(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			clearEnvDefaults(t)
 			var buf bytes.Buffer
-			if err := runStats(args, &buf, fixtureNow, report{}); err == nil {
+			if err := runStats(args, &buf, io.Discard, fixtureNow, report{}); err == nil {
 				t.Errorf("runStats(%v) succeeded, want an error explaining what to do", args)
 			}
 		})
@@ -603,7 +612,7 @@ func TestStatsRejectsBadInput(t *testing.T) {
 func TestStatsHelpIsNotAnError(t *testing.T) {
 	clearEnvDefaults(t)
 	var buf bytes.Buffer
-	if err := runStats([]string{"-h"}, &buf, fixtureNow, report{}); err != nil {
+	if err := runStats([]string{"-h"}, &buf, io.Discard, fixtureNow, report{}); err != nil {
 		t.Fatalf("stats -h: %v", err)
 	}
 	for _, want := range []string{"-by", "-repo", "-since", "-metrics"} {
@@ -854,7 +863,7 @@ func TestStatsReportsAroundAnUnreadableFile(t *testing.T) {
 func TestStatsRejectsAFileAsTheMetricsDirectory(t *testing.T) {
 	dir := fixtureDir(t)
 	var buf bytes.Buffer
-	err := runStats([]string{"-metrics", filepath.Join(dir, "scharissis--other.jsonl")}, &buf, fixtureNow, report{})
+	err := runStats([]string{"-metrics", filepath.Join(dir, "scharissis--other.jsonl")}, &buf, io.Discard, fixtureNow, report{})
 	if err == nil {
 		t.Fatalf("naming a file succeeded, reporting:\n%s", buf.String())
 	}
