@@ -127,6 +127,30 @@ func buildFakeCLI() {
 		return
 	}
 	fakeCLIDir, fakeCLIBin = dir, bin
+
+	// The first exec of a binary just written to disk pays for paging it in —
+	// some 200ms here against the ~10ms every exec after it costs. That is
+	// invisible in the full suite, where whichever test goes first is untimed;
+	// under a `-run` filter it lands inside the first watchdog window instead
+	// and kills the child before its init event is ever scanned (issue #109).
+	// Paying it here, once, keeps it out of every timed test. Best-effort: a
+	// binary that cannot run has a real exec along shortly to say so.
+	//
+	// The environment is built rather than inherited, because which seam the
+	// child impersonates comes off these variables and the caller has already
+	// set some: mode last is not enough if a future one dispatches earlier.
+	//
+	// Bounded because best-effort has to include the child that never returns:
+	// a dispatch that stopped recognising "warmup" falls through to m.Run and
+	// runs the whole suite in here, output discarded, and the suite reads as
+	// hung inside whichever test happened to build the fake CLI first.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	warm := exec.CommandContext(ctx, bin)
+	warm.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		return strings.HasPrefix(kv, "POLAKO_")
+	}), fakeClaudeEnv+"=warmup")
+	_ = warm.Run()
 }
 
 // fakeClaude stands in for `claude -p ... --output-format stream-json`.
@@ -147,6 +171,11 @@ func fakeClaude(mode string) int {
 		return 0
 	}
 	switch mode {
+	case "warmup":
+		// buildFakeCLI's throwaway first exec. It exists to be a process, not
+		// to say anything — but it still has to be a mode, because a child with
+		// no POLAKO_FAKE_* variable set runs the whole suite over again.
+		return 0
 	case "stream":
 		// The init event carries the session's command inventory (2.1.85+);
 		// both spellings of the skill are listed so the healthy path proves
@@ -1354,9 +1383,13 @@ func TestExecClaudeKillsARunPastItsBudget(t *testing.T) {
 	cfg := fakeClaudeConfig(t, "hang")
 	cfg.stall = 0 // only the budget may end this run
 
+	// Half a second rather than the tightest budget that works: the clock
+	// starts before the child does, so anything close to a warm start races
+	// process startup for the init event this test then asserts on. buildFakeCLI
+	// pays the expensive first exec, and this leaves room for the rest.
 	start := time.Now()
 	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue",
-		100*time.Millisecond)
+		500*time.Millisecond)
 	if !errors.Is(err, errBudget) {
 		t.Fatalf("a run past -max-issue-time should report errBudget, got %v", err)
 	}
