@@ -365,8 +365,10 @@ outright: `-post-summary`, off by default, comments one line of numbers on your
 own merged PR. `-remote` is on by default and would be the second, but no
 `claude` CLI registers headless runs with Remote Control yet, so polako does not
 pass the flag and no session content goes anywhere.
-[docs/security.md](docs/security.md) has the reasoning and the limits, and
-[SECURITY.md](SECURITY.md) says how to report a vulnerability privately.
+[docs/security.md](docs/security.md) has the reasoning and the limits,
+[docs/hardening.md](docs/hardening.md) covers running a shift behind an egress
+firewall you supply, and [SECURITY.md](SECURITY.md) says how to report a
+vulnerability privately.
 
 ## Questions
 
@@ -411,6 +413,7 @@ merged.
 | [docs/reference.md](docs/reference.md) | Every flag, plus `-dry-run`, `-notify`, `-remote`, environment defaults and `polako status`. |
 | [docs/run-data.md](docs/run-data.md) | What each run records, spending caps, and the `polako stats` report. |
 | [docs/security.md](docs/security.md) | The threat model, the tool allowlist, the `-label` gate, and what leaves your machine. |
+| [docs/hardening.md](docs/hardening.md) | Wrapping a shift in an egress firewall of your own, and why polako does not ship one. |
 | [docs/releasing.md](docs/releasing.md) | Cutting a release: the two tags, the two PRs, and what to bump. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Running the tests, the eval suite, and both halves from a working tree. |
 

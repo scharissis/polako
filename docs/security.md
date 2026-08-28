@@ -54,6 +54,13 @@ allowlist is a narrowing, not a sandbox. Point `-dir` at repositories you would
 run `make test` in yourself, and drop the interpreter entries from `-tools` if
 your project does not need them.
 
+Closing the rest of that gap means a boundary outside the process, and the one
+worth building first is on egress: a run with a shell has the network, and a
+prompt injection that gets something *out* is the one the human merge step
+cannot catch. [hardening.md](hardening.md) is how to put an egress firewall of
+your own around a shift, and why that firewall stays yours rather than becoming
+a polako flag.
+
 **`-label` bounds *which* issues are eligible.** Applying a label takes triage
 permission or better, so requiring one means a maintainer has to opt each issue
 in before the supervisor will touch it. An outsider can still file an issue;
