@@ -374,6 +374,17 @@ func fakeClaude(mode string) int {
 		// tests observe the killed path deterministically instead of racing.
 		time.Sleep(500 * time.Millisecond)
 		return 0
+	case "permissionblocked":
+		// Issue #138's shape: a clean, successful exit — is_error absent, a
+		// real turn count — whose only turn ended by asking the operator to
+		// approve a tool --allowedTools never granted. Nothing else on the
+		// stream says so; only the result text does.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-blocked","model":"claude-opus-5"}`)
+		emit(`{"type":"assistant","session_id":"sess-blocked","message":{"content":[` +
+			`{"type":"tool_use","name":"EnterWorktree","input":{}}]}}`)
+		emit(`{"type":"result","subtype":"success","session_id":"sess-blocked","duration_ms":100,` +
+			`"num_turns":2,"total_cost_usd":0.1,"result":"This requires user confirmation to enter the worktree. Can you approve?"}`)
+		return 0
 	case "authfail":
 		// Claude Code on a rejected OAuth token: one turn, no cost, and a
 		// result flagged is_error whose subtype is nonetheless "success".
@@ -2152,6 +2163,77 @@ func TestAuthFailureMatchesTheWaysTheCLIReportsIt(t *testing.T) {
 	for _, r := range fine {
 		if authFailure(r) {
 			t.Errorf("should not read as refused credentials: %s", clip(r, 80))
+		}
+	}
+}
+
+// Issue #157: a clean exit used to have its result text read once and
+// dropped, so a park could assert "no questions" over a run whose final
+// message was verbatim one. observe now retains it and classifies it — on a
+// success result, not only a failing one, since #138's run ended cleanly.
+func TestObserveRetainsAndClassifiesACleanExitsFinalText(t *testing.T) {
+	const asked = "This requires user confirmation to switch the session's " +
+		"working directory into the worktree. Can you approve entering `/tmp/x`?"
+	const ordinary = "Opened a PR for issue 7."
+
+	cases := []struct {
+		name           string
+		result         string
+		wantPermission bool
+	}{
+		{"a permission request", asked, true},
+		{"an ordinary result", ordinary, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var rep runReport
+			rep.observe(streamEvent{Type: "result", Subtype: "success", Result: c.result})
+			if rep.resultText != c.result {
+				t.Errorf("resultText = %q, want the result retained verbatim", rep.resultText)
+			}
+			if rep.permissionRefused != c.wantPermission {
+				t.Errorf("permissionRefused = %v, want %v", rep.permissionRefused, c.wantPermission)
+			}
+		})
+	}
+}
+
+// permissionRefusal matches the model's own wording, not a CLI wrapper
+// string, so it has no single canonical form the way authFailure's does — but
+// it still has to leave the same quoting risk closed: an issue about tool
+// permissions that gets quoted back mid-message must not park the issue over
+// a run that actually succeeded.
+func TestPermissionRefusalMatchesTheWaysARunAsksApproval(t *testing.T) {
+	asks := []string{
+		"This requires user confirmation to switch the session's working " +
+			"directory into the worktree. Can you approve entering `/tmp/x`?",
+		"This requires confirmation before I can proceed.",
+		"This requires approval to run the migration.",
+		"This requires your approval before I continue.",
+		"Can you approve granting Bash(cd:*) so I can finish?",
+		"Could you approve this tool before I continue?",
+		"I need permission to use the EnterWorktree tool.",
+		"I don't have permission to run that command.",
+		"I do not have permission to write outside the worktree.",
+	}
+	for _, r := range asks {
+		if !permissionRefusal(r) {
+			t.Errorf("should read as a permission request: %s", clip(r, 80))
+		}
+	}
+	fine := []string{
+		"Opened a PR for issue 7.",
+		"Unknown skill: polako:implement-issue",
+		// The reason the match is anchored: a run whose issue is *about*
+		// permission prompts can legitimately end by describing one without
+		// asking for anything itself.
+		"Fixed #156, which was about a run that says " +
+			`"This requires user confirmation" when cd is not allowlisted. ` +
+			"Opened a PR.",
+	}
+	for _, r := range fine {
+		if permissionRefusal(r) {
+			t.Errorf("should not read as a permission request: %s", clip(r, 80))
 		}
 	}
 }
