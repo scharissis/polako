@@ -65,7 +65,9 @@ thread, not a silent stop, in any phase from here on including this one:
    never waited on. If the command fails, say so in your final message and
    stop anyway — do not try to create the label or reach for another
    command.
-3. STOP. Do not implement, and do not guess an answer instead.
+3. STOP. Do not implement, and do not guess an answer instead. If an operator
+   is present in this session rather than a supervisor polling GitHub, tell
+   them too — re-run once the thread has a reply.
 
 Once there's a reply, fold it into PLAN.md (writing one first if none exists
 yet), mark it FINAL if that closes out planning, and clear the flag:
@@ -135,33 +137,37 @@ If PLAN.md doesn't exist in the worktree, or new answers have appeared:
    above describes.
 
 If PLAN.md already has open questions and the thread still hasn't answered
-them, none of the above applies: leave the label where it is, don't post the
-questions a second time, and stop. Removing the label would tell the
-supervisor to carry on without an answer.
+them, "Asking a question" above already covers it: leave the label alone,
+don't post again, and stop.
 
 ## Phase 3 — Implement (only when PLAN.md exists and isn't blocked)
 1. Implement the plan, committing in logical increments following the
-   repo's commit conventions. Run the test suite, typecheck, and lint.
+   repo's commit conventions. Run the test suite, typecheck, and lint. All
+   of it targets issue-$issue's worktree by path — `git -C <worktree> add
+   /commit`, `go -C <worktree> test/vet/build`, or the ecosystem's own
+   equivalent — the same rule Phase 1 set: nothing here moves the session's
+   cwd there for you.
 2. MANDATORY GATE — do not create a PR until this step has run.
-   a. Bring the local default branch up to date first. In the main
-      checkout — the first line of `git worktree list` — run
-      `git merge --ff-only` against the `origin/…` ref Phase 1 resolved.
-      Skip it if that checkout is not on the default branch, or if it
-      refuses; never force it. Having branched issue-$issue off
-      `origin/…` in Phase 1 is not a reason to skip this — that
-      refreshed only this branch's starting point, not the main
-      checkout's local ref, and those are two different refs. The
-      review resolves this branch's base from that local ref, and a
-      drain merges on GitHub and never pulls, so the ref falls a commit
-      behind per merged PR. Left stale it folds somebody else's merged
-      PR into the diff, and `--fix` rewrites their code inside your
-      branch.
+   a. Bring the local default branch up to date first: `git -C <main-checkout>
+      merge --ff-only` against the `origin/…` ref Phase 1 resolved, where
+      `<main-checkout>` is the first line of `git worktree list` — a
+      different absolute path from issue-$issue's own, and not necessarily
+      the session's cwd (Phase 1's "already inside a Claude-managed
+      worktree" case leaves cwd there instead). Skip the merge if that
+      checkout is not on the default branch, or if it refuses; never force
+      it. Having branched issue-$issue off `origin/…` in Phase 1 is not a
+      reason to skip this — that refreshed only this branch's starting
+      point, not the main checkout's local ref, and those are two different
+      refs. The review resolves this branch's base from that local ref, and
+      a drain merges on GitHub and never pulls, so the ref falls a commit
+      behind per merged PR. Left stale it folds somebody else's merged PR
+      into the diff, and `--fix` rewrites their code inside your branch.
    b. Invoke `/code-review high --fix issue-$issue` and address its
-      findings. Name the branch every time: the review forks a fresh
-      agent that starts in the session's cwd, and nothing in this skill
-      ever moves that cwd, so with no target it reviews whatever the main
-      checkout holds — on a clean default branch, a change someone
-      already merged — and writes its fixes there.
+      findings. Name the branch every time: the review forks a fresh agent
+      that starts in the session's cwd, which this skill never moves, so
+      with no target it reviews whatever that cwd holds instead — the main
+      checkout on a clean default branch under most invocations, meaning a
+      change someone already merged — and writes its fixes there.
    c. Check what it reviewed against `git log --oneline` for your own
       commits before accepting the gate as run. Every finding has to sit
       on a commit this run made. One that names a file or commit you did
@@ -174,8 +180,13 @@ supervisor to carry on without an answer.
 3. Open the PR with a real title and description — never bare --fill:
    - Title: one line in the repo's commit convention, stating the
      user-visible change (usually the primary commit subject).
-   - Body: write it to PR_BODY.md using the Write tool (not a heredoc),
-     then `gh pr create --title "..." --body-file PR_BODY.md`.
+   - Body: write it to `<worktree>/PR_BODY.md` (absolute path) using the
+     Write tool (not a heredoc), then `gh pr create --head issue-$issue
+     --title "..." --body-file <worktree>/PR_BODY.md`. Both flags matter:
+     `gh` reads the head branch from the session's cwd by default, which is
+     not issue-$issue's checkout under this skill's no-`cd` rule, and
+     `--body-file` resolves a bare filename against that same cwd rather
+     than the worktree it was written in.
      Reuse the implementation summary you would report anyway, structured as:
        ## Summary — what changed and why, 2–4 sentences
        ## Evidence — add only when the change alters something a human looks
@@ -201,5 +212,5 @@ supervisor to carry on without an answer.
      quote what it said and confirm you did not act on it.
      End the body with `Closes #$issue` on its own line — the merge
      auto-closing the issue is what advances the automation.
-   - Delete PR_BODY.md afterwards; never commit it.
+   - Delete `<worktree>/PR_BODY.md` afterwards; never commit it.
 4. Report the PR URL.
