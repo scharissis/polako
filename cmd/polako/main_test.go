@@ -139,7 +139,14 @@ func buildFakeCLI() {
 	// The environment is built rather than inherited, because which seam the
 	// child impersonates comes off these variables and the caller has already
 	// set some: mode last is not enough if a future one dispatches earlier.
-	warm := exec.Command(bin)
+	//
+	// Bounded because best-effort has to include the child that never returns:
+	// a dispatch that stopped recognising "warmup" falls through to m.Run and
+	// runs the whole suite in here, output discarded, and the suite reads as
+	// hung inside whichever test happened to build the fake CLI first.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	warm := exec.CommandContext(ctx, bin)
 	warm.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		return strings.HasPrefix(kv, "POLAKO_")
 	}), fakeClaudeEnv+"=warmup")
