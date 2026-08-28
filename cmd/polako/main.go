@@ -619,7 +619,7 @@ func main() {
 		// timestamp on piped output that never had one.
 		log.SetFlags(0) // a report, not a log
 		log.SetOutput(milestoneWriter{u: sinks})
-		sinks.stamp = false
+		sinks.stamp = stampOff
 		if isTerminal(os.Stderr) {
 			sinks.style = styleFor(true)
 		}
@@ -676,17 +676,18 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 	defer stop()
 
-	// Timestamps become the sinks' job: the shift log is always stamped, and a
-	// terminal that is not a TTY keeps the same stamps the default flags used
-	// to add, so redirected transcripts look like they always did. A TTY drops
-	// the gutter only while a shift log is there to hold every stamp — with
-	// -log off the terminal is the only record, so it keeps them — and gets
-	// colour when the platform and NO_COLOR allow it.
+	// Timestamps are the sinks' job, and every line carries one: the shift log
+	// is always stamped in full, a terminal that is not a TTY keeps the same
+	// full stamp the default flags used to add so redirected transcripts look
+	// like they always did, and a TTY gets a dim, time-only stamp instead of
+	// dropping it — worn quietly rather than shown or hidden outright, and
+	// deliberately not conditioned on whether a shift log exists this run —
+	// plus colour when the platform and NO_COLOR allow it.
 	log.SetFlags(0)
 	log.SetOutput(milestoneWriter{u: sinks})
 	sinks.verbose = cfg.verbose
 	if isTerminal(os.Stderr) {
-		sinks.stamp = cfg.logDir == ""
+		sinks.stamp = stampTTYDim
 		sinks.style = styleFor(true)
 	}
 	if err := run(ctx, cfg); err != nil {
@@ -1440,9 +1441,6 @@ func preflight(ctx context.Context, cfg *config) error {
 	if cfg.logDir != "" {
 		path, err := sinks.openShiftLog(cfg.logDir, cfg.repo, cfg.shiftID)
 		if err != nil {
-			// The stamps were dropped from a TTY on the promise the log would
-			// hold them; without one, the terminal takes them back.
-			sinks.keepStamps()
 			narrate(sevWarning, logLostFmt, err)
 		} else {
 			logPath = path
