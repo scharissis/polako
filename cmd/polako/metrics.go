@@ -625,7 +625,7 @@ func (r *recorder) warn(err error) {
 		return
 	}
 	r.warned = true
-	log.Printf("run data not recorded (%v) — the shift continues; -metrics off silences this", err)
+	narrate(sevWarning, "run data not recorded (%v) — the shift continues; -metrics off silences this", err)
 }
 
 // recordFile partitions records one file per repository, so deleting one
