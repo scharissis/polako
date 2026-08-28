@@ -8,6 +8,11 @@
 # its scratch repo, stand-in gh and record dir in the runner's working directory.
 /evals/results/
 
+# Skill run artifacts: `implement-issue` writes PLAN.md into the worktree it
+# works in, the same way it writes PR_BODY.md. Both are scratch, neither ships.
+/PLAN.md
+/PR_BODY.md
+
 # Go
 *.test
 *.out
