@@ -1483,9 +1483,15 @@ func preflight(ctx context.Context, cfg *config) error {
 
 // preflightPairs builds the startup recap as row pairs: what used to be a
 // run of full sentences becomes one fact per row, aligned like status and
-// stats. Every row is gated by the exact condition its sentence used before
-// this — reshaping what preflight already said, not changing what it
-// discloses or when.
+// stats. Every row but "queue" is gated by the exact condition its sentence
+// used before this — reshaping what preflight already said, not changing
+// what those rows disclose. "queue" (-label) is new disclosure, not a
+// reshape; its own comment below says why. Row order inside the block
+// matches the old sentence order, but warnOnVersionSkew (called just above,
+// in preflight) now always prints ahead of the whole block rather than
+// being interleaved with -dry-run the way the two sentences used to be — a
+// real, if cosmetic, reordering worth knowing about before trusting this
+// comment too literally.
 func preflightPairs(cfg config, logPath string) [][2]string {
 	var pairs [][2]string
 	if cfg.label != "" {

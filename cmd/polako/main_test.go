@@ -1348,6 +1348,54 @@ func TestCapNotesNameEveryCapInForce(t *testing.T) {
 	}
 }
 
+// TestPreflightPairsSaysNothingUnasked pins the gate each row promises: unset
+// (the zero-value config, no log path) must produce no rows at all — the
+// startup block earns its keep only when there is something to disclose.
+func TestPreflightPairsSaysNothingUnasked(t *testing.T) {
+	if got := preflightPairs(config{}, ""); len(got) != 0 {
+		t.Errorf("preflightPairs(zero value) = %v, want no rows", got)
+	}
+}
+
+// TestPreflightPairsGatesAndOrdersEveryRow is the regression test the code
+// review that shipped this function found missing: preflightPairs replaced
+// eight independently-gated narrate/log calls with one function, and nothing
+// pinned either the gating or the row order that resulted. One config with
+// every condition set exercises every row in one pass; the order asserted
+// here is the order the old sentences printed in, which the row order is
+// meant to preserve (see preflightPairs's doc comment).
+func TestPreflightPairsGatesAndOrdersEveryRow(t *testing.T) {
+	cfg := config{
+		label:       "ready",
+		dryRun:      true,
+		maxCost:     15,
+		postSummary: true,
+		notifyCmd:   "notify-send",
+		remote:      true,
+		rec:         &recorder{dir: "/tmp/metrics"},
+		shiftID:     "abc123",
+	}
+	got := preflightPairs(cfg, "/tmp/logs/shift.log")
+	wantLabels := []string{
+		"queue", "dry-run", "caps", "post-summary", "notify", "remote", "run data", "shift", "shift log",
+	}
+	if len(got) != len(wantLabels) {
+		t.Fatalf("preflightPairs with every condition set = %d rows %v, want %d rows %v",
+			len(got), got, len(wantLabels), wantLabels)
+	}
+	for i, want := range wantLabels {
+		if got[i][0] != want {
+			t.Errorf("row %d label = %q, want %q (full: %v)", i, got[i][0], want, got)
+		}
+	}
+	if !strings.Contains(got[0][1], `"ready"`) {
+		t.Errorf("queue row = %q, want it to name the -label value", got[0][1])
+	}
+	if !strings.Contains(got[6][1], "/tmp/metrics") || !strings.Contains(got[7][1], "abc123") {
+		t.Errorf("run data/shift rows = %v, want the recorder dir and shift id named", got[6:8])
+	}
+}
+
 // remediable is what the spend caps ask instead of repeating supervisePR's
 // switch, so it has to answer yes to every condition that switch dispatches at
 // and no to a PR that is merely waiting. A fourth kind of remediation added
