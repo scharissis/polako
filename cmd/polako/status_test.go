@@ -155,11 +155,11 @@ func TestRenderStatusAppliesThePaletteOnAColourTTY(t *testing.T) {
 	printed := out.String()
 
 	for _, want := range []string{
-		"\x1b[1mexample/repo\x1b[0m\n",                  // the repo line, bold
-		"\x1b[1mopen prs on issue branches\x1b[0m\n",     // the table title, bold
-		"\x1b[2mmergeable\x1b[0m",                        // a column header, dim
-		"\x1b[33mparked      \x1b[0m  1 issue",           // the parked row's label, yellow
-		"\x1b[33mfailing (check-1)\x1b[0m",                // the failing check, yellow
+		"\x1b[1mexample/repo\x1b[0m\n",               // the repo line, bold
+		"\x1b[1mopen prs on issue branches\x1b[0m\n", // the table title, bold
+		"\x1b[2mmergeable\x1b[0m",                    // a column header, dim
+		"\x1b[33mparked      \x1b[0m  1 issue",       // the parked row's label, yellow
+		"\x1b[33mfailing (check-1)\x1b[0m",           // the failing check, yellow
 		"\x1b[1mneeds you: reply on #7; " +
 			"decide what to do about #9 (drop needs-human to requeue)\x1b[0m", // the closing line, bold
 	} {

@@ -608,7 +608,7 @@ func main() {
 		verbUsage(os.Stdout)
 		return
 	}
-	report := func(name string, run func() error) {
+	runReport := func(name string, run func() error) {
 		// Narration (transient retries, gh warnings, the proposed-issues
 		// notice) goes through the same sinks and rendering rules work's
 		// does, rather than the bare stdlib logger this used to leave it
@@ -636,7 +636,7 @@ func main() {
 		os.Args = append(os.Args[:1], os.Args[2:]...)
 	case "stats":
 		rpt := newReport(isTerminal(os.Stdout))
-		report("stats", func() error { return runStats(os.Args[2:], os.Stdout, time.Now(), rpt) })
+		runReport("stats", func() error { return runStats(os.Args[2:], os.Stdout, time.Now(), rpt) })
 		return
 	case "status":
 		// Its own context, cancelled by the same signals work honours: a
@@ -645,7 +645,7 @@ func main() {
 		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 		defer stop()
 		rpt := newReport(isTerminal(os.Stdout))
-		report("status", func() error { return runStatus(ctx, os.Args[2:], os.Stdout, time.Now(), rpt) })
+		runReport("status", func() error { return runStatus(ctx, os.Args[2:], os.Stdout, time.Now(), rpt) })
 		return
 	case "version", "-version", "--version":
 		// Reachable without a verb, because it is what an operator asks
