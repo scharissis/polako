@@ -1476,22 +1476,48 @@ func preflight(ctx context.Context, cfg *config) error {
 	cfg.claudeVersion = claudeVersion(ctx, *cfg)
 	cfg.pluginVersion = pluginVersion(ctx, *cfg)
 	log.Printf("%s — running /%s per issue, polling every %s", cfg.repo, cfg.skill, cfg.poll)
-	if cfg.dryRun {
-		log.Println("-dry-run: resolving the next issue only — no claude run, no GitHub write, no run data")
-	}
 	warnOnVersionSkew(polakoVersion(), *cfg)
-	if notes := capNotes(*cfg); notes != "" {
-		log.Printf("spend caps in force: %s", notes)
+	settingsBlock(preflightPairs(*cfg, logPath))
+	return nil
+}
+
+// preflightPairs builds the startup recap as row pairs: what used to be a
+// run of full sentences becomes one fact per row, aligned like status and
+// stats. Every row but "queue" is gated by the exact condition its sentence
+// used before this — reshaping what preflight already said, not changing
+// what those rows disclose. "queue" (-label) is new disclosure, not a
+// reshape; its own comment below says why. Row order inside the block
+// matches the old sentence order, but warnOnVersionSkew (called just above,
+// in preflight) now always prints ahead of the whole block rather than
+// being interleaved with -dry-run the way the two sentences used to be — a
+// real, if cosmetic, reordering worth knowing about before trusting this
+// comment too literally.
+func preflightPairs(cfg config, logPath string) [][2]string {
+	var pairs [][2]string
+	if cfg.label != "" {
+		// Not said at all before this: the issue asks for -label to surface
+		// here. Unset (the default, unfiltered queue) says nothing, the same
+		// way an off flag elsewhere earns no row — there is nothing to
+		// disclose about it that -ungated's own warning does not already say.
+		pairs = append(pairs, [2]string{"queue", fmt.Sprintf("label %q", cfg.label)})
+	}
+	if cfg.dryRun {
+		pairs = append(pairs, [2]string{"dry-run",
+			"resolving the next issue only — no claude run, no GitHub write, no run data"})
+	}
+	if notes := capNotes(cfg); notes != "" {
+		pairs = append(pairs, [2]string{"caps", notes})
 	}
 	if cfg.postSummary {
 		// The environment can set this, so say it out loud: an operator who
 		// forgot the variable is in their profile should not have to work out
 		// where the PR comments are coming from.
-		narrate(sevSettings, "-post-summary is on — each merged PR gets one comment of run numbers")
+		pairs = append(pairs, [2]string{"post-summary", "on — each merged PR gets one comment of run numbers"})
 	}
 	if cfg.notifyCmd != "" {
-		narrate(sevSettings, "-notify is on — `%s` runs when an issue parks, an issue asks a question, "+
-			"the backlog clears, or the shift stops early", cfg.notifyCmd)
+		pairs = append(pairs, [2]string{"notify", fmt.Sprintf(
+			"on — `%s` runs when an issue parks, an issue asks a question, the backlog clears, or the shift stops early",
+			cfg.notifyCmd)})
 	}
 	if cfg.remote {
 		// Said every time, unprompted, like the recorder's line and for the same
@@ -1499,29 +1525,44 @@ func preflight(ctx context.Context, cfg *config) error {
 		// on-by-default flag that quietly does nothing is worse than one that
 		// quietly does something, because the operator goes looking for sessions
 		// that will never appear.
-		narrate(sevSettings, "-remote is on, but no claude CLI registers headless runs with Remote Control yet — "+
-			"runs stay on this machine and unwatched, and nothing is sent anywhere "+
-			"(-remote=false silences this line; a later polako lights the flag up once a CLI supports it)")
+		pairs = append(pairs, [2]string{"remote",
+			"on, but no claude CLI registers headless runs with Remote Control yet — runs stay on this machine " +
+				"and unwatched, and nothing is sent anywhere (-remote=false silences this line; a later polako " +
+				"lights the flag up once a CLI supports it)"})
 	}
 	if cfg.rec.enabled() {
 		// Say where the data goes, every time, unprompted: it is the whole of
 		// the answer to "what does this tool record".
-		narrate(sevSettings, "recording run data in %s — numbers only, never leaves this machine (-metrics off to disable)",
-			cfg.rec.dir)
+		pairs = append(pairs, [2]string{"run data",
+			fmt.Sprintf("%s — numbers only, never leaves this machine (-metrics off to disable)", cfg.rec.dir)})
 		// The one place the id is ever shown. Nothing reads it back, so a
 		// report on this drain alone is unaskable unless this line is where an
 		// operator finds it — including while the drain is still running.
-		narrate(sevSettings, "this shift is %s — `polako stats -shift %s` reports on it alone",
-			cfg.shiftID, cfg.shiftID)
+		pairs = append(pairs, [2]string{"shift",
+			fmt.Sprintf("%s — `polako stats -shift %s` reports on it alone", cfg.shiftID, cfg.shiftID)})
 	}
 	if logPath != "" {
 		// The disclosure, said every time like the recorder's line: unlike the
 		// run-data records this file holds transcript text, so where it lives
 		// and that it stays local is worth a line per shift.
-		narrate(sevSettings, "logging this shift in full to %s — the whole claude transcript stream, "+
-			"kept on this machine (-log off to disable)", logPath)
+		pairs = append(pairs, [2]string{"shift log",
+			fmt.Sprintf("%s — the whole claude transcript stream, kept on this machine (-log off to disable)", logPath)})
 	}
-	return nil
+	return pairs
+}
+
+// settingsBlock narrates the startup recap as one aligned block: every row at
+// settings severity — dim on a TTY, plain piped — through narrate, so each
+// still gets its own timestamp and its own copy in the shift log exactly like
+// any other narration. printPairs (stats.go) cannot be reused directly here:
+// it writes straight to an io.Writer, bypassing emit() entirely, which would
+// lose both of those. pairWidth is what the two share, so the startup block
+// lines up the same way status and stats already do.
+func settingsBlock(pairs [][2]string) {
+	width := pairWidth(pairs)
+	for _, p := range pairs {
+		narrate(sevSettings, "  %-*s  %s", width, p[0], p[1])
+	}
 }
 
 // queueGate refuses to work a public repository's backlog unfiltered. On a
