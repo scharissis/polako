@@ -26,20 +26,68 @@ anything but issues.
 
 ## Running it
 
+From the repository root — `.` is the plugin, not this directory, and the
+manifest it needs is `.claude-plugin/plugin.json` one level up:
+
 ```bash
 claude plugin eval . --scaffold --allow-tools Bash Write Edit
 ```
+
+`plugin eval` is itself in early access. Without the entitlement it prints one
+line — *`plugin eval` is currently in early access* — and exits having run
+nothing. That looks like a suite failure and is not one. `--help` does not tell
+you which side of the gate you are on: it prints in full on a CLI that still
+refuses to run, and it names no opt-in flag or env var, because the entitlement
+is account-side. That one line is the only signal, so read it before reading
+anything into a result.
 
 Both flags are required and neither is defaulted on:
 
 - `--scaffold` runs `scaffold.sh`, which is author-supplied bash executed as
   you. Read it before you run it — that is exactly why the CLI makes you ask.
 - `--allow-tools` grants the gated tools the skill needs. Without them a run
-  stalls on the first `git` call.
+  stalls on the first `git` call. Only `Bash`, `Write`, `Edit`, `WebFetch` and
+  `mcp__*` are gated, so the read-only file tools need no grant.
 
-Useful additions: `--case clear-issue` to run one, `--runs 3` when you want to
-know whether a case is flaky rather than whether it works, `--max-cost-usd` if
-you want a hard ceiling.
+### Three defaults worth knowing before you spend
+
+Each of these is the CLI's own documented behaviour, and each one costs money or
+sends something somewhere if you meet it by surprise.
+
+- **The baseline arm doubles the bill.** `--ablation` defaults to
+  `with-without` whenever a plugin resolves — and a path target resolves one —
+  so every case runs twice, once with the plugin and once without. That second
+  arm is the measurement saying the plugin did anything, and it is worth having
+  once the suite is green. While debugging it is half the budget spent watching
+  `/polako:implement-issue` not exist, so pass `--ablation none`.
+- **The HTML report is published to claude.ai unless you say otherwise.** It
+  carries the prompts and the grader verdicts, and publishing is the default on
+  an account that supports it. `--no-publish` keeps it local. Worth a deliberate
+  choice rather than a discovered one, in the spirit of the destinations
+  `CLAUDE.md` names out loud.
+- **A case passes only at 1.0.** `--threshold` defaults to 1.0, so a single
+  failed grader fails the case. `--max-cost-usd` aborts with exit 2 and partial
+  results; the overrun is bounded to one agent run, and when that run breaches
+  the ceiling the paid graders (`llm`, baseline) are skipped while the free ones
+  still score it.
+
+So a first debugging run, under a ceiling, is:
+
+```bash
+claude plugin eval . --scaffold --allow-tools Bash Write Edit \
+  --case clear-issue --ablation none --no-publish --keep-temp --max-cost-usd 40
+```
+
+`--keep-temp` leaves the scaffold directory behind, which is the difference
+between reading a failure and paying for another run to guess at it. The
+`40` is the whole debugging session's ceiling, and the flag bounds one
+invocation: pass what is left of it on each rerun rather than the same number
+again, or six invocations spend six times it.
+
+Useful once it works: `--case <glob>` to run one, `--runs 3` when you want to
+know whether a case is flaky rather than whether it works — every case here sets
+`runs: 1`, so one run each is what you get otherwise — and `--json` or
+`--report <path>` to keep the numbers somewhere.
 
 ## This suite is deliberately not in CI
 
@@ -98,7 +146,12 @@ the first run to be a debugging session, not a green one, and budget for it:
 start with `--case clear-issue` rather than the whole suite.
 
 The case format was recovered from the CLI binary rather than from
-documentation. These are the parts most likely to need a correction:
+documentation. `claude plugin eval --help` has since settled part of it without
+a run: the eval directory, `case.yaml` itself, `scaffold_script`, `runs`,
+`max_turns`, `timeout_seconds`, `tags` and `tool_used: Skill` all appear there
+as spelled here, and what else it says is folded into "Running it" above. These
+are the parts it does not cover, and so the ones most likely to need a
+correction:
 
 - **Grader keys.** `file_exists` takes `name` + `path`; `llm` takes `name` +
   `focus` + `criteria`; `tool_used` takes `tool`. There is also a `regex` grader
@@ -121,12 +174,18 @@ documentation. These are the parts most likely to need a correction:
   project is, which should be enough — but if the run cannot find the document
   it will stop and ask for one, which is correct behaviour scoring as a
   failure. Pass `repo/VISION.md` in the prompt if so.
-- **Whether `tool_used: Skill` ever fires here.** `SKILL.md` sets
-  `disable-model-invocation: true`, so the skill is only ever reached as a slash
-  command, and it is not obvious that arrives as a `Skill` tool call. The
-  ablation notes describe that grader as a plugin-fired indicator rather than
-  part of the score, which should make it harmless either way — but if it is
-  scored and always fails, drop it from all five cases. It is the one grader
-  here that asserts nothing about the skill's behaviour.
+- **Whether `tool_used: Skill` ever fires here — and whether `--ablation none`
+  makes it count.** `SKILL.md` sets `disable-model-invocation: true`, so the
+  skill is only ever reached as a slash command, and it is not obvious that
+  arrives as a `Skill` tool call. `--help` settles half of this: under
+  `--ablation with-without` it names `tool_used: Skill` specifically as a
+  with-only, plugin-fired indicator "rather than part of the score", so on a
+  default run it is harmless whether it fires or not. It says nothing about
+  `--ablation none` — which is exactly what the cheap debugging run above
+  passes. So a grader the default run ignores may be scored there, and with
+  `--threshold` at 1.0 one that never fires fails every case. A first run coming
+  back failing only this grader, in all six cases, is that and not the skill;
+  drop it from the six if so. It is the one grader here that asserts nothing
+  about the skill's behaviour.
 
 Fix what the first run finds and delete this section.
