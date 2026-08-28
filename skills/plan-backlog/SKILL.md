@@ -20,6 +20,16 @@ commit, push, open pull requests, alter existing issues or comments, or touch a
 line of code. If something here seems to call for one of those, the answer is
 that it belongs in a proposal for a human to approve, not in this run.
 
+The whole of the `gh` surface — read and write — is three call shapes: the two
+`issue list` reads in Phase 0, and the one `issue create` in Phase 4. Nothing
+else, including anything that looks like diligence rather than a write: do not
+run `gh label list` to confirm the `proposed` label exists, or `gh --version`,
+or any other pre-flight probe. Assume the label exists — it is the label this
+skill mints every issue with. A call outside those three shapes is not
+permitted to any shipped skill, so under an unattended drain it raises a
+permission prompt nobody is there to answer, and the run hangs instead of
+reporting — worse than skipping a check that was never asked for.
+
 ## The document is required
 
 If $vision is empty, stop and ask which document to work from. Never guess
