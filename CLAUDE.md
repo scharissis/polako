@@ -36,18 +36,22 @@ in the PR body rather than doing it quietly.
   No run-data record goes off the machine except by explicit request:
   `-post-summary`, default off, comments those same numbers on the operator's own
   merged PR.
-- **Two things leave the machine, and they are named here.** `-post-summary`
-  above, and `-remote`, default *on*, which registers each run with Remote
-  Control so the operator can watch it from claude.ai/code or the app. `-remote`
-  is the one that carries session text rather than numbers, and it is defensible
-  only for the reasons it was argued on issue #52: the destination is the
-  operator's own claude.ai account — the same account already running the model
-  and already holding the transcript — the channel is Claude Code's own rather
-  than anything built here, and `-remote=false` restores the earlier behaviour
-  byte for byte. A third destination, or widening either of these two, is the
-  change to argue for out loud rather than slip in. So is making registration
-  load-bearing: it degrades to an unwatched run and must never hang, prompt or
-  fail one, and nothing durable may remember whether it worked.
+- **One thing leaves the machine, and it is named here.** `-post-summary`
+  above. `-remote` was the second and is not one today: no `claude` CLI
+  registers headless runs with Remote Control — the current one takes
+  `--remote-control` under `-p`, runs a normal session and never starts the
+  bridge, with no in-band signal to detect the ignore (issue #82). So nothing
+  passes the flag, and with `-remote` on or off no session text goes anywhere.
+  The flag stays as interface, and the argument for lighting it up again is the
+  one settled on issue #52: the destination is the operator's own claude.ai
+  account — the same account already running the model and already holding the
+  transcript — the channel is Claude Code's own rather than anything built here,
+  and `-remote=false` restores the earlier behaviour byte for byte. Re-arming it
+  against a CLI that does register is that argument coming back into force, not
+  a new one; it must still degrade to an unwatched run rather than hang, prompt
+  or fail one, and nothing durable may remember whether it worked. A second
+  destination, or widening `-post-summary`, is the change to argue for out loud
+  rather than slip in.
 - **Restart safety.** If a PR already exists for an issue's branch, never re-run
   the skill for that issue — go straight to waiting on the PR.
 - **The `needs-human` label is orchestration state.** It is the only durable

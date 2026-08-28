@@ -107,7 +107,7 @@ report style, dim on a TTY, one fact per line:
 ```
 scharissis/polako — /polako:implement-issue per issue
   queue      label "ready" · poll 5m0s
-  remote     on — watch from claude.ai/code or the app (-remote=false disables)
+  remote     on — inert: no CLI registers headless runs, nothing is sent
   run data   ~/.polako/metrics — numbers only, stays local (-metrics off)
   shift      d2d08b3a — `polako stats -shift d2d08b3a` reports on it alone
   shift log  ~/.polako/logs/scharissis--polako--d2d08b3a.log (-log off)

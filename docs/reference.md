@@ -34,7 +34,7 @@ sets — see [`status`](#where-the-backlog-stands-polako-status) and
 | `-strict-order` | `false` | Work issues in strict ascending order: wait in place on an issue awaiting an answer instead of moving past it. |
 | `-dry-run` | `false` | Resolve the next issue, print the `claude` invocation it would get, and exit. Runs nothing and writes nothing — see [Looking before you leap](#looking-before-you-leap--dry-run). |
 | `-notify` | *(none)* | Command to run whenever polako needs a human, with context in `POLAKO_NOTIFY_*` — see [Being told when it needs you](#being-told-when-it-needs-you--notify). |
-| `-remote` | `true` | Register each run with Remote Control, so you can watch and steer it from claude.ai/code or the app — see [Watching a shift from anywhere](#watching-a-shift-from-anywhere--remote). |
+| `-remote` | `true` | Ask for each run to be watchable from claude.ai/code or the app. **Inert today** — no `claude` CLI registers headless runs, so nothing is sent and runs stay unwatched. See [Watching a shift from anywhere](#watching-a-shift-from-anywhere--remote). |
 | `-run-tag` | *(none)* | Freeform label recorded with every run, so one batch can be compared against another. |
 | `-metrics` | `~/.polako/metrics` | Directory for run-data records, or `off` to write nothing. |
 | `-log` | `~/.polako/logs` | Directory for the full per-shift log, or `off` to write none — see [The shift log](#the-shift-log--log). |
@@ -51,11 +51,11 @@ leap of faith. `-dry-run` takes it out:
 $ polako work -dir ../my-project -dry-run
 example/my-project — running /polako:implement-issue per issue, polling every 5m0s
 -dry-run: resolving the next issue only — no claude run, no GitHub write, no run data
--remote is on — each run registers with Remote Control as `polako example/my-project#<issue>`, so you can watch and steer it from claude.ai/code or the app (-remote=false keeps runs to this machine)
+-remote is on, but no claude CLI registers headless runs with Remote Control yet — runs stay on this machine and unwatched, and nothing is sent anywhere (-remote=false silences this line; a later polako lights the flag up once a CLI supports it)
 ready: #12, #14, #19
 waiting on an answer: #9
 issue #12 would be worked next; the invocation follows on stdout
-claude -p '/polako:implement-issue 12' --permission-mode acceptEdits --remote-control 'polako example/my-project#12' --allowedTools '…' --output-format stream-json --verbose
+claude -p '/polako:implement-issue 12' --permission-mode acceptEdits --allowedTools '…' --output-format stream-json --verbose
 ```
 
 It resolves the next issue exactly as a real shift would — same queue, same
@@ -144,56 +144,41 @@ notifier that goes off every time is one you mute.
 ### Watching a shift from anywhere: `-remote`
 
 A shift's runs are unattended by design and invisible with it: while a run is in
-flight, its output exists only in the terminal that started it. On by default,
-`-remote` registers each run with Claude Code's Remote Control, so it appears in
-your session list on [claude.ai/code](https://claude.ai/code) and in the mobile
-app — live, readable, and steerable if you want to step in.
+flight, its output exists only in the terminal that started it. `-remote` is the
+flag that asks for those runs to show up in your session list on
+[claude.ai/code](https://claude.ai/code) and in the mobile app instead — live,
+readable, and steerable if you want to step in.
 
-Sessions are named after the queue, so the list reads the way the backlog does:
+**It does nothing today, and that is not a bug you can fix at your end.** No
+`claude` CLI registers headless runs with Remote Control. The one that ships now
+accepts `--remote-control` under `-p`, starts a perfectly normal session, and
+never brings the remote bridge up; the feature is scoped to interactive
+sessions, and print mode is the whole differentiator. There is no field in the
+session's `init` event to detect the difference from, so polako cannot even tell
+you per-run whether it worked.
 
-```
-polako example/repo#12
-```
-
-That covers every `claude` a shift starts on the issue: the skill run, any
-resume after a crash, and the conflict, CI and review remediations against its
-PR. Startup says the registration is on and what the names look like, because
-[the environment can set any flag](#setting-defaults-from-the-environment) and a
-default-on outward path should never be a surprise.
-
-To keep every run on this machine and nowhere else:
-
-```bash
-polako work -remote=false
-```
-
-That produces `claude` invocations byte-identical to a build without the flag.
-
-**Degrades, never prompts.** Unattended means nobody is there to answer a
-question, so a registration that cannot happen must not hang or fail a run.
-Authenticating with an API key rather than a claude.ai login, an organisation
-that has turned Remote Control off, `disableRemoteControl` in settings — in each
-case the run simply proceeds unwatched.
-
-The same is true of a `claude` that will not take the flag in print mode at all.
-polako finds out rather than assuming: it asks on the shift's first run, and if
-that run dies before a session ever starts — a usage error, or a CLI that takes
-the flag and then sits waiting for the input an unattended run has nobody to
-give — nothing was spent, so it says so once, re-dispatches that same run
-without the flag, and stops asking for the rest of the shift.
+So polako does not pass the flag at all — with `-remote` on or off, the
+invocation is the same, and nothing about your session leaves this machine by
+this path. Startup says so once, rather than claiming a session list that will
+stay empty:
 
 ```
-this claude cannot register headless runs with Remote Control; runs continue unwatched (-remote=false silences this)
+-remote is on, but no claude CLI registers headless runs with Remote Control yet — runs stay on this machine and unwatched, and nothing is sent anywhere (-remote=false silences this line; a later polako lights the flag up once a CLI supports it)
 ```
 
-The refused attempt never reached a model, so it costs no `-retries` budget and
-writes no run-data record. Nothing about the answer is remembered past the
-process, either, so a CLI that grows support for the combination starts working
-with no change here and no flag to set.
+`-remote=false` silences that line and changes nothing else.
 
-A registered session is readable through your own claude.ai account and
-nobody else's. It is the one place a shift's session content is readable off
-this machine, and [security.md](security.md) is where that trade is argued.
+The flag stays because it is interface, and because the argument for turning it
+on was made and settled on [issue #52](https://github.com/scharissis/polako/issues/52):
+the destination is your own claude.ai account, the channel is Claude Code's own,
+and turning it off restores a byte-identical invocation. When a CLI registers
+headless runs, that is the argument a later polako would pass the flag on — a
+release you would upgrade to, not something that starts happening under a
+binary you already have. See [security.md](security.md) for the trade it would
+commit you to when it does.
+
+Until then, [the shift log](#the-shift-log--log) is how you read a run you were
+not watching, and it never leaves this machine either.
 
 ### The shift log: `-log`
 

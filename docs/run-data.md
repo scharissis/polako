@@ -40,13 +40,13 @@ unless you turn it on, which puts one line of numbers on your own merged PR. The
 skill half, the part you can install from a marketplace, carries no data
 collection at all: it is a prompt.
 
-One other thing about a shift is visible off this machine, and it is not run
-data: [`-remote`](reference.md#watching-a-shift-from-anywhere--remote), on by default,
-registers each run with Remote Control so you can watch it from claude.ai/code
-or the app. That makes the session itself — its transcript, live — readable
-through your own claude.ai account, and nobody else's. It is Claude Code's own
-channel rather than anything polako built, it carries nothing the local
-recorder writes, and `-remote=false` closes it.
+[`-remote`](reference.md#watching-a-shift-from-anywhere--remote) used to be
+named here as the one other thing about a shift visible off this machine. It is
+not one today: no `claude` CLI registers headless runs with Remote Control, so
+polako no longer passes the flag and nothing about the session goes anywhere.
+The flag stays for the CLI that supports it, and
+[security.md](security.md#-remote-and-why-it-is-not-in-that-table) is where the
+trade is argued for the day it does.
 
 To write nothing at all:
 

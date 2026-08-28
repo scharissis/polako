@@ -360,13 +360,13 @@ rather than by the model behaving well, and `-label` means a maintainer has to
 opt each issue in before polako will touch it. On a public repository that
 label gate is required, and `polako work` refuses to start without one.
 
-Nothing you run leaves your machine unless you ask. Two exceptions are named
-outright: `-remote`, on by default, registers each run with Remote Control so
-you can watch it from claude.ai or the app under your own account, and
-`-remote=false` turns it off; `-post-summary`, off by default, comments one line
-of numbers on your own merged PR. [docs/security.md](docs/security.md) has the
-reasoning and the limits, and [SECURITY.md](SECURITY.md) says how to report a
-vulnerability privately.
+Nothing you run leaves your machine unless you ask. One exception is named
+outright: `-post-summary`, off by default, comments one line of numbers on your
+own merged PR. `-remote` is on by default and would be the second, but no
+`claude` CLI registers headless runs with Remote Control yet, so polako does not
+pass the flag and no session content goes anywhere.
+[docs/security.md](docs/security.md) has the reasoning and the limits, and
+[SECURITY.md](SECURITY.md) says how to report a vulnerability privately.
 
 ## Questions
 
