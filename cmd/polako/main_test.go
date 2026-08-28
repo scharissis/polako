@@ -2167,11 +2167,12 @@ func TestAuthFailureMatchesTheWaysTheCLIReportsIt(t *testing.T) {
 	}
 }
 
-// Issue #157: a clean exit used to have its result text read once and
-// dropped, so a park could assert "no questions" over a run whose final
-// message was verbatim one. observe now retains it and classifies it — on a
-// success result, not only a failing one, since #138's run ended cleanly.
-func TestObserveRetainsAndClassifiesACleanExitsFinalText(t *testing.T) {
+// Issue #157: a clean exit used to have its result text read once — for
+// authFailed/limitMsg, both gated on IsError — and otherwise dropped, so a
+// park could assert "no questions" over a run whose final message was
+// verbatim one. observe now classifies it on a success result too, since
+// #138's run ended cleanly.
+func TestObserveClassifiesACleanExitsFinalText(t *testing.T) {
 	const asked = "This requires user confirmation to switch the session's " +
 		"working directory into the worktree. Can you approve entering `/tmp/x`?"
 	const ordinary = "Opened a PR for issue 7."
@@ -2188,9 +2189,6 @@ func TestObserveRetainsAndClassifiesACleanExitsFinalText(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			var rep runReport
 			rep.observe(streamEvent{Type: "result", Subtype: "success", Result: c.result})
-			if rep.resultText != c.result {
-				t.Errorf("resultText = %q, want the result retained verbatim", rep.resultText)
-			}
 			if rep.permissionRefused != c.wantPermission {
 				t.Errorf("permissionRefused = %v, want %v", rep.permissionRefused, c.wantPermission)
 			}
@@ -2215,6 +2213,9 @@ func TestPermissionRefusalMatchesTheWaysARunAsksApproval(t *testing.T) {
 		"I need permission to use the EnterWorktree tool.",
 		"I don't have permission to run that command.",
 		"I do not have permission to write outside the worktree.",
+		// A markdown bullet ahead of the signature, the other wrapping
+		// resultHead has to see through besides a heading or an asterisk.
+		"- This requires approval to write outside the worktree. Can you approve?",
 	}
 	for _, r := range asks {
 		if !permissionRefusal(r) {
@@ -2224,6 +2225,12 @@ func TestPermissionRefusalMatchesTheWaysARunAsksApproval(t *testing.T) {
 	fine := []string{
 		"Opened a PR for issue 7.",
 		"Unknown skill: polako:implement-issue",
+		// The word-boundary check: a signature is a raw byte prefix of this
+		// sentence, but the run asked for nothing — a false match here would
+		// park a possibly-salvageable run over sandbox tooling, not a refused
+		// tool.
+		"I need permission tooling wasn't available in this sandbox, so I " +
+			"worked around it and left notes on the branch.",
 		// The reason the match is anchored: a run whose issue is *about*
 		// permission prompts can legitimately end by describing one without
 		// asking for anything itself.

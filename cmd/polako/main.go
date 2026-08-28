@@ -2137,42 +2137,50 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					return parked(0, park(parkRetries,
 						"claude crashed and %d resume attempts failed", cfg.retries))
 				default:
-					// Clean exit, yet no PR and no questions. Three different
-					// runs end this way and only one of them is the "Claude
-					// decided nothing" this used to assume: the other two
-					// believed they had paused for something that will never
-					// come back, or ran out of road mid-task. Both of those have
-					// the change sitting on disk, finished or nearly, and are
-					// exactly what resume exists for. A fourth asked the operator
-					// to approve a tool this allowlist never granted and ended its
-					// turn unheard — see rep.permissionRefused below, whose fix
-					// (-add-tools) is not something resuming the same session can
-					// reach.
+					// Clean exit, yet no PR and no questions flagged through the
+					// proper channel. Four different runs end this way and only
+					// one of them is the "Claude decided nothing" this used to
+					// assume: two believed they had paused for something that
+					// will never come back, or ran out of road mid-task, and both
+					// have the change sitting on disk, finished or nearly —
+					// exactly what resume exists for. The fourth asked the
+					// operator to approve a tool this allowlist never granted and
+					// ended its turn unheard — see rep.permissionRefused below,
+					// whose fix (-add-tools) is not something resuming the same
+					// session can reach.
 					//
-					// The first three are told apart by that work on disk, not
+					// The first three (decided nothing, paused forever, ran out of
+					// road) are told apart by that work on disk, not
 					// rep.progressed(): every clean exit progressed — the run this
 					// was written for scored 59 turns and 58 tool uses — so
 					// progress cannot separate them. Whether the branch has
 					// commits, or the worktree is dirty, can. The fourth is told
-					// apart by the run's own retained final words instead, and
-					// checked first: no amount of salvageable work changes what
-					// fixes it.
+					// apart by the run's own final words instead, classified by
+					// permissionRefusal, and checked first: no amount of
+					// salvageable work changes what fixes it.
 					record(0, outcomeNothing)
 					// One probe, feeding both the decision and, if it turns out
 					// to be a park after all, the message.
 					left := inspectLeftWork(ctx, cfg, issue)
+					// What is there for the person picking it up, appended to
+					// whichever reason a branch below settles on, then handed to
+					// the same park call — one tail shared by every way this
+					// clean exit can end, rather than each branch repeating it.
+					finishPark := func(category, reason string) error {
+						if d := left.describe(); d != "" {
+							reason += "; " + d
+						}
+						return parked(0, parkAside(category, left.where(), "%s", reason))
+					}
 					if rep.permissionRefused {
 						// Resuming replays the identical session against the
 						// identical allowlist, so it hits the same wall again —
 						// only the operator can grant the tool, so park straight
 						// away rather than spending the clean-exit resume budget
 						// finding that out the slow way.
-						reason := "the run stopped to ask for a permission this allowlist does not grant " +
-							"— add the missing tool with -add-tools, then remove needs-human to retry"
-						if d := left.describe(); d != "" {
-							reason += "; " + d
-						}
-						return parked(0, parkAside(parkPermission, left.where(), "%s", reason))
+						return finishPark(parkPermission, "the run stopped to ask for a permission "+
+							"this allowlist does not grant — add the missing tool with -add-tools, "+
+							"then remove needs-human to retry")
 					}
 					// Which bound stopped a resume that was otherwise warranted,
 					// so the park says that rather than the generic sentence
@@ -2216,20 +2224,18 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 							continue
 						}
 					}
-					// What happened, why we stopped trying, and what is there for
-					// the person picking it up. With nothing on disk both extra
-					// clauses are empty. No longer claims the run asked nothing —
-					// only a question flagged through the proper channel is ruled
-					// out by the time this runs, and the permission case above is
-					// proof that prose the model never flagged can still be one.
+					// What happened and why we stopped trying; finishPark appends
+					// what is there for the person picking it up. With nothing on
+					// disk that extra clause is empty. No longer claims the run
+					// asked nothing — only a question flagged through the proper
+					// channel is ruled out by the time this runs, and the
+					// permission case above is proof that prose the model never
+					// flagged can still be one.
 					reason := "the run completed without opening a PR"
 					if bound != "" {
 						reason += "; " + bound
 					}
-					if d := left.describe(); d != "" {
-						reason += "; " + d
-					}
-					return parked(0, parkAside(boundWhy, left.where(), "%s", reason))
+					return finishPark(boundWhy, reason)
 				}
 			}
 			record(pr.Number, outcomeOpenedPR)
@@ -2578,16 +2584,13 @@ type runReport struct {
 	// permissionRefused is the third clean-exit case a park has to tell apart
 	// from "decided nothing": the run's own final words asking the operator to
 	// approve a tool this allowlist never granted, and getting nobody to
-	// answer. See permissionRefusal.
+	// answer. Computed on every result event, clean or not — a clean exit
+	// used to have its final text read once (for authFailed/limitMsg, both
+	// gated on IsError) and otherwise dropped, which is what let a park
+	// assert "no questions" over a run whose final message was verbatim one.
+	// See permissionRefusal.
 	permissionRefused bool
-	// resultText retains the result event's own words for every run, not only
-	// the two failing cases above — a clean exit used to have this read once
-	// and dropped, which is what let a park assert "no questions" over a run
-	// whose final message was verbatim one. Never posted anywhere itself, per
-	// CLAUDE.md's "no transcript text leaves the machine": only the
-	// classifiers above may read it.
-	resultText string
-	overBudget bool // -max-issue-time ran out while this run was still going
+	overBudget        bool // -max-issue-time ran out while this run was still going
 	// stderrTail is the last few KB the child wrote to stderr — for a crashed
 	// run, often the only cause on record and worth a terminal line, since the
 	// full copy is off in the shift log.
@@ -2658,7 +2661,6 @@ func (r *runReport) observe(ev streamEvent) {
 	case "result":
 		r.hasResult = true
 		r.subtype, r.isError = ev.Subtype, ev.IsError
-		r.resultText = ev.Result
 		r.authFailed = ev.IsError && authFailure(ev.Result)
 		if ev.IsError && limitRefusal(ev.Result) {
 			r.limitMsg = ev.Result
@@ -2715,6 +2717,35 @@ func nearMatches(commands []string, cmd string) []string {
 	return near
 }
 
+// resultHead reduces a result event's text to what authFailure, limitRefusal
+// and permissionRefusal each match against: lowercased, and stripped of the
+// markdown a CLI or a model sometimes wraps its own text in — a heading, a
+// bullet (`*` or `-`), stray spaces — so that wrapping does not by itself
+// defeat a head anchor.
+func resultHead(result string) string {
+	return strings.ToLower(strings.TrimLeft(strings.TrimSpace(result), "*#- "))
+}
+
+// headMatchesAny reports whether result's head starts with one of sigs, as a
+// whole word or phrase rather than a raw byte prefix: "i need permission to"
+// must not match "I need permission tooling wasn't available", so whatever
+// character follows a matched signature — if the head continues at all — has
+// to end the phrase (space, punctuation, ...) rather than continue a word.
+func headMatchesAny(result string, sigs ...string) bool {
+	head := resultHead(result)
+	return slices.ContainsFunc(sigs, func(sig string) bool {
+		if !strings.HasPrefix(head, sig) {
+			return false
+		}
+		rest := head[len(sig):]
+		if rest == "" {
+			return true
+		}
+		c := rest[0]
+		return !(c >= 'a' && c <= 'z') && !(c >= '0' && c <= '9')
+	})
+}
+
 // authFailure reports whether a run's final text is the CLI saying the API
 // refused its credentials.
 //
@@ -2727,8 +2758,7 @@ func nearMatches(commands []string, cmd string) []string {
 // already spent before. So, as with lacksCommand, every uncertainty resolves
 // toward "keep going".
 func authFailure(result string) bool {
-	head := strings.ToLower(strings.TrimLeft(strings.TrimSpace(result), "*# "))
-	return slices.ContainsFunc([]string{
+	return headMatchesAny(result,
 		"failed to authenticate",        // the CLI's own wrapper, and the one observed
 		"oauth token has expired",       // a credential it could not refresh
 		"oauth access token is invalid", // a revoked or corrupt stored one
@@ -2736,7 +2766,7 @@ func authFailure(result string) bool {
 		"invalid x-api-key",
 		"api error: 401",       // the bare status, when no wrapper survives
 		"authentication_error", // the raw API envelope, unwrapped
-	}, func(sig string) bool { return strings.HasPrefix(head, sig) })
+	)
 }
 
 // limitRefusal reports whether a failing run's result text is the CLI refusing
@@ -2747,22 +2777,29 @@ func authFailure(result string) bool {
 // residual mis-read costs one bounded wait rather than a park or a stopped
 // drain, which is the cheap side of the same trade authFailure makes.
 func limitRefusal(result string) bool {
-	head := strings.ToLower(strings.TrimLeft(strings.TrimSpace(result), "*# "))
-	return slices.ContainsFunc([]string{
+	return headMatchesAny(result,
 		"you've hit your session limit", // the CLI's wording, and the one observed
 		"you've hit your usage limit",   // its sibling for the account-wide pools
 		"session limit reached",         // shorter spellings, defensively
 		"usage limit reached",
 		"5-hour limit reached",
 		"weekly limit reached",
-	}, func(sig string) bool { return strings.HasPrefix(head, sig) })
+	)
 }
 
 // permissionRefusal reports whether a clean run's final text is the run itself
 // asking the operator to approve a tool it was refused — the shape observed on
 // issue #138, where `cd` and `EnterWorktree` both sat outside --allowedTools
-// and the run ended its turn asking in prose instead of on the issue thread
-// (see #156, which gives the skill a route to ask there instead of here).
+// and the run ended its turn asking in prose instead of on the issue thread.
+//
+// #156 gave the skill a documented route to ask there instead — post the
+// question and raise awaiting-answer — so a current skill run taking that
+// route never reaches here at all: deferReason catches it earlier in
+// processIssue's switch, over in the `asked` branch. #138 predates that
+// route; this function is the backstop for what it does not cover once it
+// exists — an older skill install (CLAUDE.md notes a version bump is the only
+// thing that moves an installed user) and, more durably, a model that simply
+// does not take the documented route on a given run.
 //
 // Unlike authFailure and limitRefusal this is not the CLI's own wrapper text —
 // it is the model's own words, so the exact wording varies run to run and the
@@ -2772,8 +2809,7 @@ func limitRefusal(result string) bool {
 // toward "this was an ordinary run" and the list stays conservative rather
 // than broad.
 func permissionRefusal(result string) bool {
-	head := strings.ToLower(strings.TrimLeft(strings.TrimSpace(result), "*# "))
-	return slices.ContainsFunc([]string{
+	return headMatchesAny(result,
 		"this requires user confirmation", // the wording observed on #138
 		"this requires confirmation",
 		"this requires approval",
@@ -2783,7 +2819,7 @@ func permissionRefusal(result string) bool {
 		"i need permission to",
 		"i don't have permission to",
 		"i do not have permission to",
-	}, func(sig string) bool { return strings.HasPrefix(head, sig) })
+	)
 }
 
 // limitResetRe reads the reset clause out of a limit refusal — "resets 10:50am
