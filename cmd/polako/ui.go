@@ -27,18 +27,29 @@ import (
 // over stamping, so piped and logged output look like they always did.
 const stampLayout = "2006/01/02 15:04:05 "
 
-// ttyStampLayout is what a TTY gets instead: the shift log already holds the
-// full stamp, so the terminal's gutter only needs enough to place a line in
-// time relative to its neighbours.
+// ttyStampLayout is what a TTY gets instead: a quiet gutter that still places
+// a line in time relative to its neighbours, deliberately shorter than the
+// shift log's stamp regardless of whether a shift log is even open this run —
+// see stampKind.
 const ttyStampLayout = "15:04:05 "
+
+// stampKind controls how — or whether — the terminal sink stamps a line. The
+// shift log ignores it entirely: a file write always gets the full
+// stampLayout, unconditionally.
+type stampKind int
+
+const (
+	stampFull   stampKind = iota // the full stampLayout, matching a pipe or redirect exactly — the default until a verb says otherwise
+	stampOff                     // no terminal stamp at all — status/stats never open a shift log, so piped output there never had one
+	stampTTYDim                  // dim, time-only gutter — work on a capable TTY
+)
 
 type ui struct {
 	// One writer at a time: the two loggers each serialise their own callers
 	// but not each other, and the claude stderr copier is a third writer.
 	mu       sync.Mutex
 	terminal io.Writer
-	stamp    bool      // put a stamp on terminal lines at all; the shift log is always stamped
-	tty      bool      // stamp is dim and time-only, not the full stampLayout; set only for work's TTY case
+	stamp    stampKind // how the terminal sink stamps a line
 	style    styler    // ANSI on a capable TTY; the zero value renders plain
 	file     io.Writer // the shift log; nil when -log is off or preflight has not opened it yet
 	verbose  bool      // -verbose: detail lines reach the terminal too
@@ -47,8 +58,9 @@ type ui struct {
 
 // sinks is the process's one ui. Package-level for the same reason the stdlib
 // logger is: narration comes from everywhere, and threading a handle through
-// every signature would dwarf the feature.
-var sinks = &ui{terminal: os.Stderr, stamp: true}
+// every signature would dwarf the feature. stampFull is stampKind's zero
+// value, so it needs no explicit field here.
+var sinks = &ui{terminal: os.Stderr}
 
 // detail is the second narration channel: lines worth keeping but not worth an
 // operator's glance. They always reach the shift log and, unless -verbose says
@@ -130,38 +142,41 @@ func (u *ui) emit(p []byte, milestone bool, sev severity) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	now := time.Now()
-	fileStamp := now.Format(stampLayout)
 	if milestone || u.verbose {
-		if u.stamp {
-			io.WriteString(u.terminal, u.termStamp(now))
+		if s := u.termStamp(now); s != "" {
+			io.WriteString(u.terminal, s)
 		}
 		io.WriteString(u.terminal, u.style.render(string(p), milestone, sev))
 	}
 	if u.file == nil {
 		return
 	}
-	if _, err := u.file.Write(append([]byte(fileStamp), p...)); err != nil && !u.warned {
+	if _, err := u.file.Write(append([]byte(now.Format(stampLayout)), p...)); err != nil && !u.warned {
 		u.warned = true
 		// Straight to the terminal rather than through the logger, which would
 		// re-enter emit while mu is held — but still through render, so this
 		// warning gets the same yellow the styler promises it.
-		if u.stamp {
-			io.WriteString(u.terminal, u.termStamp(now))
+		if s := u.termStamp(now); s != "" {
+			io.WriteString(u.terminal, s)
 		}
 		io.WriteString(u.terminal, u.style.render(fmt.Sprintf(logLostFmt+"\n", err), true, sevWarning))
 	}
 }
 
-// termStamp renders the stamp for the terminal sink alone: on a TTY it's
-// time-only and dim — the full stamp already lives in the shift log there —
-// styled by the same styler that gates every other colour, so NO_COLOR,
-// TERM=dumb and Windows get it unstyled rather than dropped. Off a TTY it's
-// the same full stampLayout a pipe or redirect has always seen.
+// termStamp renders the stamp for the terminal sink alone, "" for stampOff.
+// stampTTYDim is time-only and dim, styled by the same styler that gates
+// every other colour, so NO_COLOR, TERM=dumb and Windows get it unstyled
+// rather than dropped; stampFull is the same full stampLayout a pipe or
+// redirect has always seen.
 func (u *ui) termStamp(now time.Time) string {
-	if !u.tty {
+	switch u.stamp {
+	case stampOff:
+		return ""
+	case stampTTYDim:
+		return u.style.dim(now.Format(ttyStampLayout))
+	default:
 		return now.Format(stampLayout)
 	}
-	return u.style.wrap("\x1b[2m", now.Format(ttyStampLayout))
 }
 
 // logLostFmt is said at both moments a shift log can fail — opening it and
@@ -224,6 +239,14 @@ func (s styler) wrap(code, line string) string {
 	return code + line + "\x1b[0m"
 }
 
+// dim is the styler's one low-emphasis code, shared by every caller that
+// wants "present, but not what the eye should land on first" — detail
+// lines, the settings recap, a report's column headers, and the terminal's
+// own stamp — so the four cannot drift to different codes independently.
+func (s styler) dim(text string) string {
+	return s.wrap("\x1b[2m", text)
+}
+
 // render styles one terminal record. Detail lines (seen only under -verbose)
 // are dimmed as a block so the milestones keep standing out; a milestone's
 // colour comes from the severity its call site declared, never from the
@@ -235,7 +258,7 @@ func (s styler) render(line string, milestone bool, sev severity) string {
 	}
 	text, nl, _ := strings.Cut(line, "\n")
 	if !milestone {
-		return s.wrap("\x1b[2m", text) + "\n" + nl
+		return s.dim(text) + "\n" + nl
 	}
 	switch sev {
 	case sevSection:
@@ -247,7 +270,7 @@ func (s styler) render(line string, milestone bool, sev severity) string {
 	case sevWarning:
 		text = s.wrap("\x1b[33m", text) // yellow: needs an eye, not a stop
 	case sevSettings:
-		text = s.wrap("\x1b[2m", text) // dim: the startup preference recap
+		text = s.dim(text) // dim: the startup preference recap
 	}
 	return text + "\n" + nl
 }
@@ -272,7 +295,7 @@ func (r report) bold(s string) string { return r.style.wrap("\x1b[1m", s) }
 
 // dim marks a printTable header row, the same code narration uses for detail
 // lines: present, but not what the eye should land on first.
-func (r report) dim(s string) string { return r.style.wrap("\x1b[2m", s) }
+func (r report) dim(s string) string { return r.style.dim(s) }
 
 // attentionMarkers are the cell contents worth an eye: a failing check, a
 // review still blocking, a park, an unreviewed proposal, or a state nobody

@@ -619,7 +619,7 @@ func main() {
 		// timestamp on piped output that never had one.
 		log.SetFlags(0) // a report, not a log
 		log.SetOutput(milestoneWriter{u: sinks})
-		sinks.stamp = false
+		sinks.stamp = stampOff
 		if isTerminal(os.Stderr) {
 			sinks.style = styleFor(true)
 		}
@@ -677,16 +677,17 @@ func main() {
 	defer stop()
 
 	// Timestamps are the sinks' job, and every line carries one: the shift log
-	// is always stamped, a terminal that is not a TTY keeps the same stamps
-	// the default flags used to add so redirected transcripts look like they
-	// always did, and a TTY gets a dim, time-only stamp instead of dropping it
-	// — worn quietly rather than shown or hidden outright — plus colour when
-	// the platform and NO_COLOR allow it.
+	// is always stamped in full, a terminal that is not a TTY keeps the same
+	// full stamp the default flags used to add so redirected transcripts look
+	// like they always did, and a TTY gets a dim, time-only stamp instead of
+	// dropping it — worn quietly rather than shown or hidden outright, and
+	// deliberately not conditioned on whether a shift log exists this run —
+	// plus colour when the platform and NO_COLOR allow it.
 	log.SetFlags(0)
 	log.SetOutput(milestoneWriter{u: sinks})
 	sinks.verbose = cfg.verbose
 	if isTerminal(os.Stderr) {
-		sinks.tty = true
+		sinks.stamp = stampTTYDim
 		sinks.style = styleFor(true)
 	}
 	if err := run(ctx, cfg); err != nil {

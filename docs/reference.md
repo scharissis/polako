@@ -212,15 +212,19 @@ written warns once and the shift continues on the terminal alone. A
 `-dry-run` writes no log at all.
 
 Every line carries a time; the terminal just wears it quietly. On a TTY the
-gutter shrinks to a dim, time-only stamp — `15:04:05 ` — since the full stamp
-is already in the shift log; milestones are coloured too, sparingly. Set
-`NO_COLOR` (to anything, even nothing) to keep a TTY plain, and Windows is
-plain regardless — the stamp stays, just unstyled. Piped or redirected stderr
-keeps the full `2006/01/02 15:04:05` timestamp and carries no colour, so each
-line of `polako work 2> shift.err` is shaped exactly as it always was — but
-the stream is the quiet one: the per-tool-call `[claude]` lines live in the
-shift log now, so anything that grepped the old firehose out of stderr should
-read the log instead, or run with `-verbose` to put the stream back.
+gutter shrinks to a dim, time-only stamp — `15:04:05 ` — always, whether or
+not a shift log is open this run: the trade is a quiet terminal, not a
+promise that the date lives elsewhere, so `-log off` or a log that fails to
+open (above) means the terminal's stamp is the least precise record there
+is, not the only one made full again. Milestones are coloured too,
+sparingly. Set `NO_COLOR` (to anything, even nothing) to keep a TTY plain,
+and Windows is plain regardless — the stamp stays, just unstyled. Piped or
+redirected stderr keeps the full `2006/01/02 15:04:05` timestamp and carries
+no colour, so each line of `polako work 2> shift.err` is shaped exactly as
+it always was — but the stream is the quiet one: the per-tool-call `[claude]`
+lines live in the shift log now, so anything that grepped the old firehose
+out of stderr should read the log instead, or run with `-verbose` to put the
+stream back.
 
 ### Setting defaults from the environment
 
