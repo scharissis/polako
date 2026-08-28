@@ -36,12 +36,13 @@ pause, and none of the above argues for guessing instead.
 
 ## No prompts, ever
 Unattended means no prompts: `--allowedTools` grants a fixed set of command
-prefixes, and anything outside it — `cd` among them, along with
-`EnterWorktree` or any other tool `ToolSearch` surfaces for moving the
-session's own working directory — raises a confirmation nobody is there to
-answer. Under `claude -p` that confirmation is not a pause; it is the run
-ending having produced nothing, which reads to the supervisor as
-indistinguishable from silence and parks a perfectly good issue.
+prefixes. Anything outside it — `cd` among them, along with `EnterWorktree`
+or any other tool `ToolSearch` surfaces for moving the session's own working
+directory — raises a confirmation nobody is there to answer. That can hang
+the run outright; #138's shift log shows the other way it fails, faster and
+just as badly — the rejected confirmation left the model to end its turn on
+its own a few seconds later, "finished (ok)," having produced nothing. Either
+way the supervisor sees no progress and parks a perfectly good issue.
 
 So: never reach for a tool on the chance it is granted, and never `cd`. Work
 in another directory by naming it instead — `git -C <path>`, `go -C <path>`,
@@ -50,8 +51,12 @@ or a tool call that already takes a path argument (Read, Write, Edit all do)
 
 ## Asking a question
 Anything that genuinely blocks you — a planning question, a missing
-prerequisite, a tool this run isn't granted — is a question for the issue
-thread, not a silent stop, in any phase from here on including this one:
+prerequisite, a tool this run isn't granted and no later phase gives a
+fallback for — is a question for the issue thread, not a silent stop, in any
+phase from here on including this one. (Phase 3's review gate is the one
+exception with its own fallback already defined for one specific tool being
+unavailable, spelled out there: substitute a manual review pass rather than
+stopping to ask.)
 
 1. Post it with `gh issue comment $issue`, in terse, simple English.
 2. Flag it with exactly:
@@ -105,19 +110,20 @@ on the commits already there — never recreate the branch from the default
 branch, which would discard them. Then, by case:
 
 - If this session is already inside a Claude-managed worktree (cwd contains
-  `.claude/worktrees/`): stay here — this is the one case with nowhere else to
-  name. Check out issue-$issue if it exists, otherwise create it from the
-  remote default branch (`git symbolic-ref refs/remotes/origin/HEAD --short`).
-- Else if a worktree for issue-$issue exists: note its absolute path and use
-  it for every command from here on — `git -C <path> ...`, `go -C <path> ...`
-  and the like, and absolute paths for reading and writing files in it
-  (PLAN.md, PR_BODY.md). Never `cd` there.
+  `.claude/worktrees/`): stay here — this is the one case with nowhere else
+  to name, so its absolute path (`pwd`) is `<worktree>` for every later step.
+  Check out issue-$issue if it exists, otherwise create it from the remote
+  default branch (`git symbolic-ref refs/remotes/origin/HEAD --short`).
+- Else if a worktree for issue-$issue exists: its absolute path is
+  `<worktree>` for every later step — `git -C <worktree> ...`, `go -C
+  <worktree> ...` and the like, and absolute paths for reading and writing
+  files in it (PLAN.md, PR_BODY.md). Never `cd` there.
 - Else: take the repo name from the main checkout (first line of
   `git worktree list`) and `git worktree add` a sibling folder
   `<repo>-issue-$issue` for branch issue-$issue — taking an existing branch
   as-is (`git worktree add <path> issue-$issue`), and only using `-b` off the
   remote default branch when there is no such branch anywhere. That path is
-  the one to carry forward the same way.
+  `<worktree>`, carried forward the same way.
 
 If a prerequisite this issue depends on — a branch, an earlier PR, a file the
 issue assumes exists — turns out not to have landed, that's a finding for the
@@ -168,11 +174,13 @@ don't post again, and stop.
       with no target it reviews whatever that cwd holds instead — the main
       checkout on a clean default branch under most invocations, meaning a
       change someone already merged — and writes its fixes there.
-   c. Check what it reviewed against `git log --oneline` for your own
-      commits before accepting the gate as run. Every finding has to sit
-      on a commit this run made. One that names a file or commit you did
-      not touch means the base was wrong: revert any `--fix` edit
-      outside your own commits, correct the base, and invoke it again.
+   c. Check what it reviewed against `git -C <worktree> log --oneline` for
+      your own commits before accepting the gate as run — bare `git log
+      --oneline` reads whatever branch the session's cwd happens to have
+      checked out, not issue-$issue's. Every finding has to sit on a commit
+      this run made. One that names a file or commit you did not touch
+      means the base was wrong: revert any `--fix` edit outside your own
+      commits, correct the base, and invoke it again.
    If the code-review skill is not invocable in this session, say so
    explicitly, then perform a substitute review pass: re-read the full
    diff critically for correctness, edge cases, and convention
@@ -182,11 +190,11 @@ don't post again, and stop.
      user-visible change (usually the primary commit subject).
    - Body: write it to `<worktree>/PR_BODY.md` (absolute path) using the
      Write tool (not a heredoc), then `gh pr create --head issue-$issue
-     --title "..." --body-file <worktree>/PR_BODY.md`. Both flags matter:
-     `gh` reads the head branch from the session's cwd by default, which is
-     not issue-$issue's checkout under this skill's no-`cd` rule, and
-     `--body-file` resolves a bare filename against that same cwd rather
-     than the worktree it was written in.
+     --title "..." --body-file <worktree>/PR_BODY.md`. Pass both flags
+     always, even when cwd happens to already be `<worktree>`: `gh` reads
+     the head branch from cwd by default and `--body-file` resolves a bare
+     filename against it too, and Phase 1's other two cases leave cwd
+     somewhere else entirely under this skill's no-`cd` rule.
      Reuse the implementation summary you would report anyway, structured as:
        ## Summary — what changed and why, 2–4 sentences
        ## Evidence — add only when the change alters something a human looks
