@@ -350,6 +350,30 @@ func TestPlanSkillTreatsWhatItReadsAsData(t *testing.T) {
 	}
 }
 
+// issue #128: a plan run improvised `gh label list` to confirm the `proposed`
+// label exists, a call no shipped skill is granted, and would hang an
+// unattended drain on the permission prompt it raised. The fix was naming the
+// closed `gh` surface explicitly rather than leaving "diligence" undefined;
+// this locks that paragraph down the way every neighboring contract in this
+// section is locked down.
+func TestPlanSkillClosesItsGhSurface(t *testing.T) {
+	skill := planSkill(t)
+
+	for _, marker := range []string{"gh label list", "gh --version"} {
+		if !strings.Contains(skill, marker) {
+			t.Errorf("SKILL.md no longer names %q as an example of an unlicensed"+
+				" pre-flight probe — without it, a run has no warning against improvising"+
+				" a diligence check outside the granted `gh` surface", marker)
+		}
+	}
+
+	flat := strings.Join(strings.Fields(skill), " ")
+	if !strings.Contains(flat, "three call shapes") {
+		t.Error("SKILL.md no longer states the closed `gh` surface as \"three call shapes\"," +
+			" so nothing bounds which gh commands a plan run may use")
+	}
+}
+
 // The estimate is the curator's cheapest signal, and it is only useful if it is
 // shaped the same every time. The one thing it must never carry is money: the
 // model has no price sheet, the binary refuses to hardcode one, and a
