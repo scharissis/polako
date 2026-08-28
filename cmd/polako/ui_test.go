@@ -262,7 +262,7 @@ func TestRenderStylesWholeLinesByContent(t *testing.T) {
 		"finished (ok) — 74 turns, 19m1s, $4.12\n":     "\x1b[32mfinished (ok) — 74 turns, 19m1s, $4.12\x1b[0m\n",
 		"[claude] finished (ERROR: error_max_turns)\n": "\x1b[31m[claude] finished (ERROR: error_max_turns)\x1b[0m\n",
 		"transient: listing open issues failed\n":      "\x1b[33mtransient: listing open issues failed\x1b[0m\n",
-		"-remote is on — each run registers\n":         "\x1b[2m-remote is on — each run registers\x1b[0m\n",
+		"-remote is on, but no claude CLI registers\n": "\x1b[2m-remote is on, but no claude CLI registers\x1b[0m\n",
 		"PR #61 open — waiting for merge\n":            "PR #61 open — waiting for merge\n", // no rule: plain
 	}
 	for in, want := range cases {

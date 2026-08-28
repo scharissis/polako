@@ -559,12 +559,12 @@ type config struct {
 	// queue is what a shift learns about listing its own backlog and only wants
 	// to find out — and say — once: that this gh is too old to see sub-issues,
 	// and that there are proposals it is leaving behind the curation gate. A
-	// pointer because config is passed by value everywhere, and nil-safe because
-	// a config assembled outside parseFlags — a test, mostly — carries no shared
-	// memo: the drain lists the backlog once per issue, so a bool on a config passed
-	// by value would re-probe an old gh and re-log both lines every time round
-	// the loop. Nothing durable — a fact about this gh and this shift, not
-	// orchestration state.
+	// pointer because config is passed by value everywhere: the drain lists the
+	// backlog once per issue, so a bool would re-probe an old gh and re-log both
+	// lines every time round the loop. Nil-safe because a config assembled
+	// outside parseFlags — a test, mostly — carries no shared memo, and losing
+	// it costs only the repetition. Nothing durable — a fact about this gh and
+	// this shift, not orchestration state.
 	queue *queueMemo
 	// notifyCmd is run whenever the drain reaches a state a person has to move
 	// past. Empty, the default, means no hook at all. See notify.go.
@@ -1485,7 +1485,7 @@ func preflight(ctx context.Context, cfg *config) error {
 		// that will never appear.
 		log.Print("-remote is on, but no claude CLI registers headless runs with Remote Control yet — " +
 			"runs stay on this machine and unwatched, and nothing is sent anywhere " +
-			"(-remote=false silences this line; the flag lights up when a CLI supports it)")
+			"(-remote=false silences this line; a later polako lights the flag up once a CLI supports it)")
 	}
 	if cfg.rec.enabled() {
 		// Say where the data goes, every time, unprompted: it is the whole of

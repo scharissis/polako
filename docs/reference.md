@@ -51,7 +51,7 @@ leap of faith. `-dry-run` takes it out:
 $ polako work -dir ../my-project -dry-run
 example/my-project — running /polako:implement-issue per issue, polling every 5m0s
 -dry-run: resolving the next issue only — no claude run, no GitHub write, no run data
--remote is on, but no claude CLI registers headless runs with Remote Control yet — runs stay on this machine and unwatched, and nothing is sent anywhere (-remote=false silences this line; the flag lights up when a CLI supports it)
+-remote is on, but no claude CLI registers headless runs with Remote Control yet — runs stay on this machine and unwatched, and nothing is sent anywhere (-remote=false silences this line; a later polako lights the flag up once a CLI supports it)
 ready: #12, #14, #19
 waiting on an answer: #9
 issue #12 would be worked next; the invocation follows on stdout
@@ -163,7 +163,7 @@ this path. Startup says so once, rather than claiming a session list that will
 stay empty:
 
 ```
--remote is on, but no claude CLI registers headless runs with Remote Control yet — runs stay on this machine and unwatched, and nothing is sent anywhere (-remote=false silences this line; the flag lights up when a CLI supports it)
+-remote is on, but no claude CLI registers headless runs with Remote Control yet — runs stay on this machine and unwatched, and nothing is sent anywhere (-remote=false silences this line; a later polako lights the flag up once a CLI supports it)
 ```
 
 `-remote=false` silences that line and changes nothing else.
@@ -172,8 +172,10 @@ The flag stays because it is interface, and because the argument for turning it
 on was made and settled on [issue #52](https://github.com/scharissis/polako/issues/52):
 the destination is your own claude.ai account, the channel is Claude Code's own,
 and turning it off restores a byte-identical invocation. When a CLI registers
-headless runs, that is the argument this flag switches back on — see
-[security.md](security.md) for the trade it commits you to when it does.
+headless runs, that is the argument a later polako would pass the flag on — a
+release you would upgrade to, not something that starts happening under a
+binary you already have. See [security.md](security.md) for the trade it would
+commit you to when it does.
 
 Until then, [the shift log](#the-shift-log--log) is how you read a run you were
 not watching, and it never leaves this machine either.

@@ -26,7 +26,8 @@ flag only silences one startup line.
 
 - `-remote` no longer puts `--remote-control` or a session name on any
   `claude` invocation. The flag stays accepted, documented and on by default,
-  so registration lights up in one place when a supporting CLI ships.
+  so a later release has one place to pass it again once a supporting CLI
+  ships — an upgrade you would choose, not a change that arrives on its own.
 - The shift-start line states that headless runs cannot be registered and stay
   unwatched, in place of the claim that each one is watchable from
   claude.ai/code.
