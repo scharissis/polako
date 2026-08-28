@@ -9,6 +9,38 @@ Entries carry an **Operator impact** line when a release changes what an
 unattended run does, rather than only what the code looks like. Those are the
 lines worth reading before upgrading a machine that works a backlog overnight.
 
+## [0.11.0]
+
+### Added
+
+- stats -json — a typed summary both renderers read
+- status -json — the snapshot as one machine-readable document
+- a settings block instead of a startup essay
+- timestamps everywhere, worn quietly — a dim time-only TTY gutter
+- run the suite by hand, without the gated plugin eval command
+- declare severity at every narration call site the old table matched
+- typed severity in the narration styler
+- one presentation layer — a report renderer status, stats and work share
+
+### Fixed
+
+- code review — pointer ReviewsMedian, shared span/token-split math, dead field, HTML cards from summary
+- code review — dedupe nonNilSlice, cover the undetailed-PR cap in JSON, actionable encode error
+- code review — honest preflightPairs doc comment, gating regression test
+- code review — stampKind enum, shared dim(), honest -log-off doc
+- code review — narrate() sink parity, section rationale, index coupling
+- code review — narration colour, attention markers, naming collision
+- gitignore the skill's PLAN.md and PR_BODY.md scratch files
+
+### Changed
+
+- correct the eval invocation against the CLI's own help
+- bound the fake-CLI warm-up exec
+- warm the fake CLI so a timed test does not race its first exec
+- name the macOS trust store and the auth hosts the allowlist needs
+- pin the environment a dispatched claude child inherits
+- a hardening guide for putting an egress firewall around a shift
+
 ## [0.10.1]
 
 **Operator impact:** `-remote` never worked and now says so. No `claude` CLI
