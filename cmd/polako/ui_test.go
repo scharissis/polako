@@ -202,6 +202,90 @@ func TestVerboseMirrorsDetailToTheTerminal(t *testing.T) {
 	}
 }
 
+// ttyStamped is the shape a TTY's dim, time-only gutter must carry: 8
+// characters plus a trailing space, dimmed as a block.
+var ttyStamped = regexp.MustCompile(`^\x1b\[2m\d{2}:\d{2}:\d{2} \x1b\[0m`)
+
+func TestVerboseTTYStampsDetailTimeOnlyAndDim(t *testing.T) {
+	var term, file bytes.Buffer
+	u := &ui{terminal: &term, stamp: true, tty: true, style: styler{on: true}, file: &file, verbose: true}
+
+	detailWriter{u: u}.Write([]byte("[claude] → Bash: gh issue view 48\n"))
+
+	if !ttyStamped.MatchString(term.String()) {
+		t.Errorf("terminal detail line should carry a dim time-only stamp, got: %q", term.String())
+	}
+	if !stamped.MatchString(file.String()) {
+		t.Errorf("shift log should keep the full stamp regardless of tty, got: %q", file.String())
+	}
+}
+
+func TestTTYStampIsTimeOnlyAndDim(t *testing.T) {
+	var term, file bytes.Buffer
+	u := &ui{terminal: &term, stamp: true, tty: true, style: styler{on: true}, file: &file}
+
+	milestoneWriter{u: u}.Write([]byte("PR #61 merged — cleaning up and advancing\n"))
+
+	if !ttyStamped.MatchString(term.String()) {
+		t.Errorf("terminal line should carry a dim time-only stamp, got: %q", term.String())
+	}
+	if !stamped.MatchString(file.String()) {
+		t.Errorf("shift log should keep the full stamp on a TTY too, got: %q", file.String())
+	}
+}
+
+// TestTTYStampUnstyledWithoutColour covers NO_COLOR, TERM=dumb and Windows:
+// all three land here, at the styler being off. The stamp must stay
+// time-only rather than either reverting to the full layout or disappearing.
+func TestTTYStampUnstyledWithoutColour(t *testing.T) {
+	var term bytes.Buffer
+	u := &ui{terminal: &term, stamp: true, tty: true, file: &bytes.Buffer{}}
+
+	milestoneWriter{u: u}.Write([]byte("PR #61 merged\n"))
+
+	got := term.String()
+	if strings.Contains(got, "\x1b[") {
+		t.Errorf("styler off must not emit ANSI codes, got: %q", got)
+	}
+	if !regexp.MustCompile(`^\d{2}:\d{2}:\d{2} `).MatchString(got) {
+		t.Errorf("stamp should stay time-only even unstyled, got: %q", got)
+	}
+	if stamped.MatchString(got) {
+		t.Errorf("a TTY must not fall back to the full stampLayout, got: %q", got)
+	}
+}
+
+func TestPipedStampStaysFullLayout(t *testing.T) {
+	var term, file bytes.Buffer
+	u := &ui{terminal: &term, stamp: true, file: &file} // tty: false, the zero value
+
+	milestoneWriter{u: u}.Write([]byte("PR #61 merged\n"))
+
+	if !stamped.MatchString(term.String()) {
+		t.Errorf("a non-tty terminal should keep the full stampLayout, got: %q", term.String())
+	}
+	if strings.Contains(term.String(), "\x1b[") {
+		t.Errorf("a piped terminal should carry no ANSI codes, got: %q", term.String())
+	}
+}
+
+func TestShiftLogFailureWarningStampsTTYTimeOnlyAndDim(t *testing.T) {
+	var term bytes.Buffer
+	fw := &failWriter{}
+	u := &ui{terminal: &term, stamp: true, tty: true, style: styler{on: true}, file: fw}
+
+	milestoneWriter{u: u}.Write([]byte("=== issue #1 ===\n"))
+
+	if !strings.Contains(term.String(), "shift log not written") {
+		t.Errorf("the warning should still fire on a TTY, got: %q", term.String())
+	}
+	for _, line := range strings.Split(strings.TrimRight(term.String(), "\n"), "\n") {
+		if !ttyStamped.MatchString(line) {
+			t.Errorf("every TTY line, including the warning, should carry a dim time-only stamp, got: %q", line)
+		}
+	}
+}
+
 // A child's stderr arrives in arbitrary chunks; the shift log gets it back as
 // whole attributed lines, blank ones dropped, the unterminated remainder
 // flushed when the run ends.
