@@ -608,8 +608,21 @@ func main() {
 		verbUsage(os.Stdout)
 		return
 	}
-	report := func(name string, run func() error) {
+	runReport := func(name string, run func() error) {
+		// Narration (transient retries, gh warnings, the proposed-issues
+		// notice) goes through the same sinks and rendering rules work's
+		// does, rather than the bare stdlib logger this used to leave it
+		// on — colour on a capable stderr TTY, plain otherwise. Stamps stay
+		// off unconditionally: unlike work, status and stats never open a
+		// shift log, so there's no stamped copy elsewhere to justify a
+		// terminal that drops them, and turning stamps on here would put a
+		// timestamp on piped output that never had one.
 		log.SetFlags(0) // a report, not a log
+		log.SetOutput(milestoneWriter{u: sinks})
+		sinks.stamp = false
+		if isTerminal(os.Stderr) {
+			sinks.style = styleFor(true)
+		}
 		if err := run(); err != nil {
 			if errors.Is(err, errFlagsReported) {
 				os.Exit(2) // the usage is already on screen
@@ -622,7 +635,8 @@ func main() {
 		// Drop the verb so the flag package parses what follows it.
 		os.Args = append(os.Args[:1], os.Args[2:]...)
 	case "stats":
-		report("stats", func() error { return runStats(os.Args[2:], os.Stdout, time.Now()) })
+		rpt := newReport(isTerminal(os.Stdout))
+		runReport("stats", func() error { return runStats(os.Args[2:], os.Stdout, time.Now(), rpt) })
 		return
 	case "status":
 		// Its own context, cancelled by the same signals work honours: a
@@ -630,7 +644,8 @@ func main() {
 		// should end them rather than be ignored.
 		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 		defer stop()
-		report("status", func() error { return runStatus(ctx, os.Args[2:], os.Stdout, time.Now()) })
+		rpt := newReport(isTerminal(os.Stdout))
+		runReport("status", func() error { return runStatus(ctx, os.Args[2:], os.Stdout, time.Now(), rpt) })
 		return
 	case "version", "-version", "--version":
 		// Reachable without a verb, because it is what an operator asks

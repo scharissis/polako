@@ -279,6 +279,57 @@ func TestRenderStylesWholeLinesByContent(t *testing.T) {
 	}
 }
 
+// newReport goes through styleFor, the one decision point for NO_COLOR,
+// TERM=dumb and the Windows plain rule — so a report inherits every one of
+// those without repeating the logic.
+func TestNewReportGoesThroughStyleFor(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	if rpt := newReport(true); rpt.style.on {
+		t.Error("TERM=dumb must disable a report's colour too")
+	}
+}
+
+func TestReportRendersPlainAtTheZeroValue(t *testing.T) {
+	var rpt report
+	for _, s := range []string{"by issue", "not read", "failing (build)", "1 issue — parked"} {
+		if got := rpt.bold(s); got != s {
+			t.Errorf("bold(%q) = %q, want it unchanged at the zero value", s, got)
+		}
+		if got := rpt.dim(s); got != s {
+			t.Errorf("dim(%q) = %q, want it unchanged at the zero value", s, got)
+		}
+		if got := rpt.cell(s); got != s {
+			t.Errorf("cell(%q) = %q, want it unchanged at the zero value", s, got)
+		}
+	}
+}
+
+func TestReportBoldAndDimWrapWholeStrings(t *testing.T) {
+	rpt := report{style: styler{on: true}}
+	if got, want := rpt.bold("by issue"), "\x1b[1mby issue\x1b[0m"; got != want {
+		t.Errorf("bold = %q, want %q", got, want)
+	}
+	if got, want := rpt.dim("issue"), "\x1b[2missue\x1b[0m"; got != want {
+		t.Errorf("dim = %q, want %q", got, want)
+	}
+}
+
+func TestReportCellHighlightsAttentionMarkersOnly(t *testing.T) {
+	rpt := report{style: styler{on: true}}
+	for in, want := range map[string]string{
+		"failing (build, lint)":         "\x1b[33mfailing (build, lint)\x1b[0m",
+		"changes requested":             "\x1b[33mchanges requested\x1b[0m",
+		"1 issue — #9, labelled parked": "\x1b[33m1 issue — #9, labelled parked\x1b[0m",
+		"not read":                      "\x1b[33mnot read\x1b[0m",
+		"clear":                         "clear", // no marker: passed through plain
+		"mergeable":                     "mergeable",
+	} {
+		if got := rpt.cell(in); got != want {
+			t.Errorf("cell(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestResolveLogDirHonoursOff(t *testing.T) {
 	if got := resolveLogDir("off"); got != "" {
 		t.Errorf(`resolveLogDir("off") = %q, want ""`, got)

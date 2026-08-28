@@ -187,7 +187,9 @@ func (s styler) render(line string, milestone bool) string {
 		strings.HasPrefix(text, "could not "),
 		strings.HasPrefix(text, "no activity for "),
 		strings.HasPrefix(text, "shift log not written"),
-		strings.HasPrefix(text, "run data not recorded"):
+		strings.HasPrefix(text, "run data not recorded"),
+		strings.HasPrefix(text, "gh too old to see sub-issues"),
+		strings.HasPrefix(text, "ignoring "):
 		text = s.wrap("\x1b[33m", text) // yellow: needs an eye, not a stop
 	case strings.HasPrefix(text, "-remote is on"),
 		strings.HasPrefix(text, "-post-summary is on"),
@@ -198,6 +200,49 @@ func (s styler) render(line string, milestone bool) string {
 		text = s.wrap("\x1b[2m", text) // dim: the startup preference recap
 	}
 	return text + "\n" + nl
+}
+
+// report renders `status` and `stats`: printPairs and printTable share it,
+// styled sparingly in work's own palette. TTY-detected on stdout — printing to
+// a terminal and piping are different acts, and pipe output must stay exactly
+// what it always was. The zero value renders plain, which is what every
+// existing test and every pipe sees.
+type report struct {
+	style styler
+}
+
+func newReport(tty bool) report {
+	return report{style: styleFor(tty)}
+}
+
+// bold marks a section head: a printTable title, and the two report lines
+// that aren't printPairs/printTable output at all — the status repo line and
+// stats' "run data from …" line — wrapped directly at their call sites.
+func (r report) bold(s string) string { return r.style.wrap("\x1b[1m", s) }
+
+// dim marks a printTable header row, the same code narration uses for detail
+// lines: present, but not what the eye should land on first.
+func (r report) dim(s string) string { return r.style.wrap("\x1b[2m", s) }
+
+// attentionMarkers are the cell contents worth an eye: a failing check, a
+// review still blocking, a park, an unreviewed proposal, or a state nobody
+// looked up. Substring match because a cell can carry more than the marker
+// alone — checksCell appends the failing checks' names, for one. "proposed"
+// belongs beside "parked": needsYou treats curating one and deciding the
+// other with the same urgency, so the report should too.
+var attentionMarkers = []string{"failing", "changes requested", "parked", "proposed", unknownCell}
+
+// cell styles one printPairs/printTable cell — key or value alike, so a
+// "parked" row label gets the same yellow a "not read" value cell does.
+// Centralised here rather than decided per call site, which is what lets
+// stats.go and status.go pass plain strings and never think about colour.
+func (r report) cell(s string) string {
+	for _, m := range attentionMarkers {
+		if strings.Contains(s, m) {
+			return r.style.wrap("\x1b[33m", s)
+		}
+	}
+	return s
 }
 
 // lineWriter carries a child process's stderr into the narration stream one

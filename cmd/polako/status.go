@@ -59,8 +59,9 @@ type statusOptions struct {
 }
 
 // runStatus is the `status` subcommand: parse its own flags, read GitHub, print
-// one snapshot. now is passed in so the "quiet for" spans are testable.
-func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time) error {
+// one snapshot. now is passed in so the "quiet for" spans are testable; rpt is
+// the styler stats/status share, TTY-detected on stdout at the dispatch in main.
+func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time, rpt report) error {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(out)
 	var opt statusOptions
@@ -102,7 +103,7 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time)
 	if err != nil {
 		return err
 	}
-	renderStatus(out, cfg, snap)
+	renderStatus(out, rpt, cfg, snap)
 	return nil
 }
 
@@ -369,12 +370,12 @@ func issueForBranch(branch, prefix string) (int, bool) {
 
 // --- rendering ---
 
-func renderStatus(w io.Writer, cfg config, snap statusSnapshot) {
-	fmt.Fprintf(w, "%s%s\n", cfg.repo, statusScope(cfg))
-	printPairs(w, "", queuePairs(snap))
-	printStatusPRs(w, snap)
+func renderStatus(w io.Writer, rpt report, cfg config, snap statusSnapshot) {
+	fmt.Fprintf(w, "%s\n", rpt.bold(fmt.Sprintf("%s%s", cfg.repo, statusScope(cfg))))
+	printPairs(w, rpt, "", queuePairs(snap))
+	printStatusPRs(w, rpt, snap)
 	if line := needsYou(snap); line != "" {
-		fmt.Fprintf(w, "\n%s\n", line)
+		fmt.Fprintf(w, "\n%s\n", rpt.bold(line))
 	}
 }
 
@@ -498,7 +499,7 @@ func findPR(snap statusSnapshot, issue int) *statusPR {
 	return nil
 }
 
-func printStatusPRs(w io.Writer, snap statusSnapshot) {
+func printStatusPRs(w io.Writer, rpt report, snap statusSnapshot) {
 	if len(snap.prs) == 0 {
 		return
 	}
@@ -512,7 +513,7 @@ func printStatusPRs(w io.Writer, snap statusSnapshot) {
 	// Every column left-aligned: these are names and states, not figures, and a
 	// right-aligned URL is a column nobody can scan.
 	header := []string{"pr", "branch", "issue", "mergeable", "checks", "review", "url"}
-	printTable(w, "open prs on issue branches", header, rows, len(header))
+	printTable(w, rpt, "open prs on issue branches", header, rows, len(header))
 	if len(snap.undetailed) > 0 {
 		fmt.Fprintf(w, "  (%s past the first %d, listed without state: %s)\n",
 			plural(len(snap.undetailed), "PR"), statusPRs, issueRefs(snap.undetailed))
