@@ -206,6 +206,7 @@ human latency
 | `-by` | *(none)* | Add a breakdown table: `issue`, `model`, `tag` or `shift`. |
 | `-runs` | *(off)* | Add the run log: one row per run, with the session id that reopens it — see [Reopening a past run](#reopening-a-past-run--runs). |
 | `-html` | *(off)* | Also write the report to this path, as one self-contained HTML file — see [Keeping a copy](#keeping-a-copy--html). |
+| `-json` | `false` | Print one JSON document to stdout instead of the text report — see [As JSON](#as-json--json) below. |
 
 A window can keep an issue's terminal record while clipping away the runs that
 produced it. Those issues still count toward the merge rate, but they cannot be
@@ -404,6 +405,109 @@ it is safe to hand to a teammate without re-reading it first.
 
 An empty window still gets a file, saying so. A nightly `stats -html` that
 skipped the write would leave yesterday's numbers on disk looking like today's.
+
+## As JSON: `-json`
+
+```bash
+polako stats -json | jq .
+```
+
+```json
+{
+  "dir": "/Users/you/.polako/metrics",
+  "scope": {},
+  "source": {
+    "files": 2,
+    "records": 11,
+    "skipped": 1,
+    "unread": [],
+    "window_from": "2026-08-20T09:00:00Z",
+    "window_to": "2026-08-24T11:03:11Z",
+    "repos": ["scharissis/other", "scharissis/polako"]
+  },
+  "issues": {
+    "terminal": { "merged": 3, "needs_human": 1 },
+    "done": 4,
+    "in_flight": 1,
+    "park_reasons": { "produced_nothing": 1 },
+    "priced": 4,
+    "runs_per_issue": { "mean": 1.5, "median": 1.5 },
+    "cost_per_issue_usd": { "mean": 1.925, "median": 2 },
+    "tokens_per_issue": { "mean": 4620475, "median": 3921950 },
+    "tokens_per_issue_split": { "in": 2250, "out": 35225, "cache_read": 4362500, "cache_write": 220500 }
+  },
+  "runs": {
+    "total": 7,
+    "statuses": { "crash": 1, "no-turns": 1, "ok": 5 },
+    "reasons": { "answers": 1, "implement": 4, "remediate": 1, "resume": 1 },
+    "outcomes": { "nothing": 3, "opened_pr": 3, "posted_questions": 1 },
+    "turns": 131,
+    "tool_uses": 115,
+    "approximated": 1
+  },
+  "cost": {
+    "total_usd": 8.1,
+    "per_day_usd": 1.98,
+    "merged": 3,
+    "per_merged_usd": 2.7,
+    "tokens": { "in": 9400, "out": 145900, "cache_read": 18050000, "cache_write": 912000 },
+    "total_tokens": 19117300
+  },
+  "latency": {
+    "blocked_on_answers": { "count": 1, "median_seconds": 11400, "max_seconds": 11400 },
+    "pr_to_merge": { "count": 3, "median_seconds": 4800, "max_seconds": 7200 }
+  }
+}
+```
+
+That is `polako stats` above, field for field: `source` is the `read`/`window`/`repos`
+line, `issues`/`runs`/`cost`/`latency` are the four summary sections, and
+every number is the one the text renderer printed — not a second computation
+of it. `-by` and `-runs` add their own top-level fields, present only when the
+flag was given:
+
+```bash
+polako stats -json -by tag -runs | jq '.by, .run_log[0]'
+```
+
+```json
+{
+  "kind": "tag",
+  "groups": [
+    { "name": "baseline", "issues": 3, "merged": 2, "runs": 5, "cost_usd": 6.7, "per_merged_usd": 3.35, "tokens": 16889000 },
+    { "name": "terse-plan", "issues": 2, "merged": 1, "runs": 2, "cost_usd": 1.4, "per_merged_usd": 1.4, "tokens": 2228300 }
+  ]
+}
+{
+  "started": "2026-08-20T09:00:00Z", "repo": "scharissis/polako", "issue": 12,
+  "reason": "implement", "status": "ok", "outcome": "posted_questions",
+  "session": "s12a", "attempt": 0, "cost_usd": 1.1, "tokens": 4232000, "wall_seconds": 1200
+}
+```
+
+`.by.issues` holds the rows instead of `.by.groups` when `-by issue` was
+given. Outcome, status, reason and park-reason values are the raw on-disk
+vocabulary this page documents (`opened_pr`, not "opened pr") — the JSON is
+for scripts, and a script comparing against `"opened_pr"` should not also
+have to know the text report's prose.
+
+Every array and breakdown map defaults to `[]` / `{}`, never `null`, even
+when empty — `.source.repos[]` never needs a `// empty` guard. A handful of
+fields are conditionally *absent* rather than a zero value standing in for
+"not applicable" — `park_reasons`, `change_per_issue`, `per_day_usd`,
+`per_merged_usd`, and the four `*_per_issue*` fields together, which are all
+absent exactly when the text report's matching line is absent ("nothing to
+price", no park reasons, nothing merged, no PR-size data, less than an hour
+of window). `scope.shift` is the *resolved* id (`ds.shift`), never the
+literal `last`, the same rule [`-shift`](#telling-one-shift-from-another--shift)
+follows in text. `-by` and `run_log` are omitted entirely, not empty, when
+their flag was not given, so `.by == null` is how a script asks "was `-by`
+used".
+
+With `-json` and `-html` together, the file still gets written, but the
+"wrote the HTML report to …" confirmation moves to stderr — stdout carries
+exactly the one document a `| jq` pipeline expects, never a line of prose
+after it.
 
 ## Comparing configurations
 

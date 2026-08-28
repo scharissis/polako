@@ -40,7 +40,7 @@ import (
 )
 
 // writeHTMLReport renders the page and puts it at path.
-func writeHTMLReport(path string, ds dataset, issues []*issueStats, opt statsOptions, now time.Time) error {
+func writeHTMLReport(path string, ds dataset, issues []*issueStats, summary statsSummary, opt statsOptions, now time.Time) error {
 	// Named early: a directory here is the easy mistake, and OpenFile's own
 	// "is a directory" says nothing about what to type instead.
 	if info, err := os.Stat(path); err == nil && info.IsDir() {
@@ -50,7 +50,7 @@ func writeHTMLReport(path string, ds dataset, issues []*issueStats, opt statsOpt
 	// Rendered whole before anything is opened, so a template that fails leaves
 	// yesterday's report intact rather than a truncated page that still opens.
 	var buf bytes.Buffer
-	if err := htmlPage().Execute(&buf, buildHTMLReport(ds, issues, opt, now)); err != nil {
+	if err := htmlPage().Execute(&buf, buildHTMLReport(ds, issues, summary, opt, now)); err != nil {
 		return fmt.Errorf("could not render the HTML report (%w) — this is a bug in polako; "+
 			"the text report above is unaffected", err)
 	}
@@ -149,13 +149,13 @@ type htmlReport struct {
 // everything and say so nowhere.
 const inFlight = "in flight"
 
-func buildHTMLReport(ds dataset, issues []*issueStats, opt statsOptions, now time.Time) htmlReport {
+func buildHTMLReport(ds dataset, issues []*issueStats, summary statsSummary, opt statsOptions, now time.Time) htmlReport {
 	rep := htmlReport{
 		Title:     "polako run data",
 		Dir:       ds.dir,
 		Generated: stamp(now),
 		Version:   polakoVersion(),
-		Facts:     sourcePairs(ds, opt),
+		Facts:     sourcePairs(summary.source),
 	}
 	if len(ds.runs) == 0 && len(ds.issues) == 0 {
 		rep.Empty = "No run data here" + scopeSuffix(opt, ds) + "."
@@ -169,7 +169,7 @@ func buildHTMLReport(ds dataset, issues []*issueStats, opt statsOptions, now tim
 		return rep
 	}
 
-	rep.Cards = headlineCards(ds, issues)
+	rep.Cards = headlineCards(summary)
 	rep.Chart = costChart(ds)
 	for _, b := range []htmlBreakdown{issueBreakdown(issues), runBreakdown(ds)} {
 		if len(b.Bars) > 0 {
@@ -177,10 +177,10 @@ func buildHTMLReport(ds dataset, issues []*issueStats, opt statsOptions, now tim
 		}
 	}
 	rep.Sections = []htmlSection{
-		{"issues", issuePairs(issues)},
-		{"runs", runPairs(ds)},
-		{"cost", costPairs(ds, issues)},
-		{"human latency", latencyPairs(issues)},
+		{"issues", issuePairs(summary.issues)},
+		{"runs", runPairs(summary.runs)},
+		{"cost", costPairs(summary.cost)},
+		{"human latency", latencyPairs(summary.latency)},
 	}
 
 	// By shift and by issue always: they are the two breakdowns this page
@@ -197,58 +197,37 @@ func buildHTMLReport(ds dataset, issues []*issueStats, opt statsOptions, now tim
 	return rep
 }
 
-// headlineCards are the half-dozen numbers somebody opens this file to see. All
-// six are lifted from the sections below rather than recomputed: same sums,
-// same denominators, same caveats.
-func headlineCards(ds dataset, issues []*issueStats) []htmlCard {
-	total, tokens := 0.0, tokenCounts{}
-	turns, tools := 0, 0
-	for _, r := range ds.runs {
-		total += r.CostUSD
-		tokens.addCounts(r.Tokens)
-		turns += max(r.Turns, 0)
-		tools += r.ToolUses
-	}
-	done, merged, priced, waiting := 0, 0, 0, 0
-	for _, is := range issues {
-		if is.terminal == nil {
-			waiting++
-			continue
-		}
-		done++
-		if is.terminal.Outcome == issueMerged {
-			merged++
-			// The same denominator costPairs uses: an issue whose runs a window
-			// clipped away contributed nothing to the spend above, so counting
-			// it here would price the tool below what it cost.
-			if len(is.runs) > 0 {
-				priced++
-			}
-		}
-	}
+// headlineCards are the half-dozen numbers somebody opens this file to see —
+// read straight out of the same statsSummary the sections below format, so
+// the cards cannot drift from the numbers a screen down.
+func headlineCards(summary statsSummary) []htmlCard {
+	cost, runs, iss := summary.cost, summary.runs, summary.issues
 
 	perDay := ""
-	from, to := window(ds)
-	if days := to.Sub(from).Hours() / 24; days >= 1.0/24 {
-		perDay = usd(total/days) + "/day over " + dur(to.Sub(from))
+	if days := cost.windowTo.Sub(cost.windowFrom).Hours() / 24; days >= 1.0/24 {
+		perDay = usd(cost.totalUSD/days) + "/day over " + dur(cost.windowTo.Sub(cost.windowFrom))
 	}
 	rate, rateNote := noValue, "nothing terminal yet"
-	if done > 0 {
-		rate = percent(merged, done)
-		rateNote = fmt.Sprintf("%d of %s", merged, plural(done, "terminal issue"))
+	if iss.done > 0 {
+		merged := iss.terminal[issueMerged]
+		rate = percent(merged, iss.done)
+		rateNote = fmt.Sprintf("%d of %s", merged, plural(iss.done, "terminal issue"))
 	}
+	// cost.merged is the same denominator costPairs uses: an issue whose runs
+	// a window clipped away contributed nothing to the spend above, so
+	// counting it here would price the tool below what it cost.
 	perMerge, perMergeNote := noValue, "nothing merged in this window"
-	if priced > 0 {
-		perMerge = usd(total / float64(priced))
-		perMergeNote = "across " + plural(priced, "merge")
+	if cost.merged > 0 {
+		perMerge = usd(cost.totalUSD / float64(cost.merged))
+		perMergeNote = "across " + plural(cost.merged, "merge")
 	}
 	return []htmlCard{
-		{"total spend", usd(total), perDay},
+		{"total spend", usd(cost.totalUSD), perDay},
 		{"merge rate", rate, rateNote},
 		{"per merged PR", perMerge, perMergeNote},
-		{"runs", strconv.Itoa(len(ds.runs)), fmt.Sprintf("%s, %s", plural(turns, "turn"), plural(tools, "tool use"))},
-		{"tokens", count(tokens.total()), "in, out and cache"},
-		{"in flight", strconv.Itoa(waiting), "no terminal record yet"},
+		{"runs", strconv.Itoa(runs.total), fmt.Sprintf("%s, %s", plural(runs.turns, "turn"), plural(runs.tools, "tool use"))},
+		{"tokens", count(cost.tokens.total()), "in, out and cache"},
+		{"in flight", strconv.Itoa(iss.inFlight), "no terminal record yet"},
 	}
 }
 

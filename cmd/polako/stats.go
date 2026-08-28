@@ -86,12 +86,16 @@ type statsOptions struct {
 	shift string
 	runs  bool
 	html  string
+	json  bool
 }
 
 // runStats is the `stats` subcommand: parse its own flags, read the records,
 // print one report. now is passed in so -since is testable; rpt is the
 // styler stats/status share, TTY-detected on stdout at the dispatch in main.
-func runStats(args []string, out io.Writer, now time.Time, rpt report) error {
+// errOut is where the "-html" write confirmation goes under -json, so that
+// stdout can carry exactly one JSON document and nothing else; in text mode
+// the confirmation still goes to out, unchanged.
+func runStats(args []string, out, errOut io.Writer, now time.Time, rpt report) error {
 	fs := flag.NewFlagSet("stats", flag.ContinueOnError)
 	fs.SetOutput(out)
 	var opt statsOptions
@@ -109,6 +113,8 @@ func runStats(args []string, out io.Writer, now time.Time, rpt report) error {
 		"also list the individual runs, with the session id that reopens each one")
 	fs.StringVar(&opt.html, "html", "",
 		"also write the report to this `path`, as one self-contained HTML file")
+	fs.BoolVar(&opt.json, "json", false,
+		"print one JSON document to stdout instead of the text report — see docs/run-data.md for the schema")
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako stats [flags]\n\n"+
 			"Reports on the run data recorded by previous shifts. Reads only;\n"+
@@ -149,17 +155,30 @@ func runStats(args []string, out io.Writer, now time.Time, rpt report) error {
 		return err
 	}
 	issues := rollUpIssues(ds)
-	render(out, rpt, ds, issues, opt)
+	summary := buildStatsSummary(ds, issues, opt)
+
+	// The confirmation below moves to errOut under -json, so stdout carries
+	// exactly the one document a script piping it into jq expects — never in
+	// text mode, where it is part of the same report as everything above it.
+	confirm := out
+	if opt.json {
+		if err := renderStatsJSON(out, ds, issues, summary, opt); err != nil {
+			return err
+		}
+		confirm = errOut
+	} else {
+		render(out, rpt, ds, issues, summary, opt)
+	}
 	if opt.html == "" {
 		return nil
 	}
 	// A second view of the report just printed, never a replacement for it: an
 	// operator who asked for a file still wants to see what went into it, and a
 	// command that printed nothing would look like one that did nothing.
-	if err := writeHTMLReport(opt.html, ds, issues, opt, now); err != nil {
+	if err := writeHTMLReport(opt.html, ds, issues, summary, opt, now); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "\nwrote the HTML report to %s\n", opt.html)
+	fmt.Fprintf(confirm, "\nwrote the HTML report to %s\n", opt.html)
 	return nil
 }
 
@@ -525,9 +544,253 @@ func mergeSpan(is *issueStats) (time.Duration, bool) {
 	return 0, false
 }
 
+// --- typed summary: the numbers, computed once ---
+//
+// Unlike status (a typed statusSnapshot the text report already formats
+// from), stats's summary numbers used to be computed straight into formatted
+// [][2]string pairs — there was nowhere for -json to read a figure from
+// without recomputing it. statsSummary is that missing typed layer: built
+// once from dataset + []*issueStats, it is what sourcePairs, issuePairs,
+// runPairs, costPairs and latencyPairs now format prose from, and what
+// statsDocFrom (statsjson.go) reads directly. The two can disagree about
+// layout; they cannot disagree about a figure, because there is only one
+// place each one is computed.
+type statsSummary struct {
+	source  sourceSummary
+	issues  issuesSummary
+	runs    runsSummary
+	cost    costSummary
+	latency latencySummary
+}
+
+func buildStatsSummary(ds dataset, issues []*issueStats, opt statsOptions) statsSummary {
+	from, to := window(ds)
+	return statsSummary{
+		source:  buildSourceSummary(ds, opt, from, to),
+		issues:  buildIssuesSummary(issues),
+		runs:    buildRunsSummary(ds),
+		cost:    buildCostSummary(ds, issues, from, to),
+		latency: buildLatencySummary(issues),
+	}
+}
+
+type sourceSummary struct {
+	files       int
+	records     int
+	skipped     int
+	unread      []string
+	windowFrom  time.Time
+	windowTo    time.Time
+	scope       string // scopeSuffix(opt, ds), trimmed — the text report's own prose
+	repos       []string
+	repoFilter  string
+	sinceFilter time.Duration
+	shift       string // ds.shift: the resolved id, "" when -shift was not given
+}
+
+func buildSourceSummary(ds dataset, opt statsOptions, from, to time.Time) sourceSummary {
+	return sourceSummary{
+		files:       ds.files,
+		records:     len(ds.runs) + len(ds.issues),
+		skipped:     ds.skipped,
+		unread:      ds.unread,
+		windowFrom:  from,
+		windowTo:    to,
+		scope:       strings.TrimSpace(scopeSuffix(opt, ds)),
+		repos:       repoNames(ds),
+		repoFilter:  opt.repo,
+		sinceFilter: opt.since,
+		shift:       ds.shift,
+	}
+}
+
+// issuesSummary holds the numbers issuePairs formats. done == 0 means
+// "nothing terminal yet", the one state with no averages to report — priced,
+// runsMean etc. are meaningless zero values in that case, never read.
+type issuesSummary struct {
+	done           int
+	inFlight       int
+	terminal       map[string]int // by outcome, merged included
+	parkReasons    map[string]int // by park_reason; nil when nothing was parked
+	priced         int
+	runsMean       float64
+	runsMedian     float64
+	costMean       float64
+	costMedian     float64
+	tokensMean     float64
+	tokensMedian   int64
+	tokensSplitSum tokenCounts
+	tokensSplitN   int64
+	change         *changeSummary // nil when no terminal issue carries PR data
+}
+
+type changeSummary struct {
+	addsMedian    int
+	delsMedian    int
+	filesMedian   int
+	reviewsMedian int
+	hasReviews    bool
+	n             int
+}
+
+func buildIssuesSummary(issues []*issueStats) issuesSummary {
+	s := issuesSummary{terminal: map[string]int{}}
+	var done []*issueStats
+	for _, is := range issues {
+		if is.terminal == nil {
+			s.inFlight++
+			continue
+		}
+		done = append(done, is)
+		s.terminal[is.terminal.Outcome]++
+	}
+	s.done = len(done)
+	if s.done == 0 {
+		return s
+	}
+	if pr := buildParkReasons(done); len(pr) > 0 {
+		s.parkReasons = pr
+	}
+	s.change = buildChangeSummary(done)
+
+	var priced []*issueStats
+	for _, is := range done {
+		if len(is.runs) > 0 {
+			priced = append(priced, is)
+		}
+	}
+	s.priced = len(priced)
+	if s.priced == 0 {
+		return s
+	}
+	var runs, costs []float64
+	var tokens []int64
+	sum := tokenCounts{}
+	for _, is := range priced {
+		runs = append(runs, float64(len(is.runs)))
+		costs = append(costs, is.cost)
+		tokens = append(tokens, is.tokens.total())
+		sum.addCounts(is.tokens)
+	}
+	s.runsMean, s.runsMedian = mean(runs), median(runs)
+	s.costMean, s.costMedian = mean(costs), median(costs)
+	s.tokensMean, s.tokensMedian = mean(tokens), median(tokens)
+	s.tokensSplitSum, s.tokensSplitN = sum, int64(len(priced))
+	return s
+}
+
+// buildParkReasons breaks the hand-backs down by why they happened. A record
+// written before the field existed counts as unrecorded (key ""), never as
+// unknown, which is the field's own value for a park path that could not say.
+func buildParkReasons(done []*issueStats) map[string]int {
+	counts := map[string]int{}
+	for _, is := range done {
+		if is.terminal.Outcome == issueNeedsHuman {
+			counts[is.terminal.ParkReason]++
+		}
+	}
+	return counts
+}
+
+// buildChangeSummary is what the work actually changed, from the GitHub
+// enrichment folded into terminal records. A record written before that
+// enrichment existed carries none, and neither does one whose lookup failed,
+// so this covers its own set of issues and says how many (n).
+func buildChangeSummary(done []*issueStats) *changeSummary {
+	var adds, dels, files, reviews []int
+	for _, is := range done {
+		if !is.terminal.enriched() {
+			continue
+		}
+		adds = append(adds, is.terminal.Additions)
+		dels = append(dels, is.terminal.Deletions)
+		files = append(files, is.terminal.ChangedFiles)
+		reviews = append(reviews, is.terminal.Reviews)
+	}
+	if len(adds) == 0 {
+		return nil
+	}
+	return &changeSummary{
+		addsMedian:    median(adds),
+		delsMedian:    median(dels),
+		filesMedian:   median(files),
+		reviewsMedian: median(reviews),
+		// A repository whose PRs are merged without a formal review reports
+		// zero every time, and a column of zeros is noise rather than a finding.
+		hasReviews: slices.Max(reviews) > 0,
+		n:          len(adds),
+	}
+}
+
+type runsSummary struct {
+	total        int
+	statuses     map[string]int
+	reasons      map[string]int
+	outcomes     map[string]int
+	approximated int
+	turns        int
+	tools        int
+}
+
+func buildRunsSummary(ds dataset) runsSummary {
+	s := runsSummary{total: len(ds.runs), statuses: map[string]int{}, reasons: map[string]int{}, outcomes: map[string]int{}}
+	for _, r := range ds.runs {
+		s.statuses[r.Status]++
+		s.reasons[r.Reason]++
+		s.outcomes[r.Outcome]++
+		if r.UsageSource == usageObserved {
+			s.approximated++
+		}
+		s.turns += max(r.Turns, 0)
+		s.tools += r.ToolUses
+	}
+	return s
+}
+
+type costSummary struct {
+	totalUSD   float64
+	windowFrom time.Time
+	windowTo   time.Time
+	merged     int
+	tokens     tokenCounts
+}
+
+func buildCostSummary(ds dataset, issues []*issueStats, from, to time.Time) costSummary {
+	s := costSummary{windowFrom: from, windowTo: to}
+	for _, r := range ds.runs {
+		s.totalUSD += r.CostUSD
+		s.tokens.addCounts(r.Tokens)
+	}
+	// Only merges with runs in scope belong here: one whose runs a -since
+	// window clipped away contributes nothing to the total above, so counting
+	// it here would price the tool below what it costs.
+	for _, is := range issues {
+		if is.terminal != nil && is.terminal.Outcome == issueMerged && len(is.runs) > 0 {
+			s.merged++
+		}
+	}
+	return s
+}
+
+type latencySummary struct {
+	blocked []time.Duration
+	toMerge []time.Duration
+}
+
+func buildLatencySummary(issues []*issueStats) latencySummary {
+	var s latencySummary
+	for _, is := range issues {
+		s.blocked = append(s.blocked, answerSpans(is)...)
+		if d, ok := mergeSpan(is); ok {
+			s.toMerge = append(s.toMerge, d)
+		}
+	}
+	return s
+}
+
 // --- rendering ---
 
-func render(w io.Writer, rpt report, ds dataset, issues []*issueStats, opt statsOptions) {
+func render(w io.Writer, rpt report, ds dataset, issues []*issueStats, summary statsSummary, opt statsOptions) {
 	if len(ds.runs) == 0 && len(ds.issues) == 0 {
 		fmt.Fprintf(w, "no run data in %s%s\n", ds.dir, scopeSuffix(opt, ds))
 		if len(ds.unread) > 0 {
@@ -542,11 +805,11 @@ func render(w io.Writer, rpt report, ds dataset, issues []*issueStats, opt stats
 	}
 
 	fmt.Fprintf(w, "%s\n", rpt.bold(fmt.Sprintf("run data from %s", ds.dir)))
-	printPairs(w, rpt, "", sourcePairs(ds, opt))
-	printPairs(w, rpt, "issues", issuePairs(issues))
-	printPairs(w, rpt, "runs", runPairs(ds))
-	printPairs(w, rpt, "cost", costPairs(ds, issues))
-	printPairs(w, rpt, "human latency", latencyPairs(issues))
+	printPairs(w, rpt, "", sourcePairs(summary.source))
+	printPairs(w, rpt, "issues", issuePairs(summary.issues))
+	printPairs(w, rpt, "runs", runPairs(summary.runs))
+	printPairs(w, rpt, "cost", costPairs(summary.cost))
+	printPairs(w, rpt, "human latency", latencyPairs(summary.latency))
 
 	switch opt.by {
 	case byIssue:
@@ -580,29 +843,28 @@ func scopeSuffix(opt statsOptions, ds dataset) string {
 	return " " + strings.Join(parts, " ")
 }
 
-func sourcePairs(ds dataset, opt statsOptions) [][2]string {
-	files := fmt.Sprintf("%s, %s", plural(ds.files, "file"), plural(len(ds.runs)+len(ds.issues), "record"))
-	if ds.skipped > 0 {
-		files += fmt.Sprintf(" (%s skipped)", plural(ds.skipped, "unreadable line"))
+func sourcePairs(s sourceSummary) [][2]string {
+	files := fmt.Sprintf("%s, %s", plural(s.files, "file"), plural(s.records, "record"))
+	if s.skipped > 0 {
+		files += fmt.Sprintf(" (%s skipped)", plural(s.skipped, "unreadable line"))
 	}
 	pairs := [][2]string{{"read", files}}
-	if len(ds.unread) > 0 {
+	if len(s.unread) > 0 {
 		pairs = append(pairs, [2]string{"could not open",
-			fmt.Sprintf("%s — %s", plural(len(ds.unread), "file"), strings.Join(ds.unread, ", "))})
+			fmt.Sprintf("%s — %s", plural(len(s.unread), "file"), strings.Join(s.unread, ", "))})
 	}
-	from, to := window(ds)
-	if !from.IsZero() {
+	if !s.windowFrom.IsZero() {
 		span := ""
-		if d := to.Sub(from); d > 0 {
+		if d := s.windowTo.Sub(s.windowFrom); d > 0 {
 			span = fmt.Sprintf(" (%s)", dur(d))
 		}
-		pairs = append(pairs, [2]string{"window", fmt.Sprintf("%s → %s%s", stamp(from), stamp(to), span)})
+		pairs = append(pairs, [2]string{"window", fmt.Sprintf("%s → %s%s", stamp(s.windowFrom), stamp(s.windowTo), span)})
 	}
-	if scope := strings.TrimSpace(scopeSuffix(opt, ds)); scope != "" {
-		pairs = append(pairs, [2]string{"filtered", scope})
+	if s.scope != "" {
+		pairs = append(pairs, [2]string{"filtered", s.scope})
 	}
-	if repos := repoNames(ds); len(repos) > 1 {
-		pairs = append(pairs, [2]string{"repos", strings.Join(repos, ", ")})
+	if len(s.repos) > 1 {
+		pairs = append(pairs, [2]string{"repos", strings.Join(s.repos, ", ")})
 	}
 	return pairs
 }
@@ -648,27 +910,16 @@ func repoNames(ds dataset) []string {
 	return names
 }
 
-func issuePairs(issues []*issueStats) [][2]string {
-	var done []*issueStats
-	inFlight := 0
-	counts := map[string]int{}
-	for _, is := range issues {
-		if is.terminal == nil {
-			inFlight++
-			continue
-		}
-		done = append(done, is)
-		counts[is.terminal.Outcome]++
-	}
-	if len(done) == 0 {
+func issuePairs(s issuesSummary) [][2]string {
+	if s.done == 0 {
 		return [][2]string{{"terminal", "none yet — every issue in this window is still in flight"},
-			{"in flight", strconv.Itoa(inFlight)}}
+			{"in flight", strconv.Itoa(s.inFlight)}}
 	}
 	// The merge rate leads, with its percentage attached: it is the headline
 	// number, and "merged 3, needs human 1" buries it in a list.
-	merged := counts[issueMerged]
-	terminal := fmt.Sprintf("%d — merged %d (%s)", len(done), merged, percent(merged, len(done)))
-	rest := maps.Clone(counts)
+	merged := s.terminal[issueMerged]
+	terminal := fmt.Sprintf("%d — merged %d (%s)", s.done, merged, percent(merged, s.done))
+	rest := maps.Clone(s.terminal)
 	delete(rest, issueMerged)
 	if other := breakdown(rest, []string{issueClosed, issueNeedsHuman}); other != "none" {
 		terminal += ", " + other
@@ -678,190 +929,119 @@ func issuePairs(issues []*issueStats) [][2]string {
 	// What "needs human" above is made of — the most actionable ranking in the
 	// report, because it says which half of the tool the next change belongs
 	// in. Absent when nothing was parked, rather than a line of zeroes.
-	if why := parkReasons(done); why != "" {
-		pairs = append(pairs, [2]string{"park reasons", why})
+	if len(s.parkReasons) > 0 {
+		pairs = append(pairs, [2]string{"park reasons", breakdown(s.parkReasons, parkReasonOrder)})
 	}
-	pairs = append(pairs, [2]string{"in flight", strconv.Itoa(inFlight)})
+	pairs = append(pairs, [2]string{"in flight", strconv.Itoa(s.inFlight)})
 
-	// Only issues whose runs are in scope can be priced. An issue that merged
-	// inside a -since window after running for two days outside it has a
-	// terminal record here and no runs, and averaging it in as $0 would drag
-	// every per-issue number toward zero — the one place a filter could
-	// quietly turn expensive work into cheap-looking work.
-	var priced []*issueStats
-	for _, is := range done {
-		if len(is.runs) > 0 {
-			priced = append(priced, is)
-		}
-	}
-	change := changePairs(done)
-	if len(priced) == 0 {
+	change := changePairsFrom(s.change)
+	if s.priced == 0 {
 		pairs = append(pairs, [2]string{"per issue",
 			"nothing to price — no terminal issue has runs in this window"})
 		return append(pairs, change...)
 	}
 
-	var runs, costs []float64
-	var tokens []int64
-	sum := tokenCounts{}
-	for _, is := range priced {
-		runs = append(runs, float64(len(is.runs)))
-		costs = append(costs, is.cost)
-		tokens = append(tokens, is.tokens.total())
-		sum.addCounts(is.tokens)
-	}
-	n := int64(len(priced))
 	// Say what the averages are over whenever that is not every terminal
 	// issue, so a shrunken denominator can never pass for a cheap batch.
 	over := ""
-	if len(priced) != len(done) {
-		over = fmt.Sprintf(" (over the %d with runs in this window)", len(priced))
+	if s.priced != s.done {
+		over = fmt.Sprintf(" (over the %d with runs in this window)", s.priced)
 	}
 	pairs = append(pairs,
 		// Mean and median both, because one pathological issue drags a mean
 		// somewhere no real issue has ever been.
 		[2]string{"runs per issue", fmt.Sprintf("%s mean, %s median%s",
-			trimZero(mean(runs)), trimZero(median(runs)), over)},
+			trimZero(s.runsMean), trimZero(s.runsMedian), over)},
 		[2]string{"cost per issue", fmt.Sprintf("%s mean, %s median%s",
-			usd(mean(costs)), usd(median(costs)), over)},
+			usd(s.costMean), usd(s.costMedian), over)},
 		[2]string{"tokens per issue", fmt.Sprintf("%s mean, %s median (%s)",
-			count(int64(mean(tokens))), count(median(tokens)), split(sum, n))},
+			count(int64(s.tokensMean)), count(s.tokensMedian), split(s.tokensSplitSum, s.tokensSplitN))},
 	)
 	return append(pairs, change...)
 }
 
-// parkReasons breaks the hand-backs down by why they happened, or "" when
-// there were none. A record written before the field existed counts as
-// unrecorded — never as unknown, which is the field's own value for a park
-// path that could not say, and folding the two together would make an old file
-// look like a supervisor that had stopped classifying its parks.
-func parkReasons(done []*issueStats) string {
-	counts := map[string]int{}
-	for _, is := range done {
-		if is.terminal.Outcome == issueNeedsHuman {
-			counts[is.terminal.ParkReason]++
-		}
-	}
-	if len(counts) == 0 {
-		return ""
-	}
-	return breakdown(counts, parkReasonOrder)
-}
-
-// changePairs summarizes what the work actually changed, from the GitHub
-// enrichment folded into terminal records — every issue that ended with a PR,
-// abandoned ones included, which is the same set the lines above it count.
-// Medians, over their own
-// denominator: a record written before the enrichment existed carries none,
-// and neither does one whose lookup failed, so this line covers a different
-// set of issues from the ones above it and says which.
-func changePairs(done []*issueStats) [][2]string {
-	var adds, dels, files, reviews []int
-	for _, is := range done {
-		if !is.terminal.enriched() {
-			continue
-		}
-		adds = append(adds, is.terminal.Additions)
-		dels = append(dels, is.terminal.Deletions)
-		files = append(files, is.terminal.ChangedFiles)
-		reviews = append(reviews, is.terminal.Reviews)
-	}
-	if len(adds) == 0 {
+// changePairsFrom formats what the work actually changed, from a
+// *changeSummary built over the terminal records carrying the GitHub
+// enrichment — every issue that ended with a PR, abandoned ones included,
+// which is the same set the lines above it count. nil means no terminal
+// issue carries that enrichment, and there is nothing to print.
+func changePairsFrom(c *changeSummary) [][2]string {
+	if c == nil {
 		return nil
 	}
-	line := fmt.Sprintf("+%d -%d across %s", median(adds), median(dels), plural(median(files), "file"))
-	// A repository whose PRs are merged without a formal review reports zero
-	// every time, and a column of zeros is noise rather than a finding.
-	if slices.Max(reviews) > 0 {
-		line += ", " + plural(median(reviews), "review")
+	line := fmt.Sprintf("+%d -%d across %s", c.addsMedian, c.delsMedian, plural(c.filesMedian, "file"))
+	if c.hasReviews {
+		line += ", " + plural(c.reviewsMedian, "review")
 	}
 	return [][2]string{{"change per issue",
-		fmt.Sprintf("%s (medians over %s with PR data)", line, plural(len(adds), "issue"))}}
+		fmt.Sprintf("%s (medians over %s with PR data)", line, plural(c.n, "issue"))}}
 }
 
-func runPairs(ds dataset) [][2]string {
-	statuses, reasons, outcomes := map[string]int{}, map[string]int{}, map[string]int{}
-	approximate, turns, tools := 0, 0, 0
-	for _, r := range ds.runs {
-		statuses[r.Status]++
-		reasons[r.Reason]++
-		outcomes[r.Outcome]++
-		if r.UsageSource == usageObserved {
-			approximate++
-		}
-		turns += max(r.Turns, 0)
-		tools += r.ToolUses
-	}
+func runPairs(s runsSummary) [][2]string {
 	pairs := [][2]string{
-		{"total", fmt.Sprintf("%d — %s", len(ds.runs),
-			breakdown(statuses, []string{"ok", "error", "no-turns", "crash", "stalled",
+		{"total", fmt.Sprintf("%d — %s", s.total,
+			breakdown(s.statuses, []string{"ok", "error", "no-turns", "crash", "stalled",
 				"interrupted", "no-skill", "auth", "limit", "budget"}))},
-		{"reasons", breakdown(reasons, []string{reasonImplement, reasonResume, reasonUnfinished,
+		{"reasons", breakdown(s.reasons, []string{reasonImplement, reasonResume, reasonUnfinished,
 			reasonAnswers, reasonRemediate, reasonChecks, reasonReview})},
-		{"outcomes", breakdown(outcomes, []string{outcomeOpenedPR, outcomeQuestions, outcomeNothing, outcomeUnknown})},
-		{"work", fmt.Sprintf("%s, %s", plural(turns, "turn"), plural(tools, "tool use"))},
+		{"outcomes", breakdown(s.outcomes, []string{outcomeOpenedPR, outcomeQuestions, outcomeNothing, outcomeUnknown})},
+		{"work", fmt.Sprintf("%s, %s", plural(s.turns, "turn"), plural(s.tools, "tool use"))},
 	}
-	if approximate > 0 {
+	if s.approximated > 0 {
 		// Crash, stall and interrupt never emit a result event. Their numbers
 		// are the tally seen streaming past, and undercount by construction.
 		pairs = append(pairs, [2]string{"approximated",
 			fmt.Sprintf("%d of %d runs priced from the streamed tally, not a result event",
-				approximate, len(ds.runs))})
+				s.approximated, s.total)})
 	}
 	return pairs
 }
 
-func costPairs(ds dataset, issues []*issueStats) [][2]string {
-	total, tokens := 0.0, tokenCounts{}
-	for _, r := range ds.runs {
-		total += r.CostUSD
-		tokens.addCounts(r.Tokens)
-	}
-	spend := usd(total)
-	from, to := window(ds)
-	if days := to.Sub(from).Hours() / 24; days >= 1.0/24 {
-		spend += fmt.Sprintf(" over %s (%s/day)", dur(to.Sub(from)), usd(total/days))
-	}
-	// Only merges with runs in scope belong in this denominator: one whose
-	// runs a -since window clipped away contributes nothing to the total
-	// above, so counting it here would price the tool below what it costs.
-	merged := 0
-	for _, is := range issues {
-		if is.terminal != nil && is.terminal.Outcome == issueMerged && len(is.runs) > 0 {
-			merged++
-		}
+func costPairs(s costSummary) [][2]string {
+	spend := usd(s.totalUSD)
+	if days := s.windowTo.Sub(s.windowFrom).Hours() / 24; days >= 1.0/24 {
+		spend += fmt.Sprintf(" over %s (%s/day)", dur(s.windowTo.Sub(s.windowFrom)), usd(s.totalUSD/days))
 	}
 	pairs := [][2]string{{"total", spend}}
-	if merged > 0 {
+	if s.merged > 0 {
 		// Everything spent in the window over what shipped from it — failed
 		// runs included, because they are part of what a merged PR costs.
 		pairs = append(pairs, [2]string{"per merged PR",
-			fmt.Sprintf("%s across %s", usd(total/float64(merged)), plural(merged, "merge"))})
+			fmt.Sprintf("%s across %s", usd(s.totalUSD/float64(s.merged)), plural(s.merged, "merge"))})
 	}
-	pairs = append(pairs, [2]string{"tokens", fmt.Sprintf("%s (%s)", count(tokens.total()), split(tokens, 1))})
+	pairs = append(pairs, [2]string{"tokens", fmt.Sprintf("%s (%s)", count(s.tokens.total()), split(s.tokens, 1))})
 	return pairs
 }
 
-func latencyPairs(issues []*issueStats) [][2]string {
-	var blocked, toMerge []time.Duration
-	for _, is := range issues {
-		blocked = append(blocked, answerSpans(is)...)
-		if d, ok := mergeSpan(is); ok {
-			toMerge = append(toMerge, d)
-		}
-	}
+func latencyPairs(s latencySummary) [][2]string {
 	return [][2]string{
-		{"blocked on answers", spanSummary(blocked)},
-		{"pr open to merge", spanSummary(toMerge) + confounded(toMerge)},
+		{"blocked on answers", spanSummary(s.blocked)},
+		{"pr open to merge", spanSummary(s.toMerge) + confounded(s.toMerge)},
 	}
 }
 
 func spanSummary(spans []time.Duration) string {
-	if len(spans) == 0 {
+	s := summarizeSpans(spans)
+	if s.count == 0 {
 		return "no spans in this window"
 	}
-	return fmt.Sprintf("%s — %s median, %s max",
-		plural(len(spans), "span"), dur(median(spans)), dur(slices.Max(spans)))
+	return fmt.Sprintf("%s — %s median, %s max", plural(s.count, "span"), dur(s.median), dur(s.max))
+}
+
+// spanStats is a span list's count, median and max, computed once so
+// spanSummary (text) and statsDocSpansFrom (statsjson.go) format the same
+// numbers rather than each reducing the slice itself.
+type spanStats struct {
+	count  int
+	median time.Duration
+	max    time.Duration
+}
+
+func summarizeSpans(spans []time.Duration) spanStats {
+	if len(spans) == 0 {
+		return spanStats{}
+	}
+	return spanStats{count: len(spans), median: median(spans), max: slices.Max(spans)}
 }
 
 func confounded(spans []time.Duration) string {
@@ -1013,15 +1193,50 @@ func spanningNote(spanning int, by string) string {
 // filter narrows the records to that drain's, so the report is that drain's
 // verdict rather than the issue's fate. Two questions, two right answers.
 func groupRows(ds dataset, issues []*issueStats, by string) (rows [][]string, spanning int) {
-	type group struct {
-		name   string
-		runs   int
-		cost   float64
-		tokens int64
-		issues map[issueKey]bool
+	groups, order := groupTotals(ds, by)
+	merged := mergedIssues(issues)
+	rows = make([][]string, 0, len(order))
+	for _, name := range order {
+		g := groups[name]
+		wins := 0
+		for key := range g.issues {
+			if merged[key] {
+				wins++
+			}
+		}
+		perMerge := noValue
+		if wins > 0 {
+			perMerge = usd(g.cost / float64(wins))
+		}
+		rows = append(rows, []string{
+			g.name, strconv.Itoa(len(g.issues)), strconv.Itoa(wins),
+			strconv.Itoa(g.runs), usd(g.cost), perMerge, count(g.tokens),
+		})
 	}
-	order := []string{}
-	groups := map[string]*group{}
+	return rows, spanningCount(groups, order)
+}
+
+// statGroup is one -by bucket's tally — runs, cost, tokens, and which issues
+// touched it. groupTotals is the one place it is computed, so groupRows
+// (text) and statsDocByFrom (statsjson.go) format the same numbers rather
+// than each summing the run records itself.
+type statGroup struct {
+	name   string
+	runs   int
+	cost   float64
+	tokens int64
+	issues map[issueKey]bool
+}
+
+// groupTotals breaks the numbers down by the configuration under test, or by
+// the drain that did the work. An issue whose runs span two models or two
+// tags counts under each — the point of the breakdown is comparing batches,
+// and a batch is normally one of both, so spanningCount's footnote appears
+// only when that assumption does not hold. By drain it holds far less often:
+// an issue picked up by one drain and finished by the next is the ordinary
+// shape of a restart.
+func groupTotals(ds dataset, by string) (groups map[string]*statGroup, order []string) {
+	groups = map[string]*statGroup{}
 	for _, r := range ds.runs {
 		var name string
 		switch by {
@@ -1037,19 +1252,13 @@ func groupRows(ds dataset, issues []*issueStats, by string) (rows [][]string, sp
 		}
 		g, ok := groups[name]
 		if !ok {
-			g = &group{name: name, issues: map[issueKey]bool{}}
+			g = &statGroup{name: name, issues: map[issueKey]bool{}}
 			groups[name], order = g, append(order, name)
 		}
 		g.runs++
 		g.cost += r.CostUSD
 		g.tokens += r.Tokens.total()
 		g.issues[issueKey{r.Repo, r.Issue}] = true
-	}
-	merged := map[issueKey]bool{}
-	for _, is := range issues {
-		if is.terminal != nil && is.terminal.Outcome == issueMerged {
-			merged[is.key] = true
-		}
 	}
 	sort.SliceStable(order, func(i, j int) bool {
 		a, b := groups[order[i]], groups[order[j]]
@@ -1058,35 +1267,44 @@ func groupRows(ds dataset, issues []*issueStats, by string) (rows [][]string, sp
 		}
 		return a.name < b.name
 	})
+	return groups, order
+}
 
-	memberships := map[issueKey]int{}
-	rows = make([][]string, 0, len(order))
-	for _, name := range order {
-		g := groups[name]
-		wins := 0
-		for key := range g.issues {
-			if merged[key] {
-				wins++
-			}
+// mergedIssues is the issue's own final outcome, so every group that worked
+// it counts the merge — the same rule for a drain as for a tag, and what
+// makes $/merged "spent by this group per issue of theirs that shipped". It
+// is why a -by drain row can read merged 1 for a drain whose own terminal
+// record parked the issue, while -drain <id> on the same drain reads needs
+// human 1: the filter narrows the records to that drain's, so the report is
+// that drain's verdict rather than the issue's fate. Two questions, two
+// right answers.
+func mergedIssues(issues []*issueStats) map[issueKey]bool {
+	merged := map[issueKey]bool{}
+	for _, is := range issues {
+		if is.terminal != nil && is.terminal.Outcome == issueMerged {
+			merged[is.key] = true
 		}
-		for key := range g.issues {
+	}
+	return merged
+}
+
+// spanningCount is how many issues fell into more than one group — not how
+// many surplus memberships they add up to, which is a different and larger
+// number whenever one spans three.
+func spanningCount(groups map[string]*statGroup, order []string) int {
+	memberships := map[issueKey]int{}
+	for _, name := range order {
+		for key := range groups[name].issues {
 			memberships[key]++
 		}
-		perMerge := noValue
-		if wins > 0 {
-			perMerge = usd(g.cost / float64(wins))
-		}
-		rows = append(rows, []string{
-			g.name, strconv.Itoa(len(g.issues)), strconv.Itoa(wins),
-			strconv.Itoa(g.runs), usd(g.cost), perMerge, count(g.tokens),
-		})
 	}
+	spanning := 0
 	for _, n := range memberships {
 		if n > 1 {
 			spanning++
 		}
 	}
-	return rows, spanning
+	return spanning
 }
 
 // --- plain aligned text ---
@@ -1210,13 +1428,21 @@ func plural(n int, unit string) string {
 }
 
 // split renders a token block's four ways, divided by n — the same helper for
-// a total (n = 1) and a per-issue mean.
+// a total (n = 1) and a per-issue mean. divideTokens is the division itself,
+// its own function so statsDocIssuesFrom (statsjson.go) can read the same
+// per-issue split as numbers rather than reducing tokensSplitSum a second
+// time.
 func split(t tokenCounts, n int64) string {
+	d := divideTokens(t, n)
+	return fmt.Sprintf("in %s, out %s, cache read %s, cache write %s",
+		count(d.In), count(d.Out), count(d.CacheRead), count(d.CacheWrite))
+}
+
+func divideTokens(t tokenCounts, n int64) tokenCounts {
 	if n < 1 {
 		n = 1
 	}
-	return fmt.Sprintf("in %s, out %s, cache read %s, cache write %s",
-		count(t.In/n), count(t.Out/n), count(t.CacheRead/n), count(t.CacheWrite/n))
+	return tokenCounts{In: t.In / n, Out: t.Out / n, CacheRead: t.CacheRead / n, CacheWrite: t.CacheWrite / n}
 }
 
 // count renders a magnitude at a glance: 8.1M reads, 8123400 does not.

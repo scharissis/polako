@@ -636,7 +636,7 @@ func main() {
 		os.Args = append(os.Args[:1], os.Args[2:]...)
 	case "stats":
 		rpt := newReport(isTerminal(os.Stdout))
-		runReport("stats", func() error { return runStats(os.Args[2:], os.Stdout, time.Now(), rpt) })
+		runReport("stats", func() error { return runStats(os.Args[2:], os.Stdout, os.Stderr, time.Now(), rpt) })
 		return
 	case "status":
 		// Its own context, cancelled by the same signals work honours: a
