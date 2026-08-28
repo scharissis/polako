@@ -17,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -339,16 +338,6 @@ func fakeClaude(mode string) int {
 			`{\"type\":\"authentication_error\",\"message\":\"OAuth access token is invalid.\"},` +
 			`\"request_id\":null}"}`)
 		return 1
-	case "remotereject":
-		// A CLI that does not take --remote-control in print mode: it prints a
-		// usage error naming the flag and exits without emitting one event, so
-		// nothing ever started and no model was reached. Dispatched again
-		// without the flag it behaves like any healthy run.
-		if slices.Contains(os.Args, "--remote-control") {
-			fmt.Fprintln(os.Stderr, "error: unknown option '--remote-control' (--print)")
-			return 1
-		}
-		return fakeClaude("stream")
 	case "hang":
 		emit(`{"type":"system","subtype":"init","session_id":"sess-hang","model":"claude-opus-5"}`)
 		time.Sleep(30 * time.Second) // the stall watchdog is expected to kill this
@@ -1203,31 +1192,29 @@ func TestBuildArgsPassesTheRequestedModel(t *testing.T) {
 	}
 }
 
-// -remote is on by default and is the one thing that makes a run visible off
-// this machine, so both halves are pinned: what registration adds, and that
-// turning it off leaves the invocation exactly as it was before the flag
-// existed.
-func TestBuildArgsRegistersWithRemoteControl(t *testing.T) {
+// -remote asks for something no CLI delivers in print mode, so the invocation
+// must carry nothing for it either way round — issue #82. Both settings are
+// pinned because only the pair says what the flag means now: on is not "sends
+// the flag", it is "would, once a CLI takes it", and off has to stay identical
+// to on for as long as that is true.
+func TestBuildArgsNeverAsksForRemoteControl(t *testing.T) {
 	off := config{permissionMode: "acceptEdits", tools: "Read", repo: "example/repo"}
 	on := off
-	on.remote, on.remoteOff = true, new(atomic.Bool)
-	on = remoteRun(on, 52)
+	on.remote = true
 
-	args := buildArgs(on, "/implement-issue 52", "")
-	i := slices.Index(args, "--remote-control")
-	if i < 0 || args[i+1] != "polako example/repo#52" {
-		t.Errorf("registration should name the session after the queue, got %v", args)
+	for _, tc := range []struct {
+		name string
+		cfg  config
+	}{{"-remote on", on}, {"-remote off", off}} {
+		if got := buildArgs(tc.cfg, "/implement-issue 52", ""); slices.Contains(got, "--remote-control") {
+			t.Errorf("%s: no CLI registers headless runs, so nothing should ask, got %v", tc.name, got)
+		}
 	}
 
-	if got := buildArgs(off, "/implement-issue 52", ""); slices.Contains(got, "--remote-control") {
-		t.Errorf("-remote=false must invoke claude exactly as before the flag existed, got %v", got)
-	}
-
-	// A CLI already found to reject the flags is the same as -remote=false, for
-	// every run the shift dispatches after it finds out.
-	on.dropRemote()
-	if got := buildArgs(on, "/implement-issue 52", ""); slices.Contains(got, "--remote-control") {
-		t.Errorf("a CLI that rejected registration must not be asked again, got %v", got)
+	// The flag being inert is the whole claim, so pin it as one: -remote must
+	// make no difference at all to what claude is invoked with.
+	if !slices.Equal(buildArgs(on, "/implement-issue 52", ""), buildArgs(off, "/implement-issue 52", "")) {
+		t.Error("-remote=false must invoke claude exactly as -remote does, and neither may register")
 	}
 }
 
@@ -1492,89 +1479,30 @@ func TestExecClaudeCarriesChildStderrIntoTheNarration(t *testing.T) {
 	}
 }
 
-// The whole point of feature-detecting rather than assuming: against a CLI that
-// will not take the flags in print mode, a default shift has to behave exactly
-// as it did before they existed.
-func TestExecClaudeFallsBackWhenTheCLIRejectsRemoteControl(t *testing.T) {
-	buf := captureLog(t)
+// buildArgs is asserted directly above, but the argv a child actually receives
+// is the thing the promise was made about, so pin that end too: a real dispatch
+// under -remote must reach the CLI carrying nothing to register with. Issue #82
+// is what the pair guards against coming back — a flag reintroduced anywhere
+// between buildArgs and exec would pass the unit test and still overpromise.
+func TestDispatchNeverSendsRemoteControlToTheCLI(t *testing.T) {
 	args := watchClaudeArgs(t)
-	cfg := fakeClaudeConfig(t, "remotereject")
-	cfg.remote, cfg.remoteOff, cfg.repo = true, new(atomic.Bool), "example/repo"
-	cfg = remoteRun(cfg, 7)
+	cfg := fakeClaudeConfig(t, "stream")
+	cfg.remote, cfg.repo = true, "example/repo"
 
-	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0)
-	if err != nil {
-		t.Fatalf("a rejected registration must not fail the run: %v", err)
+	if _, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0); err != nil {
+		t.Fatalf("a healthy run under -remote: %v", err)
 	}
-	// The report the caller gets is the second attempt's, and only the second
-	// attempt's. That is what keeps the rejection off -retries and out of the
-	// run data: nothing above execClaude ever sees the first one.
-	if rep.sessionID != "sess-xyz" || rep.exitCode != 0 {
-		t.Errorf("report = %+v, want the re-dispatched run's, not the rejected attempt's", rep)
+	got := args()
+	if len(got) != 1 {
+		t.Fatalf("want exactly one dispatch — there is nothing left to re-dispatch for — got %v", got)
 	}
-	if rep.remoteRejected {
-		t.Error("the report handed back must be the one that ran, not the one that was refused")
+	if strings.Contains(got[0], "--remote-control") {
+		t.Errorf("no CLI registers headless runs, so none should be asked: %s", got[0])
 	}
-	if got := args(); len(got) != 2 ||
-		!strings.Contains(got[0], "--remote-control") || strings.Contains(got[1], "--remote-control") {
-		t.Errorf("want one attempt with the flag and one without, got %v", got)
-	}
-	if !strings.Contains(buf.String(), "cannot register headless runs with Remote Control") {
-		t.Errorf("the fall-back should be explained once\ngot:\n%s", buf.String())
-	}
-
-	// Learned for the shift, not for the run: the next dispatch under the same
-	// config asks for nothing, so the explanation is said once however long the
-	// backlog is.
-	if _, err := execClaude(context.Background(), cfg, "/implement-issue 8", "", "implement-issue", 0); err != nil {
-		t.Fatalf("the run after a rejection: %v", err)
-	}
-	if got := args(); len(got) != 3 || strings.Contains(got[2], "--remote-control") {
-		t.Errorf("a later run must not ask again, got %v", got)
-	}
-	if n := strings.Count(buf.String(), "cannot register headless runs"); n != 1 {
-		t.Errorf("the explanation was logged %d times, want exactly 1", n)
-	}
-}
-
-// Both shapes a refusal takes, and nothing else: an ordinary crash also exits
-// nonzero and an ordinary hang also stalls, and reading either as a rejected
-// flag would silently stop registering for the rest of the shift — and, worse,
-// hand the caller a second run it never asked for.
-func TestRejectedRemoteCatchesBothRefusalsAndNothingElse(t *testing.T) {
-	usage := &tailWriter{}
-	fmt.Fprintln(usage, "error: unknown option '--remote-control' (--print)")
-	other := &tailWriter{}
-	fmt.Fprintln(other, "No conversation found with the given session ID")
-	// A CLI that documents the flag for interactive sessions is as likely to
-	// refuse by naming the feature as by naming the option.
-	byName := &tailWriter{}
-	fmt.Fprintln(byName, "Error: Remote Control is not available with --print")
-
-	for _, tc := range []struct {
-		name string
-		rep  runReport
-		tail *tailWriter
-		want bool
-	}{
-		{"refused the flag", runReport{exitCode: 1}, usage, true},
-		{"refused the feature by name", runReport{exitCode: 1}, byName, true},
-		// The shape that matters most: a CLI that takes the flag, turns
-		// interactive on it and waits for input never exits at all, so there is
-		// no status and no usage error — only silence the watchdog ends. Missed,
-		// it would stall every run of the shift and park the whole backlog.
-		{"took the flag and then waited for input", runReport{exitCode: -1, stalled: true}, &tailWriter{}, true},
-		{"registration was never asked for", runReport{exitCode: 1}, nil, false},
-		{"a stall the operator stopped", runReport{exitCode: -1, stalled: true, interrupted: true}, usage, false},
-		{"a stall after the session started", runReport{exitCode: -1, stalled: true, started: true}, usage, false},
-		{"a dead session, which also emits nothing", runReport{exitCode: 1}, other, false},
-		{"the session started, so the flag was taken", runReport{exitCode: 1, started: true}, usage, false},
-		{"a clean exit", runReport{exitCode: 0}, usage, false},
-		{"Ctrl+C before the first event", runReport{exitCode: -1, interrupted: true}, usage, false},
-	} {
-		if got := rejectedRemote(tc.rep, tc.tail); got != tc.want {
-			t.Errorf("%s: rejectedRemote = %v, want %v", tc.name, got, tc.want)
-		}
+	// The session name went with the flag: no CLI reads it, and leaving it on
+	// the command line would be the same false promise one argument along.
+	if strings.Contains(got[0], "polako example/repo#") {
+		t.Errorf("the session name has no reader left; it should not be passed: %s", got[0])
 	}
 }
 
