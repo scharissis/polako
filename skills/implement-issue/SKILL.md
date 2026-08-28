@@ -115,11 +115,15 @@ unanswered on the thread.
       checkout — the first line of `git worktree list` — run
       `git merge --ff-only` against the `origin/…` ref Phase 1 resolved.
       Skip it if that checkout is not on the default branch, or if it
-      refuses; never force it. The review resolves this branch's base
-      from that local ref, and a drain merges on GitHub and never pulls,
-      so the ref falls a commit behind per merged PR. Left stale it
-      folds somebody else's merged PR into the diff, and `--fix`
-      rewrites their code inside your branch.
+      refuses; never force it. Having branched issue-$issue off
+      `origin/…` in Phase 1 is not a reason to skip this — that
+      refreshed only this branch's starting point, not the main
+      checkout's local ref, and those are two different refs. The
+      review resolves this branch's base from that local ref, and a
+      drain merges on GitHub and never pulls, so the ref falls a commit
+      behind per merged PR. Left stale it folds somebody else's merged
+      PR into the diff, and `--fix` rewrites their code inside your
+      branch.
    b. Invoke `/code-review high --fix issue-$issue` and address its
       findings. Name the branch every time: the review forks a fresh
       agent that starts in the session's cwd, which the Phase 1 `cd`
