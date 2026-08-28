@@ -19,3 +19,6 @@
 
 # Editors / OS
 .DS_Store
+
+# Python bytecode from the eval graders
+__pycache__/

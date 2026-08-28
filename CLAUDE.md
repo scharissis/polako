@@ -164,6 +164,10 @@ grades what they leave behind:
 claude plugin eval . --scaffold --allow-tools Bash Write Edit
 ```
 
+That command is gated behind an account-side early-access entitlement; until it
+is granted, `evals/run.sh` runs the same cases and graders by hand — see
+"Running it by hand" in `evals/README.md`.
+
 Two of that command's defaults are worth knowing before running it, and both
 are in `evals/README.md`: `--ablation` defaults to a second, no-plugin baseline
 arm, so every case runs twice; and the HTML report — prompts and grader
@@ -174,16 +178,17 @@ named here for the same reason that invariant exists.
 
 That suite is the one exception to hermetic tests, agreed on issue #9: it needs
 the network, a real `claude` and money, so it is opt-in and stays out of
-`check.sh` and CI. It is also new and has not yet had a green run — see
-`evals/README.md`. Until it has, a change under `skills/` still needs verifying
-by hand — `implement-issue` against a real issue, `plan-backlog` against a real
-vision document — and the PR body should say what was verified.
+`check.sh` and CI. Its first full run (by hand, 2026-08-28) came back one
+genuine finding short of green — issue #128 — so until that is settled, a
+change under `skills/` runs the suite via `evals/run.sh` and the PR body says
+what was verified.
 
-**Once it is green, that hand-verification becomes the suite.** A PR that
-changes a skill's `SKILL.md` runs it — or at minimum the cases its change
-touches, `--case <name>` — and quotes the scores in its body, the same
-"say what was verified" convention in stricter form. `--runs 3` when a case
-wobbles: a flaky grader is worse than no grader, because it teaches the habit
+**The suite is the verification.** A PR that changes a skill's `SKILL.md`
+runs it — or at minimum the cases its change touches: `evals/run.sh <case>`
+today, `--case <name>` once the entitled CLI runs — and quotes the scores in
+its body, the "say what was verified" convention in stricter form. When a case
+wobbles, run it three times (`--runs 3` on the CLI; three `run.sh` invocations
+by hand): a flaky grader is worse than no grader, because it teaches the habit
 of ignoring red. Skill wording is also a tagged change, so the next batch runs
 under a fresh `-run-tag` and earns a row in `plans/experiments.md` — the
 ritual around all of this is the README's "Improving polako".

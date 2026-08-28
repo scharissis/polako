@@ -69,9 +69,12 @@ EOF
 chmod +x "$bin/gh"
 
 # The run inherits PATH from the session, not from this script, so putting the
-# stand-in first has to go through settings the session reads. If this stops
-# working the case fails loudly rather than quietly: the real gh finds a remote
-# that is a local path, not a GitHub repo, and refuses.
+# stand-in first has to go through settings the session reads. A headless
+# `claude -p` session ignores this file (issue #126), which is why run.sh also
+# prepends $bin in the launch environment — this settings route stays for the
+# real `plugin eval` runner, whose behaviour is still unverified. If neither
+# route works the case fails loudly rather than quietly: the real gh finds a
+# remote that is a local path, not a GitHub repo, and refuses.
 mkdir -p "$workspace/.claude"
 cat > "$workspace/.claude/settings.json" <<EOF
 {

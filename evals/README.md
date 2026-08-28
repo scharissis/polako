@@ -89,6 +89,47 @@ know whether a case is flaky rather than whether it works — every case here se
 `runs: 1`, so one run each is what you get otherwise — and `--json` or
 `--report <path>` to keep the numbers somewhere.
 
+## Running it by hand
+
+The entitlement may never arrive, so the suite does not depend on it:
+
+```bash
+evals/run.sh                  # every case
+evals/run.sh clear-issue      # one case
+evals/run.sh --no-judge       # skip the llm judge; grade those yourself
+```
+
+`run.sh` reproduces what `plugin eval` would do for this suite — scaffold each
+case into a fresh workspace under `evals/results/<timestamp>-by-hand/`, run the
+case's prompt in a headless session with the plugin loaded from this checkout,
+then grade what the run left behind (`lib/grade.py`). `file_exists` graders are
+checked mechanically; `llm` graders go to a judge session — haiku, the CLI's
+own default judge, `--judge-model` to override — fed the recorded artifacts,
+repository state and a tool-call timeline, all of which is also written to each
+case's `evidence.md` so a verdict can be audited rather than trusted. Exit 0 is
+green; 1 means a grader failed, a case timed out, or the harness broke, and the
+per-case line says which — a harness error is not a skill verdict; `--no-judge`
+exits 3 until a human scores what the judge would have. To re-run one wobbling
+case three times, invoke `evals/run.sh <case>` three times — each invocation
+gets its own timestamped results directory.
+
+It costs the same money the real runner would — roughly $0.30–$1.60 per case,
+plus cents of judging — and needs `claude`, `git` and `python3`. Two deliberate
+divergences from a naive reading of the cases, each argued where it lives:
+
+- The stand-in `gh` rides in on the **launch environment's** `PATH`, because a
+  headless `claude -p` ignores the `settings.json` the scaffold writes
+  (issue #126).
+- `tool_used` graders are reported as `indicator:fired`/`not-fired`, not
+  scored: slash-command expansion emits no `Skill` tool call, so they cannot
+  fire on a path that never reaches `/code-review` (issue #127) — the CLI's
+  own ablation mode demotes them the same way.
+
+Results under `evals/results/` are scratch, and gitignored like the CLI's own.
+The durable record of a run is the per-case verdicts quoted in the PR body —
+"say what was verified", the convention `CLAUDE.md` sets — and, for tagged
+skill experiments, a row in `plans/experiments.md`.
+
 ## This suite is deliberately not in CI
 
 `scripts/check.sh` and the CI matrix stay hermetic: no network, no `gh`, no real
@@ -137,55 +178,39 @@ Graders then read fixed paths (`.eval/pr-body.md`, `.eval/labels.log`,
 `.eval/comments/0.md`, `.eval/created/*.md`, `repo-issue-1/PLAN.md`) rather than
 having to work out where the run put its worktree.
 
-## Known-unverified: this suite has never been executed
+## What a hand-run settled, and what only the CLI can
 
-It was written in a session that could run neither `claude` nor the scaffold
-itself, so `claude plugin eval .` has not been green here even once, and
-`lib/scaffold.sh` and `lib/gh-fake.sh` have never been run — only read. Expect
-the first run to be a debugging session, not a green one, and budget for it:
-start with `--case clear-issue` rather than the whole suite.
+The suite has now run in anger — every case, by hand, on 2026-08-28 (the
+"Running it by hand" path above) — so the scaffold, the stand-in `gh` and the
+graders are no longer read-only theory. What that run settled:
 
-The case format was recovered from the CLI binary rather than from
-documentation. `claude plugin eval --help` has since settled part of it without
-a run: the eval directory, `case.yaml` itself, `scaffold_script`, `runs`,
-`max_turns`, `timeout_seconds`, `tags` and `tool_used: Skill` all appear there
-as spelled here, and what else it says is folded into "Running it" above. These
-are the parts it does not cover, and so the ones most likely to need a
-correction:
+- **The scratch world works as written.** `lib/scaffold.sh` and `lib/gh-fake.sh`
+  behaved as designed on their first execution, including the seeds, and
+  `plan-vision`'s bare `VISION.md` prompt was found through the workspace
+  `CLAUDE.md` pointer without needing a `repo/` prefix.
+- **The skills held.** Every behavioral grader passed except one genuine catch:
+  a plan run improvised `gh label list`, a read outside its granted surface,
+  which the stand-in rejected and the grader failed — issue #128, a skill
+  problem, not grader noise.
+- **`.claude/settings.json` is not how the stand-in `gh` gets onto `PATH`**
+  under a headless `claude -p` — the launch environment is (issue #126). The
+  failure was loud, exactly as this section predicted.
+- **`tool_used: Skill` never fires from slash-command expansion.** It fires
+  only when a run happens to reach `/code-review` (issue #127), which is why
+  the by-hand runner reports it as an indicator instead of scoring it.
 
-- **Grader keys.** `file_exists` takes `name` + `path`; `llm` takes `name` +
-  `focus` + `criteria`; `tool_used` takes `tool`. There is also a `regex` grader
-  taking `name` + `target` + `pattern`, where `target: last_message` reads the
-  agent's final message. If a key is wrong, `claude plugin eval` should say so.
-- **Where `scaffold_script` runs, and with what working directory.** The
-  scaffold assumes the runner's cwd is the workspace the agent then starts in.
-  If that turns out to be wrong, set `EVAL_WORKSPACE` — `lib/scaffold.sh`
-  honours it — rather than rewriting the paths in every case.
-- **Whether `.claude/settings.json` is enough to get the stand-in `gh` onto the
-  agent's `PATH`.** If it is not, the failure is loud rather than silent: the
-  real `gh` finds an `origin` that is a local path, not a GitHub repo, and
-  refuses.
-- **Whether `llm` graders can read workspace files.** Several `criteria` name a
-  path under `.eval/`. If graders only see the transcript, those need rewording
-  against the transcript instead — the facts are all visible there too.
-- **Whether a prompt can name a path the way `plan-vision` does.** Its prompt is
-  `/polako:plan-backlog VISION.md`, and the document lives in `repo/`, not in
-  the workspace the run starts in. The scaffold's `CLAUDE.md` says where the
-  project is, which should be enough — but if the run cannot find the document
-  it will stop and ask for one, which is correct behaviour scoring as a
-  failure. Pass `repo/VISION.md` in the prompt if so.
-- **Whether `tool_used: Skill` ever fires here — and whether `--ablation none`
-  makes it count.** `SKILL.md` sets `disable-model-invocation: true`, so the
-  skill is only ever reached as a slash command, and it is not obvious that
-  arrives as a `Skill` tool call. `--help` settles half of this: under
-  `--ablation with-without` it names `tool_used: Skill` specifically as a
-  with-only, plugin-fired indicator "rather than part of the score", so on a
-  default run it is harmless whether it fires or not. It says nothing about
-  `--ablation none` — which is exactly what the cheap debugging run above
-  passes. So a grader the default run ignores may be scored there, and with
-  `--threshold` at 1.0 one that never fires fails every case. A first run coming
-  back failing only this grader, in all six cases, is that and not the skill;
-  drop it from the six if so. It is the one grader here that asserts nothing
-  about the skill's behaviour.
-
-Fix what the first run finds and delete this section.
+`claude plugin eval .` itself has still never run — the entitlement gate at the
+top of "Running it" — so everything CLI-specific is still unverified: the
+grader key spellings beyond what `--help` shows (including the `regex` grader
+recovered from the binary — `name` + `target` + `pattern`, `target:
+last_message` reading the agent's final message — which no case uses yet);
+whether the real runner's cwd is the workspace the scaffold assumes (if not,
+set `EVAL_WORKSPACE` — `lib/scaffold.sh` honours it — rather than rewriting
+paths in every case; `run.sh` guarantees the assumption by construction, so
+the hand-run settles nothing here); whether the real runner applies the
+workspace settings the scaffold writes (if it does, #126 is a by-hand quirk;
+if not, every case fails loudly on its first `gh` call); whether its `llm`
+graders can read workspace files or only the transcript; and whether
+`--ablation none` scores `tool_used` graders it would otherwise treat as
+indicators. Check those five on the first entitled run, before reading
+anything into scores — then fold the answers in above and delete this section.
