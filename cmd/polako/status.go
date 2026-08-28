@@ -56,6 +56,7 @@ type statusOptions struct {
 	label        string
 	branchPrefix string
 	strictOrder  bool
+	json         bool
 }
 
 // runStatus is the `status` subcommand: parse its own flags, read GitHub, print
@@ -72,6 +73,8 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 	fs.StringVar(&opt.branchPrefix, "branch-prefix", "issue-", "branch name prefix the skill uses")
 	fs.BoolVar(&opt.strictOrder, "strict-order", false,
 		"report as a work run with -strict-order would: an issue awaiting an answer keeps its place in the queue")
+	fs.BoolVar(&opt.json, "json", false,
+		"print one JSON document to stdout instead of the text report — see docs/reference.md for the schema")
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako status [flags]\n\n"+
 			"Prints where the backlog stands, derived from GitHub: the queue in the\n"+
@@ -102,6 +105,9 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 	snap, err := readStatus(ctx, cfg, now)
 	if err != nil {
 		return err
+	}
+	if opt.json {
+		return renderStatusJSON(out, cfg, snap)
 	}
 	renderStatus(out, rpt, cfg, snap)
 	return nil
@@ -572,6 +578,18 @@ func reviewCell(p statusPR) string {
 // because a line that reads "needs you: nothing" on every healthy backlog is
 // one an operator learns to skip past.
 func needsYou(snap statusSnapshot) string {
+	parts := needsYouParts(snap)
+	if len(parts) == 0 {
+		return ""
+	}
+	return "needs you: " + strings.Join(parts, "; ")
+}
+
+// needsYouParts is needsYou's derivation on its own, one clause per item, so
+// the JSON renderer can carry the same list structured rather than joined
+// into prose — the "second renderer, not a second pipeline" rule applied to
+// this line specifically.
+func needsYouParts(snap statusSnapshot) []string {
 	var parts []string
 	if len(snap.queues.blocked) > 0 {
 		parts = append(parts, "reply on "+issueRefs(snap.queues.blocked))
@@ -604,8 +622,134 @@ func needsYou(snap statusSnapshot) string {
 		parts = append(parts, fmt.Sprintf("curate %s (drop %s to queue them)",
 			issueRefs(snap.queues.proposed), proposedLabel))
 	}
-	if len(parts) == 0 {
-		return ""
+	return parts
+}
+
+// --- JSON rendering ---
+//
+// A second renderer over statusSnapshot, exactly as buildHTMLReport
+// (statshtml.go) is a second renderer over a stats dataset: every fact below
+// is read out of the same snapshot the text report walks, or computed by the
+// same helper (nextLine, needsYouParts, the PR cell functions) the text
+// report calls — never re-derived. The two can disagree about layout; they
+// cannot disagree about a fact, because there is only one place each fact is
+// computed.
+
+// statusDoc is the whole answer to `polako status -json`, in explicit typed
+// fields rather than map[string]any: a schema that is reviewable and stable,
+// per the acceptance criteria on #118.
+type statusDoc struct {
+	Repo          string         `json:"repo"`
+	Scope         statusDocScope `json:"scope"`
+	Queue         statusDocQueue `json:"queue"`
+	Next          statusDocNext  `json:"next"`
+	PRs           []statusDocPR  `json:"prs"`
+	UndetailedPRs []int          `json:"undetailed_prs"`
+	NeedsYou      []string       `json:"needs_you"`
+}
+
+type statusDocScope struct {
+	Label       string `json:"label"`
+	StrictOrder bool   `json:"strict_order"`
+}
+
+type statusDocQueue struct {
+	Ready      []int              `json:"ready"`
+	Blocked    []statusDocBlocked `json:"blocked"`
+	Parked     []int              `json:"parked"`
+	Proposed   []int              `json:"proposed"`
+	Containers []int              `json:"containers"`
+}
+
+// statusDocBlocked is one issue awaiting an answer. QuietSeconds is a pointer
+// because 0 (a reply just landed) and "the thread's age could not be read"
+// are both real, distinct states — the same distinction unknownCell exists to
+// preserve for a PR's fields, applied here to a duration instead of a string.
+type statusDocBlocked struct {
+	Issue        int    `json:"issue"`
+	QuietSeconds *int64 `json:"quiet_seconds,omitempty"`
+}
+
+// statusDocNext is the issue a drain starting now would pick up, and why.
+// Issue is 0 for none; Reason is nextLine(snap) verbatim, which already
+// covers the 0 case in words.
+type statusDocNext struct {
+	Issue  int    `json:"issue"`
+	Reason string `json:"reason"`
+}
+
+// statusDocPR mirrors the text report's table columns. Mergeable, Checks and
+// Review are the same cell strings the table prints, unknownCell ("not read")
+// included: reusing them rather than inventing a JSON-specific sentinel means
+// there is exactly one meaning of "not read", not two.
+type statusDocPR struct {
+	Number    int    `json:"number"`
+	Branch    string `json:"branch"`
+	Issue     int    `json:"issue"`
+	URL       string `json:"url"`
+	Mergeable string `json:"mergeable"`
+	Checks    string `json:"checks"`
+	Review    string `json:"review"`
+}
+
+// renderStatusJSON writes statusDoc as the whole of stdout: one document, no
+// header, no trailing prose, so `polako status -json | jq` works.
+func renderStatusJSON(w io.Writer, cfg config, snap statusSnapshot) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(statusDocFrom(cfg, snap)); err != nil {
+		return fmt.Errorf("could not encode the status report as JSON (%w) — this is a bug in polako; "+
+			"dropping -json still gets you the text report", err)
 	}
-	return "needs you: " + strings.Join(parts, "; ")
+	return nil
+}
+
+func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
+	blocked := make([]statusDocBlocked, 0, len(snap.queues.blocked))
+	for _, issue := range snap.queues.blocked {
+		b := statusDocBlocked{Issue: issue}
+		if d, ok := snap.quiet[issue]; ok {
+			secs := int64(d.Seconds())
+			b.QuietSeconds = &secs
+		}
+		blocked = append(blocked, b)
+	}
+
+	prs := make([]statusDocPR, 0, len(snap.prs))
+	for _, p := range snap.prs {
+		prs = append(prs, statusDocPR{
+			Number:    p.number,
+			Branch:    p.branch,
+			Issue:     p.issue,
+			URL:       p.url,
+			Mergeable: mergeableCell(p),
+			Checks:    checksCell(p),
+			Review:    reviewCell(p),
+		})
+	}
+
+	return statusDoc{
+		Repo:  cfg.repo,
+		Scope: statusDocScope{Label: cfg.label, StrictOrder: cfg.strictOrder},
+		Queue: statusDocQueue{
+			Ready:      nonNilSlice(snap.queues.ready),
+			Blocked:    blocked,
+			Parked:     nonNilSlice(snap.queues.parked),
+			Proposed:   nonNilSlice(snap.queues.proposed),
+			Containers: nonNilSlice(snap.queues.containers),
+		},
+		Next:          statusDocNext{Issue: snap.next, Reason: nextLine(snap)},
+		PRs:           prs,
+		UndetailedPRs: nonNilSlice(snap.undetailed),
+		NeedsYou:      nonNilSlice(needsYouParts(snap)),
+	}
+}
+
+// nonNilSlice keeps every array field a `[]`, never a JSON `null`, so a
+// script can `.[]` into any of them without special-casing the empty case.
+func nonNilSlice[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
 }
