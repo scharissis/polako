@@ -85,11 +85,10 @@ above, and keep the human merge step as the last check on what actually lands.
 
 ## What leaves the machine
 
-Two things, and only these two:
+One thing, and only on request:
 
 | What | Where it goes | Default |
 | --- | --- | --- |
-| [`-remote`](reference.md#watching-a-shift-from-anywhere--remote) | The session itself, live, in your own claude.ai session list — so you can watch and steer a run from the web or the app. | **On.** `-remote=false` closes it. |
 | [`-post-summary`](run-data.md#putting-it-on-the-pr--post-summary) | One line of run numbers, as a comment on your own merged PR — readable by exactly the people who can already see that PR. | Off. |
 
 Everything else stays local. Run data is written to your disk and read by
@@ -101,12 +100,23 @@ directory, read back by nothing, and turned off with `-log off`; `-notify`
 runs a command of yours on your own machine; and the skill half, being a
 prompt, collects nothing at all.
 
-`-remote` is the one of the two that is on by default and the one that carries
-*text* rather than numbers, so it is worth being explicit about: a registered
-session is readable through the claude.ai account the CLI is already
-authenticated as — the same account that is running the model and already holds
-the transcript. It reaches you and nobody else, over Claude Code's own channel,
-and it is the same visibility an interactive session started with
-`claude --remote-control` has. If that is not a trade you want on a given
-repository, turn it off; a shift with `-remote=false` invokes `claude` exactly
-as it did before the flag existed.
+### `-remote`, and why it is not in that table
+
+[`-remote`](reference.md#watching-a-shift-from-anywhere--remote) is on by
+default and used to be listed here as the second outward path — the one
+carrying session *text* rather than numbers. It is not one today. No `claude`
+CLI registers headless runs with Remote Control: the current one accepts
+`--remote-control` under `-p` and never starts the bridge. polako therefore
+stops passing the flag at all, so with `-remote` on or off, no session content
+goes anywhere.
+
+That is worth stating rather than quietly dropping, because the reverse is what
+would matter to you. If a future CLI does register headless runs and polako
+starts passing the flag again, this table gains a row and this section goes
+back to arguing the trade: a registered session is readable through the
+claude.ai account the CLI is already authenticated as — the same account that is
+running the model and already holds the transcript — over Claude Code's own
+channel, reaching you and nobody else. That is the same visibility an
+interactive session started with `claude --remote-control` has, and
+`-remote=false` would again be the way to decline it. Until then there is
+nothing to decline.
