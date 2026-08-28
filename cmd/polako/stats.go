@@ -1098,10 +1098,7 @@ func printPairs(w io.Writer, rpt report, title string, pairs [][2]string) {
 	if title != "" {
 		fmt.Fprintf(w, "\n%s\n", title)
 	}
-	width := 0
-	for _, p := range pairs {
-		width = max(width, len(p[0]))
-	}
+	width := pairWidth(pairs)
 	for _, p := range pairs {
 		// Padded first, styled after: wrapping ANSI codes around the label
 		// before %-*s pads it would make the escape bytes count toward the
@@ -1109,6 +1106,18 @@ func printPairs(w io.Writer, rpt report, title string, pairs [][2]string) {
 		label := rpt.cell(fmt.Sprintf("%-*s", width, p[0]))
 		fmt.Fprintf(w, "  %s  %s\n", label, rpt.cell(p[1]))
 	}
+}
+
+// pairWidth is the label width printPairs aligns its rows to. Shared with
+// preflight's startup settings block (main.go), so both column up the same
+// way even though the block reaches the terminal through narrate rather than
+// through this file's io.Writer-based rendering.
+func pairWidth(pairs [][2]string) int {
+	width := 0
+	for _, p := range pairs {
+		width = max(width, len(p[0]))
+	}
+	return width
 }
 
 // printTable aligns a header and its rows: the leading left columns name

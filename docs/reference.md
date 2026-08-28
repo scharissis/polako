@@ -50,8 +50,8 @@ leap of faith. `-dry-run` takes it out:
 ```bash
 $ polako work -dir ../my-project -dry-run
 example/my-project — running /polako:implement-issue per issue, polling every 5m0s
--dry-run: resolving the next issue only — no claude run, no GitHub write, no run data
--remote is on, but no claude CLI registers headless runs with Remote Control yet — runs stay on this machine and unwatched, and nothing is sent anywhere (-remote=false silences this line; a later polako lights the flag up once a CLI supports it)
+  dry-run  resolving the next issue only — no claude run, no GitHub write, no run data
+  remote   on, but no claude CLI registers headless runs with Remote Control yet — runs stay on this machine and unwatched, and nothing is sent anywhere (-remote=false silences this line; a later polako lights the flag up once a CLI supports it)
 ready: #12, #14, #19
 waiting on an answer: #9
 issue #12 would be worked next; the invocation follows on stdout
@@ -163,7 +163,7 @@ this path. Startup says so once, rather than claiming a session list that will
 stay empty:
 
 ```
--remote is on, but no claude CLI registers headless runs with Remote Control yet — runs stay on this machine and unwatched, and nothing is sent anywhere (-remote=false silences this line; a later polako lights the flag up once a CLI supports it)
+  remote  on, but no claude CLI registers headless runs with Remote Control yet — runs stay on this machine and unwatched, and nothing is sent anywhere (-remote=false silences this line; a later polako lights the flag up once a CLI supports it)
 ```
 
 `-remote=false` silences that line and changes nothing else.
@@ -185,7 +185,7 @@ not watching, and it never leaves this machine either.
 Each shift writes one complete log of itself to a file, named at startup:
 
 ```
-logging this shift in full to /Users/you/.polako/logs/example--my-project--3f9a1c02.log — the whole claude transcript stream, kept on this machine (-log off to disable)
+  shift log  /Users/you/.polako/logs/example--my-project--3f9a1c02.log — the whole claude transcript stream, kept on this machine (-log off to disable)
 ```
 
 The file holds everything the shift narrates, timestamped: every terminal

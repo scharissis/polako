@@ -285,8 +285,8 @@ that ran back to back, or overlapped, defeat a time window. So every shift
 stamps its records with a random id and says so once at startup:
 
 ```
-recording run data in /Users/you/.polako/metrics — numbers only, never leaves this machine (-metrics off to disable)
-this shift is 7f3a91c4 — `polako stats -shift 7f3a91c4` reports on it alone
+  run data  /Users/you/.polako/metrics — numbers only, never leaves this machine (-metrics off to disable)
+  shift     7f3a91c4 — `polako stats -shift 7f3a91c4` reports on it alone
 ```
 
 That line is the only place the id appears — nothing reads it back, and the
