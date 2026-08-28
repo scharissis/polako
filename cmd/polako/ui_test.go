@@ -255,26 +255,38 @@ func TestStyleForGatesColour(t *testing.T) {
 	}
 }
 
-func TestRenderStylesWholeLinesByContent(t *testing.T) {
+// TestRenderStylesBySeverityNotWording replaces the old wording-matching
+// assertion: the exact same wording renders a different colour depending on
+// the severity declared alongside it, and unrelated wording sharing a
+// severity gets the same colour — proving render never looks at the text.
+func TestRenderStylesBySeverityNotWording(t *testing.T) {
 	s := styler{on: true}
-	cases := map[string]string{
-		"=== issue #14 ===\n":                          "\x1b[1m=== issue #14 ===\x1b[0m\n",
-		"finished (ok) — 74 turns, 19m1s, $4.12\n":     "\x1b[32mfinished (ok) — 74 turns, 19m1s, $4.12\x1b[0m\n",
-		"[claude] finished (ERROR: error_max_turns)\n": "\x1b[31m[claude] finished (ERROR: error_max_turns)\x1b[0m\n",
-		"transient: listing open issues failed\n":      "\x1b[33mtransient: listing open issues failed\x1b[0m\n",
-		"-remote is on, but no claude CLI registers\n": "\x1b[2m-remote is on, but no claude CLI registers\x1b[0m\n",
-		"PR #61 open — waiting for merge\n":            "PR #61 open — waiting for merge\n", // no rule: plain
+	cases := []struct {
+		sev  severity
+		in   string
+		want string
+	}{
+		{sevSection, "=== issue #14 ===\n", "\x1b[1m=== issue #14 ===\x1b[0m\n"},
+		{sevSuccess, "finished (ok) — 74 turns, 19m1s, $4.12\n", "\x1b[32mfinished (ok) — 74 turns, 19m1s, $4.12\x1b[0m\n"},
+		{sevError, "[claude] finished (ERROR: error_max_turns)\n", "\x1b[31m[claude] finished (ERROR: error_max_turns)\x1b[0m\n"},
+		{sevWarning, "transient: listing open issues failed\n", "\x1b[33mtransient: listing open issues failed\x1b[0m\n"},
+		{sevSettings, "-remote is on, but no claude CLI registers\n", "\x1b[2m-remote is on, but no claude CLI registers\x1b[0m\n"},
+		{sevProgress, "PR #61 open — waiting for merge\n", "PR #61 open — waiting for merge\n"}, // default: plain
+		// The same wording a semantic severity would colour, declared as
+		// progress instead, must stay plain — proving the colour follows the
+		// declared severity, not anything render can read off the text.
+		{sevProgress, "finished (ok) — 1 turn, 1s, $0.00\n", "finished (ok) — 1 turn, 1s, $0.00\n"},
 	}
-	for in, want := range cases {
-		if got := s.render(in, true); got != want {
-			t.Errorf("render(%q) = %q, want %q", in, got, want)
+	for _, tc := range cases {
+		if got := s.render(tc.in, true, tc.sev); got != tc.want {
+			t.Errorf("render(%q, sev=%v) = %q, want %q", tc.in, tc.sev, got, tc.want)
 		}
 	}
-	if got := s.render("[claude] → Bash: ls\n", false); got != "\x1b[2m[claude] → Bash: ls\x1b[0m\n" {
-		t.Errorf("detail on a colour TTY should render dim, got %q", got)
+	if got := s.render("[claude] → Bash: ls\n", false, sevError); got != "\x1b[2m[claude] → Bash: ls\x1b[0m\n" {
+		t.Errorf("detail renders dim regardless of severity, got %q", got)
 	}
 	off := styler{}
-	if got := off.render("=== issue #14 ===\n", true); got != "=== issue #14 ===\n" {
+	if got := off.render("=== issue #14 ===\n", true, sevSection); got != "=== issue #14 ===\n" {
 		t.Errorf("a styler that is off must pass lines through untouched, got %q", got)
 	}
 }

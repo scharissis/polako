@@ -53,7 +53,7 @@ var detail = log.New(detailWriter{u: sinks}, "", 0)
 type milestoneWriter struct{ u *ui }
 
 func (w milestoneWriter) Write(p []byte) (int, error) {
-	w.u.emit(p, true)
+	w.u.emit(p, true, sevProgress)
 	return len(p), nil
 }
 
@@ -61,13 +61,57 @@ func (w milestoneWriter) Write(p []byte) (int, error) {
 type detailWriter struct{ u *ui }
 
 func (w detailWriter) Write(p []byte) (int, error) {
-	w.u.emit(p, false)
+	w.u.emit(p, false, sevProgress)
 	return len(p), nil
+}
+
+// severity is what a call site declares about a milestone line, so render
+// can choose its colour without re-deriving meaning from the wording the way
+// the rule table it replaces did. sevProgress, the zero value, is what an
+// unmigrated log.Printf gets implicitly — the stdlib log package has no way
+// to carry anything richer per call — and it renders exactly as an
+// unclassified line always has: plain. sevSection is not one of the
+// semantic severities a caller "feels" (success/warning/error/settings); it
+// marks the shift's own two structural headings, which need a colour but no
+// sentiment. See PLAN.md's "scope decisions" for why it exists.
+type severity int
+
+const (
+	sevProgress severity = iota
+	sevSuccess
+	sevWarning
+	sevError
+	sevSettings
+	sevSection
+)
+
+// narrate emits one milestone line at the severity its caller declares. It
+// resolves its target the same way the default logger's Write does — through
+// whatever log.SetOutput currently points at — so a test that redirects the
+// default logger redirects severity-aware narration too, with no separate
+// wiring to keep in sync.
+func narrate(sev severity, format string, args ...any) {
+	u := sinks
+	if mw, ok := log.Writer().(milestoneWriter); ok {
+		u = mw.u
+	}
+	s := fmt.Sprintf(format, args...)
+	if len(s) == 0 || s[len(s)-1] != '\n' {
+		s += "\n"
+	}
+	u.emit([]byte(s), true, sev)
+}
+
+// fatal narrates at error severity, then ends the process the same way
+// log.Fatalf always did.
+func fatal(format string, args ...any) {
+	narrate(sevError, format, args...)
+	os.Exit(1)
 }
 
 // emit renders one record to the sinks. The log package delivers each record
 // as a single Write call, so stamping per call never splits a line.
-func (u *ui) emit(p []byte, milestone bool) {
+func (u *ui) emit(p []byte, milestone bool, sev severity) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	now := time.Now().Format(stampLayout)
@@ -75,7 +119,7 @@ func (u *ui) emit(p []byte, milestone bool) {
 		if u.stamp {
 			io.WriteString(u.terminal, now)
 		}
-		io.WriteString(u.terminal, u.style.render(string(p), milestone))
+		io.WriteString(u.terminal, u.style.render(string(p), milestone, sev))
 	}
 	if u.file == nil {
 		return
@@ -88,7 +132,7 @@ func (u *ui) emit(p []byte, milestone bool) {
 		if u.stamp {
 			io.WriteString(u.terminal, now)
 		}
-		io.WriteString(u.terminal, u.style.render(fmt.Sprintf(logLostFmt+"\n", err), true))
+		io.WriteString(u.terminal, u.style.render(fmt.Sprintf(logLostFmt+"\n", err), true, sevWarning))
 	}
 }
 
@@ -161,11 +205,11 @@ func (s styler) wrap(code, line string) string {
 }
 
 // render styles one terminal record. Detail lines (seen only under -verbose)
-// are dimmed as a block so the milestones keep standing out; milestones are
-// matched on their own wording, because colour is cosmetic — a rule that
-// misses leaves a plain line, never a lost one — and that keeps every call
-// site free of presentation.
-func (s styler) render(line string, milestone bool) string {
+// are dimmed as a block so the milestones keep standing out; a milestone's
+// colour comes from the severity its call site declared, never from the
+// wording — a caller that forgets to declare one renders plain, never
+// wrong, and every future rewording keeps its colour for free.
+func (s styler) render(line string, milestone bool, sev severity) string {
 	if !s.on {
 		return line
 	}
@@ -173,30 +217,16 @@ func (s styler) render(line string, milestone bool) string {
 	if !milestone {
 		return s.wrap("\x1b[2m", text) + "\n" + nl
 	}
-	switch {
-	case strings.HasPrefix(text, "=== "), strings.HasPrefix(text, "summary:"):
+	switch sev {
+	case sevSection:
 		text = s.wrap("\x1b[1m", text) // bold: the shift's section marks
-	case strings.Contains(text, "finished (ERROR"), strings.HasPrefix(text, "stopping:"):
+	case sevError:
 		text = s.wrap("\x1b[31m", text) // red: the shift lost something here
-	case strings.Contains(text, "finished (ok"),
-		strings.Contains(text, "merged — cleaning up"),
-		strings.Contains(text, "backlog cleared"):
+	case sevSuccess:
 		text = s.wrap("\x1b[32m", text) // green: forward progress
-	case strings.HasPrefix(text, "transient:"),
-		strings.Contains(text, "needs a human"),
-		strings.HasPrefix(text, "could not "),
-		strings.HasPrefix(text, "no activity for "),
-		strings.HasPrefix(text, "shift log not written"),
-		strings.HasPrefix(text, "run data not recorded"),
-		strings.HasPrefix(text, "gh too old to see sub-issues"),
-		strings.HasPrefix(text, "ignoring "):
+	case sevWarning:
 		text = s.wrap("\x1b[33m", text) // yellow: needs an eye, not a stop
-	case strings.HasPrefix(text, "-remote is on"),
-		strings.HasPrefix(text, "-post-summary is on"),
-		strings.HasPrefix(text, "-notify is on"),
-		strings.HasPrefix(text, "recording run data in"),
-		strings.HasPrefix(text, "this shift is "),
-		strings.HasPrefix(text, "logging this shift in full"):
+	case sevSettings:
 		text = s.wrap("\x1b[2m", text) // dim: the startup preference recap
 	}
 	return text + "\n" + nl
