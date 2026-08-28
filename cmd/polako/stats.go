@@ -89,8 +89,9 @@ type statsOptions struct {
 }
 
 // runStats is the `stats` subcommand: parse its own flags, read the records,
-// print one report. now is passed in so -since is testable.
-func runStats(args []string, out io.Writer, now time.Time) error {
+// print one report. now is passed in so -since is testable; rpt is the
+// styler stats/status share, TTY-detected on stdout at the dispatch in main.
+func runStats(args []string, out io.Writer, now time.Time, rpt report) error {
 	fs := flag.NewFlagSet("stats", flag.ContinueOnError)
 	fs.SetOutput(out)
 	var opt statsOptions
@@ -148,7 +149,7 @@ func runStats(args []string, out io.Writer, now time.Time) error {
 		return err
 	}
 	issues := rollUpIssues(ds)
-	render(out, ds, issues, opt)
+	render(out, rpt, ds, issues, opt)
 	if opt.html == "" {
 		return nil
 	}
@@ -526,7 +527,7 @@ func mergeSpan(is *issueStats) (time.Duration, bool) {
 
 // --- rendering ---
 
-func render(w io.Writer, ds dataset, issues []*issueStats, opt statsOptions) {
+func render(w io.Writer, rpt report, ds dataset, issues []*issueStats, opt statsOptions) {
 	if len(ds.runs) == 0 && len(ds.issues) == 0 {
 		fmt.Fprintf(w, "no run data in %s%s\n", ds.dir, scopeSuffix(opt, ds))
 		if len(ds.unread) > 0 {
@@ -540,23 +541,23 @@ func render(w io.Writer, ds dataset, issues []*issueStats, opt statsOptions) {
 		return
 	}
 
-	fmt.Fprintf(w, "run data from %s\n", ds.dir)
-	printPairs(w, "", sourcePairs(ds, opt))
-	printPairs(w, "issues", issuePairs(issues))
-	printPairs(w, "runs", runPairs(ds))
-	printPairs(w, "cost", costPairs(ds, issues))
-	printPairs(w, "human latency", latencyPairs(issues))
+	fmt.Fprintf(w, "%s\n", rpt.bold(fmt.Sprintf("run data from %s", ds.dir)))
+	printPairs(w, rpt, "", sourcePairs(ds, opt))
+	printPairs(w, rpt, "issues", issuePairs(issues))
+	printPairs(w, rpt, "runs", runPairs(ds))
+	printPairs(w, rpt, "cost", costPairs(ds, issues))
+	printPairs(w, rpt, "human latency", latencyPairs(issues))
 
 	switch opt.by {
 	case byIssue:
-		printIssueTable(w, issues)
+		printIssueTable(w, rpt, issues)
 	case byModel, byTag, byShift:
-		printGroupTable(w, ds, issues, opt.by)
+		printGroupTable(w, rpt, ds, issues, opt.by)
 	}
 	// Last, because it is the rawest view of the same rows every summary above
 	// it was derived from.
 	if opt.runs {
-		printRunTable(w, ds)
+		printRunTable(w, rpt, ds)
 	}
 }
 
@@ -896,8 +897,8 @@ func issueRows(issues []*issueStats) [][]string {
 	return rows
 }
 
-func printIssueTable(w io.Writer, issues []*issueStats) {
-	printTable(w, "by issue", issueHeader, issueRows(issues), issueLeft)
+func printIssueTable(w io.Writer, rpt report, issues []*issueStats) {
+	printTable(w, rpt, "by issue", issueHeader, issueRows(issues), issueLeft)
 }
 
 // noValue fills a table cell a record has nothing for — most often the session
@@ -961,18 +962,18 @@ func runRows(ds dataset) [][]string {
 	return rows
 }
 
-func printRunTable(w io.Writer, ds dataset) {
+func printRunTable(w io.Writer, rpt report, ds dataset) {
 	if len(ds.runs) == 0 {
 		// Reached when a window kept issue records but clipped every run away.
-		fmt.Fprint(w, "\nrun log\n  (no runs in this window)\n")
+		fmt.Fprintf(w, "\n%s\n  (no runs in this window)\n", rpt.bold("run log"))
 		return
 	}
-	printTable(w, "run log", runHeader, runRows(ds), runLeft)
+	printTable(w, rpt, "run log", runHeader, runRows(ds), runLeft)
 }
 
-func printGroupTable(w io.Writer, ds dataset, issues []*issueStats, by string) {
+func printGroupTable(w io.Writer, rpt report, ds dataset, issues []*issueStats, by string) {
 	rows, spanning := groupRows(ds, issues, by)
-	printTable(w, "by "+by, groupHeader(by), rows, groupLeft)
+	printTable(w, rpt, "by "+by, groupHeader(by), rows, groupLeft)
 	if note := spanningNote(spanning, by); note != "" {
 		fmt.Fprintf(w, "  %s\n", note)
 	}
@@ -1090,7 +1091,7 @@ func groupRows(ds dataset, issues []*issueStats, by string) (rows [][]string, sp
 
 // --- plain aligned text ---
 
-func printPairs(w io.Writer, title string, pairs [][2]string) {
+func printPairs(w io.Writer, rpt report, title string, pairs [][2]string) {
 	if len(pairs) == 0 {
 		return
 	}
@@ -1102,15 +1103,19 @@ func printPairs(w io.Writer, title string, pairs [][2]string) {
 		width = max(width, len(p[0]))
 	}
 	for _, p := range pairs {
-		fmt.Fprintf(w, "  %-*s  %s\n", width, p[0], p[1])
+		// Padded first, styled after: wrapping ANSI codes around the label
+		// before %-*s pads it would make the escape bytes count toward the
+		// width and misalign every row behind it.
+		label := rpt.cell(fmt.Sprintf("%-*s", width, p[0]))
+		fmt.Fprintf(w, "  %s  %s\n", label, rpt.cell(p[1]))
 	}
 }
 
 // printTable aligns a header and its rows: the leading left columns name
 // things, everything after them is a number, and a column of dollars only
 // reads as a column when it is right-aligned.
-func printTable(w io.Writer, title string, header []string, rows [][]string, left int) {
-	fmt.Fprintf(w, "\n%s\n", title)
+func printTable(w io.Writer, rpt report, title string, header []string, rows [][]string, left int) {
+	fmt.Fprintf(w, "\n%s\n", rpt.bold(title))
 	if len(rows) == 0 {
 		fmt.Fprintln(w, "  (no runs in this window to break down)")
 		return
@@ -1124,21 +1129,29 @@ func printTable(w io.Writer, title string, header []string, rows [][]string, lef
 			widths[i] = max(widths[i], len(cell))
 		}
 	}
-	line := func(cells []string) {
+	line := func(cells []string, style func(string) string) {
 		var b strings.Builder
 		for i, cell := range cells {
 			b.WriteString("  ")
+			var padded string
 			if i < left {
-				fmt.Fprintf(&b, "%-*s", widths[i], cell)
+				padded = fmt.Sprintf("%-*s", widths[i], cell)
 			} else {
-				fmt.Fprintf(&b, "%*s", widths[i], cell)
+				padded = fmt.Sprintf("%*s", widths[i], cell)
 			}
+			if i == len(cells)-1 {
+				// Trimmed before styling, not after: a styled last cell ends
+				// in a reset code, not a space, so trimming the assembled
+				// line after the fact would miss padding a style wrapped.
+				padded = strings.TrimRight(padded, " ")
+			}
+			b.WriteString(style(padded))
 		}
-		fmt.Fprintln(w, strings.TrimRight(b.String(), " "))
+		fmt.Fprintln(w, b.String())
 	}
-	line(header)
+	line(header, rpt.dim)
 	for _, row := range rows {
-		line(row)
+		line(row, rpt.cell)
 	}
 }
 

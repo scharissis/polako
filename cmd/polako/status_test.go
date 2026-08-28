@@ -80,7 +80,7 @@ func TestStatusReportsWhereTheBacklogStands(t *testing.T) {
 	}
 
 	var out strings.Builder
-	renderStatus(&out, cfg, snap)
+	renderStatus(&out, report{}, cfg, snap)
 	printed := out.String()
 	for _, want := range []string{
 		"example/repo",
@@ -104,6 +104,100 @@ func TestStatusReportsWhereTheBacklogStands(t *testing.T) {
 				unwanted, printed)
 		}
 	}
+
+	// The whole report, byte for byte, with report{} — the zero value, and
+	// what every pipe gets: no call site decided to colour anything, so
+	// today's plain bytes must be untouched by the renderer that now sits in
+	// front of them. Captured from this exact scenario, not re-derived from
+	// the new renderer — the same rule stats.go's TestStatsReport already
+	// follows for its own report.
+	want := `example/repo
+  ready         2 issues — #3, #5
+  awaiting you  1 issue — #7 (quiet 26h)
+  parked        1 issue — #9, labelled needs-human
+  next          #3 — its branch already has PR #40, so it would wait on that rather than run the skill again
+
+open prs on issue branches
+  pr   branch   issue  mergeable  checks   review  url
+  #40  issue-3  #3     mergeable  passing  clear   https://example.invalid/pr/40
+
+needs you: reply on #7; review and merge PR #40; decide what to do about #9 (drop needs-human to requeue)
+`
+	if printed != want {
+		t.Errorf("report differs\n--- got ---\n%s\n--- want ---\n%s", printed, want)
+	}
+}
+
+// The same snapshot again, this time through a report whose styler is on —
+// the palette applied where it matters (the repo line, the table title, the
+// column headers, a parked row, a failing check, the needs-you line) and left
+// alone everywhere else (a plain "mergeable" cell, "clear" review), with the
+// columns still aligned once the ANSI is stripped back out.
+func TestRenderStatusAppliesThePaletteOnAColourTTY(t *testing.T) {
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues: map[string]*fakeIssue{
+			"3": {Open: true},
+			"5": {Open: true},
+			"7": {Open: true, Labels: []string{awaitingAnswerLabel}, Comments: 2, CommentedAt: statusNow.Add(-26 * time.Hour).Format(time.RFC3339)},
+			"9": {Open: true, Labels: []string{needsHumanLabel}},
+		},
+		PRs: map[string]*fakePR{
+			"issue-3": {Number: 40, State: "OPEN", Mergeable: "MERGEABLE", Checks: []string{"FAILURE"}},
+		},
+	})
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+
+	var out strings.Builder
+	renderStatus(&out, report{style: styler{on: true}}, cfg, snap)
+	printed := out.String()
+
+	for _, want := range []string{
+		"\x1b[1mexample/repo\x1b[0m\n",                  // the repo line, bold
+		"\x1b[1mopen prs on issue branches\x1b[0m\n",     // the table title, bold
+		"\x1b[2mmergeable\x1b[0m",                        // a column header, dim
+		"\x1b[33mparked      \x1b[0m  1 issue",           // the parked row's label, yellow
+		"\x1b[33mfailing (check-1)\x1b[0m",                // the failing check, yellow
+		"\x1b[1mneeds you: reply on #7; " +
+			"decide what to do about #9 (drop needs-human to requeue)\x1b[0m", // the closing line, bold
+	} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("coloured report is missing %q\ngot:\n%q", want, printed)
+		}
+	}
+	for _, plain := range []string{"mergeable", "clear"} {
+		if strings.Contains(printed, "\x1b[33m"+plain) {
+			t.Errorf("%q has no attention marker and must not be highlighted\ngot:\n%q", plain, printed)
+		}
+	}
+
+	// Strip every ANSI wrap and the plain report comes back byte for byte:
+	// the palette is decoration painted over the same bytes, and the plain
+	// renderer's own render of this scenario is the reference.
+	var plain strings.Builder
+	renderStatus(&plain, report{}, cfg, snap)
+	if got, want := stripANSI(printed), plain.String(); got != want {
+		t.Errorf("colour changed what the report says\n--- stripped ---\n%s\n--- plain ---\n%s", got, want)
+	}
+}
+
+// stripANSI removes every "\x1b[...m" escape this package's styler ever
+// writes, so a coloured report can be compared against its plain shape.
+func stripANSI(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == '\x1b' {
+			if j := strings.IndexByte(s[i:], 'm'); j >= 0 {
+				i += j + 1
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
 }
 
 // `status` answers "what would a drain work here?", so it has to exclude
@@ -145,7 +239,7 @@ func TestStatusInheritsTheCurationGate(t *testing.T) {
 	}
 
 	var out strings.Builder
-	renderStatus(&out, cfg, snap)
+	renderStatus(&out, report{}, cfg, snap)
 	printed := out.String()
 	// What is held back is named, not merely absent: an operator reading a
 	// snapshot that showed neither would have no way to find the batch at all.
@@ -178,7 +272,7 @@ func TestStatusDoesNotCallAGatedBacklogCleared(t *testing.T) {
 		t.Fatalf("readStatus: %v", err)
 	}
 	var out strings.Builder
-	renderStatus(&out, cfg, snap)
+	renderStatus(&out, report{}, cfg, snap)
 	printed := out.String()
 	if strings.Contains(printed, "backlog cleared") {
 		t.Errorf("two open issues is not a cleared backlog:\n%s", printed)
@@ -210,7 +304,7 @@ func TestStatusMakesOnlyReadCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readStatus: %v", err)
 	}
-	renderStatus(&strings.Builder{}, cfg, snap)
+	renderStatus(&strings.Builder{}, report{}, cfg, snap)
 
 	after, err := os.ReadFile(path)
 	if err != nil {
@@ -267,7 +361,7 @@ func TestStatusNamesTheAnswerItWouldChase(t *testing.T) {
 		t.Fatalf("next = %d, want #4", snap.next)
 	}
 	var out strings.Builder
-	renderStatus(&out, cfg, snap)
+	renderStatus(&out, report{}, cfg, snap)
 	for _, want := range []string{
 		"ready         no issue is workable right now",
 		"next          #4 — nothing else is workable",
@@ -308,7 +402,7 @@ func TestStatusHonoursStrictOrder(t *testing.T) {
 		t.Fatalf("next = %d, want #4: -strict-order waits in place on it", snap.next)
 	}
 	var out strings.Builder
-	renderStatus(&out, strict, snap)
+	renderStatus(&out, report{}, strict, snap)
 	for _, want := range []string{
 		"example/repo — -strict-order", // said out loud: the flag can come from the environment
 		"next          #4 — -strict-order holds the queue behind it",
@@ -329,7 +423,7 @@ func TestStatusSaysWhenTheBacklogIsDrained(t *testing.T) {
 		t.Fatalf("readStatus: %v", err)
 	}
 	var out strings.Builder
-	renderStatus(&out, cfg, snap)
+	renderStatus(&out, report{}, cfg, snap)
 	if want := "nothing open — a shift starting now would find the backlog cleared"; !strings.Contains(out.String(), want) {
 		t.Errorf("report is missing %q\ngot:\n%s", want, out.String())
 	}
@@ -358,7 +452,7 @@ func TestStatusSaysWhichPRsItLeftUndetailed(t *testing.T) {
 		t.Errorf("undetailed = %v, want %v", snap.undetailed, want)
 	}
 	var out strings.Builder
-	renderStatus(&out, cfg, snap)
+	renderStatus(&out, report{}, cfg, snap)
 	for _, want := range []string{
 		fmt.Sprintf("(2 PRs past the first %d, listed without state: #%d, #%d)",
 			statusPRs, 100+statusPRs+1, 100+statusPRs+2),
@@ -541,7 +635,7 @@ func TestStatusNextRespectsRestartSafetyOnAFlaggedIssue(t *testing.T) {
 }
 
 func TestRunStatusRejectsAnArgument(t *testing.T) {
-	err := runStatus(context.Background(), []string{"12"}, &strings.Builder{}, statusNow)
+	err := runStatus(context.Background(), []string{"12"}, &strings.Builder{}, statusNow, report{})
 	if err == nil || !strings.Contains(err.Error(), "status takes flags only") {
 		t.Errorf("err = %v, want a complaint about the argument", err)
 	}
