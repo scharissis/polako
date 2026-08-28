@@ -29,10 +29,53 @@ visibly alive, rather than spent inside one call a watchdog cannot tell from a
 hang. Backgrounding the slow thing is fine; what is not is the turn ending
 while it is still outstanding.
 
-Stopping on purpose is a different thing from stopping to wait. Phase 2's
-unanswered question ends the run deliberately, flagged with `awaiting-answer`
-for a human to answer and a later run to fold in — that is this run's result,
-not a pause, and none of the above argues for guessing instead.
+Stopping on purpose is a different thing from stopping to wait. An unanswered
+question ends the run deliberately, flagged with `awaiting-answer` for a human
+to answer and a later run to fold in — that is this run's result, not a
+pause, and none of the above argues for guessing instead.
+
+## No prompts, ever
+Unattended means no prompts: `--allowedTools` grants a fixed set of command
+prefixes, and anything outside it — `cd` among them, along with
+`EnterWorktree` or any other tool `ToolSearch` surfaces for moving the
+session's own working directory — raises a confirmation nobody is there to
+answer. Under `claude -p` that confirmation is not a pause; it is the run
+ending having produced nothing, which reads to the supervisor as
+indistinguishable from silence and parks a perfectly good issue.
+
+So: never reach for a tool on the chance it is granted, and never `cd`. Work
+in another directory by naming it instead — `git -C <path>`, `go -C <path>`,
+or a tool call that already takes a path argument (Read, Write, Edit all do)
+— every place below that might otherwise say "cd into it" says this instead.
+
+## Asking a question
+Anything that genuinely blocks you — a planning question, a missing
+prerequisite, a tool this run isn't granted — is a question for the issue
+thread, not a silent stop, in any phase from here on including this one:
+
+1. Post it with `gh issue comment $issue`, in terse, simple English.
+2. Flag it with exactly:
+
+       gh issue edit $issue --add-label awaiting-answer
+
+   Issue number first, that spelling — it is the only form the run is
+   permitted, and any other raises a permission prompt nobody is there to
+   answer. That label is the only thing telling the supervisor a question
+   was asked rather than nothing produced; without it your questions are
+   never waited on. If the command fails, say so in your final message and
+   stop anyway — do not try to create the label or reach for another
+   command.
+3. STOP. Do not implement, and do not guess an answer instead.
+
+Once there's a reply, fold it into PLAN.md (writing one first if none exists
+yet), mark it FINAL if that closes out planning, and clear the flag:
+
+    gh issue edit $issue --remove-label awaiting-answer
+
+If PLAN.md already has open questions and the thread still hasn't answered
+them, none of the above applies: leave the label where it is, don't post the
+questions a second time, and stop. Removing the label would tell the
+supervisor to carry on without an answer.
 
 ## Phase 0 — Gather context (every run, before anything else)
 1. Run `gh issue view $issue --json number,title,state,body,comments` and read it.
@@ -60,15 +103,23 @@ on the commits already there — never recreate the branch from the default
 branch, which would discard them. Then, by case:
 
 - If this session is already inside a Claude-managed worktree (cwd contains
-  `.claude/worktrees/`): stay here. Check out issue-$issue if it exists,
-  otherwise create it from the remote default branch (`git symbolic-ref
-  refs/remotes/origin/HEAD --short`).
-- Else if a worktree for issue-$issue exists: cd into it.
+  `.claude/worktrees/`): stay here — this is the one case with nowhere else to
+  name. Check out issue-$issue if it exists, otherwise create it from the
+  remote default branch (`git symbolic-ref refs/remotes/origin/HEAD --short`).
+- Else if a worktree for issue-$issue exists: note its absolute path and use
+  it for every command from here on — `git -C <path> ...`, `go -C <path> ...`
+  and the like, and absolute paths for reading and writing files in it
+  (PLAN.md, PR_BODY.md). Never `cd` there.
 - Else: take the repo name from the main checkout (first line of
   `git worktree list`) and `git worktree add` a sibling folder
   `<repo>-issue-$issue` for branch issue-$issue — taking an existing branch
   as-is (`git worktree add <path> issue-$issue`), and only using `-b` off the
-  remote default branch when there is no such branch anywhere.
+  remote default branch when there is no such branch anywhere. That path is
+  the one to carry forward the same way.
+
+If a prerequisite this issue depends on — a branch, an earlier PR, a file the
+issue assumes exists — turns out not to have landed, that's a finding for the
+thread, not a reason to end the run quietly: see "Asking a question" above.
 
 ## Phase 2 — Plan
 If PLAN.md doesn't exist in the worktree, or new answers have appeared:
@@ -77,35 +128,16 @@ If PLAN.md doesn't exist in the worktree, or new answers have appeared:
    to touch, scope decisions, anything deliberately left out. It's the
    resume point if this session dies.
 2. If anything genuinely blocks implementation: record the questions in
-   PLAN.md under "## Open questions", post them with
-   `gh issue comment $issue` in terse, simple English, and then flag the
-   issue with exactly:
-
-       gh issue edit $issue --add-label awaiting-answer
-
-   Issue number first, that spelling — it is the only form the run is
-   permitted, and any other raises a permission prompt nobody is there to
-   answer. That label is the only thing telling the supervisor a question
-   was asked rather than nothing produced; without it your questions are
-   never waited on. If the command fails, say so in your final message
-   and stop anyway — do not try to create the label or reach for another
-   command. Then STOP and tell me to re-run once there's a reply. Do not
-   implement.
+   PLAN.md under "## Open questions", then ask them the way "Asking a
+   question" above describes, and stop.
 3. If the thread answers previously posted questions, fold them into
-   PLAN.md, mark it FINAL, and clear the flag with
-   `gh issue edit $issue --remove-label awaiting-answer`.
+   PLAN.md, mark it FINAL, and clear the flag the way "Asking a question"
+   above describes.
 
 If PLAN.md already has open questions and the thread still hasn't answered
 them, none of the above applies: leave the label where it is, don't post the
 questions a second time, and stop. Removing the label would tell the
 supervisor to carry on without an answer.
-
-The flag is not particular to planning. Any time you stop to ask something on
-the issue thread — mid-implementation, at the review gate, anywhere past this
-phase — post the question and raise the label the same way before stopping. An
-unflagged question is one nobody waits for: the supervisor reads the run as
-having produced nothing and parks the issue, leaving your question sitting
-unanswered on the thread.
 
 ## Phase 3 — Implement (only when PLAN.md exists and isn't blocked)
 1. Implement the plan, committing in logical increments following the
@@ -126,8 +158,8 @@ unanswered on the thread.
       branch.
    b. Invoke `/code-review high --fix issue-$issue` and address its
       findings. Name the branch every time: the review forks a fresh
-      agent that starts in the session's cwd, which the Phase 1 `cd`
-      does not move, so with no target it reviews whatever the main
+      agent that starts in the session's cwd, and nothing in this skill
+      ever moves that cwd, so with no target it reviews whatever the main
       checkout holds — on a clean default branch, a change someone
       already merged — and writes its fixes there.
    c. Check what it reviewed against `git log --oneline` for your own
