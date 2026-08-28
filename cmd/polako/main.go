@@ -698,7 +698,7 @@ func main() {
 			log.Println("interrupted — state is on GitHub; rerun to resume")
 			os.Exit(130)
 		}
-		log.Fatalf("stopping: %v", err)
+		fatal("stopping: %v", err)
 	}
 }
 
@@ -1078,8 +1078,11 @@ func drain(ctx context.Context, cfg config) error {
 	// died on is not among them — unfinished is not an outcome — so a run that
 	// dies on its first issue has nothing to summarize and says nothing.
 	finish := func(err error) error {
-		for _, line := range drainSummary(append(results, stillWaiting(states)...), time.Since(started)) {
-			log.Print(line)
+		if lines := drainSummary(append(results, stillWaiting(states)...), time.Since(started)); len(lines) > 0 {
+			narrate(sevSection, "%s", lines[0]) // the shift's own closing heading
+			for _, line := range lines[1:] {
+				log.Print(line)
+			}
 		}
 		// A drain that ended before the backlog did needs somebody. Ctrl+C is
 		// the exception rather than an oversight: whoever pressed it is at the
@@ -1121,7 +1124,7 @@ func drain(ctx context.Context, cfg config) error {
 				// Naming those in the summary would send an operator to a thread
 				// with nothing left to do on it.
 				clear(states)
-				log.Println("no open issues — backlog cleared")
+				narrate(sevSuccess, "no open issues — backlog cleared")
 				notify(ctx, cfg, notification{event: notifyCleared,
 					reason: "no open issues left to work"})
 				return finish(nil)
@@ -1135,7 +1138,7 @@ func drain(ctx context.Context, cfg config) error {
 				continue // the queue moved while waiting — ask GitHub again
 			}
 		}
-		log.Printf("=== issue #%d ===", issue)
+		narrate(sevSection, "=== issue #%d ===", issue)
 
 		st := states[issue]
 		if st == nil {
@@ -1158,7 +1161,7 @@ func drain(ctx context.Context, cfg config) error {
 			skip[issue] = true
 			results = append(results, spend(st, issueResult{issue: issue, parked: true, reason: reason}))
 			delete(states, issue)
-			log.Printf("issue #%d needs a human: %s — parking it and moving on", issue, reason)
+			narrate(sevWarning, "issue #%d needs a human: %s — parking it and moving on", issue, reason)
 			// Whatever the park had to say that the issue thread must not carry.
 			// Today that is where on this disk the work it left is sitting.
 			if aside := parkAsideOf(err); aside != "" {
@@ -1249,7 +1252,7 @@ func awaitAnswer(ctx context.Context, cfg config, blocked []int, states map[int]
 			if ctx.Err() != nil {
 				return 0, ctx.Err()
 			}
-			log.Printf("transient: checking #%d comments failed (%v) — will retry", issue, err)
+			narrate(sevWarning, "transient: checking #%d comments failed (%v) — will retry", issue, err)
 			continue
 		}
 		baseline := states[issue].baseline
@@ -1298,7 +1301,7 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string) {
 		}
 	}
 	if err != nil {
-		log.Printf("could not label issue #%d %q (%v) — the next shift will pick it up again "+
+		narrate(sevWarning, "could not label issue #%d %q (%v) — the next shift will pick it up again "+
 			"unless you label it yourself or close it", issue, needsHumanLabel, err)
 	}
 	// Parking supersedes any question still flagged on the issue: what it now
@@ -1310,7 +1313,7 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string) {
 	body := fmt.Sprintf("**polako parked this issue.** %s\n\n"+
 		"Nothing will run on it again until the `%s` label is removed.", reason, needsHumanLabel)
 	if _, cerr := gh(ctx, cfg, "issue", "comment", n, "--body", body); cerr != nil {
-		log.Printf("could not comment on issue #%d (%v) — the reason is in this log and in the exit summary",
+		narrate(sevWarning, "could not comment on issue #%d (%v) — the reason is in this log and in the exit summary",
 			issue, cerr)
 	}
 }
@@ -1440,7 +1443,7 @@ func preflight(ctx context.Context, cfg *config) error {
 			// The stamps were dropped from a TTY on the promise the log would
 			// hold them; without one, the terminal takes them back.
 			sinks.keepStamps()
-			log.Printf(logLostFmt, err)
+			narrate(sevWarning, logLostFmt, err)
 		} else {
 			logPath = path
 		}
@@ -1486,10 +1489,10 @@ func preflight(ctx context.Context, cfg *config) error {
 		// The environment can set this, so say it out loud: an operator who
 		// forgot the variable is in their profile should not have to work out
 		// where the PR comments are coming from.
-		log.Printf("-post-summary is on — each merged PR gets one comment of run numbers")
+		narrate(sevSettings, "-post-summary is on — each merged PR gets one comment of run numbers")
 	}
 	if cfg.notifyCmd != "" {
-		log.Printf("-notify is on — `%s` runs when an issue parks, an issue asks a question, "+
+		narrate(sevSettings, "-notify is on — `%s` runs when an issue parks, an issue asks a question, "+
 			"the backlog clears, or the shift stops early", cfg.notifyCmd)
 	}
 	if cfg.remote {
@@ -1498,26 +1501,26 @@ func preflight(ctx context.Context, cfg *config) error {
 		// on-by-default flag that quietly does nothing is worse than one that
 		// quietly does something, because the operator goes looking for sessions
 		// that will never appear.
-		log.Print("-remote is on, but no claude CLI registers headless runs with Remote Control yet — " +
-			"runs stay on this machine and unwatched, and nothing is sent anywhere " +
+		narrate(sevSettings, "-remote is on, but no claude CLI registers headless runs with Remote Control yet — "+
+			"runs stay on this machine and unwatched, and nothing is sent anywhere "+
 			"(-remote=false silences this line; a later polako lights the flag up once a CLI supports it)")
 	}
 	if cfg.rec.enabled() {
 		// Say where the data goes, every time, unprompted: it is the whole of
 		// the answer to "what does this tool record".
-		log.Printf("recording run data in %s — numbers only, never leaves this machine (-metrics off to disable)",
+		narrate(sevSettings, "recording run data in %s — numbers only, never leaves this machine (-metrics off to disable)",
 			cfg.rec.dir)
 		// The one place the id is ever shown. Nothing reads it back, so a
 		// report on this drain alone is unaskable unless this line is where an
 		// operator finds it — including while the drain is still running.
-		log.Printf("this shift is %s — `polako stats -shift %s` reports on it alone",
+		narrate(sevSettings, "this shift is %s — `polako stats -shift %s` reports on it alone",
 			cfg.shiftID, cfg.shiftID)
 	}
 	if logPath != "" {
 		// The disclosure, said every time like the recorder's line: unlike the
 		// run-data records this file holds transcript text, so where it lives
 		// and that it stays local is worth a line per shift.
-		log.Printf("logging this shift in full to %s — the whole claude transcript stream, "+
+		narrate(sevSettings, "logging this shift in full to %s — the whole claude transcript stream, "+
 			"kept on this machine (-log off to disable)", logPath)
 	}
 	return nil
@@ -1892,7 +1895,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 			// the child through the context, so a resume interrupted before its
 			// first event looks exactly like a dead session and is not one.
 			if resumeTarget != "" && runErr != nil && ctx.Err() == nil && !rep.started {
-				log.Printf("session %s could not be resumed — the next attempt starts a fresh run, "+
+				narrate(sevWarning, "session %s could not be resumed — the next attempt starts a fresh run, "+
 					"which re-derives where the last one got to from the worktree", resumeTarget)
 				st.session = ""
 			}
@@ -2178,7 +2181,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 			fallthrough
 		case "MERGED", "CLOSED":
 			if pr.State == "MERGED" {
-				log.Printf("PR #%d merged — cleaning up and advancing", pr.Number)
+				narrate(sevSuccess, "PR #%d merged — cleaning up and advancing", pr.Number)
 				cleanupWorktree(ctx, cfg, issue)
 				// The merge just made the local default branch stale. The next issue
 				// would sync anyway; doing it here too is what leaves the operator a
@@ -2332,7 +2335,7 @@ func (c config) dropSubIssues() {
 	if c.queue != nil && c.queue.subIssuesOff.Swap(true) {
 		return
 	}
-	log.Print("gh too old to see sub-issues; container issues will be treated as workable — upgrade gh")
+	narrate(sevWarning, "gh too old to see sub-issues; container issues will be treated as workable — upgrade gh")
 }
 
 // sayProposals names what the curation gate is holding back, once a shift, so a
@@ -2347,7 +2350,7 @@ func (c config) sayProposals(n int) {
 	if c.queue != nil && c.queue.saidProposed.Swap(true) {
 		return
 	}
-	log.Printf("ignoring %d proposed issue(s) awaiting curation — remove the %s label to queue them",
+	narrate(sevWarning, "ignoring %d proposed issue(s) awaiting curation — remove the %s label to queue them",
 		n, proposedLabel)
 }
 
@@ -2827,7 +2830,7 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 				case <-t.C:
 					idle := time.Since(time.Unix(0, lastEvent.Load()))
 					if idle > cfg.stall {
-						log.Printf("no activity for %s — killing the run to resume it",
+						narrate(sevWarning, "no activity for %s — killing the run to resume it",
 							idle.Round(time.Millisecond))
 						stalled.Store(true)
 						_ = cmd.Process.Kill()
@@ -3009,7 +3012,11 @@ func logEvent(ev streamEvent) {
 				status += ": " + ev.Subtype
 			}
 		}
-		log.Printf("[claude] finished (%s) — %d turns, %s, $%.2f", status, ev.NumTurns,
+		sev := sevSuccess
+		if ev.IsError {
+			sev = sevError
+		}
+		narrate(sev, "[claude] finished (%s) — %d turns, %s, $%.2f", status, ev.NumTurns,
 			(time.Duration(ev.DurationMS) * time.Millisecond).Round(time.Second), ev.TotalCost)
 	}
 }
@@ -3401,7 +3408,7 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, tally *is
 			if ctx.Err() != nil {
 				return "", ctx.Err()
 			}
-			log.Printf("transient: checking PR #%d failed (%v) — will retry", prNumber, err)
+			narrate(sevWarning, "transient: checking PR #%d failed (%v) — will retry", prNumber, err)
 		case pr.state != "OPEN":
 			return pr.state, nil
 		case overspent != "" && pr.remediable():
@@ -3945,7 +3952,7 @@ func postSummary(ctx context.Context, cfg config, prNumber int, tally issueTally
 		return
 	}
 	if _, err := gh(ctx, cfg, "pr", "comment", strconv.Itoa(prNumber), "--body", summaryComment(tally)); err != nil {
-		log.Printf("could not comment the run summary on PR #%d (%v) — the shift continues", prNumber, err)
+		narrate(sevWarning, "could not comment the run summary on PR #%d (%v) — the shift continues", prNumber, err)
 		return
 	}
 	log.Printf("commented the run summary on PR #%d", prNumber)
@@ -3958,7 +3965,7 @@ func waitForReply(ctx context.Context, cfg config, issue int, baseline int64) er
 		}
 		comments, err := issueComments(ctx, cfg, issue)
 		if err != nil {
-			log.Printf("transient: checking #%d comments failed (%v) — will retry", issue, err)
+			narrate(sevWarning, "transient: checking #%d comments failed (%v) — will retry", issue, err)
 			continue
 		}
 		if replyArrived(comments, baseline) {
@@ -4032,13 +4039,13 @@ func ensureIssueClosed(ctx context.Context, cfg config, issue, prNumber int) err
 // loudly because a skipped sync is what puts a stale base under the next review.
 func syncDefaultBranch(ctx context.Context, cfg config) {
 	if _, err := git(ctx, cfg, "fetch", "origin", "--quiet"); err != nil {
-		log.Printf("could not fetch origin, so the default branch may be behind "+
+		narrate(sevWarning, "could not fetch origin, so the default branch may be behind "+
 			"and a review may run against a stale base: %v", err)
 		return
 	}
 	head, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short")
 	if err != nil {
-		log.Printf("could not resolve origin's default branch, so %s is left as it is "+
+		narrate(sevWarning, "could not resolve origin's default branch, so %s is left as it is "+
 			"— run `git remote set-head origin -a` there if reviews look mis-scoped: %v", cfg.dir, err)
 		return
 	}
@@ -4055,7 +4062,7 @@ func syncDefaultBranch(ctx context.Context, cfg config) {
 	}
 	before, _ := git(ctx, cfg, "rev-parse", "HEAD")
 	if _, err := git(ctx, cfg, "merge", "--ff-only", remote); err != nil {
-		log.Printf("could not fast-forward %s to %s, so a review may run against a stale "+
+		narrate(sevWarning, "could not fast-forward %s to %s, so a review may run against a stale "+
 			"base — commit, stash or discard whatever is in the way in %s: %v",
 			local, remote, cfg.dir, err)
 		return
@@ -4148,7 +4155,7 @@ func retryRead[T any](ctx context.Context, cfg config, what string, read func() 
 		if attempt >= ghReads {
 			return zero, err
 		}
-		log.Printf("transient: %s failed (%v) — will retry in %s (%d of %d)",
+		narrate(sevWarning, "transient: %s failed (%v) — will retry in %s (%d of %d)",
 			what, err, dur(cfg.ghRetryWait), attempt, ghReads)
 		if err := sleep(ctx, cfg.ghRetryWait); err != nil {
 			return zero, err
