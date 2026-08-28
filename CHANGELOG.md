@@ -9,6 +9,34 @@ Entries carry an **Operator impact** line when a release changes what an
 unattended run does, rather than only what the code looks like. Those are the
 lines worth reading before upgrading a machine that works a backlog overnight.
 
+## [0.10.1]
+
+**Operator impact:** `-remote` never worked and now says so. No `claude` CLI
+registers headless runs with Remote Control — the current one accepts
+`--remote-control` under `-p`, runs a normal session and never starts the
+remote bridge — so no run has ever appeared in a session list, whatever
+startup claimed. polako now passes no such flag at all, and the shift-start
+line says registration is unavailable instead of promising it. Nothing about a
+shift leaves the machine by this path, and nothing ever did; `-post-summary`
+is once again the only outward path, and it stays off by default. If you set
+`-remote=false` to keep runs local, that is now the default behaviour and the
+flag only silences one startup line.
+
+### Fixed
+
+- `-remote` no longer puts `--remote-control` or a session name on any
+  `claude` invocation. The flag stays accepted, documented and on by default,
+  so registration lights up in one place when a supporting CLI ships.
+- The shift-start line states that headless runs cannot be registered and stay
+  unwatched, in place of the claim that each one is watchable from
+  claude.ai/code.
+
+### Removed
+
+- The rejection-and-redispatch machinery behind the flag, which the CLI's
+  actual behaviour made unreachable: a refusal that never comes cannot be
+  detected, and the fallback line it guarded never fired.
+
 ## [0.10.0]
 
 **Operator impact:** the terminal goes quiet and a new local file appears. A
