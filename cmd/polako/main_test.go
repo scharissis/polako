@@ -32,6 +32,12 @@ const fakeClaudeEnv = "POLAKO_FAKE_CLAUDE"
 // is what a CLI too old to have it does.
 const fakePluginEnv = "POLAKO_FAKE_PLUGIN_VERSION"
 
+// envCanaryVar is a variable the "envcanary" mode echoes back, standing in for
+// the HTTPS_PROXY and CA-certificate variables docs/hardening.md tells an
+// operator to export around a shift. Nothing but a name: what is under test is
+// that the child saw it at all.
+const envCanaryVar = "POLAKO_TEST_ENV_CANARY"
+
 // fakeArgsLogEnv names a file every fake claude run appends its argv to, one
 // line per invocation. It is how a test sees what was actually dispatched —
 // including a run the supervisor threw away and re-dispatched, which by design
@@ -157,6 +163,18 @@ func fakeClaude(mode string) int {
 			`"modelUsage":{"claude-opus-5":{"inputTokens":100,"outputTokens":190,"cacheReadInputTokens":300,` +
 			`"cacheCreationInputTokens":400,"costUSD":0.45},` +
 			`"claude-haiku-4-5":{"inputTokens":0,"outputTokens":10,"costUSD":0.05}}}`)
+		return 0
+	case "envcanary":
+		// Reports what the parent's environment looked like from in here.
+		// stderr rather than an event, because the narration carries it
+		// verbatim and no event type exists to hold it.
+		fmt.Fprintf(os.Stderr, "canary=%s\n", os.Getenv(envCanaryVar))
+		return fakeClaude("stream")
+	case "envcanaryout":
+		// The same canary standing in for gh and git rather than for claude:
+		// capture() runs those for their stdout and throws stderr away on
+		// success, and no stream-json is expected of them.
+		emit("canary=" + os.Getenv(envCanaryVar))
 		return 0
 	case "oldcli":
 		// A CLI old enough to report a result with no per-model breakdown.
@@ -1503,6 +1521,45 @@ func TestDispatchNeverSendsRemoteControlToTheCLI(t *testing.T) {
 	// the command line would be the same false promise one argument along.
 	if strings.Contains(got[0], "polako example/repo#") {
 		t.Errorf("the session name has no reader left; it should not be passed: %s", got[0])
+	}
+}
+
+// docs/hardening.md tells an operator to wrap a shift in an egress proxy by
+// exporting HTTPS_PROXY and a CA path around `polako work`, and that only
+// reaches the model because the dispatch leaves cmd.Env nil and os/exec hands
+// the child the parent's environment. Setting cmd.Env for any reason — one
+// variable a run wanted, added the obvious way — would take the proxy back out
+// silently: the run would still pass, and simply stop being watched. So pin the
+// passthrough rather than the absence of an assignment.
+func TestDispatchGivesTheChildTheOperatorsEnvironment(t *testing.T) {
+	buf := captureLog(t)
+	cfg := fakeClaudeConfig(t, "envcanary")
+	t.Setenv(envCanaryVar, "http://localhost:8443")
+
+	if _, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0); err != nil {
+		t.Fatalf("execClaude: %v", err)
+	}
+	if want := "canary=http://localhost:8443"; !strings.Contains(buf.String(), want) {
+		t.Errorf("the claude child did not inherit the environment it was started with: want %q\ngot:\n%s", want, buf.String())
+	}
+}
+
+// The same promise one funnel over: every gh and git the supervisor runs goes
+// through capture, and that is the likelier place for a cmd.Env to appear — a
+// GH_TOKEN, a GIT_TERMINAL_PROMPT=0, added for a reason that has nothing to do
+// with proxies. An assignment there takes the branch pushes out of the
+// firewall, which docs/hardening.md calls the flow most worth watching, and
+// every other test in this package still passes.
+func TestGhAndGitInheritTheOperatorsEnvironmentToo(t *testing.T) {
+	t.Setenv(fakeClaudeEnv, "envcanaryout") // inherited by the child process
+	t.Setenv(envCanaryVar, "http://localhost:8443")
+
+	out, err := capture(context.Background(), t.TempDir(), fakeCLI(t), "status")
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if want := "canary=http://localhost:8443"; !strings.Contains(string(out), want) {
+		t.Errorf("a gh or git child did not inherit the environment polako was started with: want %q\ngot:\n%s", want, out)
 	}
 }
 
