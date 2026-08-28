@@ -586,10 +586,17 @@ func TestSkillBranchNameMatchesTheBranchPrefixDefault(t *testing.T) {
 func TestPRBodyKeepsItsSectionsAndClosingLine(t *testing.T) {
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
-	for _, heading := range []string{"## Summary", "## Design decisions", "## Scope", "## Verification"} {
+	for _, heading := range []string{"## Summary", "## Evidence", "## Design decisions", "## Scope", "## Verification"} {
 		if !strings.Contains(skill, heading) {
 			t.Errorf("SKILL.md no longer asks the PR body for a %q section", heading)
 		}
+	}
+
+	// Most PRs change nothing a human looks at, so Evidence has to stay
+	// conditional — pinned separately so a later edit cannot quietly make it
+	// mandatory and breed filler (a pasted `go test` tail dressed up as a demo).
+	if !strings.Contains(skill, "Omit this section entirely when the change alters nothing a human sees") {
+		t.Error("SKILL.md no longer tells the run to omit ## Evidence when the change has no visible artifact")
 	}
 
 	closes := func(line string) bool {

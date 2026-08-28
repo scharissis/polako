@@ -2,6 +2,14 @@
 
 <!-- What changes, and why. -->
 
+## Evidence
+
+<!-- If this changes something a human looks at — CLI output, a generated
+     file, a rendered doc, an error message, a report layout — show it: a
+     fenced block of real output, a mermaid diagram, or a link to an image
+     already committed on the branch. Delete this section if nothing visible
+     changed. -->
+
 ## Design decisions
 
 <!-- The choices a reviewer would otherwise have to reverse-engineer, and what

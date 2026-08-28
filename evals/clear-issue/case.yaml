@@ -35,10 +35,18 @@ graders:
     name: pr_body_is_complete
     focus: the recorded PR body at .eval/pr-body.md
     criteria: >
-      The body has all four sections — Summary, Design decisions, Scope,
-      Verification — and its last line is exactly "Closes #1". Fail if any
-      section is missing, if the body is a bare diff summary, or if the closing
-      line is absent or buried mid-paragraph.
+      The body has all five sections — Summary, Evidence, Design decisions,
+      Scope, Verification — and its last line is exactly "Closes #1". Fail if
+      any section is missing, if the body is a bare diff summary, or if the
+      closing line is absent or buried mid-paragraph. The issue's own change is
+      exactly the kind Evidence exists for: `--help` printing a usage line is
+      visible CLI output, so fail if Evidence is missing or empty. Also fail
+      if it reads like a bare prose description of the output rather than a
+      captured fenced block, or like an invented/hand-typed line rather than
+      something the run actually ran and observed — judge this by whether it
+      reads like a real terminal transcript, not by matching an exact wording;
+      the issue only requires a usage line naming the script and its one
+      argument, not a specific spelling of either.
 
   - type: llm
     name: no_question_was_asked
