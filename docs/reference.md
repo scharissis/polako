@@ -304,6 +304,7 @@ polako's job.
 | `-label` | *(none)* | Only count issues carrying this label, the same scoping `polako work`'s `-label` applies. |
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how open PRs are matched back to issues. |
 | `-strict-order` | `false` | Report as a work run with `-strict-order` would: an issue awaiting an answer keeps its place, so `next` can name it rather than the ready issue behind it. |
+| `-json` | `false` | Print one JSON document to stdout instead of the text report — see [As JSON](#as-json--json) below. |
 
 They take environment defaults the same way `polako work`'s do, so a
 `POLAKO_LABEL` that scopes your work scopes the report of it too — and
@@ -335,4 +336,62 @@ polako asks under your own credentials, so this reports what it can actually see
 And the PR table details the first eight PRs it finds on issue branches — one
 issue is in flight at a time, so there is normally one — with anything past that
 listed by number and said out loud rather than silently dropped.
+
+### As JSON: `-json`
+
+```
+polako status -json | jq .
+```
+
+```json
+{
+  "repo": "scharissis/polako",
+  "scope": { "label": "", "strict_order": false },
+  "queue": {
+    "ready": [14, 19, 23],
+    "blocked": [{ "issue": 9, "quiet_seconds": 93600 }],
+    "parked": [5],
+    "proposed": [27, 28],
+    "containers": [12]
+  },
+  "next": {
+    "issue": 14,
+    "reason": "#14 — its branch already has PR #61, so it would wait on that rather than run the skill again"
+  },
+  "prs": [
+    {
+      "number": 61, "branch": "issue-14", "issue": 14,
+      "url": "https://github.com/scharissis/polako/pull/61",
+      "mergeable": "mergeable", "checks": "failing (test-mac)", "review": "clear"
+    }
+  ],
+  "undetailed_prs": [],
+  "needs_you": [
+    "reply on #9",
+    "review and merge PR #58",
+    "decide what to do about #5 (drop needs-human to requeue)",
+    "curate #27, #28 (drop proposed to queue them)"
+  ]
+}
+```
+
+With `-json`, stdout carries exactly one document — no header, no `needs you:`
+line, nothing else — so a pipe into `jq` sees only the facts.
+
+It is the same snapshot the text report renders, field for field: `queue`
+holds the same five lists (`ready`, `blocked`, `parked`, `proposed`,
+`containers`), `next` names the issue a shift starting now would pick up and
+why, `prs` is the same table (`mergeable`/`checks`/`review` are the exact
+strings the text columns print, including `not read` for a PR past the
+eight-PR cap whose state was never looked up — `unknown` is a different,
+also-real state: gh was asked and does not know), and `needs_you` is the
+closing line's clauses as an array instead of a `;`-joined sentence.
+
+Every array field is always present as `[]`, never `null`, even when empty —
+`.queue.ready[]` never needs a `// empty` guard. `quiet_seconds` is the one
+field that can be *absent*: it is whole seconds since the thread's newest
+comment, omitted rather than `0` when that comment's timestamp could not be
+parsed, so "just replied" and "unreadable" cannot be confused. The same rule
+`status`'s text report follows applies here too — no issue, PR or comment
+text, only numbers, branches, labels, states and URLs.
 

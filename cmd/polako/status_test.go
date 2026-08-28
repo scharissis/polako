@@ -7,6 +7,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -125,6 +126,145 @@ needs you: reply on #7; review and merge PR #40; decide what to do about #9 (dro
 `
 	if printed != want {
 		t.Errorf("report differs\n--- got ---\n%s\n--- want ---\n%s", printed, want)
+	}
+}
+
+// The same backlog as TestStatusReportsWhereTheBacklogStands, this time
+// through `-json`. Same snapshot, same facts — the assertions below are the
+// text test's own assertions translated field by field, so the two reports
+// cannot silently disagree about the same backlog.
+func TestStatusJSONMatchesTheTextReport(t *testing.T) {
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues: map[string]*fakeIssue{
+			"3":  {Open: true},
+			"5":  {Open: true},
+			"7":  {Open: true, Labels: []string{awaitingAnswerLabel}, Comments: 2, CommentedAt: statusNow.Add(-26 * time.Hour).Format(time.RFC3339)},
+			"9":  {Open: true, Labels: []string{needsHumanLabel}},
+			"11": {Open: false},
+		},
+		PRs: map[string]*fakePR{
+			"issue-3":  {Number: 40, State: "OPEN", Mergeable: "MERGEABLE", Checks: []string{"SUCCESS"}},
+			"issue-11": {Number: 41, State: "OPEN", Mergeable: "MERGEABLE"},
+			"hotfix":   {Number: 42, State: "OPEN", Mergeable: "MERGEABLE"},
+		},
+	})
+
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+
+	var out strings.Builder
+	if err := renderStatusJSON(&out, cfg, snap); err != nil {
+		t.Fatalf("renderStatusJSON: %v", err)
+	}
+	var doc statusDoc
+	if err := json.Unmarshal([]byte(out.String()), &doc); err != nil {
+		t.Fatalf("output did not parse as JSON: %v\n%s", err, out.String())
+	}
+
+	if doc.Repo != "example/repo" {
+		t.Errorf("repo = %q, want %q", doc.Repo, "example/repo")
+	}
+	if want := (statusDocQueue{
+		Ready:      []int{3, 5},
+		Blocked:    []statusDocBlocked{{Issue: 7, QuietSeconds: ptrInt64(26 * 3600)}},
+		Parked:     []int{9},
+		Proposed:   []int{},
+		Containers: []int{},
+	}); !slices.Equal(doc.Queue.Ready, want.Ready) ||
+		len(doc.Queue.Blocked) != 1 || doc.Queue.Blocked[0].Issue != 7 ||
+		doc.Queue.Blocked[0].QuietSeconds == nil || *doc.Queue.Blocked[0].QuietSeconds != 26*3600 ||
+		!slices.Equal(doc.Queue.Parked, want.Parked) {
+		t.Errorf("queue = %+v, want %+v", doc.Queue, want)
+	}
+	if doc.Next.Issue != 3 || !strings.Contains(doc.Next.Reason, "its branch already has PR #40") {
+		t.Errorf("next = %+v, want issue 3 and the restart-safety reason", doc.Next)
+	}
+	if len(doc.PRs) != 1 {
+		t.Fatalf("prs = %+v, want only PR #40 on issue-3", doc.PRs)
+	}
+	if pr := doc.PRs[0]; pr.Number != 40 || pr.Branch != "issue-3" || pr.Issue != 3 ||
+		pr.Mergeable != "mergeable" || pr.Checks != "passing" || pr.Review != "clear" {
+		t.Errorf("pr = %+v, want #40 on issue-3, mergeable/passing/clear", pr)
+	}
+	if want := "needs you: reply on #7; review and merge PR #40; " +
+		"decide what to do about #9 (drop needs-human to requeue)"; "needs you: "+strings.Join(doc.NeedsYou, "; ") != want {
+		t.Errorf("needs_you = %v, want it to join into %q", doc.NeedsYou, want)
+	}
+	// The two PRs on issue-11 and the hotfix branch never reach the report at
+	// all — same exclusion the text renderer applies.
+	for _, unwanted := range []int{41, 42} {
+		for _, pr := range doc.PRs {
+			if pr.Number == unwanted {
+				t.Errorf("JSON named PR #%d, which is not part of where the backlog stands", unwanted)
+			}
+		}
+	}
+}
+
+func ptrInt64(n int64) *int64 { return &n }
+
+// An empty backlog still comes back with every array field as `[]`, never
+// `null` — a script doing `.queue.ready[]` must not have to special-case the
+// quiet case.
+func TestStatusJSONKeepsArraysEmptyNotNull(t *testing.T) {
+	cfg, _ := statusConfigFor(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: false}}})
+
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	var out strings.Builder
+	if err := renderStatusJSON(&out, cfg, snap); err != nil {
+		t.Fatalf("renderStatusJSON: %v", err)
+	}
+	for _, unwanted := range []string{
+		`"ready":null`, `"parked":null`, `"proposed":null`, `"containers":null`,
+		`"blocked":null`, `"prs":null`, `"undetailed_prs":null`, `"needs_you":null`,
+	} {
+		if strings.Contains(out.String(), unwanted) {
+			t.Errorf("output has %q, want an empty array instead\n%s", unwanted, out.String())
+		}
+	}
+	for _, want := range []string{
+		`"ready": []`, `"blocked": []`, `"prs": []`, `"needs_you": []`,
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output is missing %q\n%s", want, out.String())
+		}
+	}
+}
+
+// A thread whose newest comment could not be dated is a real state — the same
+// one the text report shows without a "(quiet ...)" suffix — and it must not
+// collapse into quiet_seconds: 0, which would claim the thread just spoke.
+func TestStatusJSONLeavesQuietSecondsAbsentWhenUnreadable(t *testing.T) {
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues: map[string]*fakeIssue{
+			"4": {Open: true, Labels: []string{awaitingAnswerLabel}, Comments: 1, CommentedAt: "not a date"},
+		},
+	})
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	var out strings.Builder
+	if err := renderStatusJSON(&out, cfg, snap); err != nil {
+		t.Fatalf("renderStatusJSON: %v", err)
+	}
+	var doc statusDoc
+	if err := json.Unmarshal([]byte(out.String()), &doc); err != nil {
+		t.Fatalf("output did not parse as JSON: %v\n%s", err, out.String())
+	}
+	if len(doc.Queue.Blocked) != 1 || doc.Queue.Blocked[0].Issue != 4 {
+		t.Fatalf("blocked = %+v, want issue 4", doc.Queue.Blocked)
+	}
+	if doc.Queue.Blocked[0].QuietSeconds != nil {
+		t.Errorf("quiet_seconds = %v, want absent for an unreadable span", *doc.Queue.Blocked[0].QuietSeconds)
+	}
+	if strings.Contains(out.String(), "quiet_seconds") {
+		t.Errorf("output names quiet_seconds for an issue whose span could not be read\n%s", out.String())
 	}
 }
 
