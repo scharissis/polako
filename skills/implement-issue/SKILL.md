@@ -146,16 +146,22 @@ unanswered on the thread.
      then `gh pr create --title "..." --body-file PR_BODY.md`.
      Reuse the implementation summary you would report anyway, structured as:
        ## Summary — what changed and why, 2–4 sentences
-       ## Evidence — when the change alters something a human looks at
-         (printed CLI output, a generated file, a rendered doc, an error
-         message, a report layout), show the artifact itself: a fenced block
-         of real output this run captured (before/after when the change
-         replaced something), a mermaid block for a flow or state change, or
-         a link to an image already committed on the branch. Quote only what
-         you actually observed — never invent or hand-type output — and
-         never attempt an asset upload, since no upload tool is in this
-         run's grant.
-         Omit this section entirely when the change alters nothing a human sees; most PRs do.
+       ## Evidence — add only when the change alters something a human looks
+         at: printed CLI output, a generated file, a rendered doc, an error
+         message, a report layout. Capture it when you run the manual check
+         in step 1 and reuse it here rather than reproducing it later — a
+         fenced block of the real output (before/after when you can still
+         reproduce both, after alone otherwise), or a link to an image
+         already committed on the branch. Never quote test or lint output
+         here — that's what Verification is for. A mermaid diagram of a flow
+         or state change is the one exception to "captured": it documents
+         the actual structure rather than claiming to be a transcript, so
+         author it, don't invent it. Beyond these forms, never hand-type
+         output pretending it was captured, and never attempt an asset
+         upload — no upload tool is in this run's grant.
+         Omit this section entirely when the change alters nothing a human sees,
+         or when nothing above can represent what it produced; most PRs hit
+         the first case.
        ## Design decisions — the choices a reviewer would question, and why
        ## Scope — anything deliberately left out, and the reasoning
        ## Verification — test/typecheck/lint results and manual checks done
