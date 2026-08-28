@@ -575,7 +575,6 @@ func buildStatsSummary(ds dataset, issues []*issueStats, opt statsOptions) stats
 }
 
 type sourceSummary struct {
-	dir         string
 	files       int
 	records     int
 	skipped     int
@@ -591,7 +590,6 @@ type sourceSummary struct {
 
 func buildSourceSummary(ds dataset, opt statsOptions, from, to time.Time) sourceSummary {
 	return sourceSummary{
-		dir:         ds.dir,
 		files:       ds.files,
 		records:     len(ds.runs) + len(ds.issues),
 		skipped:     ds.skipped,
@@ -1023,11 +1021,27 @@ func latencyPairs(s latencySummary) [][2]string {
 }
 
 func spanSummary(spans []time.Duration) string {
-	if len(spans) == 0 {
+	s := summarizeSpans(spans)
+	if s.count == 0 {
 		return "no spans in this window"
 	}
-	return fmt.Sprintf("%s — %s median, %s max",
-		plural(len(spans), "span"), dur(median(spans)), dur(slices.Max(spans)))
+	return fmt.Sprintf("%s — %s median, %s max", plural(s.count, "span"), dur(s.median), dur(s.max))
+}
+
+// spanStats is a span list's count, median and max, computed once so
+// spanSummary (text) and statsDocSpansFrom (statsjson.go) format the same
+// numbers rather than each reducing the slice itself.
+type spanStats struct {
+	count  int
+	median time.Duration
+	max    time.Duration
+}
+
+func summarizeSpans(spans []time.Duration) spanStats {
+	if len(spans) == 0 {
+		return spanStats{}
+	}
+	return spanStats{count: len(spans), median: median(spans), max: slices.Max(spans)}
 }
 
 func confounded(spans []time.Duration) string {
@@ -1414,13 +1428,21 @@ func plural(n int, unit string) string {
 }
 
 // split renders a token block's four ways, divided by n — the same helper for
-// a total (n = 1) and a per-issue mean.
+// a total (n = 1) and a per-issue mean. divideTokens is the division itself,
+// its own function so statsDocIssuesFrom (statsjson.go) can read the same
+// per-issue split as numbers rather than reducing tokensSplitSum a second
+// time.
 func split(t tokenCounts, n int64) string {
+	d := divideTokens(t, n)
+	return fmt.Sprintf("in %s, out %s, cache read %s, cache write %s",
+		count(d.In), count(d.Out), count(d.CacheRead), count(d.CacheWrite))
+}
+
+func divideTokens(t tokenCounts, n int64) tokenCounts {
 	if n < 1 {
 		n = 1
 	}
-	return fmt.Sprintf("in %s, out %s, cache read %s, cache write %s",
-		count(t.In/n), count(t.Out/n), count(t.CacheRead/n), count(t.CacheWrite/n))
+	return tokenCounts{In: t.In / n, Out: t.Out / n, CacheRead: t.CacheRead / n, CacheWrite: t.CacheWrite / n}
 }
 
 // count renders a magnitude at a glance: 8.1M reads, 8123400 does not.

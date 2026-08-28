@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"slices"
 	"time"
 )
 
@@ -97,12 +96,17 @@ type statsDocIssues struct {
 	ChangePerIssue      *statsDocChange     `json:"change_per_issue,omitempty"`
 }
 
+// ReviewsMedian is a pointer, not a plain int with omitempty: hasReviews
+// false and a true median of 0 reviews (some issues reviewed, the middle one
+// not) are both real states, and omitempty would drop the second exactly
+// like the first — dropping a fact the text report still prints as "0
+// reviews".
 type statsDocChange struct {
-	AdditionsMedian int `json:"additions_median"`
-	DeletionsMedian int `json:"deletions_median"`
-	FilesMedian     int `json:"files_median"`
-	ReviewsMedian   int `json:"reviews_median,omitempty"`
-	Issues          int `json:"issues"`
+	AdditionsMedian int  `json:"additions_median"`
+	DeletionsMedian int  `json:"deletions_median"`
+	FilesMedian     int  `json:"files_median"`
+	ReviewsMedian   *int `json:"reviews_median,omitempty"`
+	Issues          int  `json:"issues"`
 }
 
 type statsDocRuns struct {
@@ -263,7 +267,8 @@ func statsDocIssuesFrom(s issuesSummary) statsDocIssues {
 			Issues:          s.change.n,
 		}
 		if s.change.hasReviews {
-			doc.ChangePerIssue.ReviewsMedian = s.change.reviewsMedian
+			reviews := s.change.reviewsMedian
+			doc.ChangePerIssue.ReviewsMedian = &reviews
 		}
 	}
 	if s.priced == 0 {
@@ -275,16 +280,6 @@ func statsDocIssuesFrom(s issuesSummary) statsDocIssues {
 	split := tokenSplitDocFrom(divideTokens(s.tokensSplitSum, s.tokensSplitN))
 	doc.TokensPerIssueSplit = &split
 	return doc
-}
-
-// divideTokens is the per-issue composition split() renders as prose,
-// division included: the two must read the same n runs of integer division
-// so a JSON reader and the text report never round differently.
-func divideTokens(t tokenCounts, n int64) tokenCounts {
-	if n < 1 {
-		n = 1
-	}
-	return tokenCounts{In: t.In / n, Out: t.Out / n, CacheRead: t.CacheRead / n, CacheWrite: t.CacheWrite / n}
 }
 
 func statsDocRunsFrom(s runsSummary) statsDocRuns {
@@ -325,11 +320,12 @@ func statsDocLatencyFrom(s latencySummary) statsDocLatency {
 }
 
 func statsDocSpansFrom(spans []time.Duration) statsDocSpans {
-	doc := statsDocSpans{Count: len(spans)}
-	if len(spans) == 0 {
+	s := summarizeSpans(spans)
+	doc := statsDocSpans{Count: s.count}
+	if s.count == 0 {
 		return doc
 	}
-	med, max := median(spans).Seconds(), slices.Max(spans).Seconds()
+	med, max := s.median.Seconds(), s.max.Seconds()
 	doc.MedianSeconds, doc.MaxSeconds = &med, &max
 	return doc
 }

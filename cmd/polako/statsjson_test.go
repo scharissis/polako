@@ -247,6 +247,38 @@ func findIssueRow(t *testing.T, rows []statsDocIssueRow, repo string, issue int)
 	return statsDocIssueRow{}
 }
 
+// A true median of 0 reviews (some issues reviewed, the middle one not) and
+// "no review data at all" are different states, and change_per_issue must
+// keep them apart: reviews_median present-and-0 for the former, the whole
+// field absent for the latter.
+func TestStatsJSONReviewsMedianSurvivesAGenuineZero(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"v":1,"kind":"issue","ts":"2026-08-20T09:00:00Z","repo":"r/r","issue":1,"pr":1,"outcome":"merged","additions":10,"deletions":2,"changed_files":1,"reviews":0}
+{"v":1,"kind":"issue","ts":"2026-08-20T10:00:00Z","repo":"r/r","issue":2,"pr":2,"outcome":"merged","additions":20,"deletions":4,"changed_files":2,"reviews":0}
+{"v":1,"kind":"issue","ts":"2026-08-20T11:00:00Z","repo":"r/r","issue":3,"pr":3,"outcome":"merged","additions":30,"deletions":6,"changed_files":3,"reviews":5}
+`
+	if err := os.WriteFile(filepath.Join(dir, "r--r.jsonl"), []byte(body), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	out := stats(t, "-metrics", dir, "-json")
+	var doc statsDoc
+	mustUnmarshal(t, out, &doc)
+
+	c := doc.Issues.ChangePerIssue
+	if c == nil {
+		t.Fatalf("change_per_issue is nil, want additions/deletions/reviews over 3 issues")
+	}
+	if c.ReviewsMedian == nil {
+		t.Fatalf("reviews_median is absent, want a present 0 — median of [0, 0, 5] is a real 0, not \"no data\"")
+	}
+	if *c.ReviewsMedian != 0 {
+		t.Errorf("reviews_median = %d, want 0", *c.ReviewsMedian)
+	}
+	if !strings.Contains(out, `"reviews_median": 0`) {
+		t.Errorf("the raw JSON dropped the zero median instead of printing it:\n%s", out)
+	}
+}
+
 // -json with -html still writes the file; the confirmation must not land on
 // stdout, where it would break "-json is the whole of stdout" and could not
 // be told apart from part of the document by a naive line-splitter.
