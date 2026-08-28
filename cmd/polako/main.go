@@ -1078,12 +1078,11 @@ func drain(ctx context.Context, cfg config) error {
 	// died on is not among them — unfinished is not an outcome — so a run that
 	// dies on its first issue has nothing to summarize and says nothing.
 	finish := func(err error) error {
-		for i, line := range drainSummary(append(results, stillWaiting(states)...), time.Since(started)) {
-			if i == 0 {
-				narrate(sevSection, "%s", line) // the shift's own closing heading
-				continue
+		if lines := drainSummary(append(results, stillWaiting(states)...), time.Since(started)); len(lines) > 0 {
+			narrate(sevSection, "%s", lines[0]) // the shift's own closing heading
+			for _, line := range lines[1:] {
+				log.Print(line)
 			}
-			log.Print(line)
 		}
 		// A drain that ended before the backlog did needs somebody. Ctrl+C is
 		// the exception rather than an oversight: whoever pressed it is at the

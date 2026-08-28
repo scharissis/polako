@@ -73,7 +73,11 @@ func (w detailWriter) Write(p []byte) (int, error) {
 // unclassified line always has: plain. sevSection is not one of the
 // semantic severities a caller "feels" (success/warning/error/settings); it
 // marks the shift's own two structural headings, which need a colour but no
-// sentiment. See PLAN.md's "scope decisions" for why it exists.
+// sentiment: the issue's acceptance criteria pin the other five colours to
+// named severities but also require "bold for section marks," and no
+// combination of those five leaves a slot for bold without turning some
+// unrelated severity bold too — so it gets a sixth, purely structural value
+// instead.
 type severity int
 
 const (
@@ -91,15 +95,20 @@ const (
 // default logger redirects severity-aware narration too, with no separate
 // wiring to keep in sync.
 func narrate(sev severity, format string, args ...any) {
-	u := sinks
-	if mw, ok := log.Writer().(milestoneWriter); ok {
-		u = mw.u
+	mw, ok := log.Writer().(milestoneWriter)
+	if !ok {
+		// The default logger points somewhere that isn't a *ui — a test
+		// redirected it directly (log.SetOutput(io.Discard), a strings.Builder)
+		// expecting plain log.Printf semantics. Matching that, rather than
+		// falling back to the real sinks, is what keeps the promise above.
+		log.Printf(format, args...)
+		return
 	}
 	s := fmt.Sprintf(format, args...)
 	if len(s) == 0 || s[len(s)-1] != '\n' {
 		s += "\n"
 	}
-	u.emit([]byte(s), true, sev)
+	mw.u.emit([]byte(s), true, sev)
 }
 
 // fatal narrates at error severity, then ends the process the same way
