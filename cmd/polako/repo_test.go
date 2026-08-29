@@ -485,8 +485,8 @@ func TestReviewGateNamesTheBranch(t *testing.T) {
 // branch's base from the *local* default branch, and a drain never pulls — it
 // merges on GitHub — so that ref falls one commit behind per merged PR. Review
 // against a stale one and somebody else's merged PR is inside the diff, where
-// `--fix` will happily rewrite it into this branch. The refresh has to come
-// before the invocation, so check the order too.
+// a finding "fixed" against it lands the fix inside this branch's own commits.
+// The refresh has to come before the invocation, so check the order too.
 func TestReviewGateRefreshesTheBaseBeforeReviewing(t *testing.T) {
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
@@ -499,6 +499,85 @@ func TestReviewGateRefreshesTheBaseBeforeReviewing(t *testing.T) {
 	if review := strings.Index(skill, "/code-review"); review >= 0 && refresh > review {
 		t.Error("the base refresh comes after the review is invoked, which is too late to" +
 			" affect what it diffs against — move it before the invocation")
+	}
+}
+
+// The gate's resumability (issue #216) depends on the review returning before
+// any fix is applied, so it can be checkpointed on its own — a death while
+// --fix is still editing files is what left #216's gate with nothing to
+// resume from. `--fix` coming back onto this line would silently regress
+// that: the invocation would still name the branch (passing
+// TestReviewGateNamesTheBranch above) while quietly losing the resumability
+// this test exists to protect.
+func TestReviewGateDoesNotAutoApplyFixes(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	// Checked over the whole document rather than a window around the
+	// invocation: a window sized to today's wording can miss a rewrap that
+	// pushes `--fix` in from either direction, and `/code-review` names the
+	// branch on exactly one line (TestReviewGateNamesTheBranch), so a
+	// whole-document check can't accidentally cover a second, unrelated
+	// invocation either. Every legitimate mention of `--fix` in this file
+	// documents its absence — if that stops being true, name the new
+	// phrasing here too, deliberately, rather than widen a line window.
+	legitimate := []string{"no `--fix`", "Leaving `--fix` off"}
+	flat := strings.Join(strings.Fields(skill), " ")
+	for _, phrase := range legitimate {
+		flat = strings.ReplaceAll(flat, strings.Join(strings.Fields(phrase), " "), "")
+	}
+	if strings.Contains(flat, "--fix") {
+		t.Error("SKILL.md mentions --fix somewhere other than the phrasings this test knows" +
+			" document its deliberate absence — if the review invocation now passes --fix, that" +
+			" applies findings before this skill can checkpoint them, which is issue #216's" +
+			" original incident; if it's a new legitimate mention, add its exact phrasing to" +
+			" this test's exclusion list")
+	}
+}
+
+// "Reviewed through" is the entire resumability contract issue #216 added —
+// the one thing a resumed run reads to decide whether the expensive 8-subagent
+// review needs repeating. Losing it silently turns every resume back into a
+// full re-review — the exact cost the issue was filed about — without any
+// test failing to say so.
+func TestReviewGateRecordsResumeMarkers(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	// >= 2, not just present: step a reads it (the resume check) and step c
+	// has to separately say to write it, or the marker step a looks for is
+	// never actually produced by anything.
+	if n := strings.Count(skill, "Reviewed through"); n < 2 {
+		t.Errorf("SKILL.md mentions %q only %d time(s) — step a's resume check reads it and"+
+			" step c has to separately write it, so fewer than two mentions means either the"+
+			" read or the write side of this marker is gone, and issue #216's"+
+			" full-re-review-on-every-death regresses silently", "Reviewed through", n)
+	}
+}
+
+// The base refresh has to be unconditional — not nested under the resume
+// shortcut, and not something the code-review-unavailable fallback could
+// read as skippable — or a resumed run, or one using the substitute review
+// pass, compares against a base that may be a merged PR stale. An earlier
+// draft of this gate put the refresh after the resume check and had to patch
+// the ambiguity with reminder sentences in two places; the fix was to make
+// the refresh run first, always, before the resume decision exists to skip
+// anything. Pin that ordering directly rather than the reminder prose, since
+// the prose was the symptom, not the guarantee.
+func TestReviewGateFallbackStillRefreshesTheBase(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	fallback := strings.Index(skill, "not invocable in this session")
+	if fallback < 0 {
+		t.Fatal("SKILL.md no longer describes a fallback for when the code-review skill is" +
+			" not invocable — Phase 3's gate needs one, since it is otherwise a hard stop")
+	}
+	refresh := strings.Index(skill, "merge --ff-only")
+	resumeCheck := strings.Index(skill, "Check for a resume point")
+	if refresh < 0 || resumeCheck < 0 || !(refresh < resumeCheck && resumeCheck < fallback) {
+		t.Errorf("the base refresh (%q at %d), the resume-point check (%q at %d) and the"+
+			" code-review-unavailable fallback (at %d) are no longer in that order — the refresh"+
+			" has to run before the resume check exists to decide anything is skippable, or a"+
+			" resumed run (or the fallback's substitute review) can compare against a stale base",
+			"merge --ff-only", refresh, "Check for a resume point", resumeCheck, fallback)
 	}
 }
 
