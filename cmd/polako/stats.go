@@ -1115,18 +1115,28 @@ func sourcePairs(s sourceSummary) [][2]string {
 	return pairs
 }
 
-// reqWindowLine renders the resolved -window bounds and how far through the
-// window now falls: the progress a fixed -since has no equivalent of, since
-// a calendar window has a known end and -since does not.
-func reqWindowLine(s sourceSummary) string {
-	total := s.reqTo.Sub(s.reqFrom)
-	elapsed := s.reqNow.Sub(s.reqFrom)
+// windowElapsed is the clamp both reqWindowLine (text) and
+// statsDocWindowFrom (-json) apply to how far now falls into a resolved
+// window — never negative (a window that hasn't started), never past the
+// end (one already over) — computed once so the two renderers cannot drift
+// apart on the rule.
+func windowElapsed(from, to, now time.Time) (elapsed, total time.Duration) {
+	total = to.Sub(from)
+	elapsed = now.Sub(from)
 	if elapsed < 0 {
 		elapsed = 0
 	}
 	if elapsed > total {
 		elapsed = total
 	}
+	return elapsed, total
+}
+
+// reqWindowLine renders the resolved -window bounds and how far through the
+// window now falls: the progress a fixed -since has no equivalent of, since
+// a calendar window has a known end and -since does not.
+func reqWindowLine(s sourceSummary) string {
+	elapsed, total := windowElapsed(s.reqFrom, s.reqTo, s.reqNow)
 	remaining := total - elapsed
 	var pct float64
 	if total > 0 {
@@ -1335,17 +1345,24 @@ func planCostPairs(p planCostSummary) [][2]string {
 	}
 	note := "upper bound: counts everything the account did meanwhile, not just this issue"
 	if p.hasCrossCheck {
-		window := p.crossCheckWindow
-		if window == "" {
-			window = "the reported window"
-		}
-		note += fmt.Sprintf("; polako's own share was %d%% of the last %s", p.crossCheckPercent, window)
+		note += fmt.Sprintf("; polako's own share was %d%% of the last %s", p.crossCheckPercent, crossCheckWindowLabel(p))
 	}
 	line += " (" + note + ")"
 	if p.unsampled > 0 {
-		line += fmt.Sprintf(" (over %s — %s had no usable reading)", plural(p.n, "issue"), plural(p.unsampled, "issue"))
+		line += fmt.Sprintf(" (%s of %s had no usable reading)", plural(p.unsampled, "issue"), plural(p.n+p.unsampled, "issue"))
 	}
 	return [][2]string{{"plan cost per issue", line}}
+}
+
+// crossCheckWindowLabel names the probe attribution's own window ("24h"),
+// falling back to a description when the CLI reported none — one fallback
+// string, shared by the text line above and the HTML card (statshtml.go),
+// rather than two independently-worded copies.
+func crossCheckWindowLabel(p planCostSummary) string {
+	if p.crossCheckWindow != "" {
+		return p.crossCheckWindow
+	}
+	return "reported window"
 }
 
 func runPairs(s runsSummary) [][2]string {

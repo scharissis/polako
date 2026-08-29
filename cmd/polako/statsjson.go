@@ -265,14 +265,7 @@ func statsDocWindowFrom(s sourceSummary) *statsDocWindow {
 	if s.reqWindow == "" {
 		return nil
 	}
-	total := s.reqTo.Sub(s.reqFrom)
-	elapsed := s.reqNow.Sub(s.reqFrom)
-	if elapsed < 0 {
-		elapsed = 0
-	}
-	if elapsed > total {
-		elapsed = total
-	}
+	elapsed, total := windowElapsed(s.reqFrom, s.reqTo, s.reqNow)
 	return &statsDocWindow{
 		Kind:             s.reqWindow,
 		From:             stamp(s.reqFrom),

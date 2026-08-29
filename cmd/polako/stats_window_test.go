@@ -339,7 +339,7 @@ func TestPlanCostPerIssueLine(t *testing.T) {
 	got := planCostPairs(summary.plan)
 	want := "5% mean, 4% median of a week — about 25 issues to a full week " +
 		"(upper bound: counts everything the account did meanwhile, not just this issue) " +
-		"(over 3 issues — 2 issues had no usable reading)"
+		"(2 issues of 5 issues had no usable reading)"
 	if len(got) != 1 || got[0][1] != want {
 		t.Errorf("plan cost pairs = %v, want [[plan cost per issue %q]]", got, want)
 	}

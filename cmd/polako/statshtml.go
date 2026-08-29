@@ -246,11 +246,7 @@ func planCostCard(p planCostSummary) (htmlCard, bool) {
 		note = fmt.Sprintf("median, about %d issues to a full week", int(math.Round(100/p.median)))
 	}
 	if p.hasCrossCheck {
-		window := p.crossCheckWindow
-		if window == "" {
-			window = "reported window"
-		}
-		note += fmt.Sprintf(" — polako %d%% of last %s", p.crossCheckPercent, window)
+		note += fmt.Sprintf(" — polako %d%% of last %s", p.crossCheckPercent, crossCheckWindowLabel(p))
 	}
 	return htmlCard{"plan cost per issue", pct1(p.median), note}, true
 }
