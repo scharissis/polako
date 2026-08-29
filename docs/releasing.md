@@ -14,6 +14,12 @@ under its version and skips anything that resolves to the same string. Commits
 that land on `main` without a bump reach nobody. Bumping the field is the only
 thing that moves an installed user.
 
+`TestShippingFixesDoNotSitUnreleased` enforces that: it fails once a non-merge
+commit touching `skills/` or `cmd/` has sat above the newest release tag for
+more than a day, naming the commits and pointing at a `chore(release)` bump.
+Test-only changes and a release already in flight are exempt; the day of grace
+is there so ordinary work between releases does not turn the build red.
+
 ## Cutting a release
 
 A release is two merged PRs — one that cuts it, one that publishes it — with

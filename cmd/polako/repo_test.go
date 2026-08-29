@@ -9,12 +9,14 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // repoRoot is two levels up from cmd/polako.
@@ -697,6 +699,136 @@ func TestIssueTemplatesApplyNoOrchestrationLabel(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// releaseGrace is how long a fix on a shipping path may sit above the newest
+// release tag before TestShippingFixesDoNotSitUnreleased fails. It is the whole
+// escape hatch and it is deliberately short: work in progress between releases
+// is normal, but a build that went red the instant a fix merged would only
+// teach everyone to ignore it. A day is long enough to batch a morning's fixes
+// and short enough that #169's false park — a run handed the released skill a
+// day after the fix for it merged — goes red first.
+const releaseGrace = 24 * time.Hour
+
+// The plugin and the binary ship from one tagged commit, and an install
+// resolves to that tag, never to `main` (docs/releasing.md, "Installs resolve
+// to a tag"). So a fix merged to `main` reaches nobody until plugin.json is
+// bumped and a new tag cut — and nothing else notices the gap: #169 parked
+// because the released skill still said `cd`, a day after the commit that
+// removed it. CLAUDE.md already states the rule ("a fix that lands without a
+// bump reaches nobody"); this makes it fail loudly instead of being remembered.
+//
+// It trips when a change touching either shipping path — skills/ or cmd/, the
+// two halves that ship together — has been on main, unreleased, for longer than
+// releaseGrace. The bound is time, not a commit count: one fix sitting for a
+// week is the same defect as ten in an afternoon, and a count lets the first
+// slip by. Test-only changes are excluded — they never reach a `go install`
+// user — and a release already in flight (plugin.json bumped, tag not yet
+// pushed) is taken as the acknowledgement it is.
+func TestShippingFixesDoNotSitUnreleased(t *testing.T) {
+	root := repoRoot()
+	// Real git against the actual checkout breaks none of the hermetic rules
+	// (no network, no gh, no real claude): the facts are all local, and no fake
+	// can tell you whether a fix has been released. Same reasoning as gitAt in
+	// sync_test.go.
+	git := func(args ...string) (string, bool) {
+		out, err := exec.Command("git", append([]string{"-C", root}, args...)...).Output()
+		return strings.TrimSpace(string(out)), err == nil
+	}
+
+	// In CI the check has to run — a silent skip is the same as not having it —
+	// so a checkout that cannot answer (not a repo, shallow, no tags) is a
+	// failure there, naming the fix. Everywhere else it is a skip: a shallow or
+	// tagless clone is a normal thing to be working in.
+	inCI := os.Getenv("GITHUB_ACTIONS") == "true"
+	unavailable := func(why string) {
+		if inCI {
+			t.Fatalf("%s — CI must check out full history and tags (fetch-depth: 0) for this check", why)
+		}
+		t.Skipf("%s", why)
+	}
+
+	if _, ok := git("rev-parse", "--git-dir"); !ok {
+		unavailable("not a git checkout")
+		return
+	}
+	if shallow, _ := git("rev-parse", "--is-shallow-repository"); shallow == "true" {
+		unavailable("shallow clone: the release tags are not present")
+		return
+	}
+
+	// The newest release by semver, not by tag date: a re-tag could land out of
+	// order, and v0.9.0 sorts after v0.10.0 lexically. The vX.Y.Z tags are the
+	// ones `go install ...@vX.Y.Z` resolves; polako--vX.Y.Z moves with them.
+	tagList, ok := git("tag", "--list", "v*")
+	if !ok || tagList == "" {
+		unavailable("no vX.Y.Z release tags found")
+		return
+	}
+	var latestTag string
+	var latest [3]int
+	for _, tag := range strings.Fields(tagList) {
+		v, err := parseSemver(strings.TrimPrefix(tag, "v"))
+		if err != nil {
+			continue
+		}
+		if latestTag == "" || slices.Compare(v[:], latest[:]) > 0 {
+			latestTag, latest = tag, v
+		}
+	}
+	if latestTag == "" {
+		unavailable("no tag matching vX.Y.Z parsed as a version")
+		return
+	}
+
+	// A release in flight: the chore(release) commit bumps plugin.json before
+	// cut-release.yml pushes the tag, and the release PR's own CI runs in that
+	// window. The bump is the acknowledgement, so nothing is owed.
+	if v, err := parseSemver(pluginManifestVersion(t)); err == nil && slices.Compare(v[:], latest[:]) > 0 {
+		return
+	}
+
+	// First-parent, so a date is when the change landed on main — a merge
+	// commit's %ct — not when it was written on a branch that may have lived
+	// for days before a same-day release made it current. The subject is then
+	// the merge's ("Merge pull request #N …"), which points at the PR to
+	// release. Test files are dropped: they do not ship to a `go install` user.
+	log, ok := git("log", "--first-parent", "--pretty=format:%ct%x09%h%x09%s",
+		latestTag+"..HEAD", "--", "skills", "cmd", ":(exclude)*_test.go")
+	if !ok {
+		unavailable("could not list commits since " + latestTag)
+		return
+	}
+	if log == "" {
+		return // nothing unreleased on a shipping path
+	}
+
+	var lines []string
+	var oldest time.Time
+	for _, line := range strings.Split(log, "\n") {
+		when, rest, found := strings.Cut(line, "\t")
+		if !found {
+			continue
+		}
+		secs, err := strconv.ParseInt(when, 10, 64)
+		if err != nil {
+			continue
+		}
+		lines = append(lines, "\t"+strings.ReplaceAll(rest, "\t", "  "))
+		if at := time.Unix(secs, 0); oldest.IsZero() || at.Before(oldest) {
+			oldest = at
+		}
+	}
+	if age := time.Since(oldest); age > releaseGrace {
+		t.Errorf("%d commit(s) touching skills/ or cmd/ have been unreleased since %s,"+
+			" the oldest for %s (grace is %s):\n%s\n\n"+
+			"An install resolves to a release tag, not to main, so the released plugin"+
+			" and binary do not contain these — an unattended run keeps getting the"+
+			" released skill. Remedy: a `chore(release)` bump of"+
+			" .claude-plugin/plugin.json and CHANGELOG.md (the \"Start a release\""+
+			" workflow, or ./scripts/release.sh).",
+			len(lines), latestTag, age.Round(time.Hour), releaseGrace, strings.Join(lines, "\n"))
 	}
 }
 
