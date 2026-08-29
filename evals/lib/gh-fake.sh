@@ -59,8 +59,41 @@ body_of() {
 subcommand="${1-} ${2-}"
 
 case "$subcommand" in
+# Most cases fix the whole answer in issue.json. plan-vision has no single
+# subject issue — its fixtures are issues.json/issues-closed.json, the backlog
+# a dedup-minded run reads in Phase 0 — so a view of one of those numbers (a
+# call its own grader permits, even though no SKILL.md instructs it) falls
+# back to looking the number up there instead of crashing under set -e.
 "issue view")
-  cat "$case_dir/issue.json"
+  if [ -f "$case_dir/issue.json" ]; then
+    cat "$case_dir/issue.json"
+  else
+    number=${3-}
+    found=""
+    for fixture in "$case_dir/issues.json" "$case_dir/issues-closed.json"; do
+      if [ -f "$fixture" ]; then
+        if found=$(python3 -c '
+import json, sys
+number, path = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    issues = json.load(f)
+for issue in issues:
+    if str(issue.get("number")) == number:
+        json.dump(issue, sys.stdout)
+        sys.exit(0)
+sys.exit(1)
+' "$number" "$fixture"); then
+          break
+        fi
+      fi
+    done
+    if [ -n "$found" ]; then
+      printf '%s\n' "$found"
+    else
+      echo "GraphQL: Could not resolve to an issue with the number of $number. (repository.issue)" >&2
+      exit 1
+    fi
+  fi
   ;;
 
 # The backlog a plan run reads before it proposes anything. Open and closed are
