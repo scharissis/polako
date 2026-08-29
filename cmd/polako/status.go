@@ -436,12 +436,26 @@ func queuePairs(snap statusSnapshot) [][2]string {
 	}
 	if len(q.containers) > 0 {
 		pairs = append(pairs, [2]string{"containers",
-			fmt.Sprintf("%s — %s, tracking sub-issues rather than work",
-				plural(len(q.containers), "issue"), issueRefs(q.containers))})
+			fmt.Sprintf("%s — %s", plural(len(q.containers), "issue"), containerRefs(q.containers))})
 	}
 	// Last, because it is the answer the rest of the table is context for.
 	pairs = append(pairs, [2]string{"next", nextLine(snap)})
 	return pairs
+}
+
+// containerRefs renders each container with its sub-issue rollup, so the
+// containers row tells a finished epic — every child closed, waiting only on
+// a human to close the container itself — from one still in progress.
+func containerRefs(containers []containerInfo) string {
+	refs := make([]string, len(containers))
+	for i, c := range containers {
+		ref := fmt.Sprintf("#%d (%d/%d closed", c.number, c.completed, c.total)
+		if c.finished() {
+			ref += " — yours to close"
+		}
+		refs[i] = ref + ")"
+	}
+	return strings.Join(refs, ", ")
 }
 
 func queueLine(ready []int) string {
@@ -654,11 +668,20 @@ type statusDocScope struct {
 }
 
 type statusDocQueue struct {
-	Ready      []int              `json:"ready"`
-	Blocked    []statusDocBlocked `json:"blocked"`
-	Parked     []int              `json:"parked"`
-	Proposed   []int              `json:"proposed"`
-	Containers []int              `json:"containers"`
+	Ready      []int                `json:"ready"`
+	Blocked    []statusDocBlocked   `json:"blocked"`
+	Parked     []int                `json:"parked"`
+	Proposed   []int                `json:"proposed"`
+	Containers []statusDocContainer `json:"containers"`
+}
+
+// statusDocContainer is one container issue with its sub-issue rollup, so a
+// caller can tell #113 (6 of 6 closed) from #147 (1 of 5) without a second
+// call — the same widening `blocked` already carries for quiet_seconds.
+type statusDocContainer struct {
+	Issue     int `json:"issue"`
+	Total     int `json:"total"`
+	Completed int `json:"completed"`
 }
 
 // statusDocBlocked is one issue awaiting an answer. QuietSeconds is a pointer
@@ -715,6 +738,11 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 		blocked = append(blocked, b)
 	}
 
+	containers := make([]statusDocContainer, len(snap.queues.containers))
+	for i, c := range snap.queues.containers {
+		containers[i] = statusDocContainer{Issue: c.number, Total: c.total, Completed: c.completed}
+	}
+
 	prs := make([]statusDocPR, 0, len(snap.prs))
 	for _, p := range snap.prs {
 		prs = append(prs, statusDocPR{
@@ -736,7 +764,7 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 			Blocked:    blocked,
 			Parked:     nonNilSlice(snap.queues.parked),
 			Proposed:   nonNilSlice(snap.queues.proposed),
-			Containers: nonNilSlice(snap.queues.containers),
+			Containers: nonNilSlice(containers),
 		},
 		Next:          statusDocNext{Issue: snap.next, Reason: nextLine(snap)},
 		PRs:           prs,

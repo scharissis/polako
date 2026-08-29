@@ -3334,7 +3334,25 @@ type issueQueues struct {
 	blocked    []int
 	parked     []int
 	proposed   []int
-	containers []int
+	containers []containerInfo
+}
+
+// containerInfo is one container issue and the sub-issue rollup that says
+// whether the epic it tracks is done in substance, waiting only on a human to
+// close it.
+type containerInfo struct {
+	number    int
+	total     int
+	completed int
+}
+
+// finished is the one predicate for "this epic is done", so the rest of the
+// backlog-fill epic (#101) has a single place to ask rather than each child
+// inventing its own. total == 0 cannot happen — a container only exists
+// because SubIssues.Total > 0 — but is not finished either way a defensive
+// read reaches it.
+func (c containerInfo) finished() bool {
+	return c.total > 0 && c.completed == c.total
 }
 
 // open is every issue the listing found, whichever queue it landed in. The
@@ -3342,8 +3360,11 @@ type issueQueues struct {
 // work it", so an exclusion must not shorten it.
 func (q issueQueues) open() []int {
 	all := make([]int, 0, len(q.ready)+len(q.blocked)+len(q.parked)+len(q.proposed)+len(q.containers))
-	for _, list := range [][]int{q.ready, q.blocked, q.parked, q.proposed, q.containers} {
+	for _, list := range [][]int{q.ready, q.blocked, q.parked, q.proposed} {
 		all = append(all, list...)
+	}
+	for _, c := range q.containers {
+		all = append(all, c.number)
 	}
 	return all
 }
@@ -3376,7 +3397,11 @@ func selectableIssues(raw []byte) (issueQueues, error) {
 		case is.SubIssues.Total > 0:
 			// A container, and containers are never worked — whatever their
 			// labels, so a parent somebody made by hand is protected too.
-			q.containers = append(q.containers, is.Number)
+			q.containers = append(q.containers, containerInfo{
+				number:    is.Number,
+				total:     is.SubIssues.Total,
+				completed: is.SubIssues.Completed,
+			})
 		case is.hasLabel(needsHumanLabel):
 			q.parked = append(q.parked, is.Number)
 		case is.hasLabel(proposedLabel):
@@ -3391,7 +3416,7 @@ func selectableIssues(raw []byte) (issueQueues, error) {
 	slices.Sort(q.blocked)
 	slices.Sort(q.parked)
 	slices.Sort(q.proposed)
-	slices.Sort(q.containers)
+	slices.SortFunc(q.containers, func(a, b containerInfo) int { return a.number - b.number })
 	return q, nil
 }
 
@@ -3405,7 +3430,8 @@ type ghIssue struct {
 	Number    int       `json:"number"`
 	Labels    []ghLabel `json:"labels"`
 	SubIssues struct {
-		Total int `json:"total"`
+		Total     int `json:"total"`
+		Completed int `json:"completed"`
 	} `json:"subIssuesSummary"`
 }
 

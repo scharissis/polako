@@ -132,7 +132,7 @@ scharissis/polako
   awaiting you  1 issue — #9 (quiet 26h)
   parked        1 issue — #5, labelled needs-human
   proposed      2 issues — #27, #28, labelled proposed
-  containers    1 issue — #12, tracking sub-issues rather than work
+  containers    1 issue — #12 (2/5 closed)
   next          #14 — its branch already has PR #61, so it would wait on that rather than run the skill again
 
 open prs on issue branches
