@@ -293,14 +293,18 @@ func statsDocPlanFrom(p planCostSummary) *statsDocPlan {
 	if p.hasCrossCheck {
 		pct := p.crossCheckPercent
 		doc.CrossCheckPercent = &pct
-		doc.CrossCheckWindow = p.crossCheckWindow
+		doc.CrossCheckWindow = crossCheckWindowLabel(p)
 	}
 	return doc
 }
 
+// statsDocScopeFrom reports SinceSeconds only for an operator-given -since:
+// -window reuses sinceFilter internally to drive the same record cutoff, but
+// that derived duration is not what -since means to a reader of this field —
+// the resolved bounds for -window live in the doc's own Window section.
 func statsDocScopeFrom(s sourceSummary) statsDocScope {
 	scope := statsDocScope{Repo: s.repoFilter, Shift: s.shift}
-	if s.sinceFilter > 0 {
+	if s.reqWindow == "" && s.sinceFilter > 0 {
 		secs := int64(s.sinceFilter.Seconds())
 		scope.SinceSeconds = &secs
 	}

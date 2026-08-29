@@ -262,8 +262,12 @@ func statsReport(ctx context.Context, cfg config, opt statsOptions, dir string, 
 	// The plan-cost cross-check needs the same probe attribution -window
 	// week may already have fetched above, reused here rather than asked
 	// twice; failing that, one attempt iff there is a sample this report
-	// would otherwise show with no cross-check at all.
-	if probe == nil && issuesHaveUsageSamples(issues) {
+	// would otherwise show with no cross-check at all. -window week always
+	// attempts probeUsage once in resolveWindowBounds above regardless of
+	// whether it succeeds, so probe == nil there means "already tried and
+	// failed," not "never asked" — a second attempt against the same
+	// unreachable CLI would only double the cost, never the odds.
+	if probe == nil && opt.window != windowWeek && issuesHaveUsageSamples(issues) {
 		if snap, ok := probeUsage(ctx, cfg); ok {
 			probe = &snap
 		}
@@ -1122,13 +1126,7 @@ func sourcePairs(s sourceSummary) [][2]string {
 // apart on the rule.
 func windowElapsed(from, to, now time.Time) (elapsed, total time.Duration) {
 	total = to.Sub(from)
-	elapsed = now.Sub(from)
-	if elapsed < 0 {
-		elapsed = 0
-	}
-	if elapsed > total {
-		elapsed = total
-	}
+	elapsed = min(max(now.Sub(from), 0), total)
 	return elapsed, total
 }
 
@@ -1138,16 +1136,13 @@ func windowElapsed(from, to, now time.Time) (elapsed, total time.Duration) {
 func reqWindowLine(s sourceSummary) string {
 	elapsed, total := windowElapsed(s.reqFrom, s.reqTo, s.reqNow)
 	remaining := total - elapsed
-	var pct float64
-	if total > 0 {
-		pct = 100 * elapsed.Seconds() / total.Seconds()
-	}
 	label := s.reqWindow
 	if s.reqAnchor != "" {
 		label += " — anchor: " + s.reqAnchor
 	}
-	return fmt.Sprintf("%s → %s (%s; %s elapsed, %s left, %.0f%% through)",
-		stamp(s.reqFrom), stamp(s.reqTo), label, dur(elapsed), dur(remaining), pct)
+	return fmt.Sprintf("%s → %s (%s; %s elapsed, %s left, %s through)",
+		stamp(s.reqFrom), stamp(s.reqTo), label, dur(elapsed), dur(remaining),
+		percent(int(elapsed.Seconds()), int(total.Seconds())))
 }
 
 // window is the span the records actually cover, which is what a rate has to
