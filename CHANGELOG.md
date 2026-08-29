@@ -9,6 +9,34 @@ Entries carry an **Operator impact** line when a release changes what an
 unattended run does, rather than only what the code looks like. Those are the
 lines worth reading before upgrading a machine that works a backlog overnight.
 
+## [0.12.0]
+
+### Added
+
+- PR bodies show the change, not just describe it
+
+### Fixed
+
+- code review -- add finished to the JSON rollup, correct a stale doc comment
+- read the sub-issue rollup's completed count in status
+- code review -- everProgressed missed the clean-exit resume arm
+- progressed() required an assistant event, not evidence of work
+- code review — word-boundary matching, drop dead field, dedupe park tail
+- a park no longer throws away the run's own account of why it stopped
+- second review pass — anchor the gate's git log, fix wording gaps
+- code review — gh pr create needs --head, and other cwd assumptions
+- Phase 1 never says cd, and the escape hatch reaches it
+- code review — resolve Evidence's mermaid contradiction, loosen the grader, sync the PR template
+- name the branch-from-origin shortcut as not a substitute for the ff-only refresh
+- code review — scope the gh-surface claim to today, lock it with a test
+- plan-backlog closes its gh surface, so a run can't improvise gh label list
+
+### Changed
+
+- cover a resume crash-loop that never does real work
+- document the permission_refused park category
+- cover the permission-refusal park path and the retired sentence
+
 ## [0.11.0]
 
 ### Added
