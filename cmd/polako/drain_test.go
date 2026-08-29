@@ -67,9 +67,13 @@ type fakeIssue struct {
 	SubIssuesCompleted int `json:"sub_issues_completed"`
 	// Comments is how many comments the thread has; they carry ids 1..Comments
 	// in the order they were written, the way GitHub hands them out. Bots holds
-	// the ids of the ones a GitHub App wrote rather than a person.
-	Comments int   `json:"comments"`
-	Bots     []int `json:"bots"`
+	// the ids of the ones a GitHub App wrote rather than a person. Bodies holds
+	// the text of the ones `issue comment` actually wrote in this test — keyed
+	// by id, and absent (so empty) for a comment the test set up some other
+	// way, since nothing before commentFinishedContainers ever read a body.
+	Comments int            `json:"comments"`
+	Bots     []int          `json:"bots"`
+	Bodies   map[int]string `json:"bodies"`
 	// CommentedAt stamps every comment on the thread. Only the newest one's
 	// date is ever read — `status` measures how long a thread has been quiet by
 	// it — so one date says everything a per-comment one would. Empty stands
@@ -285,8 +289,8 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			if slices.Contains(is.Bots, id) {
 				author = "Bot"
 			}
-			comments = append(comments, fmt.Sprintf(`{"id":%d,"user":{"type":%q},"created_at":%q}`,
-				id, author, is.CommentedAt))
+			comments = append(comments, fmt.Sprintf(`{"id":%d,"user":{"type":%q},"created_at":%q,"body":%q}`,
+				id, author, is.CommentedAt, is.Bodies[id]))
 		}
 		return "[" + strings.Join(comments, ",") + "]", counting, 0
 
@@ -314,6 +318,12 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			return "", false, 1
 		}
 		is.Comments++
+		if body := flagVal("--body"); body != "" {
+			if is.Bodies == nil {
+				is.Bodies = map[int]string{}
+			}
+			is.Bodies[is.Comments] = body
+		}
 		return "", true, 0
 
 	case "issue close":
@@ -1700,6 +1710,120 @@ func TestDrainWorksNeitherProposalsNorContainers(t *testing.T) {
 	}
 	if !strings.Contains(out, "backlog cleared") {
 		t.Errorf("a backlog of nothing but proposals and containers is cleared\ngot:\n%s", out)
+	}
+}
+
+// The point of the whole issue: a finished container — every child closed —
+// gets exactly one comment on its own thread, naming the count rather than
+// the children (containerInfo carries no child numbers, and fetching them
+// would cost an extra call this drain does not make).
+func TestDrainCommentsOnceOnAFinishedContainer(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6},
+		},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	is := finalGhState(t, path).Issues["113"]
+	if is.Comments != 1 {
+		t.Fatalf("comments on #113 = %d, want exactly 1", is.Comments)
+	}
+	body := is.Bodies[1]
+	if !strings.Contains(body, "6 sub-issues") {
+		t.Errorf("comment body = %q, want it to name the count", body)
+	}
+	if strings.Contains(body, "#") {
+		t.Errorf("comment body = %q, want no child issue numbers — listing them costs an extra call", body)
+	}
+	if !strings.Contains(body, finishedContainerMarker) {
+		t.Errorf("comment body = %q, want the idempotency marker", body)
+	}
+	if !is.Open {
+		t.Error("the container itself must not be closed — that is a human's call")
+	}
+	if !strings.Contains(buf.String(), "epic #113: all 6 sub-issues closed — commented, yours to close") {
+		t.Errorf("log is missing the epic-finished line\ngot:\n%s", buf.String())
+	}
+}
+
+// Idempotent, and that is the load-bearing part: a shift that sees the same
+// finished container a second time — because a prior shift already commented,
+// or because this drain's loop revisits the same container across issues —
+// must say nothing further.
+func TestDrainDoesNotCommentTwiceOnAFinishedContainer(t *testing.T) {
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {
+				Open: true, SubIssues: 6, SubIssuesCompleted: 6,
+				Comments: 1,
+				Bodies:   map[int]string{1: "All 6 sub-issues are closed.\n\n" + finishedContainerMarker},
+			},
+			// A second, ordinary issue so the loop passes over the container more
+			// than once before the backlog clears.
+			"2": {Open: true},
+		},
+		PRs: map[string]*fakePR{"issue-2": {Number: 9, State: "MERGED"}},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	is := finalGhState(t, path).Issues["113"]
+	if is.Comments != 1 {
+		t.Errorf("comments on #113 = %d, want the pre-existing 1 and no more", is.Comments)
+	}
+}
+
+// The marker is matched as a substring, not the whole comment, so rewording
+// the prose around it — which the wording of finishedContainerComment is free
+// to do later — never causes a second comment.
+func TestDrainRecognisesTheMarkerAfterTheProseIsReworded(t *testing.T) {
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {
+				Open: true, SubIssues: 6, SubIssuesCompleted: 6,
+				Comments: 1,
+				Bodies:   map[int]string{1: "Totally different wording now. " + finishedContainerMarker + " More words."},
+			},
+		},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	if got := finalGhState(t, path).Issues["113"].Comments; got != 1 {
+		t.Errorf("comments on #113 = %d, want the reworded one left alone", got)
+	}
+}
+
+// A comment that fails to post is a warning, not a park and not fatal —
+// nothing in the drain depends on it landing, and the next shift tries again.
+func TestDrainWarnsWhenItCannotCommentOnAFinishedContainer(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6},
+		},
+		FailReads: map[string]int{"issue comment": 1},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a comment that fails to post must not end the drain: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "could not comment on finished epic #113") {
+		t.Errorf("log is missing the warning\ngot:\n%s", out)
+	}
+	if !strings.Contains(out, "backlog cleared") {
+		t.Errorf("the shift must carry on after the warning\ngot:\n%s", out)
 	}
 }
 

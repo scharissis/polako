@@ -122,6 +122,17 @@ own sub-issue rollup. A `gh` too old to report that rollup gets one warning and
 carries on, with container issues treated as ordinary work; the `proposed`
 exclusion is labels alone and never depends on it.
 
+**A finished container gets one comment, once, on its own thread.** When
+every child of a container is closed, the drain says so on the container's
+own issue rather than closing it: a container's body is the design record for
+its children, and only you can judge whether they added up to it. The comment
+is idempotent by construction — it carries a marker the drain checks the
+thread for before posting, so a later shift that finds the same finished
+container again says nothing further, and a comment that fails to post is a
+warning rather than a park. It names how many children closed, not which
+ones: a container carries their count, and listing them by number would cost
+an extra `gh` call this drain does not make.
+
 **A run that has to ask something labels the issue `awaiting-answer`**, and the
 supervisor keys off that label rather than off the thread getting busier. The
 distinction matters because plenty of things comment on an issue that are not

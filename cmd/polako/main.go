@@ -932,7 +932,9 @@ func run(ctx context.Context, cfg config) error {
 // real invocation — so the command can be piped somewhere useful instead of
 // being fished out of a transcript.
 func dryRun(ctx context.Context, cfg config, out io.Writer) error {
-	ready, blocked, err := openIssues(ctx, cfg)
+	// Containers are not this command's business: a dry run says what the
+	// next issue would be, and a container is never that issue.
+	ready, blocked, _, err := openIssues(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -1111,10 +1113,11 @@ func drain(ctx context.Context, cfg config) error {
 			notify(ctx, cfg, notification{event: notifyStopped, reason: reason})
 			return finish(nil)
 		}
-		ready, blocked, err := openIssues(ctx, cfg)
+		ready, blocked, containers, err := openIssues(ctx, cfg)
 		if err != nil {
 			return finish(err)
 		}
+		commentFinishedContainers(ctx, cfg, containers)
 		issue := pickLowest(ready, skip)
 		if issue == 0 {
 			blocked = slices.DeleteFunc(blocked, func(n int) bool { return skip[n] })
@@ -1323,6 +1326,57 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string) {
 	if _, cerr := gh(ctx, cfg, "issue", "comment", n, "--body", body); cerr != nil {
 		narrate(sevWarning, "could not comment on issue #%d (%v) — the reason is in this log and in the exit summary",
 			issue, cerr)
+	}
+}
+
+// finishedContainerMarker tags the one comment a finished container gets, so
+// a later shift — or the same shift, seeing the same container again next
+// pass — can tell it already said its piece. Matched as a substring of a
+// comment's body, so rewording the prose around it never breaks the check.
+const finishedContainerMarker = "<!-- polako: epic finished -->"
+
+// finishedContainerComment is the one write a finished container gets. The
+// child issues are not named: containerInfo carries only their count, and
+// listing them by number would cost an extra `gh` call per container — for a
+// line an operator can already see by opening the epic itself.
+func finishedContainerComment(c containerInfo) string {
+	return fmt.Sprintf("All %s closed. Closing this one is yours to judge: the body above "+
+		"is the design record, and only you can say the children added up to it.\n\n%s",
+		plural(c.total, "sub-issue"), finishedContainerMarker)
+}
+
+// commentFinishedContainers tells a human, once, that an epic is done in
+// substance: every child closed, waiting only on someone to close the
+// container itself. All orchestration state lives in GitHub, so idempotency
+// comes from reading the thread before writing to it rather than from a
+// shift-local record of what this process already did — the same shape
+// awaitAnswer already uses to notice a reply.
+//
+// Best-effort like parkIssue's own comment: nothing else in the drain reads
+// this comment back, so a failure here is a warning and the shift carries on.
+// Never reached on a dry run — dryRun and drain are separate paths off run(),
+// and dryRun never calls this.
+func commentFinishedContainers(ctx context.Context, cfg config, containers []containerInfo) {
+	for _, c := range containers {
+		if !c.finished() {
+			continue
+		}
+		comments, err := issueComments(ctx, cfg, c.number)
+		if err != nil {
+			narrate(sevWarning, "could not read #%d's thread to check for the epic-finished note (%v) — "+
+				"will try again next pass", c.number, err)
+			continue
+		}
+		if slices.ContainsFunc(comments, func(cm issueComment) bool {
+			return strings.Contains(cm.Body, finishedContainerMarker)
+		}) {
+			continue
+		}
+		if _, err := gh(ctx, cfg, "issue", "comment", strconv.Itoa(c.number), "--body", finishedContainerComment(c)); err != nil {
+			narrate(sevWarning, "could not comment on finished epic #%d (%v) — the next shift will try again", c.number, err)
+			continue
+		}
+		log.Printf("epic #%d: all %d sub-issues closed — commented, yours to close", c.number, c.total)
 	}
 }
 
@@ -3239,19 +3293,21 @@ func pickLowest(numbers []int, skip map[int]bool) int {
 	return lowest
 }
 
-// openIssues asks GitHub what there is to work: the issues ready now, and the
-// ones a run already flagged for a human. -strict-order folds the second list
-// back into the first, which is the whole of what the flag does — a flagged
-// issue keeps its place in the queue, and everything behind it waits.
-func openIssues(ctx context.Context, cfg config) (ready, blocked []int, err error) {
+// openIssues asks GitHub what there is to work: the issues ready now, the
+// ones a run already flagged for a human, and the containers — never worked
+// themselves, but the drain still needs them to notice a finished one.
+// -strict-order folds the second list back into the first, which is the whole
+// of what the flag does — a flagged issue keeps its place in the queue, and
+// everything behind it waits.
+func openIssues(ctx context.Context, cfg config) (ready, blocked []int, containers []containerInfo, err error) {
 	q, err := openQueues(ctx, cfg)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if cfg.strictOrder {
-		return append(q.ready, q.blocked...), nil, nil
+		return append(q.ready, q.blocked...), nil, q.containers, nil
 	}
-	return q.ready, q.blocked, nil
+	return q.ready, q.blocked, q.containers, nil
 }
 
 // What the queue is derived from: the labels the exclusions read, and the
@@ -3475,6 +3531,11 @@ type issueComment struct {
 	// quiet. No wait decides on it: comment ids only ever increase, and a
 	// baseline made of them needs no clock and survives an edit.
 	CreatedAt string `json:"created_at"`
+	// Body is read by nobody but commentFinishedContainers, checking a
+	// thread for the epic-finished marker before posting a second one. Every
+	// other reader of this type only ever needed metadata — the text itself
+	// is data, not something the rest of the drain acts on.
+	Body string `json:"body"`
 }
 
 func (c issueComment) fromBot() bool { return c.User.Type == "Bot" }

@@ -23,6 +23,9 @@ func TestDryRunSaysWhatItWouldDoAndChangesNothing(t *testing.T) {
 			"2": {Open: true, Labels: []string{awaitingAnswerLabel}},
 			"3": {Open: true, Labels: []string{needsHumanLabel}},
 			"4": {Open: true},
+			// A finished container: a real drain would comment on this one, and a
+			// dry run must not — it never calls commentFinishedContainers at all.
+			"5": {Open: true, SubIssues: 6, SubIssuesCompleted: 6},
 		},
 	})
 	records := t.TempDir()
