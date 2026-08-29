@@ -68,29 +68,26 @@ case "$subcommand" in
   if [ -f "$case_dir/issue.json" ]; then
     cat "$case_dir/issue.json"
   else
+    # Fixture priority mirrors "issue list" just below: open before closed.
     number=${3-}
-    found=""
-    for fixture in "$case_dir/issues.json" "$case_dir/issues-closed.json"; do
-      if [ -f "$fixture" ]; then
-        if found=$(python3 -c '
+    if found=$(python3 -c '
 import json, sys
-number, path = sys.argv[1], sys.argv[2]
-with open(path) as f:
-    issues = json.load(f)
-for issue in issues:
-    if str(issue.get("number")) == number:
-        json.dump(issue, sys.stdout)
-        sys.exit(0)
+number, paths = sys.argv[1], sys.argv[2:]
+for path in paths:
+    try:
+        with open(path) as f:
+            issues = json.load(f)
+    except FileNotFoundError:
+        continue
+    for issue in issues:
+        if str(issue.get("number")) == number:
+            json.dump(issue, sys.stdout)
+            sys.exit(0)
 sys.exit(1)
-' "$number" "$fixture"); then
-          break
-        fi
-      fi
-    done
-    if [ -n "$found" ]; then
+' "$number" "$case_dir/issues.json" "$case_dir/issues-closed.json"); then
       printf '%s\n' "$found"
     else
-      echo "GraphQL: Could not resolve to an issue with the number of $number. (repository.issue)" >&2
+      echo "GraphQL: Could not resolve to an issue or pull request with the number of $number. (repository.issue)" >&2
       exit 1
     fi
   fi
