@@ -2364,6 +2364,31 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 			},
 		},
 		{
+			// The other resume flavour must count too: a clean exit with
+			// real commits or a dirty worktree is stronger evidence of
+			// progress than progressed() itself asks for, and it spends the
+			// same resumes counter the crash arm's ceiling message reads
+			// (see the invariant on the two counters being one budget,
+			// above). One in the middle of an otherwise pure death-rattle
+			// crash loop must still make the ceiling's sentence say a run
+			// got somewhere.
+			name:  "a clean-exit resume with real work counts toward the ceiling's honesty too",
+			mode:  "deathrattlemixed",
+			state: &ghState{Issues: open()},
+			tune: func(t *testing.T, cfg *config) {
+				leftBehind(t, cfg)
+				cfg.retries, cfg.resumeCeiling = 100, ceiling
+			},
+			runs: 1 + ceiling, // fresh crash, the clean-exit resume, two more crashes
+			check: func(t *testing.T, err error, st *ghState, out string) {
+				want := fmt.Sprintf("claude has been retried %d times on this issue and still has "+
+					"not finished it — each run gets somewhere and then dies, which needs a human", ceiling)
+				if got := parkedFor(t, err); got != want {
+					t.Errorf("park reason = %q, want %q", got, want)
+				}
+			},
+		},
+		{
 			// Nothing crashed, nothing was asked, nothing was produced, and
 			// there is nothing on the branch or in the worktree either. That is
 			// the clean exit that really did decide nothing, and a machine

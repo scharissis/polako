@@ -1845,10 +1845,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 	fruitless, resumes, cleanResumes, resumeKind := 0, 0, 0, ""
 	// everProgressed tracks, across every resume counted by resumes, whether
 	// any of them ever produced real work — unlike fruitless, it is never
-	// reset. -retries has no enforced ceiling of its own, so an operator
-	// value above resumeCeiling can still let a run of pure death-rattle
-	// crashes reach the ceiling below with zero progress ever seen; the park
-	// sentence there must not claim otherwise.
+	// reset. Why that matters is at its one read site below.
 	everProgressed := false
 
 	// Before the run, not only after the last merge: the gap this closes is also
@@ -2137,22 +2134,19 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 						// "retried" rather than "resumed": most of these are
 						// resumes, but a dead session turns one into a fresh
 						// restart, and the count covers both. everProgressed
-						// picks the sentence: -retries has no enforced ceiling
+						// picks the clause: -retries has no enforced ceiling
 						// of its own, so a value set above resumeCeiling can
 						// still reach here on a run of pure death-rattle
 						// crashes, and claiming one of them got somewhere
 						// would be exactly the false diagnosis this issue is
 						// about.
+						clause := "every attempt has died before doing any observable work"
 						if everProgressed {
-							return parked(0, park(parkRetries,
-								"claude has been retried %d times on this issue and still has "+
-									"not finished it — each run gets somewhere and then dies, which needs "+
-									"a human", resumes))
+							clause = "each run gets somewhere and then dies"
 						}
 						return parked(0, park(parkRetries,
 							"claude has been retried %d times on this issue and still has "+
-								"not finished it — every attempt has died before doing any observable "+
-								"work, which needs a human", resumes))
+								"not finished it — %s, which needs a human", resumes, clause))
 					}
 					return parked(0, park(parkRetries,
 						"claude crashed and %d resume attempts failed", cfg.retries))
@@ -2233,6 +2227,12 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 						default:
 							resumes++
 							cleanResumes++
+							// Salvageable work on disk is itself the evidence
+							// progressed() is a proxy for — stronger, since it is
+							// what a human would check by hand. The same counter
+							// (resumes) the crash arm's ceiling message reads,
+							// so it has to carry the same signal.
+							everProgressed = true
 							resumeKind = reasonUnfinished
 							// No -retry-wait. A crash sleeps because a crash is
 							// often transient — an API drop, a rate limit, a host

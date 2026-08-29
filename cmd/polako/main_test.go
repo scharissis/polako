@@ -232,6 +232,22 @@ func fakeClaude(mode string) int {
 		emit(`{"type":"system","subtype":"init","session_id":"sess-death","model":"claude-opus-5"}`)
 		emit(`{"type":"assistant","session_id":"sess-death","message":{"content":[],"usage":{}}}`)
 		return 1
+	case "deathrattlemixed":
+		// One resume in the middle is a clean exit with real work left on
+		// disk — the fresh crash before it and the crashes after it are
+		// death rattles. Whether the resume ceiling's park sentence
+		// credits that middle run is exactly what this shape tests: the
+		// clean-exit resume counts against the same resumes counter the
+		// crash arm's ceiling reads, so it must count as progress too.
+		n, err := countClaudeRun()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		if n == 2 {
+			return fakeClaude("stream")
+		}
+		return fakeClaude("crash")
 	case "costlycrash":
 		// Reported what it spent and then died anyway. The combination is what
 		// a cost cap needs to be exercised end to end: a run that leaves a bill
