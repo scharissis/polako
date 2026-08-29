@@ -554,11 +554,15 @@ func TestReviewGateRecordsResumeMarkers(t *testing.T) {
 	}
 }
 
-// The code-review-unavailable fallback replaces only the review call (c), not
-// the base refresh (b) before it — a finder on this issue's own gate caught
-// an earlier draft skipping both, which would compare a substitute manual
-// review against a base that could be a merged PR stale, with nothing left to
-// catch it.
+// The base refresh has to be unconditional — not nested under the resume
+// shortcut, and not something the code-review-unavailable fallback could
+// read as skippable — or a resumed run, or one using the substitute review
+// pass, compares against a base that may be a merged PR stale. An earlier
+// draft of this gate put the refresh after the resume check and had to patch
+// the ambiguity with reminder sentences in two places; the fix was to make
+// the refresh run first, always, before the resume decision exists to skip
+// anything. Pin that ordering directly rather than the reminder prose, since
+// the prose was the symptom, not the guarantee.
 func TestReviewGateFallbackStillRefreshesTheBase(t *testing.T) {
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
@@ -567,14 +571,14 @@ func TestReviewGateFallbackStillRefreshesTheBase(t *testing.T) {
 		t.Fatal("SKILL.md no longer describes a fallback for when the code-review skill is" +
 			" not invocable — Phase 3's gate needs one, since it is otherwise a hard stop")
 	}
-	// Whitespace-normalized so a cosmetic rewrap of this sentence — a
-	// different wrap point or indentation, changing no behavior — can't
-	// turn this test red; it is prose content being checked, not layout.
-	window := strings.Join(strings.Fields(skill[fallback:min(fallback+200, len(skill))]), " ")
-	if !strings.Contains(window, "still run b,") {
-		t.Errorf("the code-review-unavailable fallback no longer says to still run the base"+
-			" refresh (b) before substituting for the review call (c) — without it a substitute"+
-			" review compares against a base that may be a merged PR stale:\n\t%s", window)
+	refresh := strings.Index(skill, "merge --ff-only")
+	resumeCheck := strings.Index(skill, "Check for a resume point")
+	if refresh < 0 || resumeCheck < 0 || !(refresh < resumeCheck && resumeCheck < fallback) {
+		t.Errorf("the base refresh (%q at %d), the resume-point check (%q at %d) and the"+
+			" code-review-unavailable fallback (at %d) are no longer in that order — the refresh"+
+			" has to run before the resume check exists to decide anything is skippable, or a"+
+			" resumed run (or the fallback's substitute review) can compare against a stale base",
+			"merge --ff-only", refresh, "Check for a resume point", resumeCheck, fallback)
 	}
 }
 
