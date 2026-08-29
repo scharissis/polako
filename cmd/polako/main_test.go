@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -153,6 +154,12 @@ func buildFakeCLI() {
 	_ = warm.Run()
 }
 
+// fakeUsageEnv picks which `/usage` fixture fakeClaude answers with. Unset
+// means "no such command" — an old CLI without /usage — which is also why
+// every existing stream-mode test is unaffected by this dispatch existing
+// at all.
+const fakeUsageEnv = "POLAKO_FAKE_USAGE"
+
 // fakeClaude stands in for `claude -p ... --output-format stream-json`.
 func fakeClaude(mode string) int {
 	emit := func(line string) {
@@ -169,6 +176,13 @@ func fakeClaude(mode string) int {
 		emit(`[{"id":"some-other-plugin@elsewhere","version":"9.9.9"},` +
 			`{"id":"polako@scharissis","version":"` + v + `","scope":"user","enabled":true}]`)
 		return 0
+	}
+	// probeUsage's call — `claude -p "/usage" --output-format json` — is a
+	// different call on the same binary too, dispatched on argv for the same
+	// reason plugin list is: it never goes through execClaude, so no mode a
+	// drain test picks selects it.
+	if slices.Contains(os.Args, "-p") && slices.Contains(os.Args, "/usage") {
+		return fakeUsageProbe()
 	}
 	switch mode {
 	case "warmup":
@@ -482,6 +496,37 @@ func fakeClaude(mode string) int {
 	}
 	fmt.Fprintf(os.Stderr, "unknown fake claude mode %q\n", mode)
 	return 2
+}
+
+// fakeUsageProbe answers `claude -p "/usage" --output-format json` per
+// fakeUsageEnv: "sub" is usageSample, the full subscription output quoted
+// verbatim in issue #138's own body (usage_test.go reuses the same constant
+// so the fixture and the parser tests can never drift apart), and "timeout"
+// sleeps well past any sane usageTimeout so it is the caller's own bound
+// that ends the call rather than this. Unset exits 1 — a CLI too old to have
+// /usage — which is also why every stream-mode test is unaffected by this
+// dispatch existing at all. The other shapes parseUsage has to tolerate
+// (no-subscription prose, a wording change, a partially-readable payload)
+// are exercised directly against parseUsage in usage_test.go, with no need
+// for a subprocess round trip.
+func fakeUsageProbe() int {
+	var result string
+	switch os.Getenv(fakeUsageEnv) {
+	case "":
+		return 1
+	case "sub":
+		result = usageSample
+	case "timeout":
+		time.Sleep(5 * time.Second)
+		result = usageSample
+	}
+	out, err := json.Marshal(map[string]any{"result": result, "is_error": false})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(os.Stdout, string(out))
+	return 0
 }
 
 // recordFakeArgs appends this invocation's argv to the file fakeArgsLogEnv
@@ -1419,6 +1464,7 @@ func TestPreflightPairsGatesAndOrdersEveryRow(t *testing.T) {
 		label:       "ready",
 		dryRun:      true,
 		maxCost:     15,
+		usage:       &usageSnapshot{pools: []usagePool{{name: "session", percent: 10}}},
 		postSummary: true,
 		notifyCmd:   "notify-send",
 		remote:      true,
@@ -1427,7 +1473,7 @@ func TestPreflightPairsGatesAndOrdersEveryRow(t *testing.T) {
 	}
 	got := preflightPairs(cfg, "/tmp/logs/shift.log")
 	wantLabels := []string{
-		"epics", "queue", "dry-run", "caps", "post-summary", "notify", "remote", "run data", "shift", "shift log",
+		"epics", "queue", "dry-run", "caps", "plan", "post-summary", "notify", "remote", "run data", "shift", "shift log",
 	}
 	if len(got) != len(wantLabels) {
 		t.Fatalf("preflightPairs with every condition set = %d rows %v, want %d rows %v",
@@ -1441,8 +1487,11 @@ func TestPreflightPairsGatesAndOrdersEveryRow(t *testing.T) {
 	if !strings.Contains(got[1][1], `"ready"`) {
 		t.Errorf("queue row = %q, want it to name the -label value", got[1][1])
 	}
-	if !strings.Contains(got[7][1], "/tmp/metrics") || !strings.Contains(got[8][1], "abc123") {
-		t.Errorf("run data/shift rows = %v, want the recorder dir and shift id named", got[7:9])
+	if !strings.Contains(got[4][1], "session 10%") {
+		t.Errorf("plan row = %q, want the usage snapshot rendered", got[4][1])
+	}
+	if !strings.Contains(got[8][1], "/tmp/metrics") || !strings.Contains(got[9][1], "abc123") {
+		t.Errorf("run data/shift rows = %v, want the recorder dir and shift id named", got[8:10])
 	}
 }
 

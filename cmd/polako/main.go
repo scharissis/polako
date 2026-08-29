@@ -602,6 +602,16 @@ type config struct {
 	// the full id, and the marketplace half is operator-chosen, so it cannot be
 	// rebuilt from the plugin name.
 	pluginID string
+	// usage is the account's own plan, as of the one probe preflight (or
+	// statusConfig) ran — nil when the probe never answered, never a zero
+	// snapshot standing in for "could not tell". See usage.go.
+	usage *usageSnapshot
+	// usageTimeout bounds probeUsage's own exec, separate from execClaude's
+	// stall watchdog — the probe never goes through execClaude. A seam like
+	// ghRetryWait: parseFlags and statusConfig pin it to
+	// defaultUsageProbeTimeout, and a test shrinks it to prove the timeout
+	// path without waiting out the real one.
+	usageTimeout time.Duration
 }
 
 func main() {
@@ -836,6 +846,7 @@ func parseFlags() config {
 	cfg.ghBin = "gh"
 	cfg.ghRetryWait = ghRetryDelay
 	cfg.resumeCeiling = defaultResumeCeiling
+	cfg.usageTimeout = defaultUsageProbeTimeout
 	cfg.skip = parseSkip(skip)
 	abs, err := filepath.Abs(cfg.dir)
 	if err != nil {
@@ -1673,6 +1684,9 @@ func preflight(ctx context.Context, cfg *config) error {
 	}
 	cfg.claudeVersion = claudeVersion(ctx, *cfg)
 	cfg.pluginVersion, cfg.pluginID = pluginVersion(ctx, *cfg)
+	if snap, ok := probeUsage(ctx, *cfg); ok {
+		cfg.usage = &snap
+	}
 	log.Printf("%s — running /%s per issue, polling every %s", cfg.repo, cfg.skill, cfg.poll)
 	warnOnVersionSkew(polakoVersion(), *cfg)
 	settingsBlock(preflightPairs(*cfg, logPath))
@@ -1712,6 +1726,11 @@ func preflightPairs(cfg config, logPath string) [][2]string {
 	}
 	if notes := capNotes(cfg); notes != "" {
 		pairs = append(pairs, [2]string{"caps", notes})
+	}
+	if cfg.usage != nil {
+		if line := usageLine(*cfg.usage); line != "" {
+			pairs = append(pairs, [2]string{"plan", line})
+		}
 	}
 	if cfg.postSummary {
 		// The environment can set this, so say it out loud: an operator who
@@ -3176,28 +3195,13 @@ func limitReset(msg string, now time.Time) (time.Time, bool) {
 	if m == nil {
 		return time.Time{}, false
 	}
-	hour, err := strconv.Atoi(m[1])
-	if err != nil || hour < 1 || hour > 12 {
+	hour, minute, ok := clock12h(m[1], m[2], m[3])
+	if !ok {
 		return time.Time{}, false
 	}
-	minute := 0
-	if m[2] != "" {
-		minute, _ = strconv.Atoi(m[2])
-	}
-	if strings.EqualFold(m[3], "pm") {
-		if hour != 12 {
-			hour += 12
-		}
-	} else if hour == 12 {
-		hour = 0
-	}
-	loc := now.Location()
-	if m[4] != "" {
-		l, err := time.LoadLocation(m[4])
-		if err != nil {
-			return time.Time{}, false
-		}
-		loc = l
+	loc, ok := resolveZone(m[4], now.Location())
+	if !ok {
+		return time.Time{}, false
 	}
 	at := now.In(loc)
 	reset := time.Date(at.Year(), at.Month(), at.Day(), hour, minute, 0, 0, loc)
@@ -3207,6 +3211,42 @@ func limitReset(msg string, now time.Time) (time.Time, bool) {
 		reset = reset.AddDate(0, 0, 1)
 	}
 	return reset, true
+}
+
+// clock12h turns an hour/minute/meridiem triple — the shape both a limit
+// refusal's clock and the usage probe's dated reset clause spell a time in —
+// into 24-hour components. False for an hour outside 1-12, the one shape
+// neither caller can trust.
+func clock12h(hourStr, minuteStr, meridiem string) (hour, minute int, ok bool) {
+	hour, err := strconv.Atoi(hourStr)
+	if err != nil || hour < 1 || hour > 12 {
+		return 0, 0, false
+	}
+	if minuteStr != "" {
+		minute, _ = strconv.Atoi(minuteStr)
+	}
+	if strings.EqualFold(meridiem, "pm") {
+		if hour != 12 {
+			hour += 12
+		}
+	} else if hour == 12 {
+		hour = 0
+	}
+	return hour, minute, true
+}
+
+// resolveZone reads an optional zone name — empty meaning "the caller's own",
+// which is what a clause naming no zone at all means. False only for a name
+// this build's tzdata cannot resolve.
+func resolveZone(name string, fallback *time.Location) (*time.Location, bool) {
+	if name == "" {
+		return fallback, true
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, false
+	}
+	return loc, true
 }
 
 // execClaude runs one headless claude invocation with the shared streaming,
