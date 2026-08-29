@@ -653,6 +653,15 @@ func main() {
 		rpt := newReport(isTerminal(os.Stdout))
 		runReport("status", func() error { return runStatus(ctx, os.Args[2:], os.Stdout, time.Now(), rpt) })
 		return
+	case "tidy":
+		// Its own context for the same reason status gets one: this makes gh
+		// and git calls, and some of them mutate, so Ctrl+C partway through
+		// should end them rather than be ignored.
+		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
+		defer stop()
+		rpt := newReport(isTerminal(os.Stdout))
+		runReport("tidy", func() error { return runTidy(ctx, os.Args[2:], os.Stdout, rpt) })
+		return
 	case "version", "-version", "--version":
 		// Reachable without a verb, because it is what an operator asks
 		// exactly when they are unsure what they are running.
@@ -719,7 +728,8 @@ func verbUsage(w io.Writer) {
 			"Usage: polako <verb> [flags]\n\n"+
 			"  work    work the backlog: run the skill per issue, wait for each merge, unattended\n"+
 			"  status  print where the backlog stands, from GitHub (read-only)\n"+
-			"  stats   report on the run data already recorded (local, read-only)\n\n"+
+			"  stats   report on the run data already recorded (local, read-only)\n"+
+			"  tidy    reclaim the worktrees and branches of finished issues (dry-run by default)\n\n"+
 			"Run 'polako <verb> -h' for that verb's flags.\n")
 }
 
@@ -844,15 +854,18 @@ const envPrefix = "POLAKO_"
 const envUsage = "Any flag below can take its default from the environment:\n" +
 	"POLAKO_<FLAG>, e.g. POLAKO_POST_SUMMARY=1. Arguments win.\n"
 
-// envExempt are the flags the environment may not set. Both are actions rather
-// than preferences, and either one left in a profile turns every later drain
-// into something that exits before doing any work — a failure that looks like
-// success, since the process ends cleanly. POLAKO_VERSION is exactly the
-// variable a Dockerfile or CI job pins an install with; POLAKO_DRY_RUN is
-// the one an operator exports to preview an unfamiliar repository once and then
-// forgets, after which the nightly drain reports success on a backlog nobody
-// touched.
-var envExempt = map[string]bool{"version": true, "dry-run": true}
+// envExempt are the flags the environment may not set. These are actions
+// rather than preferences, and each one left in a profile turns every later
+// run into something other than what its operator typed that day.
+// POLAKO_VERSION is exactly the variable a Dockerfile or CI job pins an
+// install with; POLAKO_DRY_RUN is the one an operator exports to preview an
+// unfamiliar repository once and then forgets, after which the nightly drain
+// reports success on a backlog nobody touched. POLAKO_APPLY is that risk
+// mirrored onto `tidy`: a forgotten export would turn every future dry-run
+// preview into a live worktree-and-branch deletion run, which is exactly the
+// case -dry-run defaulting on is meant to prevent for the reason -apply
+// exists at all.
+var envExempt = map[string]bool{"version": true, "dry-run": true, "apply": true}
 
 // applyEnvDefaults lets an operator set a per-machine default for any flag, so
 // a preference they always want lives in a shell profile instead of being
