@@ -63,16 +63,22 @@ road mid-task, and one that asked to be granted a tool the allowlist never
 included and got nobody to answer, since nothing was there to. The middle two
 have the work sitting on disk, so before it parks, `polako` asks git what is there: commits
 on `issue-N` ahead of the default branch, and uncommitted changes in the
-worktree. The fourth is read off the run's own final words instead, and parks
-straight away rather than being retried — resuming replays the same session
-against the same allowlist and hits the identical wall, so only `-add-tools`
-fixes it:
+worktree. The fourth is read off what the run itself said — its final words if
+the ask ended there, any earlier turn otherwise, since a run can ask partway
+through and then wrap up on some other sentence. When the ask *was* the final
+word it parks straight away rather than being retried — resuming replays the
+same session against the same allowlist and hits the identical wall, so only
+`-add-tools` or a fix to the skill that reached for the tool gets past it:
 
 ```
   parked  #16 ($2.27) — the run stopped to ask for a permission this allowlist
-  does not grant — add the missing tool with -add-tools, then remove
-  needs-human to retry
+  does not grant — add the missing tool with -add-tools, or fix the skill that
+  reached for it, then remove needs-human to retry
 ```
+
+When the ask was only an earlier turn, `polako` still resumes first if there is
+work on disk to resume into; the reason above is what it lands on if that run,
+or the lack of one, ends with the issue parked anyway.
 
 If it finds work, it resumes the session to finish it, telling that run outright
 that its turn ended the process and there is no later one. If it finds nothing,

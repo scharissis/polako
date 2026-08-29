@@ -2305,9 +2305,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 						// only the operator can grant the tool, so park straight
 						// away rather than spending the clean-exit resume budget
 						// finding that out the slow way.
-						return finishPark(parkPermission, "the run stopped to ask for a permission "+
-							"this allowlist does not grant — add the missing tool with -add-tools, "+
-							"then remove needs-human to retry")
+						return finishPark(parkPermission, permissionParkReason)
 					}
 					// Which bound stopped a resume that was otherwise warranted,
 					// so the park says that rather than the generic sentence
@@ -2364,11 +2362,23 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					// channel is ruled out by the time this runs, and the
 					// permission case above is proof that prose the model never
 					// flagged can still be one.
-					reason := "the run completed without opening a PR"
+					reason, category := "the run completed without opening a PR", boundWhy
+					if rep.permissionAsked {
+						// An earlier turn asked for a tool this run was not
+						// granted (the result text did not, or permissionRefused
+						// above would have parked without resuming). Whether that
+						// ask is why nothing shipped or a detour it recovered
+						// from, it is the first thing for an operator to rule
+						// out — and the generic sentence sends them to the shift
+						// log to learn it was even asked. Naming it here changes
+						// neither that we park nor that a resume was tried first:
+						// control reaches this line only once resuming is done.
+						reason, category = permissionParkReason, parkPermission
+					}
 					if bound != "" {
 						reason += "; " + bound
 					}
-					return finishPark(boundWhy, reason)
+					return finishPark(category, reason)
 				}
 			}
 			record(pr.Number, outcomeOpenedPR)
@@ -2729,7 +2739,18 @@ type runReport struct {
 	// assert "no questions" over a run whose final message was verbatim one.
 	// See permissionRefusal.
 	permissionRefused bool
-	overBudget        bool // -max-issue-time ran out while this run was still going
+	// permissionAsked is the weaker sibling: some assistant turn along the way
+	// — not necessarily the last — read as a request to use a tool this
+	// allowlist never granted, even though the final result text did not (or
+	// permissionRefused above would have caught it). It does not pre-empt a
+	// resume the way permissionRefused does, because the run's closing words
+	// were something else and it may have found a way round; it only sharpens
+	// the park reason if the run parks anyway. Issue #182: on #169 the ask
+	// ("This requires user confirmation to proceed") landed mid-run and the
+	// run then wrapped up on a sentence the head anchor could not match, so
+	// the issue parked as "no PR and no questions".
+	permissionAsked bool
+	overBudget      bool // -max-issue-time ran out while this run was still going
 	// stderrTail is the last few KB the child wrote to stderr — for a crashed
 	// run, often the only cause on record and worth a terminal line, since the
 	// full copy is off in the shift log.
@@ -2799,8 +2820,19 @@ func (r *runReport) observe(ev streamEvent) {
 		r.observedTurns++
 		r.observed.add(ev.Message.Usage)
 		for _, c := range ev.Message.Content {
-			if c.Type == "tool_use" {
+			switch c.Type {
+			case "tool_use":
 				r.toolUses++
+			case "text":
+				// The same head-anchored test permissionRefusal runs on the
+				// final text, applied to each turn as it streams: a turn that
+				// opens by asking for approval is the run narrating its own
+				// block, not a permissions issue quoted back in a summary, so
+				// the anchor's guard against the latter survives being read
+				// earlier. Latched — a later ordinary turn does not unsay it.
+				if permissionRefusal(c.Text) {
+					r.permissionAsked = true
+				}
 			}
 		}
 	case "result":
@@ -2931,6 +2963,16 @@ func limitRefusal(result string) bool {
 		"weekly limit reached",
 	)
 }
+
+// permissionParkReason is the park message both permission paths share —
+// permissionRefused, where the result text itself was the ask and the issue
+// parks without a resume, and permissionAsked, where an earlier turn was and
+// the issue parks after any resume has run its course. Either way the lever is
+// the operator's, so it names -add-tools and the skill rather than only
+// reporting that something was refused.
+const permissionParkReason = "the run stopped to ask for a permission this " +
+	"allowlist does not grant — add the missing tool with -add-tools, or fix " +
+	"the skill that reached for it, then remove needs-human to retry"
 
 // permissionRefusal reports whether a clean run's final text is the run itself
 // asking the operator to approve a tool it was refused — the shape observed on

@@ -411,6 +411,17 @@ func fakeClaude(mode string) int {
 		emit(`{"type":"result","subtype":"success","session_id":"sess-blocked","duration_ms":100,` +
 			`"num_turns":2,"total_cost_usd":0.1,"result":"This requires user confirmation to enter the worktree. Can you approve?"}`)
 		return 0
+	case "permissionmidrun":
+		// Issue #182 / #169: the ask lands in a turn partway through, and the
+		// run then ends on a sentence the head anchor cannot match. Same clean
+		// exit as "permissionblocked" — no PR, nothing on disk — only the tell
+		// has moved off the result event onto an earlier turn.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-midrun","model":"claude-opus-5"}`)
+		emit(`{"type":"assistant","session_id":"sess-midrun","message":{"content":[` +
+			`{"type":"text","text":"This requires user confirmation to proceed. I'll wait for approval before continuing."}]}}`)
+		emit(`{"type":"result","subtype":"success","session_id":"sess-midrun","duration_ms":100,` +
+			`"num_turns":3,"total_cost_usd":0.2,"result":"The sandbox restricts Bash to the launch directory, so I need the EnterWorktree tool to move into the worktree."}`)
+		return 0
 	case "authfail":
 		// Claude Code on a rejected OAuth token: one turn, no cost, and a
 		// result flagged is_error whose subtype is nonetheless "success".
@@ -2268,6 +2279,53 @@ func TestPermissionRefusalMatchesTheWaysARunAsksApproval(t *testing.T) {
 		if permissionRefusal(r) {
 			t.Errorf("should not read as a permission request: %s", clip(r, 80))
 		}
+	}
+}
+
+// Issue #182: on #169 the run asked for an ungranted tool in a turn partway
+// through, then ended on a different sentence the head anchor could not catch,
+// and parked as "no PR and no questions". observe now reads every assistant
+// turn, not only the result text, so the ask is not lost.
+func TestObserveReadsAPermissionAskFromAnEarlierTurn(t *testing.T) {
+	turn := func(text string) streamEvent {
+		ev, ok := parseEvent([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":` +
+			strconv.Quote(text) + `}]}}`))
+		if !ok {
+			t.Fatalf("could not build assistant turn: %q", text)
+		}
+		return ev
+	}
+
+	// #169's actual final text, verbatim so the wording that slipped through
+	// cannot regress: on its own it still does not read as a permission stop —
+	// the ask is not at the head, and the head anchor is right to miss it.
+	const finalText = "The sandbox restricts Bash to the launch directory, so I " +
+		"need the `EnterWorktree` tool to move into `/Users/stef/code/polako-issue-169` " +
+		"(already created via `git worktree add`) …"
+	if permissionRefusal(finalText) {
+		t.Fatal("#169's final text is not itself an approval request")
+	}
+
+	var rep runReport
+	rep.observe(turn("Looking at the worktree layout now."))
+	rep.observe(turn("This requires user confirmation to proceed. I'll wait for approval before continuing."))
+	rep.observe(turn("Still blocked on that."))
+	rep.observe(streamEvent{Type: "result", Subtype: "success", Result: finalText})
+
+	if rep.permissionRefused {
+		t.Error("permissionRefused should stay false — the final text was not the ask")
+	}
+	if !rep.permissionAsked {
+		t.Error("permissionAsked should be true — an earlier turn asked for approval")
+	}
+
+	// A turn that only quotes the phrase mid-sentence must not latch it, the
+	// same false positive the head anchor closes on the result text.
+	var quoting runReport
+	quoting.observe(turn("Earlier the run said \"This requires user confirmation\" and then stopped; fixing that."))
+	quoting.observe(streamEvent{Type: "result", Subtype: "success", Result: "Opened a PR."})
+	if quoting.permissionAsked {
+		t.Error("permissionAsked should be false — the turn quoted the phrase, it did not ask")
 	}
 }
 
