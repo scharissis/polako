@@ -222,6 +222,32 @@ func fakeClaude(mode string) int {
 	case "crash":
 		emit(`{"type":"system","subtype":"init","session_id":"sess-crash","model":"claude-opus-5"}`)
 		return 7
+	case "deathrattle":
+		// Issue #166's shape: a --resume the CLI kills on arrival still
+		// emits one assistant event before it dies — an empty usage
+		// block, no tool use — which used to be enough to count as
+		// progress and reset the -retries budget every single attempt.
+		// Every invocation looks like this, fresh or resumed, so the
+		// loop never finds a fruitful one.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-death","model":"claude-opus-5"}`)
+		emit(`{"type":"assistant","session_id":"sess-death","message":{"content":[],"usage":{}}}`)
+		return 1
+	case "deathrattlemixed":
+		// One resume in the middle is a clean exit with real work left on
+		// disk — the fresh crash before it and the crashes after it are
+		// death rattles. Whether the resume ceiling's park sentence
+		// credits that middle run is exactly what this shape tests: the
+		// clean-exit resume counts against the same resumes counter the
+		// crash arm's ceiling reads, so it must count as progress too.
+		n, err := countClaudeRun()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		if n == 2 {
+			return fakeClaude("stream")
+		}
+		return fakeClaude("crash")
 	case "costlycrash":
 		// Reported what it spent and then died anyway. The combination is what
 		// a cost cap needs to be exercised end to end: a run that leaves a bill

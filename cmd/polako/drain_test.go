@@ -2322,6 +2322,73 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 			},
 		},
 		{
+			// Issue #166: a --resume the CLI kills on arrival still emits one
+			// assistant event before it dies, and that alone used to count as
+			// progress — progressed() read any assistant event as work done,
+			// so fruitless was zeroed every attempt and -retries never bit.
+			// Fixed, this parks at -retries rather than riding the resume
+			// ceiling all the way to 20.
+			name:  "a resume crash-loop that never does real work spends -retries, not the ceiling",
+			mode:  "deathrattle",
+			state: &ghState{Issues: open()},
+			tune:  func(_ *testing.T, cfg *config) { cfg.retries = 3 },
+			runs:  1 + 3, // the fresh attempt and every resume -retries allowed
+			check: func(t *testing.T, err error, st *ghState, out string) {
+				if got, want := parkedFor(t, err), "claude crashed and 3 resume attempts failed"; got != want {
+					t.Errorf("park reason = %q, want %q", got, want)
+				}
+			},
+		},
+		{
+			// -retries has no enforced ceiling of its own, so a value set
+			// above resumeCeiling can still let a pure death-rattle crash
+			// loop reach the ceiling with zero progress ever observed. The
+			// ceiling's park sentence must not claim one of them got
+			// somewhere in that case.
+			name:  "a crash loop with no progress ever reaches the ceiling honestly",
+			mode:  "deathrattle",
+			state: &ghState{Issues: open()},
+			tune:  func(_ *testing.T, cfg *config) { cfg.retries, cfg.resumeCeiling = 100, ceiling },
+			runs:  1 + ceiling,
+			check: func(t *testing.T, err error, st *ghState, out string) {
+				got := parkedFor(t, err)
+				if strings.Contains(got, "gets somewhere and then dies") {
+					t.Errorf("park reason = %q, want no claim of progress that was never observed", got)
+				}
+				want := fmt.Sprintf("claude has been retried %d times on this issue and still has "+
+					"not finished it — every attempt has died before doing any observable work, "+
+					"which needs a human", ceiling)
+				if got != want {
+					t.Errorf("park reason = %q, want %q", got, want)
+				}
+			},
+		},
+		{
+			// The other resume flavour must count too: a clean exit with
+			// real commits or a dirty worktree is stronger evidence of
+			// progress than progressed() itself asks for, and it spends the
+			// same resumes counter the crash arm's ceiling message reads
+			// (see the invariant on the two counters being one budget,
+			// above). One in the middle of an otherwise pure death-rattle
+			// crash loop must still make the ceiling's sentence say a run
+			// got somewhere.
+			name:  "a clean-exit resume with real work counts toward the ceiling's honesty too",
+			mode:  "deathrattlemixed",
+			state: &ghState{Issues: open()},
+			tune: func(t *testing.T, cfg *config) {
+				leftBehind(t, cfg)
+				cfg.retries, cfg.resumeCeiling = 100, ceiling
+			},
+			runs: 1 + ceiling, // fresh crash, the clean-exit resume, two more crashes
+			check: func(t *testing.T, err error, st *ghState, out string) {
+				want := fmt.Sprintf("claude has been retried %d times on this issue and still has "+
+					"not finished it — each run gets somewhere and then dies, which needs a human", ceiling)
+				if got := parkedFor(t, err); got != want {
+					t.Errorf("park reason = %q, want %q", got, want)
+				}
+			},
+		},
+		{
 			// Nothing crashed, nothing was asked, nothing was produced, and
 			// there is nothing on the branch or in the worktree either. That is
 			// the clean exit that really did decide nothing, and a machine
