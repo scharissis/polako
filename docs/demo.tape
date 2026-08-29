@@ -42,5 +42,5 @@ Sleep 500ms
 
 # What would a shift do next? -dry-run resolves the next issue and prints the
 # exact invocation it would run, including the tool allowlist that bounds it.
-Type "polako work -dry-run" Sleep 500ms Enter
+Type "polako work -label ready -dry-run" Sleep 500ms Enter
 Sleep 8s
