@@ -13,6 +13,15 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.12.1]
+
+### What's Changed
+* feat: release notes become GitHub's linked notes, annotated with closed issues by @scharissis in https://github.com/scharissis/polako/pull/184 (closes #137, #166)
+* fix: queue blockedBy so an unmerged prerequisite is never invisible by @scharissis in https://github.com/scharissis/polako/pull/185 (closes #179)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.12.0...v0.12.1
+
 ## [0.12.0]
 
 ### Added
