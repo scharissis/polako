@@ -250,7 +250,11 @@ outside the window or belonged to a shift on another machine.
 work are two records, and `stats` sums both. The same goes for the `unfinished`
 reason, which is a `--resume` of a run that ended its turn without a PR rather
 than one that crashed — counting how often that happens is how you tell whether
-the skill's one-turn rule is landing.
+the skill's one-turn rule is landing. Those rows also carry a `resumed_from`,
+the session id passed to `--resume`; today's CLI keeps the session id across a
+resume, so it always equals the row's own `session`. It is stored as the resume
+*target* — a property of the invocation — so it would still say something
+against a CLI that forks a new session on resume rather than continuing the old.
 
 Summing both is right, and that took measuring. A `--resume`d run's `result`
 event reports **that invocation, not the session it continued**, so the two

@@ -218,10 +218,16 @@ type runRecord struct {
 	Reason  string `json:"reason"`
 	Attempt int    `json:"attempt"`
 	Session string `json:"session"`
-	// ResumedFrom chains a resumed run back to the session it continued. That
-	// chain is a provenance record, not a correction a reader has to apply: a
-	// --resume'd result event reports the invocation rather than the session
-	// (settled on issue #78), so rows are summed exactly as written.
+	// ResumedFrom is the session id this run passed to --resume: the resume
+	// target, a fact about the invocation and not about the session it
+	// produced. Today's CLI keeps the session id across a resume, so it is
+	// always equal to Session whenever it is set (non-empty exactly when
+	// Reason is "resume" or "unfinished"); it would diverge only against a CLI
+	// that forks a new session on resume rather than continuing the old one —
+	// which is also the change that would turn the sum below into a wrong one,
+	// so this is the field that would notice. Regardless: a --resume'd result
+	// event reports that invocation rather than the session (settled on issue
+	// #78), so rows are summed exactly as written.
 	ResumedFrom string `json:"resumed_from"`
 
 	Status   string `json:"status"`
