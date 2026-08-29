@@ -425,6 +425,20 @@ func fakeClaude(mode string) int {
 		emit(`{"type":"result","subtype":"success","session_id":"sess-blocked","duration_ms":100,` +
 			`"num_turns":2,"total_cost_usd":0.1,"result":"This requires user confirmation to enter the worktree. Can you approve?"}`)
 		return 0
+	case "toolrefused":
+		// Issue #209: #126's actual shape — a refused tool_result mid-run
+		// (the CLI's own fact) followed by a clean exit whose final text is
+		// ordinary prose with no ask of its own, so the prose route
+		// (permissionRefusal) stays blind to it and only the structural
+		// signal catches it.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-refused","model":"claude-opus-5"}`)
+		emit(`{"type":"assistant","session_id":"sess-refused","message":{"content":[` +
+			`{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"gh issue close 1 --comment \"...\""}}]}}`)
+		emit(`{"type":"user","session_id":"sess-refused","message":{"content":[` +
+			`{"type":"tool_result","tool_use_id":"toolu_1","is_error":true,"content":"This command requires approval"}]}}`)
+		emit(`{"type":"result","subtype":"success","session_id":"sess-refused","duration_ms":100,` +
+			`"num_turns":2,"total_cost_usd":0.1,"result":"Issue #1 is resolved: nothing left to do."}`)
+		return 0
 	case "permissionmidrun":
 		// Issue #182 / #169: the ask lands in a turn partway through, and the
 		// run then ends on a sentence the head anchor cannot match. Same clean
@@ -2327,11 +2341,128 @@ func TestPermissionRefusalMatchesTheWaysARunAsksApproval(t *testing.T) {
 		"Fixed #156, which was about a run that says " +
 			`"This requires user confirmation" when cd is not allowlisted. ` +
 			"Opened a PR.",
+		// Issue #209: #126's three actual final texts, verbatim, from session
+		// 902c1c34-d4db-40cc-b00c-aa8f82242472. Each run had already been
+		// refused a tool_result mid-run ("This command requires approval"),
+		// but none of these closing messages themselves read as an ask — that
+		// is the bug: the prose route stays blind to all three on purpose,
+		// pinned here, and TestObserveLatchesOnARefusedToolResult is what now
+		// catches them instead, off the structural signal.
+		"Issue #126 is resolved: my earlier run confirmed PR #132 already " +
+			"shipped the fix and asked whether to close it, and you replied " +
+			`"Mark this issue as resolved by #132." I've cleared the ` +
+			"awaiting-answer label. Closing the issue with an explanatory " +
+			"comment needs your approval — please confirm the gh issue close " +
+			`126 --comment "..." command above so I can finish.`,
+		"I've hit a hard blocker: the gh issue close command requires " +
+			"interactive approval that isn't coming through in this turn, and " +
+			"I can't bypass permission prompts — that's a safety boundary I " +
+			"won't cross, not a workaround I can find my way around.",
+		"Re-verified — nothing has changed since the last check: no new " +
+			"commits, no PR, issue still open, awaiting-answer already " +
+			`cleared. Retrying gh issue close produced the identical ` +
+			`"requires approval" block again.`,
 	}
 	for _, r := range fine {
 		if permissionRefusal(r) {
 			t.Errorf("should not read as a permission request: %s", clip(r, 80))
 		}
+	}
+}
+
+// Issue #209: the CLI's own wrapper text for a refused tool_result, not the
+// model's prose — both real signatures observed on session
+// 902c1c34-d4db-40cc-b00c-aa8f82242472, and a real is_error tool_result from
+// the same session that is *not* this: a working-directory security block,
+// which must not be mistaken for a refused permission.
+func TestToolResultRefusalMatchesTheCLIsOwnWrapperText(t *testing.T) {
+	refused := []string{
+		"This command requires approval",
+		"This Bash command contains multiple operations. The following " +
+			"parts require approval: ls /Users/stef/code/polako-issue-126/PLAN.md, " +
+			"cat /Users/stef/code/polako-issue-126/PLAN.md",
+	}
+	for _, r := range refused {
+		if !toolResultRefusal(r) {
+			t.Errorf("should read as a refused tool_result: %s", clip(r, 80))
+		}
+	}
+	fine := []string{
+		"",
+		"issue #48",
+		// Real capture, same session: a working-directory restriction, not a
+		// permission the allowlist could grant.
+		"rm in '/Users/stef/code/polako-issue-126/ISSUE_COMMENT.md' was " +
+			"blocked. For security, Claude Code may only remove files from " +
+			"the allowed working directories for this session: " +
+			"'/Users/stef/code/polako'.",
+	}
+	for _, r := range fine {
+		if toolResultRefusal(r) {
+			t.Errorf("should not read as a refused tool_result: %s", clip(r, 80))
+		}
+	}
+}
+
+// Issue #209: a refused tool_result is a structural fact the CLI states
+// itself, mid-run — unlike permissionRefusal's prose, observe latches it
+// straight onto permissionRefused (which already parks without spending the
+// resume budget) and names the refused command, correlated back to its
+// tool_use by id since a single-command refusal's own text does not name it.
+func TestObserveLatchesOnARefusedToolResult(t *testing.T) {
+	toolUse := func(id, name string, input string) streamEvent {
+		ev, ok := parseEvent([]byte(`{"type":"assistant","message":{"content":[` +
+			`{"type":"tool_use","id":` + strconv.Quote(id) + `,"name":` + strconv.Quote(name) +
+			`,"input":` + input + `}]}}`))
+		if !ok {
+			t.Fatalf("could not build tool_use turn")
+		}
+		return ev
+	}
+	toolResult := func(id, content string, isErr bool) streamEvent {
+		ev, ok := parseEvent([]byte(`{"type":"user","message":{"content":[` +
+			`{"type":"tool_result","tool_use_id":` + strconv.Quote(id) +
+			`,"is_error":` + strconv.FormatBool(isErr) + `,"content":` + strconv.Quote(content) + `}]}}`))
+		if !ok {
+			t.Fatalf("could not build tool_result turn")
+		}
+		return ev
+	}
+
+	var rep runReport
+	rep.observe(toolUse("toolu_1", "Bash", `{"command":"gh issue close 126 --comment \"...\""}`))
+	rep.observe(toolResult("toolu_1", "This command requires approval", true))
+	// #126's actual final text: ordinary prose, no ask of its own.
+	rep.observe(streamEvent{Type: "result", Subtype: "success", Result: "Issue #126 is resolved: my earlier " +
+		"run confirmed PR #132 already shipped the fix."})
+
+	if !rep.permissionRefused {
+		t.Error("permissionRefused should latch from the refused tool_result " +
+			"and survive an ordinary final result — the overwrite this issue fixes")
+	}
+	if want := "Bash: gh issue close 126"; !strings.Contains(rep.permissionRefusedDetail, want) {
+		t.Errorf("permissionRefusedDetail = %q, want it to name the correlated command (contains %q)",
+			rep.permissionRefusedDetail, want)
+	}
+
+	// A tool_result that is not an error, or does not read as a refusal, must
+	// not latch.
+	var ok runReport
+	ok.observe(toolUse("toolu_2", "Bash", `{"command":"gh issue view 126"}`))
+	ok.observe(toolResult("toolu_2", "issue #126: ...", false))
+	ok.observe(streamEvent{Type: "result", Subtype: "success", Result: "Opened a PR."})
+	if ok.permissionRefused {
+		t.Error("permissionRefused should stay false — no refusal on the stream")
+	}
+
+	var blockedElsewhere runReport
+	blockedElsewhere.observe(toolUse("toolu_3", "Bash", `{"command":"rm ISSUE_COMMENT.md"}`))
+	blockedElsewhere.observe(toolResult("toolu_3",
+		"rm in '/x/ISSUE_COMMENT.md' was blocked. For security, Claude Code may only "+
+			"remove files from the allowed working directories for this session: '/x'.", true))
+	blockedElsewhere.observe(streamEvent{Type: "result", Subtype: "success", Result: "Opened a PR."})
+	if blockedElsewhere.permissionRefused {
+		t.Error("permissionRefused should stay false — a directory restriction is not a permission refusal")
 	}
 }
 

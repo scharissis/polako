@@ -2572,7 +2572,21 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 						if d := left.describe(); d != "" {
 							reason += "; " + d
 						}
-						return parked(0, parkAside(category, left.where(), "%s", reason))
+						// The refused command can carry a local absolute path
+						// (a worktree path inside a Bash command) exactly the
+						// way a worktree's own path can — see leftWork.where()
+						// — so it travels beside it in aside, never in reason,
+						// which is posted to the issue thread verbatim.
+						aside := left.where()
+						if rep.permissionRefusedDetail != "" {
+							detail := "the refused command was: " + clip(rep.permissionRefusedDetail, 200)
+							if aside != "" {
+								aside += " — " + detail
+							} else {
+								aside = detail
+							}
+						}
+						return parked(0, parkAside(category, aside, "%s", reason))
 					}
 					if rep.permissionRefused {
 						// Resuming replays the identical session against the
@@ -2923,6 +2937,13 @@ type streamEvent struct {
 			Text  string          `json:"text"`
 			Name  string          `json:"name"`
 			Input json.RawMessage `json:"input"`
+			// ID identifies a tool_use block (assistant); ToolUseID is
+			// the same value echoed back on the tool_result (user) that
+			// answers it, so the two can be correlated.
+			ID         string          `json:"id"`
+			ToolUseID  string          `json:"tool_use_id"`
+			IsError    bool            `json:"is_error"`
+			ResultText json.RawMessage `json:"content"`
 		} `json:"content"`
 		Usage streamUsage `json:"usage"`
 	} `json:"message"`
@@ -3017,14 +3038,30 @@ type runReport struct {
 	// bool, because the refusal carries the reset time the wait is read from.
 	limitMsg string
 	// permissionRefused is the third clean-exit case a park has to tell apart
-	// from "decided nothing": the run's own final words asking the operator to
-	// approve a tool this allowlist never granted, and getting nobody to
-	// answer. Computed on every result event, clean or not — a clean exit
-	// used to have its final text read once (for authFailed/limitMsg, both
-	// gated on IsError) and otherwise dropped, which is what let a park
-	// assert "no questions" over a run whose final message was verbatim one.
-	// See permissionRefusal.
+	// from "decided nothing": either the run's own final words asked the
+	// operator to approve a tool this allowlist never granted and got nobody
+	// to answer (permissionRefusal, on every result event), or — issue #209 —
+	// the CLI itself reported a refused tool_result mid-run (toolResultRefusal,
+	// latched and never cleared by a later ordinary result: see the OR in the
+	// result case below). A clean exit used to have its final text read once
+	// (for authFailed/limitMsg, both gated on IsError) and otherwise dropped,
+	// which is what let a park assert "no questions" over a run whose final
+	// message was verbatim one.
 	permissionRefused bool
+	// permissionRefusedDetail names what was refused, when the stream gives
+	// it: the tool_use correlated by id to the refused tool_result (preferred
+	// — it has the actual command, which a single-command refusal's own
+	// content text does not), or failing that the tool_result's own text
+	// (which does name the parts, for a refused compound Bash command). May
+	// hold a local absolute path (a worktree path in a Bash command), so — like
+	// leftWork.where() — it belongs in a park's aside, never its reason.
+	permissionRefusedDetail string
+	// pendingTools tracks each in-flight tool_use's id to a human-readable
+	// summary of it, so a refused tool_result — which the CLI reports as flat
+	// prose with no command of its own for a single-command refusal — can
+	// still be named. Cleared as each id's result arrives; an id still
+	// in-flight when the run ends is simply never read.
+	pendingTools map[string]string
 	// permissionAsked is the weaker sibling: some assistant turn along the way
 	// — not necessarily the last — read as a request to use a tool this
 	// allowlist never granted, even though the final result text did not (or
@@ -3109,6 +3146,12 @@ func (r *runReport) observe(ev streamEvent) {
 			switch c.Type {
 			case "tool_use":
 				r.toolUses++
+				if c.ID != "" {
+					if r.pendingTools == nil {
+						r.pendingTools = make(map[string]string)
+					}
+					r.pendingTools[c.ID] = c.Name + toolDetail(c.Input)
+				}
 			case "text":
 				// A turn that opens by asking for approval is the run
 				// narrating its own block, not a permissions issue quoted back
@@ -3120,6 +3163,31 @@ func (r *runReport) observe(ev streamEvent) {
 				}
 			}
 		}
+	case "user":
+		// The CLI's own fact that a tool was refused, not the model's later
+		// retelling of it — see toolResultRefusal. Latched: unlike
+		// permissionAsked this pre-empts a resume (below), because resuming
+		// replays the identical session against the identical allowlist.
+		for _, c := range ev.Message.Content {
+			if c.Type != "tool_result" {
+				continue
+			}
+			cmd := r.pendingTools[c.ToolUseID]
+			delete(r.pendingTools, c.ToolUseID)
+			if !c.IsError {
+				continue
+			}
+			if text := toolResultContentText(c.ResultText); toolResultRefusal(text) {
+				r.permissionRefused = true
+				if r.permissionRefusedDetail == "" {
+					if cmd != "" {
+						r.permissionRefusedDetail = cmd
+					} else {
+						r.permissionRefusedDetail = text
+					}
+				}
+			}
+		}
 	case "result":
 		r.hasResult = true
 		r.subtype, r.isError = ev.Subtype, ev.IsError
@@ -3127,7 +3195,11 @@ func (r *runReport) observe(ev streamEvent) {
 		if ev.IsError && limitRefusal(ev.Result) {
 			r.limitMsg = ev.Result
 		}
-		r.permissionRefused = permissionRefusal(ev.Result)
+		// OR, not assign: a mid-run refused tool_result (above) must survive
+		// a clean final result whose own text does not itself read as an
+		// ask — issue #209, where every one of #126's three final messages
+		// was ordinary prose despite the run having been refused a tool.
+		r.permissionRefused = r.permissionRefused || permissionRefusal(ev.Result)
 		r.turns = ev.NumTurns
 		r.wallMS, r.apiMS = ev.DurationMS, ev.DurationAPIMS
 		r.costUSD = ev.TotalCost
@@ -3317,6 +3389,59 @@ var permissionAskSignatures = []string{
 // is too often the run describing a wall it then goes around.
 func permissionAskMidRun(text string) bool {
 	return headMatchesAny(text, permissionAskSignatures...)
+}
+
+// toolRefusalSignatures are the CLI's own wrapper text for a tool_result the
+// permission system refused outright — observed verbatim on issue #209
+// (session 902c1c34-d4db-40cc-b00c-aa8f82242472): a plain "This command
+// requires approval" for a single command, and, for a compound Bash command,
+// "This Bash command contains multiple operations. The following parts
+// require approval: ..." naming the parts. Unlike permissionAskSignatures
+// this is CLI prose, not the model's, so — like authFailure and
+// limitRefusal — it is trusted rather than treated as one phrasing among
+// many.
+var toolRefusalSignatures = []string{
+	"this command requires approval",
+	"this bash command contains multiple operations",
+}
+
+// toolResultRefusal reports whether a tool_result's content is the CLI
+// itself refusing a command outside --allowedTools — the structural fact
+// issue #209 classifies on, rather than the model's own retelling of it a
+// turn or more later. Head-anchored for the same reason as authFailure: a
+// tool_result that merely quotes this text (a grep hit, a file read) is the
+// likelier false positive.
+func toolResultRefusal(text string) bool {
+	return headMatchesAny(text, toolRefusalSignatures...)
+}
+
+// toolResultContentText reads a tool_result content field. The CLI has only
+// ever been observed sending a plain string, but the underlying API also
+// allows an array of {type:"text",text:...} blocks (evals/lib/grade.py's
+// timeline() handles both off real captured runs), so both are read here.
+func toolResultContentText(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &blocks) != nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, b := range blocks {
+		if b.Type != "text" {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteByte(' ')
+		}
+		sb.WriteString(b.Text)
+	}
+	return sb.String()
 }
 
 // limitResetRe reads the reset clause out of a limit refusal — "resets 10:50am
