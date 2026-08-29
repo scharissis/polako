@@ -407,3 +407,67 @@ parsed, so "just replied" and "unreadable" cannot be confused. The same rule
 `status`'s text report follows applies here too — no issue, PR or comment
 text, only numbers, branches, labels, states and URLs.
 
+## Reclaiming finished issues: `polako tidy`
+
+Cleanup today only runs from inside a shift that watched a merge itself.
+Every other run — and every interactive one — leaves its worktree and its
+branch behind. `tidy` is what an operator points at that backlog once:
+
+```bash
+polako tidy
+```
+
+```
+scharissis/polako
+would reclaim (-apply to do it)
+  issue  branch     why             action
+  #115   issue-115  closed          worktree removed, branch deleted
+  #130   issue-130  merged (PR #201) worktree removed, branch deleted
+
+skipped
+  issue  branch     reason
+  #171   issue-171  still open
+  #178   issue-178  2 uncommitted files
+```
+
+Before touching anything it proves the branch safe to remove — **all** of
+these, not any one:
+
+- the issue is closed, or its PR is merged — GitHub is the authority, as
+  always;
+- the branch is merged into the default branch (an ancestor of
+  `origin/HEAD`'s branch, after a fast-forward refresh exactly like the one a
+  shift does before picking up an issue). A branch merged via a squash is not
+  literally an ancestor of anything, and this does not try to reason about
+  that — it reports "not merged into the default branch" and leaves the
+  branch alone;
+- its worktree, if it has one, has no uncommitted or untracked changes
+  (`PLAN.md` — the skill's own planning note, which nothing ever commits —
+  does not count against it, the same exception `-dry-run`'s park messages
+  already carry);
+- nothing about it is unpushed.
+
+Anything that fails one of those is named and left alone — that output is
+the feature, not a diagnostic: it is how you learn `issue-178` still has two
+files uncommitted. Refusing is always recoverable; removing wrongly is not.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `-repo` | *(whatever `-dir` is a checkout of)* | Repository to reclaim in, `owner/name`. |
+| `-dir` | `.` | Path to the repository's main checkout, used to resolve the repository when `-repo` is not given. |
+| `-branch-prefix` | `issue-` | Branch prefix the skill uses; how a branch is matched back to an issue. |
+| `-apply` | `false` | Actually remove worktrees and delete branches. Every other verb here defaults to acting; this is the one whose actions cannot be undone, so it defaults to only reporting what it would do. Cannot be set from the environment — see below. |
+
+`-branch-prefix` and `-dir`/`-repo` take environment defaults the same way
+every other verb's do. `-apply` deliberately does not: a `POLAKO_APPLY=1`
+left in a shell profile would turn every future preview into a live deletion
+run, which is exactly the mistake defaulting to dry-run exists to prevent.
+
+A `.claude/worktrees/<slug>-<hash>` entry is matched the same way any other
+worktree is — by the branch it has checked out, not by its directory name —
+so one of those is reclaimed exactly when it carries a finished `issue-N`
+branch, and left alone otherwise, including a detached one, which carries no
+branch at all.
+
+A repository with nothing to reclaim prints one line and exits 0.
+
