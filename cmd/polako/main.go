@@ -1843,6 +1843,13 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 	// flavour: the kinds are exclusive, and a second bool is one more thing every
 	// place that clears the first has to remember.
 	fruitless, resumes, cleanResumes, resumeKind := 0, 0, 0, ""
+	// everProgressed tracks, across every resume counted by resumes, whether
+	// any of them ever produced real work — unlike fruitless, it is never
+	// reset. -retries has no enforced ceiling of its own, so an operator
+	// value above resumeCeiling can still let a run of pure death-rattle
+	// crashes reach the ceiling below with zero progress ever seen; the park
+	// sentence there must not claim otherwise.
+	everProgressed := false
 
 	// Before the run, not only after the last merge: the gap this closes is also
 	// opened by a teammate's push and by a drain restarted days later, and the
@@ -2111,6 +2118,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 						// loop -retries exists to stop. A host that sleeps four
 						// times across one long issue must not park it.
 						fruitless = 0
+						everProgressed = true
 						log.Printf("%s (retry %d/%d; the last run got work done before it "+
 							"ended, so the -retries budget starts over) in %s",
 							mode, resumes, cfg.resumeCeiling, cfg.retryWait)
@@ -2128,11 +2136,23 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					if resumes >= cfg.resumeCeiling {
 						// "retried" rather than "resumed": most of these are
 						// resumes, but a dead session turns one into a fresh
-						// restart, and the count covers both.
+						// restart, and the count covers both. everProgressed
+						// picks the sentence: -retries has no enforced ceiling
+						// of its own, so a value set above resumeCeiling can
+						// still reach here on a run of pure death-rattle
+						// crashes, and claiming one of them got somewhere
+						// would be exactly the false diagnosis this issue is
+						// about.
+						if everProgressed {
+							return parked(0, park(parkRetries,
+								"claude has been retried %d times on this issue and still has "+
+									"not finished it — each run gets somewhere and then dies, which needs "+
+									"a human", resumes))
+						}
 						return parked(0, park(parkRetries,
 							"claude has been retried %d times on this issue and still has "+
-								"not finished it — each run gets somewhere and then dies, which needs "+
-								"a human", resumes))
+								"not finished it — every attempt has died before doing any observable "+
+								"work, which needs a human", resumes))
 					}
 					return parked(0, park(parkRetries,
 						"claude crashed and %d resume attempts failed", cfg.retries))
@@ -2635,7 +2655,13 @@ func (r runReport) status() string {
 // exists for a session that resumes and dies straight back; a run that worked
 // for an hour and was cut off by a host going to sleep is not that, and
 // charging it for one is how a healthy issue gets parked after four naps.
-func (r runReport) progressed() bool { return r.observedTurns > 0 || r.toolUses > 0 }
+//
+// Evidence of work, not evidence of an event: observedTurns counts every
+// assistant event, and a --resume the CLI kills on arrival emits exactly
+// one, with an empty usage block and no tool use — the CLI's death rattle,
+// indistinguishable from real progress if an event were enough. Output
+// tokens actually observed, or a tool use, are not.
+func (r runReport) progressed() bool { return r.observed.Out > 0 || r.toolUses > 0 }
 
 // observe folds one event into the report.
 func (r *runReport) observe(ev streamEvent) {
