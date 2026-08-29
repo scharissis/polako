@@ -1827,6 +1827,69 @@ func TestDrainWarnsWhenItCannotCommentOnAFinishedContainer(t *testing.T) {
 	}
 }
 
+// A container with exactly one child is grammar, not an edge case: the log
+// line and the comment body must both say "1 sub-issue", not "1 sub-issues".
+func TestDrainNamesASingleSubIssueCorrectly(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 1, SubIssuesCompleted: 1},
+		},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	if body := finalGhState(t, path).Issues["113"].Bodies[1]; !strings.Contains(body, "1 sub-issue ") {
+		t.Errorf("comment body = %q, want singular %q", body, "1 sub-issue")
+	}
+	if out := buf.String(); !strings.Contains(out, "epic #113: all 1 sub-issue closed") {
+		t.Errorf("log is missing the singular epic-finished line\ngot:\n%s", out)
+	}
+}
+
+// The marker check is a network read, and re-running it on every pass of the
+// drain's loop for a container whose answer this shift already knows would
+// be a call spent for nothing. A shift-local memo, mirroring the loop's own
+// skip map, is what keeps it to one read and one write for the whole shift —
+// this pins that down at the gh-call level rather than only at the resulting
+// comment count.
+func TestDrainReadsAFinishedContainerOnceInAShift(t *testing.T) {
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6},
+			// Two ordinary issues, both closed by an already-merged PR, so the
+			// drain's loop passes over the container's queue entry three times
+			// (before #2, before #3, and once more finding the backlog clear)
+			// without ever running a claude session.
+			"2": {Open: true},
+			"3": {Open: true},
+		},
+		PRs: map[string]*fakePR{
+			"issue-2": {Number: 8, State: "MERGED"},
+			"issue-3": {Number: 9, State: "MERGED"},
+		},
+	})
+	calls := filepath.Join(t.TempDir(), "gh-calls.log")
+	t.Setenv(fakeGhLogEnv, calls)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	argv, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatalf("reading the gh call log: %v", err)
+	}
+	if got := strings.Count(string(argv), "issues/113/comments"); got != 1 {
+		t.Errorf("#113's thread was read %d times across the shift, want exactly 1\n%s", got, argv)
+	}
+	if got := strings.Count(string(argv), "issue comment 113"); got != 1 {
+		t.Errorf("#113 was commented %d times, want exactly 1\n%s", got, argv)
+	}
+}
+
 // A gh from before sub-issues rejects the whole --json set rather than the one
 // field it does not know, so the listing asks again without it. Containers are
 // workable on such a host — that is the price, and the warning is what makes it

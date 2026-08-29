@@ -1074,6 +1074,10 @@ func drain(ctx context.Context, cfg config) error {
 	}
 	cfg.skip = skip
 	states := map[int]*issueState{}
+	// Same shape as skip, for the same reason: not state a restart needs, only
+	// a memo so this shift does not re-read a finished container's thread on
+	// every pass once it already knows the marker is there.
+	commentedContainers := map[int]bool{}
 
 	var results []issueResult
 	// Every exit goes through finish, fatal ones included: a session that died
@@ -1117,7 +1121,9 @@ func drain(ctx context.Context, cfg config) error {
 		if err != nil {
 			return finish(err)
 		}
-		commentFinishedContainers(ctx, cfg, containers)
+		if err := commentFinishedContainers(ctx, cfg, containers, commentedContainers); err != nil {
+			return finish(err)
+		}
 		issue := pickLowest(ready, skip)
 		if issue == 0 {
 			blocked = slices.DeleteFunc(blocked, func(n int) bool { return skip[n] })
@@ -1347,22 +1353,32 @@ func finishedContainerComment(c containerInfo) string {
 
 // commentFinishedContainers tells a human, once, that an epic is done in
 // substance: every child closed, waiting only on someone to close the
-// container itself. All orchestration state lives in GitHub, so idempotency
-// comes from reading the thread before writing to it rather than from a
-// shift-local record of what this process already did — the same shape
-// awaitAnswer already uses to notice a reply.
+// container itself. Idempotency across shifts comes from the marker: a
+// container's thread is read for it before anything is posted, the same
+// shape awaitAnswer already uses to notice a reply.
+//
+// done is this shift's own memo of containers already confirmed — not
+// durable, exactly like the drain loop's own skip map — so a container that
+// stays in the queue and is seen again on every later pass of the loop is
+// not re-read off GitHub once this shift already knows its answer.
 //
 // Best-effort like parkIssue's own comment: nothing else in the drain reads
-// this comment back, so a failure here is a warning and the shift carries on.
-// Never reached on a dry run — dryRun and drain are separate paths off run(),
-// and dryRun never calls this.
-func commentFinishedContainers(ctx context.Context, cfg config, containers []containerInfo) {
+// this comment back, so a failure here is a warning and the shift carries
+// on — except a context cancellation, which is the operator stopping the
+// process on purpose rather than a GitHub hiccup, and is propagated rather
+// than logged as one, matching every other gh call in this loop. Never
+// reached on a dry run — dryRun and drain are separate paths off run(), and
+// dryRun never calls this.
+func commentFinishedContainers(ctx context.Context, cfg config, containers []containerInfo, done map[int]bool) error {
 	for _, c := range containers {
-		if !c.finished() {
+		if !c.finished() || done[c.number] {
 			continue
 		}
 		comments, err := issueComments(ctx, cfg, c.number)
 		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			narrate(sevWarning, "could not read #%d's thread to check for the epic-finished note (%v) — "+
 				"will try again next pass", c.number, err)
 			continue
@@ -1370,14 +1386,20 @@ func commentFinishedContainers(ctx context.Context, cfg config, containers []con
 		if slices.ContainsFunc(comments, func(cm issueComment) bool {
 			return strings.Contains(cm.Body, finishedContainerMarker)
 		}) {
+			done[c.number] = true
 			continue
 		}
 		if _, err := gh(ctx, cfg, "issue", "comment", strconv.Itoa(c.number), "--body", finishedContainerComment(c)); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			narrate(sevWarning, "could not comment on finished epic #%d (%v) — the next shift will try again", c.number, err)
 			continue
 		}
-		log.Printf("epic #%d: all %d sub-issues closed — commented, yours to close", c.number, c.total)
+		done[c.number] = true
+		log.Printf("epic #%d: all %s closed — commented, yours to close", c.number, plural(c.total, "sub-issue"))
 	}
+	return nil
 }
 
 // ensureLabel declares a label on the repository, and errors if it was already
