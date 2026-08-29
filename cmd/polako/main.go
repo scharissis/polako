@@ -1876,10 +1876,14 @@ func warnOnVersionSkew(binary string, cfg config) {
 		"installed here) and run " +
 		"`go install github.com/scharissis/polako/cmd/polako@latest`; see docs/install.md"
 	if cfg.pluginID != "" {
+		// `claude plugin marketplace update` wants the marketplace name, which is
+		// the `@` half of the id — the same one docs/install.md names. Deriving it
+		// keeps the two commands in step and matches the canonical wording there.
+		_, marketplace, _ := strings.Cut(cfg.pluginID, "@")
 		remedy = fmt.Sprintf("bring both to the current release: "+
-			"`claude plugin marketplace update && claude plugin update %s`, then "+
+			"`claude plugin marketplace update %s && claude plugin update %s`, then "+
 			"`go install github.com/scharissis/polako/cmd/polako@latest` (see docs/install.md)",
-			cfg.pluginID)
+			marketplace, cfg.pluginID)
 	}
 	log.Printf("version skew: this binary is %s but the installed %s plugin is %s — "+
 		"they are meant to ship together, and the supervisor finds a PR by the "+

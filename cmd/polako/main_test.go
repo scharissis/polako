@@ -2536,7 +2536,7 @@ func TestWarnOnVersionSkew(t *testing.T) {
 // trap (issue #190), so if the two can disagree, one is wrong the next time the
 // CLI changes.
 func TestVersionSkewRemedyAgreesWithInstallDocs(t *testing.T) {
-	const wantCmd = "claude plugin update polako@scharissis"
+	const wantCmd = "claude plugin marketplace update scharissis && claude plugin update polako@scharissis"
 	if docs := readRepoFile(t, "docs", "install.md"); !strings.Contains(docs, wantCmd) {
 		t.Fatalf("docs/install.md no longer shows %q — move this test and warnOnVersionSkew's remedy with it", wantCmd)
 	}
