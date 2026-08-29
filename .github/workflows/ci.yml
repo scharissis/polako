@@ -35,7 +35,13 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          unformatted=$(gofmt -l .)
+          # Same scoping as scripts/check.sh: gofmt, unlike go, does not skip
+          # dot-directories, so list tracked files rather than passing ".".
+          go_files=$(git ls-files '*.go')
+          unformatted=""
+          if [ -n "$go_files" ]; then
+            unformatted=$(gofmt -l $go_files)
+          fi
           if [ -n "$unformatted" ]; then
             echo "not gofmt-clean:"
             echo "$unformatted"
