@@ -439,8 +439,8 @@ func TestStatusReportsFinishedAndLiveContainers(t *testing.T) {
 		t.Fatalf("output did not parse as JSON: %v\n%s", err, jsonOut.String())
 	}
 	wantDoc := []statusDocContainer{
-		{Issue: 113, Total: 6, Completed: 6},
-		{Issue: 147, Total: 5, Completed: 1},
+		{Issue: 113, Total: 6, Completed: 6, Finished: true},
+		{Issue: 147, Total: 5, Completed: 1, Finished: false},
 	}
 	if !slices.Equal(doc.Queue.Containers, wantDoc) {
 		t.Errorf("queue.containers = %+v, want %+v", doc.Queue.Containers, wantDoc)

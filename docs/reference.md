@@ -352,7 +352,7 @@ polako status -json | jq .
     "blocked": [{ "issue": 9, "quiet_seconds": 93600 }],
     "parked": [5],
     "proposed": [27, 28],
-    "containers": [{ "issue": 12, "total": 5, "completed": 2 }]
+    "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false }]
   },
   "next": {
     "issue": 14,
@@ -388,10 +388,12 @@ also-real state: gh was asked and does not know), and `needs_you` is the
 closing line's clauses as an array instead of a `;`-joined sentence.
 
 `queue.containers` is objects, not bare numbers — `{ "issue", "total",
-"completed" }` — so a caller can tell a finished container (`completed ==
-total`, waiting only on a human to close it) from one still in progress
-without a second call. This narrows the shape #118 originally published,
-where it was a plain array of issue numbers like every other list here.
+"completed", "finished" }` — so a caller can tell a finished container from
+one still in progress without a second call. `finished` is `total > 0 &&
+completed == total` computed once in Go rather than left for every consumer
+to reimplement — a jq script checks the field rather than repeating the
+comparison. This narrows the shape #118 originally published, where it was a
+plain array of issue numbers like every other list here.
 
 Every array field is always present as `[]`, never `null`, even when empty —
 `.queue.ready[]` never needs a `// empty` guard. `quiet_seconds` is the one

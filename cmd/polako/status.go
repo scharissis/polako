@@ -650,8 +650,10 @@ func needsYouParts(snap statusSnapshot) []string {
 // computed.
 
 // statusDoc is the whole answer to `polako status -json`, in explicit typed
-// fields rather than map[string]any: a schema that is reviewable and stable,
-// per the acceptance criteria on #118.
+// fields rather than map[string]any: a schema that is reviewable, per the
+// acceptance criteria on #118. Reviewable does not mean frozen — #168 widened
+// `queue.containers` from bare issue numbers to objects once the sub-issue
+// rollup's completed count was worth reporting, and said so in docs/reference.md.
 type statusDoc struct {
 	Repo          string         `json:"repo"`
 	Scope         statusDocScope `json:"scope"`
@@ -678,10 +680,15 @@ type statusDocQueue struct {
 // statusDocContainer is one container issue with its sub-issue rollup, so a
 // caller can tell #113 (6 of 6 closed) from #147 (1 of 5) without a second
 // call — the same widening `blocked` already carries for quiet_seconds.
+// Finished is containerInfo.finished() verbatim: the one place that decides
+// "done" is a Go method, and repeating its comparison in every jq script that
+// reads this document would be exactly the "children invent their own"
+// outcome that method exists to prevent.
 type statusDocContainer struct {
-	Issue     int `json:"issue"`
-	Total     int `json:"total"`
-	Completed int `json:"completed"`
+	Issue     int  `json:"issue"`
+	Total     int  `json:"total"`
+	Completed int  `json:"completed"`
+	Finished  bool `json:"finished"`
 }
 
 // statusDocBlocked is one issue awaiting an answer. QuietSeconds is a pointer
@@ -738,9 +745,11 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 		blocked = append(blocked, b)
 	}
 
-	containers := make([]statusDocContainer, len(snap.queues.containers))
-	for i, c := range snap.queues.containers {
-		containers[i] = statusDocContainer{Issue: c.number, Total: c.total, Completed: c.completed}
+	containers := make([]statusDocContainer, 0, len(snap.queues.containers))
+	for _, c := range snap.queues.containers {
+		containers = append(containers, statusDocContainer{
+			Issue: c.number, Total: c.total, Completed: c.completed, Finished: c.finished(),
+		})
 	}
 
 	prs := make([]statusDocPR, 0, len(snap.prs))
