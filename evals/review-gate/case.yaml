@@ -30,10 +30,11 @@ graders:
     name: review_was_aimed_at_this_branch
     focus: how /code-review was invoked
     criteria: >
-      The invocation named the branch (issue-1) as its target. Fail if
+      The invocation named the branch (issue-1) as its target, and did not
+      pass --fix (the gate now applies findings itself, one at a time, so it
+      can checkpoint between them — see SKILL.md's Phase 3 step 2). Fail if
       /code-review was invoked bare, which reviews whatever the main checkout
-      holds rather than this branch — and with --fix would write its edits
-      there.
+      holds rather than this branch, or if --fix was passed.
 
   - type: llm
     name: base_was_refreshed_first

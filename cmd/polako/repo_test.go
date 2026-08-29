@@ -485,8 +485,8 @@ func TestReviewGateNamesTheBranch(t *testing.T) {
 // branch's base from the *local* default branch, and a drain never pulls — it
 // merges on GitHub — so that ref falls one commit behind per merged PR. Review
 // against a stale one and somebody else's merged PR is inside the diff, where
-// `--fix` will happily rewrite it into this branch. The refresh has to come
-// before the invocation, so check the order too.
+// a finding "fixed" against it lands the fix inside this branch's own commits.
+// The refresh has to come before the invocation, so check the order too.
 func TestReviewGateRefreshesTheBaseBeforeReviewing(t *testing.T) {
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
@@ -499,6 +499,66 @@ func TestReviewGateRefreshesTheBaseBeforeReviewing(t *testing.T) {
 	if review := strings.Index(skill, "/code-review"); review >= 0 && refresh > review {
 		t.Error("the base refresh comes after the review is invoked, which is too late to" +
 			" affect what it diffs against — move it before the invocation")
+	}
+}
+
+// The gate's resumability (issue #216) depends on the review returning before
+// any fix is applied, so it can be checkpointed on its own — a death while
+// --fix is still editing files is what left #216's gate with nothing to
+// resume from. `--fix` coming back onto this line would silently regress
+// that: the invocation would still name the branch (passing
+// TestReviewGateNamesTheBranch above) while quietly losing the resumability
+// this test exists to protect.
+func TestReviewGateDoesNotAutoApplyFixes(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	for _, line := range strings.Split(skill, "\n") {
+		if !strings.Contains(line, "/code-review") {
+			continue
+		}
+		// "no `--fix`" is the point being documented — only a line that would
+		// actually pass the flag to the invocation is the regression.
+		if strings.Contains(line, "--fix") && !strings.Contains(line, "no `--fix`") {
+			t.Errorf("the review invocation passes --fix, which applies findings before this"+
+				" skill can checkpoint them — a death during --fix's own edits is issue #216,"+
+				" the incident this gate's resume markers exist to fix:\n\t%s", strings.TrimSpace(line))
+		}
+	}
+}
+
+// The two markers a resumed run reads to decide whether the gate already ran
+// are the entire resumability contract issue #216 added. Losing either
+// string silently turns every resume back into a full re-review — the exact
+// cost the issue was filed about — without any test failing to say so.
+func TestReviewGateRecordsResumeMarkers(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	for _, marker := range []string{"Reviewed through", "Gate complete through"} {
+		if !strings.Contains(skill, marker) {
+			t.Errorf("SKILL.md no longer writes a %q marker to PLAN.md's `## Review` section —"+
+				" without it a resumed run cannot tell the gate already ran, and issue #216's"+
+				" full-re-review-on-every-death regresses silently", marker)
+		}
+	}
+}
+
+// The code-review-unavailable fallback replaces only the review call (c), not
+// the base refresh (b) before it — a finder on this issue's own gate caught
+// an earlier draft skipping both, which would compare a substitute manual
+// review against a base that could be a merged PR stale, with nothing left to
+// catch it.
+func TestReviewGateFallbackStillRefreshesTheBase(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	fallback := strings.Index(skill, "not invocable in this session")
+	if fallback < 0 {
+		t.Fatal("SKILL.md no longer describes a fallback for when the code-review skill is" +
+			" not invocable — Phase 3's gate needs one, since it is otherwise a hard stop")
+	}
+	if !strings.Contains(skill, "still run\n      b,") && !strings.Contains(skill, "still run b,") {
+		t.Error("the code-review-unavailable fallback no longer says to still run the base" +
+			" refresh (b) before substituting for the review call (c) — without it a substitute" +
+			" review compares against a base that may be a merged PR stale")
 	}
 }
 

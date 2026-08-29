@@ -4986,8 +4986,9 @@ func ensureIssueClosed(ctx context.Context, cfg config, issue, prNumber int) err
 // watches — so the local ref falls a commit behind on every merge, and anything
 // that resolves "this branch's base" from the checkout then reads a base that
 // predates it. The review gate does exactly that: against a stale base it folds
-// an already-merged PR into the diff under review, where a --fix rewrites code
-// that shipped days ago into the branch being reviewed.
+// an already-merged PR into the diff under review, so a change that shipped
+// days ago reads as part of the branch being reviewed — and, if a finding
+// against it gets "fixed", as an edit landing inside this branch's own commits.
 //
 // Merges are not the only source. A teammate's push, a hotfix, or a drain
 // restarted after days down all leave the same gap, which is why this runs when
