@@ -7,6 +7,7 @@ Write-Host '==> gofmt'
 # does, so "." would format-check every nested worktree under
 # .claude/worktrees too. List tracked files instead.
 $goFiles = git ls-files '*.go'
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $unformatted = $null
 if ($goFiles) {
     $unformatted = gofmt -l $goFiles

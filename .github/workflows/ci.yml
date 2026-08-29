@@ -37,10 +37,12 @@ jobs:
         run: |
           # Same scoping as scripts/check.sh: gofmt, unlike go, does not skip
           # dot-directories, so list tracked files rather than passing ".".
-          go_files=$(git ls-files '*.go')
+          # git ls-files -z / xargs -0, not mapfile: keeps this correct even
+          # for a tracked path containing a space, and matches check.sh so
+          # the two don't drift into different idioms for the same check.
           unformatted=""
-          if [ -n "$go_files" ]; then
-            unformatted=$(gofmt -l $go_files)
+          if [ -n "$(git ls-files '*.go')" ]; then
+            unformatted=$(git ls-files -z '*.go' | xargs -0 gofmt -l)
           fi
           if [ -n "$unformatted" ]; then
             echo "not gofmt-clean:"
