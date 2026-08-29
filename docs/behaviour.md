@@ -122,16 +122,61 @@ own sub-issue rollup. A `gh` too old to report that rollup gets one warning and
 carries on, with container issues treated as ordinary work; the `proposed`
 exclusion is labels alone and never depends on it.
 
-**A finished container gets one comment, once, on its own thread.** When
-every child of a container is closed, the drain says so on the container's
-own issue rather than closing it: a container's body is the design record for
-its children, and only you can judge whether they added up to it. The comment
-is idempotent by construction — it carries a marker the drain checks the
-thread for before posting, so a later shift that finds the same finished
-container again says nothing further, and a comment that fails to post is a
-warning rather than a park. It names how many children closed, not which
-ones: a container carries their count, and listing them by number would cost
-an extra `gh` call this drain does not make.
+A container all of whose sub-issues have closed earns a line in the exit
+summary — the design is done in substance, and only a human closing the epic
+itself remains:
+
+```
+  epic    #113: all 6 sub-issues closed — close it when the design is satisfied
+```
+
+Sourced from the queue listing the drain already re-reads every pass, so
+merging the last child of an epic mid-shift is enough — no extra `gh` call.
+Present only when earned, absent entirely when nothing is finished, and
+scoped the same way the rest of the queue is: a container outside `-label`
+is never in that listing to begin with.
+
+**A finished container also gets one comment, once, on its own thread.** The
+exit summary above scrolls past, and an unattended shift has nobody watching
+it — so the durable half of "this epic is finished" lives where the person
+who has to judge it is already looking, and where it is still there next
+week. A container's body is the design record for its children, and only you
+can judge whether they added up to it. The comment is idempotent by
+construction — it carries a marker the drain checks the thread for before
+posting, so a later shift that finds the same finished container again says
+nothing further, and a comment that fails to post is a warning rather than a
+park. It names how many children closed, not which ones: a container carries
+their count, and listing them by number would cost an extra `gh` call this
+drain does not make.
+
+**A ready issue with an open `blockedBy` dependency is put down for this pass**
+rather than worked — a listing that already flags a container also flags an
+unmerged prerequisite, in the same call. Nothing is written anywhere: the next
+listing that finds the blocker closed hands the issue straight back to ready,
+the same shift or a later one. The log names what it is waiting on rather than
+going quiet about it:
+
+```
+issue #171 blocked by #170 — skipping this pass
+```
+
+A blocker outside `-label`'s scope still blocks while it is open — the gate is
+whether the work landed, not whether it was this shift's business — and two
+issues blocking each other are both put down without a hang, the rest of the
+backlog unaffected. That out-of-scope guarantee holds when GitHub's own state
+comes back on the `blockedBy` connection, which is the ordinary case; a `gh`
+old enough to omit it falls back to asking whether the blocker showed up
+anywhere in this same listing, and an out-of-`-label` blocker has no row of
+its own to be found by there — the one gap the no-second-request rule leaves
+open on such a host. A container, `needs-human`, `proposed` or
+`awaiting-answer` classification always wins over a blocker: `awaiting-answer`
+in particular keeps its own poll for a reply running regardless of whether some
+unrelated dependency has merged. `-strict-order` does not fold a held-back
+issue into the queue the way it does an awaiting-answer one — running it again
+this pass cannot show anything the same listing did not already know. A `gh`
+too old to see `blockedBy` shares the sub-issue rollup's one warning rather
+than raising a second, and carries on with blocked issues treated as ordinary
+work.
 
 **A run that has to ask something labels the issue `awaiting-answer`**, and the
 supervisor keys off that label rather than off the thread getting busier. The

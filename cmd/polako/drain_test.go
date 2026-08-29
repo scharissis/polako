@@ -95,6 +95,16 @@ type fakeIssue struct {
 	// supervisor is off working another one: it disappears from the Nth
 	// `issue list` from now. Counted the same way and for the same reason.
 	CloseOnList int `json:"close_on_list"`
+
+	// BlockedBy names the issues this one's blockedBy connection reports,
+	// rendered with a "state" key read off each named issue's own Open bool
+	// in this same ghState — unaffected by any -label filter on the
+	// top-level listing, the way a real blockedBy connection is.
+	BlockedBy []int `json:"blocked_by"`
+	// BlockedByNoState is the same, but rendered with no "state" key at all —
+	// a gh whose blockedBy support does not carry one, standing in for
+	// whatever the real shape turns out to omit.
+	BlockedByNoState []int `json:"blocked_by_no_state"`
 }
 
 type fakePR struct {
@@ -446,14 +456,18 @@ func commitsJSON(committedAt string) string {
 // the countdowns that stand in for a human acting on the repository between one
 // listing and the next, so it reports whether it changed anything.
 //
-// fields is what the caller asked for, because two things turn on it: an old gh
-// refuses the call outright rather than the field, and a payload only carries
-// the sub-issue rollup when the rollup was asked for.
+// fields is what the caller asked for, because three things turn on it: an old
+// gh refuses the call outright rather than the field, a payload only carries
+// the sub-issue rollup when the rollup was asked for, and the same for the
+// blockedBy connection.
 func listIssues(st *ghState, label, fields string) (out string, changed bool, code int) {
 	subIssues := strings.Contains(fields, "subIssuesSummary")
-	if subIssues && st.OldGh {
+	blockedBy := strings.Contains(fields, "blockedBy")
+	if (subIssues || blockedBy) && st.OldGh {
 		// Refused before any listing happens, so no countdown ticks: what gh
-		// checks here is its own field table, not the repository.
+		// checks here is its own field table, not the repository. Both
+		// extended fields are asked for together, so either one being on the
+		// request is what an old gh would reject.
 		fmt.Fprintf(os.Stderr, "unknown JSON field: %q\nAvailable fields:\n  labels\n  number\n", "subIssuesSummary")
 		return "", false, 1
 	}
@@ -467,7 +481,10 @@ func listIssues(st *ghState, label, fields string) (out string, changed bool, co
 	}
 	slices.Sort(numbers)
 
-	var rows []string
+	// Every countdown ticks in one pass before any row is built, so a
+	// blockedBy lookup below sees every issue's Open exactly as this listing
+	// leaves it — not whatever it was before a higher-numbered blocker's own
+	// countdown had its turn.
 	for _, n := range numbers {
 		is := st.Issues[strconv.Itoa(n)]
 		if is.CloseOnList > 0 {
@@ -477,6 +494,11 @@ func listIssues(st *ghState, label, fields string) (out string, changed bool, co
 			}
 			changed = true
 		}
+	}
+
+	var rows []string
+	for _, n := range numbers {
+		is := st.Issues[strconv.Itoa(n)]
 		if !is.Open || (label != "" && !slices.Contains(is.Labels, label)) {
 			continue
 		}
@@ -490,6 +512,20 @@ func listIssues(st *ghState, label, fields string) (out string, changed bool, co
 			// the payload is the shape gh really hands back.
 			row += fmt.Sprintf(`,"subIssuesSummary":{"total":%d,"completed":%d,"percentCompleted":0}`,
 				is.SubIssues, is.SubIssuesCompleted)
+		}
+		if blockedBy {
+			var nodes []string
+			for _, bn := range is.BlockedBy {
+				state := "CLOSED"
+				if blocker, ok := st.Issues[strconv.Itoa(bn)]; ok && blocker.Open {
+					state = "OPEN"
+				}
+				nodes = append(nodes, fmt.Sprintf(`{"number":%d,"state":%q}`, bn, state))
+			}
+			for _, bn := range is.BlockedByNoState {
+				nodes = append(nodes, fmt.Sprintf(`{"number":%d}`, bn))
+			}
+			row += fmt.Sprintf(`,"blockedBy":{"nodes":[%s]}`, strings.Join(nodes, ","))
 		}
 		rows = append(rows, row+"}")
 	}
@@ -1654,6 +1690,86 @@ func TestDrainStillStopsOnAFatalError(t *testing.T) {
 	}
 }
 
+// A shift that ends on a fatal error still names an epic its last listing
+// found finished — the pass that fetched it happened before the fatal
+// dispatch, and finish is what every exit runs through, errors included.
+func TestDrainNamesAFinishedEpicEvenWhenItEndsOnAFatalError(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "authfail", &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true},
+			// A container, never picked up as work — issue 3 is what the second
+			// pass dispatches, and what the fake CLI's "authfail" mode fails on.
+			"2": {Open: true, SubIssues: 3, SubIssuesCompleted: 3},
+			"3": {Open: true},
+		},
+		PRs: map[string]*fakePR{"issue-1": {Number: 8, State: "MERGED"}},
+	})
+
+	err := drain(context.Background(), cfg)
+	if !errors.Is(err, errAuth) {
+		t.Fatalf("drain error = %v, want it to carry %v", err, errAuth)
+	}
+	if want := "epic    #2: all 3 sub-issues closed — close it when the design is satisfied"; !strings.Contains(buf.String(), want) {
+		t.Errorf("a fatal exit must still name the finished epic: missing %q\ngot:\n%s",
+			want, buf.String())
+	}
+}
+
+// The point of the issue: a shift that merges the last child of an epic
+// during its own run says so on its way out, sourced from the listing the
+// loop already made rather than an extra `gh` call.
+func TestDrainNamesAnEpicThatFinishesMidShift(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true, SubIssues: 2, SubIssuesCompleted: 2},
+			// Its PR is already merged, so the shift closes it without a claude
+			// run and then finds nothing else workable.
+			"2": {Open: true},
+		},
+		PRs: map[string]*fakePR{"issue-2": {Number: 9, State: "MERGED"}},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	out := buf.String()
+	if want := "epic    #1: all 2 sub-issues closed — close it when the design is satisfied"; !strings.Contains(out, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, out)
+	}
+	if want := "summary: 1 issue merged, 0 issues parked"; !strings.Contains(out, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, out)
+	}
+}
+
+// A container outside `-label`'s scope is never in the listing this reads
+// from — the same rule a held-back blocker follows — so a finished one there
+// is never this shift's business to report.
+func TestDrainDoesNotNameAFinishedEpicOutsideLabelScope(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			// Finished, but carries none of the label the shift is scoped to.
+			"1": {Open: true, SubIssues: 2, SubIssuesCompleted: 2},
+			"2": {Open: true, Labels: []string{"bug"}},
+		},
+		PRs: map[string]*fakePR{"issue-2": {Number: 9, State: "MERGED"}},
+	})
+	cfg.label = "bug"
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "epic") {
+		t.Errorf("issue 1's epic is outside -label's scope and should go unmentioned\ngot:\n%s", out)
+	}
+	if want := "summary: 1 issue merged, 0 issues parked"; !strings.Contains(out, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, out)
+	}
+}
+
 func TestDrainHonoursOnceAfterAPark(t *testing.T) {
 	captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
@@ -1891,9 +2007,12 @@ func TestDrainReadsAFinishedContainerOnceInAShift(t *testing.T) {
 }
 
 // A gh from before sub-issues rejects the whole --json set rather than the one
-// field it does not know, so the listing asks again without it. Containers are
-// workable on such a host — that is the price, and the warning is what makes it
-// visible — but the curation gate is labels alone and does not depend on it.
+// field it does not know, so the listing asks again without it. Containers
+// and blockedBy dependencies are both workable/invisible on such a host —
+// that is the price, and the warning is what makes it visible — but the
+// curation gate is labels alone and does not depend on either. Sub-issues and
+// blockedBy share one budget: a gh old enough to reject one is assumed too
+// old for both, so the drop and the warning happen once, not once per field.
 func TestOldGhListsWithoutTheSubIssueRollup(t *testing.T) {
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
@@ -1902,6 +2021,9 @@ func TestOldGhListsWithoutTheSubIssueRollup(t *testing.T) {
 			"1": {Open: true},
 			"2": {Open: true, SubIssues: 2},
 			"3": {Open: true, Labels: []string{proposedLabel}},
+			// Would be held back on a gh that could see blockedBy — 1 is open —
+			// but an old gh cannot ask for it at all, so it reads as ordinary work.
+			"4": {Open: true, BlockedBy: []int{1}},
 		},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
@@ -1914,11 +2036,15 @@ func TestOldGhListsWithoutTheSubIssueRollup(t *testing.T) {
 		if err != nil {
 			t.Fatalf("an old gh must still produce a queue: %v", err)
 		}
-		if want := []int{1, 2}; !slices.Equal(q.ready, want) {
-			t.Errorf("ready = %v, want %v — a container it cannot see is ordinary work", q.ready, want)
+		if want := []int{1, 2, 4}; !slices.Equal(q.ready, want) {
+			t.Errorf("ready = %v, want %v — a container and a blocker it cannot see are both ordinary work",
+				q.ready, want)
 		}
 		if want := []int{3}; !slices.Equal(q.proposed, want) {
 			t.Errorf("proposed = %v, want %v — the gate is labels, and labels every gh has", q.proposed, want)
+		}
+		if len(q.heldBack) != 0 {
+			t.Errorf("heldBack = %+v, want none — this gh cannot see blockedBy at all", q.heldBack)
 		}
 	}
 
@@ -1932,9 +2058,90 @@ func TestOldGhListsWithoutTheSubIssueRollup(t *testing.T) {
 	if got := strings.Count(string(argv), subIssuesField); got != 1 {
 		t.Errorf("the rollup should be asked for once and then given up on, asked %d times:\n%s", got, argv)
 	}
+	if got := strings.Count(string(argv), blockedByField); got != 1 {
+		t.Errorf("blockedBy should be asked for once and then given up on, asked %d times:\n%s", got, argv)
+	}
 	if got := strings.Count(string(argv), "issue list"); got != 3 {
 		t.Errorf("issue list calls = %d, want 3: the rejected one, its fallback, "+
 			"and one listing that no longer asks\n%s", got, argv)
+	}
+}
+
+// A held-back issue does not hold the queue: the drain works the issue behind
+// it instead, names the blocker once per pass, and never touches the
+// held-back issue itself — no comment, no label, no PR.
+func TestDrainSkipsAHeldBackIssueAndWorksTheNextOne(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			// The blocker: stays open and unworked for the whole shift, since
+			// proposed keeps it out of every queue a drain reads.
+			"1": {Open: true, Labels: []string{proposedLabel}},
+			"2": {Open: true, BlockedBy: []int{1}},
+			// Its PR is already merged, so the shift advances past it without a
+			// claude run and then finds nothing else workable.
+			"3": {Open: true},
+		},
+		PRs: map[string]*fakePR{"issue-3": {Number: 9, State: "MERGED"}},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	is := st.Issues["2"]
+	if !is.Open || is.Comments != 0 || len(is.Labels) != 0 {
+		t.Errorf("issue 2 = %+v, want it untouched — held back the whole shift", is)
+	}
+	if !st.Issues["1"].Open {
+		t.Error("issue 1 (the blocker) should never have been worked either — it is only proposed")
+	}
+	if st.Issues["3"].Open {
+		t.Error("issue 3 should have been closed once its merged PR was seen")
+	}
+
+	out := buf.String()
+	want := "issue #2 blocked by #1 — skipping this pass"
+	// Once per pass, and this drain makes exactly two: the one that works
+	// issue 3, and the one after that finds nothing left and clears.
+	if got := strings.Count(out, want); got != 2 {
+		t.Errorf("skip log count = %d, want 2\ngot:\n%s", got, out)
+	}
+	if !strings.Contains(out, "backlog cleared") {
+		t.Errorf("a backlog of nothing but a proposal and a held-back issue is cleared\ngot:\n%s", out)
+	}
+}
+
+// -strict-order folds an awaiting-answer issue back into ready so it keeps
+// its place in line, but a held-back issue is not an awaiting-answer issue:
+// running it again this pass cannot reveal anything the same listing did not
+// already know, so it stays out of ready either way.
+func TestOpenIssuesKeepsAHeldBackIssueOutUnderStrictOrder(t *testing.T) {
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true, Labels: []string{awaitingAnswerLabel}},
+			"2": {Open: true, BlockedBy: []int{3}},
+			"3": {Open: true},
+		},
+	})
+	cfg.strictOrder = true
+
+	ready, blocked, heldBack, _, err := openIssues(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("openIssues: %v", err)
+	}
+	if blocked != nil {
+		t.Errorf("blocked = %v, want nil — -strict-order folds it into ready", blocked)
+	}
+	// Ready then the folded-in blocked queue appended, unsorted against each
+	// other — the existing -strict-order shape, unchanged by this issue.
+	if want := []int{3, 1}; !slices.Equal(ready, want) {
+		t.Errorf("ready = %v, want %v — 1 is folded in by -strict-order, 2 stays out held back", ready, want)
+	}
+	want := []heldBackInfo{{number: 2, blockers: []int{3}}}
+	if !heldBackEqual(heldBack, want) {
+		t.Errorf("heldBack = %+v, want %+v", heldBack, want)
 	}
 }
 
@@ -2079,6 +2286,169 @@ func TestContainerInfoFinished(t *testing.T) {
 	}
 }
 
+// heldBackEqual compares two heldBackInfo slices field by field: the type
+// carries a []int, so it is not comparable and slices.Equal cannot see inside
+// it.
+func heldBackEqual(a, b []heldBackInfo) bool {
+	return slices.EqualFunc(a, b, func(x, y heldBackInfo) bool {
+		return x.number == y.number && slices.Equal(x.blockers, y.blockers)
+	})
+}
+
+// A ready issue with an open blockedBy dependency is put down for this pass
+// rather than worked — the whole point of #179.
+func TestSelectableIssuesHoldsBackAnOpenBlocker(t *testing.T) {
+	raw := []byte(`[
+		{"number":4,"labels":[],"blockedBy":{"nodes":[{"number":100,"state":"OPEN"},{"number":101,"state":"CLOSED"}]}},
+		{"number":5,"labels":[]}]`)
+
+	q, err := selectableIssues(raw)
+	if err != nil {
+		t.Fatalf("selectableIssues: %v", err)
+	}
+	if want := []int{5}; !slices.Equal(q.ready, want) {
+		t.Errorf("ready = %v, want %v — 4 has an open blocker", q.ready, want)
+	}
+	want := []heldBackInfo{{number: 4, blockers: []int{100}}}
+	if !heldBackEqual(q.heldBack, want) {
+		t.Errorf("heldBack = %+v, want %+v — only the still-open blocker is named, not the closed one",
+			q.heldBack, want)
+	}
+}
+
+// Nothing durable marks a held-back issue: the very next listing that finds
+// the blocker closed hands it straight back to ready.
+func TestSelectableIssuesUnblocksOnceTheBlockerCloses(t *testing.T) {
+	raw := []byte(`[{"number":4,"blockedBy":{"nodes":[{"number":100,"state":"CLOSED"}]}}]`)
+
+	q, err := selectableIssues(raw)
+	if err != nil {
+		t.Fatalf("selectableIssues: %v", err)
+	}
+	if want := []int{4}; !slices.Equal(q.ready, want) {
+		t.Errorf("ready = %v, want %v — a closed blocker must not hold it back", q.ready, want)
+	}
+	if len(q.heldBack) != 0 {
+		t.Errorf("heldBack = %+v, want none", q.heldBack)
+	}
+}
+
+// blockedBy's own state travels with the connection rather than with the
+// top-level --label filter, so a blocker this call would never have listed on
+// its own account — wrong label, or none at all — still blocks while it is
+// open. The gate is whether the work landed, not whose business it was.
+func TestSelectableIssuesBlockerOutsideLabelScopeStillBlocks(t *testing.T) {
+	raw := []byte(`[{"number":4,"blockedBy":{"nodes":[{"number":200,"state":"OPEN"}]}}]`)
+
+	q, err := selectableIssues(raw)
+	if err != nil {
+		t.Fatalf("selectableIssues: %v", err)
+	}
+	if len(q.ready) != 0 {
+		t.Errorf("ready = %v, want 4 held back even though 200 never appears as its own row", q.ready)
+	}
+	want := []heldBackInfo{{number: 4, blockers: []int{200}}}
+	if !heldBackEqual(q.heldBack, want) {
+		t.Errorf("heldBack = %+v, want %+v", q.heldBack, want)
+	}
+}
+
+// A gh whose blockedBy support carries no state at all falls back to asking
+// whether the blocker's number showed up anywhere in this same listing —
+// numbers already in hand, no second request paid for the approximation.
+func TestSelectableIssuesFallsBackToTheListingWhenStateIsAbsent(t *testing.T) {
+	// 9 is present in the payload as its own open row, so the fallback reads
+	// it as open and 4 stays held back.
+	raw := []byte(`[{"number":4,"blockedBy":{"nodes":[{"number":9}]}},{"number":9,"labels":[]}]`)
+	q, err := selectableIssues(raw)
+	if err != nil {
+		t.Fatalf("selectableIssues: %v", err)
+	}
+	if want := []int{9}; !slices.Equal(q.ready, want) {
+		t.Errorf("ready = %v, want %v — 4 is held back by 9, still present in this listing", q.ready, want)
+	}
+	want := []heldBackInfo{{number: 4, blockers: []int{9}}}
+	if !heldBackEqual(q.heldBack, want) {
+		t.Errorf("heldBack = %+v, want %+v", q.heldBack, want)
+	}
+
+	// 999 never shows up anywhere in the payload, so the fallback reads it as
+	// closed and 4 is ordinary work.
+	raw = []byte(`[{"number":4,"blockedBy":{"nodes":[{"number":999}]}}]`)
+	q, err = selectableIssues(raw)
+	if err != nil {
+		t.Fatalf("selectableIssues: %v", err)
+	}
+	if want := []int{4}; !slices.Equal(q.ready, want) {
+		t.Errorf("ready = %v, want %v — a blocker absent from the listing reads as closed", q.ready, want)
+	}
+	if len(q.heldBack) != 0 {
+		t.Errorf("heldBack = %+v, want none", q.heldBack)
+	}
+}
+
+// Two issues blocking each other resolve independently in the same pass: both
+// are held back, both are named, and neither loops or hangs the rest of the
+// queue.
+func TestSelectableIssuesResolvesADependencyCycle(t *testing.T) {
+	raw := []byte(`[
+		{"number":4,"blockedBy":{"nodes":[{"number":5,"state":"OPEN"}]}},
+		{"number":5,"blockedBy":{"nodes":[{"number":4,"state":"OPEN"}]}},
+		{"number":6,"labels":[]}]`)
+
+	q, err := selectableIssues(raw)
+	if err != nil {
+		t.Fatalf("selectableIssues: %v", err)
+	}
+	if want := []int{6}; !slices.Equal(q.ready, want) {
+		t.Errorf("ready = %v, want %v — the rest of the queue keeps working", q.ready, want)
+	}
+	want := []heldBackInfo{{number: 4, blockers: []int{5}}, {number: 5, blockers: []int{4}}}
+	if !heldBackEqual(q.heldBack, want) {
+		t.Errorf("heldBack = %+v, want %+v", q.heldBack, want)
+	}
+}
+
+// The precedence decisions: a container, needs-human, proposed or
+// awaiting-answer classification wins outright over an open blocker — each is
+// either structural or a judgement already made, and only the awaiting-answer
+// case is a close call. It stays above held-back on purpose: awaitAnswer polls
+// that issue's thread for a reply whether or not some unrelated dependency has
+// merged, and demoting it to held-back would silently stop that poll.
+func TestSelectableIssuesLabelsAndContainersOutrankAnOpenBlocker(t *testing.T) {
+	blocker := `"blockedBy":{"nodes":[{"number":100,"state":"OPEN"}]}`
+	raw := []byte(`[
+		{"number":4,"labels":[{"name":"needs-human"}],` + blocker + `},
+		{"number":5,"labels":[{"name":"proposed"}],` + blocker + `},
+		{"number":6,"labels":[{"name":"awaiting-answer"}],` + blocker + `},
+		{"number":7,"subIssuesSummary":{"total":2},` + blocker + `},
+		{"number":8,"labels":[],` + blocker + `}]`)
+
+	q, err := selectableIssues(raw)
+	if err != nil {
+		t.Fatalf("selectableIssues: %v", err)
+	}
+	if len(q.ready) != 0 {
+		t.Errorf("ready = %v, want none — every non-held-back issue here is claimed by a higher case", q.ready)
+	}
+	if want := []int{4}; !slices.Equal(q.parked, want) {
+		t.Errorf("parked = %v, want %v", q.parked, want)
+	}
+	if want := []int{5}; !slices.Equal(q.proposed, want) {
+		t.Errorf("proposed = %v, want %v", q.proposed, want)
+	}
+	if want := []int{6}; !slices.Equal(q.blocked, want) {
+		t.Errorf("blocked = %v, want %v — awaiting-answer outranks a blocker too", q.blocked, want)
+	}
+	if len(q.containers) != 1 || q.containers[0].number != 7 {
+		t.Errorf("containers = %+v, want just #7", q.containers)
+	}
+	want := []heldBackInfo{{number: 8, blockers: []int{100}}}
+	if !heldBackEqual(q.heldBack, want) {
+		t.Errorf("heldBack = %+v, want %+v — only the plain ready candidate is held back", q.heldBack, want)
+	}
+}
+
 func TestSelectableIssuesRejectsJunk(t *testing.T) {
 	if _, err := selectableIssues([]byte("not json")); err == nil {
 		t.Fatal("a payload that is not an issue list must be an error, not an empty queue")
@@ -2128,7 +2498,7 @@ func TestDrainSummaryReportsEveryOutcome(t *testing.T) {
 		{issue: 2},
 		{issue: 5},
 		{issue: 3, awaiting: true},
-	}, 90*time.Minute), "\n")
+	}, nil, 90*time.Minute), "\n")
 
 	for _, want := range []string{
 		"summary: 2 issues merged, 1 issue parked, 1 issue awaiting an answer, 1h30m of wall clock",
@@ -2145,7 +2515,7 @@ func TestDrainSummaryReportsEveryOutcome(t *testing.T) {
 // Most drains have nothing waiting, and a bucket that reads "0 issues awaiting
 // an answer" on every ordinary run is noise in the one line anybody reads.
 func TestDrainSummaryOmitsAnEmptyWaitingBucket(t *testing.T) {
-	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, time.Minute), "\n")
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil, time.Minute), "\n")
 	if want := "summary: 1 issue merged, 0 issues parked, 1m of wall clock"; !strings.Contains(got, want) {
 		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
 	}
@@ -2157,7 +2527,7 @@ func TestDrainSummaryOmitsAnEmptyWaitingBucket(t *testing.T) {
 // A drain that never reached an issue has nothing to summarize, and "0 issues
 // merged" on every empty backlog is noise.
 func TestDrainSummaryIsSilentWithoutResults(t *testing.T) {
-	if got := drainSummary(nil, time.Minute); got != nil {
+	if got := drainSummary(nil, nil, time.Minute); got != nil {
 		t.Errorf("summary = %v, want nothing", got)
 	}
 }
@@ -2168,7 +2538,7 @@ func TestDrainSummaryPricesTheDrainAndEachIssue(t *testing.T) {
 		{issue: 1, parked: true, reason: "no PR and no questions", cost: 2.5},
 		{issue: 2, cost: 4},
 		{issue: 3, awaiting: true, cost: 0.25},
-	}, 90*time.Minute), "\n")
+	}, nil, 90*time.Minute), "\n")
 
 	for _, want := range []string{
 		"$6.75 spent, 1h30m of wall clock",
@@ -2189,7 +2559,7 @@ func TestDrainSummaryPricesTheDrainAndEachIssue(t *testing.T) {
 func TestDrainSummarySaysWhenTheTotalUndercounts(t *testing.T) {
 	got := strings.Join(drainSummary([]issueResult{
 		{issue: 1, cost: 4, approximated: 2},
-	}, time.Minute), "\n")
+	}, nil, time.Minute), "\n")
 
 	if want := "$4.00 spent (2 runs reported none, so that is an undercount)"; !strings.Contains(got, want) {
 		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
@@ -2199,9 +2569,55 @@ func TestDrainSummarySaysWhenTheTotalUndercounts(t *testing.T) {
 // A drain that only waited on a PR an earlier process opened spent nothing,
 // and "$0.00" reads as a free backlog rather than as an absent number.
 func TestDrainSummaryOmitsDollarsItNeverSpent(t *testing.T) {
-	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, time.Minute), "\n")
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil, time.Minute), "\n")
 	if strings.Contains(got, "$") {
 		t.Errorf("an uncosted drain should print no dollars at all\ngot:\n%s", got)
+	}
+}
+
+// A finished container earns its own line, keyed off the same listing that
+// already threw its containers away before this issue — carried through
+// rather than re-fetched.
+func TestDrainSummaryNamesAFinishedContainer(t *testing.T) {
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}},
+		[]containerInfo{{number: 113, total: 6, completed: 6}}, time.Minute), "\n")
+	if want := "epic    #113: all 6 sub-issues closed — close it when the design is satisfied"; !strings.Contains(got, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
+	}
+}
+
+// Most drains touch no epic at all, and a container list with nothing
+// finished in it should read exactly like no container list.
+func TestDrainSummaryOmitsContainersThatAreNotFinished(t *testing.T) {
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}},
+		[]containerInfo{{number: 113, total: 6, completed: 3}}, time.Minute), "\n")
+	if strings.Contains(got, "epic") {
+		t.Errorf("no container finished, so the summary should not mention one\ngot:\n%s", got)
+	}
+}
+
+// A container with exactly one sub-issue is still a container — SubIssues.Total
+// > 0 is the whole of the rule — so the singular has to read right too.
+func TestDrainSummaryNamesAFinishedContainerOfOne(t *testing.T) {
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}},
+		[]containerInfo{{number: 113, total: 1, completed: 1}}, time.Minute), "\n")
+	if want := "epic    #113: all 1 sub-issue closed — close it when the design is satisfied"; !strings.Contains(got, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
+	}
+}
+
+// A shift that touches no issue at all — the backlog's only open item is a
+// container already finished before this shift ever ran — still has the one
+// thing worth saying, without the "0 issues merged, 0 issues parked" header
+// that would otherwise frame it as a no-op.
+func TestDrainSummaryReportsAFinishedContainerEvenWithNoIssueResults(t *testing.T) {
+	got := strings.Join(drainSummary(nil,
+		[]containerInfo{{number: 113, total: 6, completed: 6}}, time.Minute), "\n")
+	if want := "epic    #113: all 6 sub-issues closed — close it when the design is satisfied"; !strings.Contains(got, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
+	}
+	if strings.Contains(got, "merged") || strings.Contains(got, "parked") {
+		t.Errorf("no issue was touched, so the summary should not claim 0 of either\ngot:\n%s", got)
 	}
 }
 
