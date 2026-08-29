@@ -512,26 +512,25 @@ func TestReviewGateRefreshesTheBaseBeforeReviewing(t *testing.T) {
 func TestReviewGateDoesNotAutoApplyFixes(t *testing.T) {
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
-	lines := strings.Split(skill, "\n")
-	for i, line := range lines {
-		if !strings.Contains(line, "/code-review") {
-			continue
-		}
-		// A prose-wrapped file can push a flag onto the next line or two, so
-		// check a small window around the invocation rather than just the one
-		// line it starts on — a rewrap must not be able to hide --fix from
-		// this check the way it could hide from a same-line-only match.
-		window := line
-		for j := i + 1; j < len(lines) && j <= i+3; j++ {
-			window += " " + lines[j]
-		}
-		// "no `--fix`" is the point being documented — only something that
-		// would actually pass the flag to the invocation is the regression.
-		if strings.Contains(window, "--fix") && !strings.Contains(window, "no `--fix`") {
-			t.Errorf("the review invocation passes --fix, which applies findings before this"+
-				" skill can checkpoint them — a death during --fix's own edits is issue #216,"+
-				" the incident this gate's resume markers exist to fix:\n\t%s", strings.TrimSpace(window))
-		}
+	// Checked over the whole document rather than a window around the
+	// invocation: a window sized to today's wording can miss a rewrap that
+	// pushes `--fix` in from either direction, and `/code-review` names the
+	// branch on exactly one line (TestReviewGateNamesTheBranch), so a
+	// whole-document check can't accidentally cover a second, unrelated
+	// invocation either. Every legitimate mention of `--fix` in this file
+	// documents its absence — if that stops being true, name the new
+	// phrasing here too, deliberately, rather than widen a line window.
+	legitimate := []string{"no `--fix`", "Leaving `--fix` off"}
+	flat := strings.Join(strings.Fields(skill), " ")
+	for _, phrase := range legitimate {
+		flat = strings.ReplaceAll(flat, strings.Join(strings.Fields(phrase), " "), "")
+	}
+	if strings.Contains(flat, "--fix") {
+		t.Error("SKILL.md mentions --fix somewhere other than the phrasings this test knows" +
+			" document its deliberate absence — if the review invocation now passes --fix, that" +
+			" applies findings before this skill can checkpoint them, which is issue #216's" +
+			" original incident; if it's a new legitimate mention, add its exact phrasing to" +
+			" this test's exclusion list")
 	}
 }
 
