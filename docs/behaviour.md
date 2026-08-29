@@ -136,6 +136,19 @@ Present only when earned, absent entirely when nothing is finished, and
 scoped the same way the rest of the queue is: a container outside `-label`
 is never in that listing to begin with.
 
+**A finished container also gets one comment, once, on its own thread.** The
+exit summary above scrolls past, and an unattended shift has nobody watching
+it — so the durable half of "this epic is finished" lives where the person
+who has to judge it is already looking, and where it is still there next
+week. A container's body is the design record for its children, and only you
+can judge whether they added up to it. The comment is idempotent by
+construction — it carries a marker the drain checks the thread for before
+posting, so a later shift that finds the same finished container again says
+nothing further, and a comment that fails to post is a warning rather than a
+park. It names how many children closed, not which ones: a container carries
+their count, and listing them by number would cost an extra `gh` call this
+drain does not make.
+
 **A ready issue with an open `blockedBy` dependency is put down for this pass**
 rather than worked — a listing that already flags a container also flags an
 unmerged prerequisite, in the same call. Nothing is written anywhere: the next
