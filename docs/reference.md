@@ -94,7 +94,7 @@ moments:
 polako work -notify ~/bin/tell-me
 ```
 
-It fires on four states, and nothing else:
+It fires on five states, and nothing else:
 
 | `POLAKO_NOTIFY_EVENT` | What happened |
 | --- | --- |
@@ -102,12 +102,13 @@ It fires on four states, and nothing else:
 | `awaiting-answer` | A run stopped to ask something on the issue thread. Reply there and the next shift folds it in. |
 | `cleared` | The backlog is empty. Nothing is left to work. |
 | `stopped` | The shift ended before the backlog did: a fatal error, or `-max-session-cost` spent. |
+| `epic-done` | An epic's last child closed. The one event above for something good rather than something stuck — closing the container itself is still a human's call, so it still needs you. Fires once, the moment the epic's thread gets its comment, never again for the same epic. |
 
 The context arrives in the environment, so the command needs no arguments:
 
 | Variable | Value |
 | --- | --- |
-| `POLAKO_NOTIFY_EVENT` | One of the four above. |
+| `POLAKO_NOTIFY_EVENT` | One of the five above. |
 | `POLAKO_NOTIFY_ISSUE` | The issue number, or empty when the whole shift rather than one issue needs you. |
 | `POLAKO_NOTIFY_REPO` | `owner/name`. |
 | `POLAKO_NOTIFY_REASON` | One line of English saying what happened and what to do about it. |

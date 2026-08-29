@@ -40,6 +40,12 @@ const (
 	// case the flag exists for: a refused token stops everything, and without
 	// this nothing says so until somebody looks at the terminal.
 	notifyStopped = "stopped"
+	// notifyEpicDone fires once, the same occasion commentFinishedContainers
+	// earns its own log line: every child of a container closed, waiting only
+	// on a human to judge whether they added up to the design and close it.
+	// The one event above announcing something good rather than something
+	// stuck — an epic finishing is still a state only a person can move past.
+	notifyEpicDone = "epic-done"
 )
 
 // notifyPrefix namespaces the variables a notify command receives.

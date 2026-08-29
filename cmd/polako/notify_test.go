@@ -304,6 +304,121 @@ func TestNotifyFiresWhenTheDrainStopsEarly(t *testing.T) {
 	}
 }
 
+// The event this epic (#171) adds: notify fires the same occasion the
+// container earns its comment, carrying the container's number and its
+// closed-child count.
+func TestNotifyFiresWhenAnEpicsLastChildCloses(t *testing.T) {
+	captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6},
+		},
+	})
+	told := notifyLog(t, &cfg)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	got := told()
+	if len(got) != 2 {
+		t.Fatalf("notifications = %v, want the epic-done and then the backlog draining", got)
+	}
+	for _, want := range []string{
+		notifyPrefix + "EVENT=epic-done",
+		notifyPrefix + "ISSUE=113",
+		"6 sub-issues", // the closed-child count, in the REASON english
+	} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("the epic-done notification is missing %q\ngot: %s", want, got[0])
+		}
+	}
+	if !strings.Contains(got[1], notifyPrefix+"EVENT=cleared") {
+		t.Errorf("second notification = %s, want the backlog draining", got[1])
+	}
+}
+
+// A container with children still open must never be mistaken for one that
+// just finished — commentFinishedContainers only acts on c.finished(), and
+// notify must follow the same gate.
+func TestNotifyDoesNotFireForAPartlyFinishedEpic(t *testing.T) {
+	captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 5},
+		},
+	})
+	told := notifyLog(t, &cfg)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	for _, line := range told() {
+		if strings.Contains(line, notifyPrefix+"EVENT=epic-done") {
+			t.Errorf("notified epic-done for a container with open children\ngot: %s", line)
+		}
+	}
+}
+
+// The once-ever gate is the thread comment: a container this shift finds
+// already commented must not fire epic-done again, on this shift or a later
+// one — an operator should not be paged every night about an epic they have
+// not got round to closing.
+func TestNotifyDoesNotRefireForAnAlreadyCommentedEpic(t *testing.T) {
+	captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {
+				Open: true, SubIssues: 6, SubIssuesCompleted: 6,
+				Comments: 1,
+				Bodies:   map[int]string{1: "All 6 sub-issues are closed.\n\n" + finishedContainerMarker},
+			},
+			// A second, ordinary issue so the drain's loop passes over the
+			// container more than once before the backlog clears.
+			"2": {Open: true},
+		},
+		PRs: map[string]*fakePR{"issue-2": {Number: 9, State: "MERGED"}},
+	})
+	told := notifyLog(t, &cfg)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	for _, line := range told() {
+		if strings.Contains(line, notifyPrefix+"EVENT=epic-done") {
+			t.Errorf("re-notified epic-done for an already-commented container\ngot: %s", line)
+		}
+	}
+}
+
+// A notify command is a courtesy, same as every other event: a failing or
+// hanging hook must cost the operator that notification and nothing else —
+// the comment still posts and the shift still completes.
+func TestNotifyFailureForEpicDoneDoesNotAffectTheShift(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6},
+		},
+	})
+	notifyLog(t, &cfg)
+	t.Setenv(fakeNotifyEnv, "fail")
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a broken -notify must not end the drain: %v", err)
+	}
+
+	is := finalGhState(t, path).Issues["113"]
+	if is.Comments != 1 {
+		t.Errorf("comments on #113 = %d, want exactly 1 even though -notify failed", is.Comments)
+	}
+	if !strings.Contains(buf.String(), "-notify command failed for epic-done #113") {
+		t.Errorf("log is missing the -notify failure\ngot:\n%s", buf.String())
+	}
+}
+
 // declaredFlags is every flag name the package declares, on any FlagSet — the
 // drain's and the stats subcommand's alike.
 func declaredFlags(t *testing.T) []string {
