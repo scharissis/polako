@@ -214,14 +214,21 @@ don't post again, and stop.
         HEAD (`git -C <worktree> merge-base --is-ancestor <sha> HEAD`) —
         *and* every commit between that sha and HEAD is one this section's
         findings already account for (`git -C <worktree> log <sha>..HEAD
-        --oneline` against the findings marked "fixed" — a commit in that
-        range no finding claims means something other than this gate's own
-        fix loop landed on the branch, so treat this bullet as not matching
-        and fall to the next one instead) — the review itself does not need
-        repeating: skip b and c, and resume at d — working whatever findings
-        are still "pending" (there may be none left, if a previous run died
-        after the last fix landed but before d's own tests/audit finished;
-        d still has to run those before this counts as done).
+        --oneline` against the findings marked "fixed" — each fix commit
+        names its finding per step d, so this is a direct match, not a
+        guess). A commit that matches a finding still marked "pending" —
+        a death between committing the fix and updating its status, not a
+        stray commit — is not a mismatch: update that finding to "fixed"
+        and keep checking the rest. Only a commit no finding names at all
+        means something other than this gate's own fix loop landed on the
+        branch — treat the whole bullet as not matching and fall to the
+        next one. Once every commit in range is accounted for (directly or
+        by that reconciliation), the review itself does not need repeating:
+        skip b and c, and resume at d — working whatever findings are still
+        "pending" after reconciliation (there may be none left, if a
+        previous run died after the last fix landed but before d's own
+        tests/audit finished; d still has to run those before this counts
+        as done).
       - No `## Review` section, one whose "Reviewed through" sha is *not* an
         ancestor of current HEAD, or one where an unaccounted-for commit sits
         between the two — history moved in some way other than this gate's
@@ -270,12 +277,19 @@ don't post again, and stop.
       through, only the leftover ones on a run resuming mid-fix, none at all
       if a previous run already fixed every one and only died before this
       step's own checks below ran.
+      - Before starting a pending finding, check `git -C <worktree> status
+        --porcelain` — a death between applying and committing an earlier
+        attempt at this same finding leaves stray uncommitted edits behind.
+        Finish and commit them if they are this finding's own fix, revert
+        them if they are not, before touching anything else; never layer a
+        fresh fix attempt on top of unexplained edits already sitting there.
       - For each pending finding: decide whether it needs a fix, apply it,
-        commit it in the repo's usual convention, and update that finding's
-        line in PLAN.md's `## Review` section to "fixed" or "not fixed —
-        <reason>" before moving to the next one, so a death between two
-        findings leaves the first one's progress recorded rather than
-        redone.
+        commit it in the repo's usual convention with the finding named in
+        the commit message (step a's resume check matches fix commits back
+        to findings by that name), and update that finding's line in
+        PLAN.md's `## Review` section to "fixed" or "not fixed — <reason>"
+        before moving to the next one, so a death between two findings
+        leaves the first one's progress recorded rather than redone.
       - Once every finding is resolved — not before — re-run the test suite,
         typecheck and lint, the same tools step 1 used: a fix commit that
         breaks the build is only caught here if this looks again.

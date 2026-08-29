@@ -512,16 +512,25 @@ func TestReviewGateRefreshesTheBaseBeforeReviewing(t *testing.T) {
 func TestReviewGateDoesNotAutoApplyFixes(t *testing.T) {
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
-	for _, line := range strings.Split(skill, "\n") {
+	lines := strings.Split(skill, "\n")
+	for i, line := range lines {
 		if !strings.Contains(line, "/code-review") {
 			continue
 		}
-		// "no `--fix`" is the point being documented — only a line that would
-		// actually pass the flag to the invocation is the regression.
-		if strings.Contains(line, "--fix") && !strings.Contains(line, "no `--fix`") {
+		// A prose-wrapped file can push a flag onto the next line or two, so
+		// check a small window around the invocation rather than just the one
+		// line it starts on — a rewrap must not be able to hide --fix from
+		// this check the way it could hide from a same-line-only match.
+		window := line
+		for j := i + 1; j < len(lines) && j <= i+3; j++ {
+			window += " " + lines[j]
+		}
+		// "no `--fix`" is the point being documented — only something that
+		// would actually pass the flag to the invocation is the regression.
+		if strings.Contains(window, "--fix") && !strings.Contains(window, "no `--fix`") {
 			t.Errorf("the review invocation passes --fix, which applies findings before this"+
 				" skill can checkpoint them — a death during --fix's own edits is issue #216,"+
-				" the incident this gate's resume markers exist to fix:\n\t%s", strings.TrimSpace(line))
+				" the incident this gate's resume markers exist to fix:\n\t%s", strings.TrimSpace(window))
 		}
 	}
 }
@@ -533,11 +542,15 @@ func TestReviewGateDoesNotAutoApplyFixes(t *testing.T) {
 func TestReviewGateRecordsResumeMarkers(t *testing.T) {
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
+	// >= 2 per marker, not just present: step a reads each one (the resume
+	// check) and step c or d has to separately say to write it, or the
+	// marker step a looks for is never actually produced by anything.
 	for _, marker := range []string{"Reviewed through", "Gate complete through"} {
-		if !strings.Contains(skill, marker) {
-			t.Errorf("SKILL.md no longer writes a %q marker to PLAN.md's `## Review` section —"+
-				" without it a resumed run cannot tell the gate already ran, and issue #216's"+
-				" full-re-review-on-every-death regresses silently", marker)
+		if n := strings.Count(skill, marker); n < 2 {
+			t.Errorf("SKILL.md mentions %q only %d time(s) — step a's resume check reads it and"+
+				" a separate step has to write it, so fewer than two mentions means either the"+
+				" read or the write side of this marker is gone, and issue #216's"+
+				" full-re-review-on-every-death regresses silently", marker, n)
 		}
 	}
 }
@@ -555,10 +568,14 @@ func TestReviewGateFallbackStillRefreshesTheBase(t *testing.T) {
 		t.Fatal("SKILL.md no longer describes a fallback for when the code-review skill is" +
 			" not invocable — Phase 3's gate needs one, since it is otherwise a hard stop")
 	}
-	if !strings.Contains(skill, "still run\n      b,") && !strings.Contains(skill, "still run b,") {
-		t.Error("the code-review-unavailable fallback no longer says to still run the base" +
-			" refresh (b) before substituting for the review call (c) — without it a substitute" +
-			" review compares against a base that may be a merged PR stale")
+	// Whitespace-normalized so a cosmetic rewrap of this sentence — a
+	// different wrap point or indentation, changing no behavior — can't
+	// turn this test red; it is prose content being checked, not layout.
+	window := strings.Join(strings.Fields(skill[fallback:min(fallback+200, len(skill))]), " ")
+	if !strings.Contains(window, "still run b,") {
+		t.Errorf("the code-review-unavailable fallback no longer says to still run the base"+
+			" refresh (b) before substituting for the review call (c) — without it a substitute"+
+			" review compares against a base that may be a merged PR stale:\n\t%s", window)
 	}
 }
 
