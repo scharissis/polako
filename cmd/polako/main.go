@@ -2568,7 +2568,14 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					// whichever reason a branch below settles on, then handed to
 					// the same park call — one tail shared by every way this
 					// clean exit can end, rather than each branch repeating it.
-					finishPark := func(category, reason string) error {
+					// refusedCmd is the refused command, when the permission park is
+					// the one telling — every other category has nothing to add
+					// here, which the empty string at their one call site below
+					// says outright rather than leaving to rep's own invariant
+					// that permissionRefusedDetail is empty whenever
+					// permissionRefused is false. Named to avoid shadowing the
+					// package-level detail logger (ui.go) inside this closure.
+					finishPark := func(category, reason, refusedCmd string) error {
 						if d := left.describe(); d != "" {
 							reason += "; " + d
 						}
@@ -2576,17 +2583,17 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 						// (a worktree path inside a Bash command) exactly the
 						// way a worktree's own path can — see leftWork.where()
 						// — so it travels beside it in aside, never in reason,
-						// which is posted to the issue thread verbatim.
-						aside := left.where()
-						if rep.permissionRefusedDetail != "" {
-							detail := "the refused command was: " + clip(rep.permissionRefusedDetail, 200)
-							if aside != "" {
-								aside += " — " + detail
-							} else {
-								aside = detail
-							}
+						// which is posted to the issue thread verbatim. Joined
+						// the same way leftWork.describe() joins its own
+						// optional clauses.
+						var asideParts []string
+						if w := left.where(); w != "" {
+							asideParts = append(asideParts, w)
 						}
-						return parked(0, parkAside(category, aside, "%s", reason))
+						if refusedCmd != "" {
+							asideParts = append(asideParts, "the refused command was: "+clip(refusedCmd, 200))
+						}
+						return parked(0, parkAside(category, strings.Join(asideParts, " — "), "%s", reason))
 					}
 					if rep.permissionRefused {
 						// Resuming replays the identical session against the
@@ -2594,7 +2601,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 						// only the operator can grant the tool, so park straight
 						// away rather than spending the clean-exit resume budget
 						// finding that out the slow way.
-						return finishPark(parkPermission, permissionParkReason)
+						return finishPark(parkPermission, permissionParkReason, rep.permissionRefusedDetail)
 					}
 					// Which bound stopped a resume that was otherwise warranted,
 					// so the park says that rather than the generic sentence
@@ -2678,7 +2685,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 					if bound != "" {
 						reason += "; " + bound
 					}
-					return finishPark(category, reason)
+					return finishPark(category, reason, "")
 				}
 			}
 			record(pr.Number, outcomeOpenedPR)
@@ -2997,6 +3004,13 @@ func parseEvent(line []byte) (streamEvent, bool) {
 	return ev, true
 }
 
+// pendingTool is a tool_use event's name and raw input, kept only until its
+// matching tool_result arrives — see runReport.pendingTools.
+type pendingTool struct {
+	name  string
+	input json.RawMessage
+}
+
 // runReport is what one claude invocation yielded: the session to resume, the
 // numbers it reported, and how it ended. It is filled in as the stream
 // arrives, so it stays valid — and worth recording — for a run that crashed,
@@ -3056,12 +3070,16 @@ type runReport struct {
 	// hold a local absolute path (a worktree path in a Bash command), so — like
 	// leftWork.where() — it belongs in a park's aside, never its reason.
 	permissionRefusedDetail string
-	// pendingTools tracks each in-flight tool_use's id to a human-readable
-	// summary of it, so a refused tool_result — which the CLI reports as flat
-	// prose with no command of its own for a single-command refusal — can
-	// still be named. Cleared as each id's result arrives; an id still
-	// in-flight when the run ends is simply never read.
-	pendingTools map[string]string
+	// pendingTools tracks each in-flight tool_use's id to enough of it to name
+	// later, so a refused tool_result — which the CLI reports as flat prose
+	// with no command of its own for a single-command refusal — can still be
+	// named. The raw pieces, not toolDetail's formatted string: that call
+	// parses the input JSON, and the near-totality of tool calls are never
+	// refused, so paying for it up front on every one would be waste — it
+	// only runs once a refusal is actually confirmed, below. Cleared as each
+	// id's result arrives; an id still in-flight when the run ends is simply
+	// never read.
+	pendingTools map[string]pendingTool
 	// permissionAsked is the weaker sibling: some assistant turn along the way
 	// — not necessarily the last — read as a request to use a tool this
 	// allowlist never granted, even though the final result text did not (or
@@ -3148,9 +3166,9 @@ func (r *runReport) observe(ev streamEvent) {
 				r.toolUses++
 				if c.ID != "" {
 					if r.pendingTools == nil {
-						r.pendingTools = make(map[string]string)
+						r.pendingTools = make(map[string]pendingTool)
 					}
-					r.pendingTools[c.ID] = c.Name + toolDetail(c.Input)
+					r.pendingTools[c.ID] = pendingTool{name: c.Name, input: c.Input}
 				}
 			case "text":
 				// A turn that opens by asking for approval is the run
@@ -3172,7 +3190,7 @@ func (r *runReport) observe(ev streamEvent) {
 			if c.Type != "tool_result" {
 				continue
 			}
-			cmd := r.pendingTools[c.ToolUseID]
+			tool, hadTool := r.pendingTools[c.ToolUseID]
 			delete(r.pendingTools, c.ToolUseID)
 			if !c.IsError {
 				continue
@@ -3180,8 +3198,8 @@ func (r *runReport) observe(ev streamEvent) {
 			if text := toolResultContentText(c.ResultText); toolResultRefusal(text) {
 				r.permissionRefused = true
 				if r.permissionRefusedDetail == "" {
-					if cmd != "" {
-						r.permissionRefusedDetail = cmd
+					if hadTool {
+						r.permissionRefusedDetail = tool.name + toolDetail(tool.input)
 					} else {
 						r.permissionRefusedDetail = text
 					}
