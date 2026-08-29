@@ -155,8 +155,10 @@ check it is *kept*.
   `worktree add` and `push` all work, and none of them reach the network.
 - `.eval/bin/gh` — a stand-in that answers reads from the case's fixtures
   (`issue.json` for `issue view`, `issues.json` and `issues-closed.json` for
-  `issue list`) and *records* every write into `.eval/` instead of performing
-  it. It refuses any subcommand no shipped skill is permitted, so a case cannot
+  `issue list` — and, when a case has no `issue.json`, `issue view` falls back
+  to looking the requested number up in those same two files) and *records*
+  every write into `.eval/` instead of performing it. It refuses any
+  subcommand no shipped skill is permitted, so a case cannot
   pass on a call the real run could never make — `defaultTools` is the set for
   `implement-issue`, and for `plan-backlog` it is the write surface its
   `SKILL.md` names, whose `issue list` and `issue create` are outside
