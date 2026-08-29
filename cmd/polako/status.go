@@ -125,6 +125,8 @@ func statusConfig(ctx context.Context, opt statusOptions) (config, error) {
 	cfg := config{
 		ghBin:        "gh",
 		ghRetryWait:  ghRetryDelay,
+		claudeBin:    "claude",
+		usageTimeout: defaultUsageProbeTimeout,
 		label:        opt.label,
 		branchPrefix: opt.branchPrefix,
 		strictOrder:  opt.strictOrder,
@@ -183,6 +185,9 @@ type statusSnapshot struct {
 	// changes what "next" means rather than what is in the queues: a flagged
 	// issue holds its place, and everything behind it waits on it.
 	strictOrder bool
+	// usage is the account's own plan, as probeUsage answered it — nil when
+	// the probe could not (see config.usage, which this mirrors).
+	usage *usageSnapshot
 }
 
 // statusPR is one open PR on a branch the skill named, and what GitHub says
@@ -239,6 +244,13 @@ func readStatus(ctx context.Context, cfg config, now time.Time) (statusSnapshot,
 	snap.prs, snap.undetailed, err = readStatusPRs(ctx, cfg, snap.queues)
 	if err != nil {
 		return snap, err
+	}
+	// Best-effort, like every claude-CLI read this binary makes: a probe
+	// that fails leaves the row out of the report rather than failing the
+	// snapshot, on a machine that is possibly not even the one running a
+	// drain.
+	if usage, ok := probeUsage(ctx, cfg); ok {
+		snap.usage = &usage
 	}
 	return snap, nil
 }
@@ -380,9 +392,23 @@ func renderStatus(w io.Writer, rpt report, cfg config, snap statusSnapshot) {
 	fmt.Fprintf(w, "%s\n", rpt.bold(fmt.Sprintf("%s%s", cfg.repo, statusScope(cfg))))
 	printPairs(w, rpt, "", queuePairs(snap))
 	printStatusPRs(w, rpt, snap)
+	if line := statusPlanLine(snap); line != "" {
+		fmt.Fprintf(w, "%s\n", line)
+	}
 	if line := needsYou(snap); line != "" {
 		fmt.Fprintf(w, "\n%s\n", rpt.bold(line))
 	}
+}
+
+// statusPlanLine is the same row usageLine builds for work's startup
+// banner, reused rather than re-derived: the "second renderer, not a second
+// pipeline" rule this file already applies to statusDocFrom, held to a
+// single fact source here too.
+func statusPlanLine(snap statusSnapshot) string {
+	if snap.usage == nil {
+		return ""
+	}
+	return usageLine(*snap.usage)
 }
 
 // statusScope names what narrowed or reordered the report, so a snapshot that
@@ -679,6 +705,10 @@ type statusDoc struct {
 	PRs           []statusDocPR  `json:"prs"`
 	UndetailedPRs []int          `json:"undetailed_prs"`
 	NeedsYou      []string       `json:"needs_you"`
+	// Plan is the same line the text report prints, or nil when the usage
+	// probe could not answer — never an empty string standing in for "no
+	// usage", which would be indistinguishable from a genuine 0%.
+	Plan *string `json:"plan,omitempty"`
 }
 
 type statusDocScope struct {
@@ -787,7 +817,7 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 		})
 	}
 
-	return statusDoc{
+	doc := statusDoc{
 		Repo:  cfg.repo,
 		Scope: statusDocScope{Label: cfg.label, StrictOrder: cfg.strictOrder},
 		Queue: statusDocQueue{
@@ -802,6 +832,10 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 		UndetailedPRs: nonNilSlice(snap.undetailed),
 		NeedsYou:      nonNilSlice(needsYouParts(snap)),
 	}
+	if line := statusPlanLine(snap); line != "" {
+		doc.Plan = &line
+	}
+	return doc
 }
 
 // nonNilSlice keeps every array field a `[]`, never a JSON `null`, so a

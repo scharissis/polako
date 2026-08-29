@@ -30,10 +30,12 @@ func statusConfigFor(t *testing.T, st *ghState) (config, string) {
 	return config{
 		dir:          drainCfg.dir,
 		ghBin:        drainCfg.ghBin,
+		claudeBin:    drainCfg.claudeBin,
 		repo:         drainCfg.repo,
 		ghRepo:       drainCfg.repo,
 		branchPrefix: "issue-",
 		ghRetryWait:  time.Millisecond,
+		usageTimeout: 5 * time.Second,
 		queue:        new(queueMemo),
 	}, path
 }
@@ -885,5 +887,68 @@ func TestRunStatusRejectsAnArgument(t *testing.T) {
 	err := runStatus(context.Background(), []string{"12"}, &strings.Builder{}, statusNow, report{})
 	if err == nil || !strings.Contains(err.Error(), "status takes flags only") {
 		t.Errorf("err = %v, want a complaint about the argument", err)
+	}
+}
+
+// status prints the same "plan" line work's startup banner does, read from
+// the same usage probe — one renderer per fact, not two.
+func TestStatusReportsThePlanLineWhenTheProbeAnswers(t *testing.T) {
+	t.Setenv(fakeUsageEnv, "sub")
+	cfg, _ := statusConfigFor(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: true}}})
+
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	if snap.usage == nil {
+		t.Fatal("snap.usage = nil, want the probed snapshot")
+	}
+	want := "plan: session 42%, week 52% (resets Sep 2, 6pm) — polako was 29% of the last 24h"
+
+	var out strings.Builder
+	renderStatus(&out, report{}, cfg, snap)
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("text report missing the plan line:\n%s", out.String())
+	}
+
+	var jsonOut strings.Builder
+	if err := renderStatusJSON(&jsonOut, cfg, snap); err != nil {
+		t.Fatalf("renderStatusJSON: %v", err)
+	}
+	var doc statusDoc
+	if err := json.Unmarshal([]byte(jsonOut.String()), &doc); err != nil {
+		t.Fatalf("output did not parse as JSON: %v\n%s", err, jsonOut.String())
+	}
+	if doc.Plan == nil || *doc.Plan != want {
+		t.Errorf("doc.Plan = %v, want %q", doc.Plan, want)
+	}
+}
+
+// A probe that cannot answer — the default fixture, an old CLI with no
+// /usage — leaves the row out of both renderers entirely: absent, never a
+// zero standing in for "could not tell".
+func TestStatusOmitsThePlanLineWhenTheProbeCannotAnswer(t *testing.T) {
+	cfg, _ := statusConfigFor(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: true}}})
+
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	if snap.usage != nil {
+		t.Fatalf("snap.usage = %+v, want nil when the probe never answered", snap.usage)
+	}
+
+	var out strings.Builder
+	renderStatus(&out, report{}, cfg, snap)
+	if strings.Contains(out.String(), "plan:") {
+		t.Errorf("text report has a plan line with no usage snapshot:\n%s", out.String())
+	}
+
+	var jsonOut strings.Builder
+	if err := renderStatusJSON(&jsonOut, cfg, snap); err != nil {
+		t.Fatalf("renderStatusJSON: %v", err)
+	}
+	if strings.Contains(jsonOut.String(), `"plan"`) {
+		t.Errorf("JSON has a plan field with no usage snapshot:\n%s", jsonOut.String())
 	}
 }

@@ -372,7 +372,8 @@ polako status -json | jq .
     "review and merge PR #58",
     "decide what to do about #5 (drop needs-human to requeue)",
     "curate #27, #28 (drop proposed to queue them)"
-  ]
+  ],
+  "plan": "plan: session 42%, week 52% (resets Sep 2, 6pm) — polako was 29% of the last 24h"
 }
 ```
 
@@ -403,9 +404,13 @@ Every array field is always present as `[]`, never `null`, even when empty —
 `.queue.ready[]` never needs a `// empty` guard. `quiet_seconds` is the one
 field that can be *absent*: it is whole seconds since the thread's newest
 comment, omitted rather than `0` when that comment's timestamp could not be
-parsed, so "just replied" and "unreadable" cannot be confused. The same rule
-`status`'s text report follows applies here too — no issue, PR or comment
-text, only numbers, branches, labels, states and URLs.
+parsed, so "just replied" and "unreadable" cannot be confused. `plan` is
+absent the same way, and for the same reason: a probe that could not read
+the CLI's own `/usage` output — an old CLI, an account with no subscription,
+a wording change — leaves the field out entirely, never `""` standing in for
+"no usage at all". The same rule `status`'s text report follows applies here
+too — no issue, PR or comment text, only numbers, branches, labels, states
+and URLs.
 
 ## Reclaiming finished issues: `polako tidy`
 
