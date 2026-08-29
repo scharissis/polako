@@ -54,21 +54,26 @@ refreshing the secret is the fix.
 1. **Start a release** — Actions → *Start a release* → pick patch, minor or
    major ([What to bump](#what-to-bump)). It opens the release PR: one
    `chore(release): X.Y.Z` commit that bumps
-   [`plugin.json`](../.claude-plugin/plugin.json) and drafts a
-   [`CHANGELOG.md`](../CHANGELOG.md) section from the commit subjects since the
-   last release, and does nothing else — folded into a feature commit, no
-   commit would mean "this is X.Y.Z". The same PR written by hand works
-   identically; the workflow is a convenience, the PR is the contract.
+   [`plugin.json`](../.claude-plugin/plugin.json) and writes the
+   [`CHANGELOG.md`](../CHANGELOG.md) section, and does nothing else — folded
+   into a feature commit, no commit would mean "this is X.Y.Z". The section is
+   GitHub's release notes for the range: every merged PR as a linked bullet
+   with its author and the issues it closed, capped by a compare link, with
+   the previous cycle's release and publish PRs filtered out as plumbing. The
+   same PR written by hand works identically; the workflow is a convenience,
+   the PR is the contract.
 
-2. **Rewrite the draft, then merge.** Commit subjects are raw material; the
-   section should say what an operator needs to know before upgrading (the
-   changelog's own preamble says how). Merging the release PR is the act that
-   cuts the release: *Cut a release* sees the new version, refuses while the
-   changelog section is missing or `claude plugin validate` objects — before
-   either tag exists — then pushes both tags on the merge commit and hands
-   `vX.Y.Z` to *Release*, which cross-compiles the five targets with the tag
-   stamped in, publishes the GitHub release with the changelog section as its
-   body, starts a *Smoke* run, and opens the publish PR.
+2. **Read the notes, add what only a person can, then merge.** The linked
+   list is complete on its own; what it cannot say is what a change means for
+   an unattended machine, so add an **Operator impact** line when the release
+   changes what a run does (the changelog's own preamble says why). Merging
+   the release PR is the act that cuts the release: *Cut a release* sees the
+   new version, refuses while the changelog section is missing or
+   `claude plugin validate` objects — before either tag exists — then pushes
+   both tags on the merge commit and hands `vX.Y.Z` to *Release*, which
+   cross-compiles the five targets with the tag stamped in, publishes the
+   GitHub release with the changelog section as its body, starts a *Smoke*
+   run, and opens the publish PR.
 
 3. **Merge the publish PR.** It moves the `ref` in
    [`marketplace.json`](../.claude-plugin/marketplace.json) to the new tag, and
