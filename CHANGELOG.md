@@ -13,6 +13,16 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.12.3]
+
+### What's Changed
+* fix: eval stand-in gh no longer crashes on 'issue view' without issue.json by @scharissis in https://github.com/scharissis/polako/pull/201 (closes #130)
+* fix: check.sh gofmt-checks every nested worktree, and CI cannot see it by @scharissis in https://github.com/scharissis/polako/pull/202 (closes #160)
+* feat: polako tidy — reclaim the worktrees and branches of finished issues by @scharissis in https://github.com/scharissis/polako/pull/203 (closes #161)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.12.2...v0.12.3
+
 ## [0.12.2]
 
 ### What's Changed
