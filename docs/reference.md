@@ -29,6 +29,8 @@ sets — see [`status`](#where-the-backlog-stands-polako-status) and
 | `-max-cost` | *(no limit)* | Park an issue once this shift's runs on it have cost this many dollars — see [Capping what a shift spends](run-data.md#capping-what-a-shift-spends). |
 | `-max-issue-time` | *(no limit)* | Park an issue once this shift's runs on it have taken this much *run time*, e.g. `-max-issue-time 90m`. Unlike `-stall`, it does not care whether events are arriving. |
 | `-max-session-cost` | *(no limit)* | End the shift cleanly, between issues, once its runs have cost this many dollars. |
+| `-max-session-usage` | *(no limit)* | End the shift cleanly, between issues, once the plan's current-session usage reaches this percent — see [Capping what a shift spends](run-data.md#capping-what-a-shift-spends). |
+| `-max-week-usage` | *(no limit)* | End the shift cleanly, between issues, once the plan's current-week usage reaches this percent. |
 | `-skip` | *(none)* | Comma-separated issue numbers to skip. Issues labelled `needs-human` are skipped anyway — see [How it works](behaviour.md). |
 | `-once` | `false` | Process a single issue to a merge, a park or a question for you, then exit. |
 | `-strict-order` | `false` | Work issues in strict ascending order: wait in place on an issue awaiting an answer instead of moving past it. |
@@ -101,7 +103,7 @@ It fires on five states, and nothing else:
 | `parked` | An issue was parked for a human — including a run that crashed and used up its resumes. |
 | `awaiting-answer` | A run stopped to ask something on the issue thread. Reply there and the next shift folds it in. |
 | `cleared` | The backlog is empty. Nothing is left to work. |
-| `stopped` | The shift ended before the backlog did: a fatal error, or `-max-session-cost` spent. |
+| `stopped` | The shift ended before the backlog did: a fatal error, `-max-session-cost` spent, or the plan's own usage reaching `-max-session-usage`/`-max-week-usage`. |
 | `epic-done` | An epic's last child closed and the drain closed the container, with a comment on the thread saying so. The one event above for something good rather than something stuck. Fires once, on the close; a container a human has held with `needs-human` or `proposed` is left open and fires nothing. |
 
 The context arrives in the environment, so the command needs no arguments:

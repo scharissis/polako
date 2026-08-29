@@ -1433,8 +1433,10 @@ func TestCapNotesNameEveryCapInForce(t *testing.T) {
 	if got := capNotes(config{}); got != "" {
 		t.Errorf("capNotes with no caps = %q, want nothing said", got)
 	}
-	got := capNotes(config{maxCost: 15, maxIssueTime: 90 * time.Minute, maxSessionCost: 200})
-	for _, want := range []string{"-max-cost $15.00", "-max-issue-time 1h30m", "-max-session-cost $200.00"} {
+	got := capNotes(config{maxCost: 15, maxIssueTime: 90 * time.Minute, maxSessionCost: 200,
+		maxSessionUsage: 80, maxWeekUsage: 90})
+	for _, want := range []string{"-max-cost $15.00", "-max-issue-time 1h30m", "-max-session-cost $200.00",
+		"-max-session-usage 80%", "-max-week-usage 90%"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("capNotes = %q, missing %q", got, want)
 		}

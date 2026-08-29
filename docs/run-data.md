@@ -19,7 +19,11 @@ Claude CLI). One more object per issue records how it ended —
 path could not say) — and, when GitHub could
 be asked, what the PR turned out to be: additions, deletions, changed files,
 how many reviews it drew, and when it opened and merged. That is one extra `gh pr view`
-as each issue ends, and none at all under `-metrics off`.
+as each issue ends, and none at all under `-metrics off`. When
+[the usage gate](#capping-what-a-shift-spends) is on, that same object also
+carries the plan's week-usage percent as this issue was picked up and again
+as it reached this terminal state — what a later report needs to say what the
+issue cost the plan.
 
 **What is never written:** issue titles, issue bodies, PR titles, comment text,
 review text, diffs, or anything the model said. Reviews are counted, never
@@ -63,11 +67,12 @@ polako carries on.
 
 ## Capping what a shift spends
 
-All three caps are off unless you set one, so a shift that sets none behaves
+All five caps are off unless you set one, so a shift that sets none behaves
 exactly as it always did.
 
 ```bash
-polako work -max-cost 15 -max-issue-time 90m -max-session-cost 200
+polako work -max-cost 15 -max-issue-time 90m -max-session-cost 200 \
+  -max-session-usage 90 -max-week-usage 90
 ```
 
 - **`-max-cost`** — dollars one issue may cost before it is parked.
@@ -76,6 +81,16 @@ polako work -max-cost 15 -max-issue-time 90m -max-session-cost 200
   most of its life waiting for you to merge its PR, and parking issues over how
   long that took would punish nobody's slowness but the reviewer's.
 - **`-max-session-cost`** — dollars this shift may spend before it stops.
+- **`-max-session-usage`** / **`-max-week-usage`** — the plan's own limits
+  rather than this binary's arithmetic: percentages read off `claude`'s own
+  `/usage`, checked between issues exactly where `-max-session-cost` is and
+  for the same reason, and just as much never a park — this is a fact about
+  the account, not about the issue. See [behaviour.md](behaviour.md), "A
+  session limit is waited out, not retried against": that is the wall, this
+  is the fence in front of it. Whichever pool trips first stops the shift; a
+  probe that cannot answer — an old CLI with no `/usage`, an unparseable
+  reply — never does, it just logs once and the drain carries on uncapped
+  for that pass.
 
 `-max-issue-time` is the one that catches what `-stall` cannot. That watchdog
 kills a run that has gone *silent*; an agent looping productively but uselessly
