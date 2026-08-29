@@ -436,12 +436,26 @@ func queuePairs(snap statusSnapshot) [][2]string {
 	}
 	if len(q.containers) > 0 {
 		pairs = append(pairs, [2]string{"containers",
-			fmt.Sprintf("%s — %s, tracking sub-issues rather than work",
-				plural(len(q.containers), "issue"), issueRefs(q.containers))})
+			fmt.Sprintf("%s — %s", plural(len(q.containers), "issue"), containerRefs(q.containers))})
 	}
 	// Last, because it is the answer the rest of the table is context for.
 	pairs = append(pairs, [2]string{"next", nextLine(snap)})
 	return pairs
+}
+
+// containerRefs renders each container with its sub-issue rollup, so the
+// containers row tells a finished epic — every child closed, waiting only on
+// a human to close the container itself — from one still in progress.
+func containerRefs(containers []containerInfo) string {
+	refs := make([]string, len(containers))
+	for i, c := range containers {
+		ref := fmt.Sprintf("#%d (%d/%d closed", c.number, c.completed, c.total)
+		if c.finished() {
+			ref += " — yours to close"
+		}
+		refs[i] = ref + ")"
+	}
+	return strings.Join(refs, ", ")
 }
 
 func queueLine(ready []int) string {
@@ -636,8 +650,10 @@ func needsYouParts(snap statusSnapshot) []string {
 // computed.
 
 // statusDoc is the whole answer to `polako status -json`, in explicit typed
-// fields rather than map[string]any: a schema that is reviewable and stable,
-// per the acceptance criteria on #118.
+// fields rather than map[string]any: a schema that is reviewable, per the
+// acceptance criteria on #118. Reviewable does not mean frozen — #168 widened
+// `queue.containers` from bare issue numbers to objects once the sub-issue
+// rollup's completed count was worth reporting, and said so in docs/reference.md.
 type statusDoc struct {
 	Repo          string         `json:"repo"`
 	Scope         statusDocScope `json:"scope"`
@@ -654,11 +670,25 @@ type statusDocScope struct {
 }
 
 type statusDocQueue struct {
-	Ready      []int              `json:"ready"`
-	Blocked    []statusDocBlocked `json:"blocked"`
-	Parked     []int              `json:"parked"`
-	Proposed   []int              `json:"proposed"`
-	Containers []int              `json:"containers"`
+	Ready      []int                `json:"ready"`
+	Blocked    []statusDocBlocked   `json:"blocked"`
+	Parked     []int                `json:"parked"`
+	Proposed   []int                `json:"proposed"`
+	Containers []statusDocContainer `json:"containers"`
+}
+
+// statusDocContainer is one container issue with its sub-issue rollup, so a
+// caller can tell #113 (6 of 6 closed) from #147 (1 of 5) without a second
+// call — the same widening `blocked` already carries for quiet_seconds.
+// Finished is containerInfo.finished() verbatim: the one place that decides
+// "done" is a Go method, and repeating its comparison in every jq script that
+// reads this document would be exactly the "children invent their own"
+// outcome that method exists to prevent.
+type statusDocContainer struct {
+	Issue     int  `json:"issue"`
+	Total     int  `json:"total"`
+	Completed int  `json:"completed"`
+	Finished  bool `json:"finished"`
 }
 
 // statusDocBlocked is one issue awaiting an answer. QuietSeconds is a pointer
@@ -715,6 +745,13 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 		blocked = append(blocked, b)
 	}
 
+	containers := make([]statusDocContainer, 0, len(snap.queues.containers))
+	for _, c := range snap.queues.containers {
+		containers = append(containers, statusDocContainer{
+			Issue: c.number, Total: c.total, Completed: c.completed, Finished: c.finished(),
+		})
+	}
+
 	prs := make([]statusDocPR, 0, len(snap.prs))
 	for _, p := range snap.prs {
 		prs = append(prs, statusDocPR{
@@ -736,7 +773,7 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 			Blocked:    blocked,
 			Parked:     nonNilSlice(snap.queues.parked),
 			Proposed:   nonNilSlice(snap.queues.proposed),
-			Containers: nonNilSlice(snap.queues.containers),
+			Containers: nonNilSlice(containers),
 		},
 		Next:          statusDocNext{Issue: snap.next, Reason: nextLine(snap)},
 		PRs:           prs,

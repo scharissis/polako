@@ -61,8 +61,10 @@ type fakeIssue struct {
 	Open   bool     `json:"open"`
 	Labels []string `json:"labels"`
 	// SubIssues is how many children the issue has, which is what makes it a
-	// container. Only the total is modelled: it is all the queue reads.
-	SubIssues int `json:"sub_issues"`
+	// container, and SubIssuesCompleted how many of them are closed — the pair
+	// the queue reads to tell a finished epic from a live one.
+	SubIssues          int `json:"sub_issues"`
+	SubIssuesCompleted int `json:"sub_issues_completed"`
 	// Comments is how many comments the thread has; they carry ids 1..Comments
 	// in the order they were written, the way GitHub hands them out. Bots holds
 	// the ids of the ones a GitHub App wrote rather than a person.
@@ -474,10 +476,10 @@ func listIssues(st *ghState, label, fields string) (out string, changed bool, co
 		}
 		row := fmt.Sprintf(`{"number":%d,"labels":[%s]`, n, strings.Join(labels, ","))
 		if subIssues {
-			// The whole rollup rather than the one number the queue reads, so
+			// The whole rollup rather than the two numbers the queue reads, so
 			// the payload is the shape gh really hands back.
-			row += fmt.Sprintf(`,"subIssuesSummary":{"total":%d,"completed":0,"percentCompleted":0}`,
-				is.SubIssues)
+			row += fmt.Sprintf(`,"subIssuesSummary":{"total":%d,"completed":%d,"percentCompleted":0}`,
+				is.SubIssues, is.SubIssuesCompleted)
 		}
 		rows = append(rows, row+"}")
 	}
@@ -1854,6 +1856,39 @@ func TestSelectableIssuesDropsContainers(t *testing.T) {
 		t.Errorf("blocked/parked/proposed = %v/%v/%v, want a container in no queue at all: "+
 			"it is not held back by anything a human could release",
 			q.blocked, q.parked, q.proposed)
+	}
+	want := []containerInfo{
+		{number: 4, total: 3, completed: 1},
+		{number: 5, total: 1, completed: 0},
+		{number: 6, total: 2, completed: 0},
+		{number: 7, total: 2, completed: 0},
+	}
+	if !slices.Equal(q.containers, want) {
+		t.Errorf("containers = %+v, want %+v — the completed count travels with the total", q.containers, want)
+	}
+}
+
+// The rollup's completed count is what tells a finished epic — every child
+// closed, nothing left but for a human to close the container itself — from
+// one still in progress. One predicate, finished(), is the only place that
+// decides it.
+func TestContainerInfoFinished(t *testing.T) {
+	cases := []struct {
+		name string
+		c    containerInfo
+		want bool
+	}{
+		{"partly finished", containerInfo{number: 113, total: 6, completed: 3}, false},
+		{"untouched", containerInfo{number: 147, total: 5, completed: 0}, false},
+		{"finished", containerInfo{number: 113, total: 6, completed: 6}, true},
+		// Cannot happen in a real payload — a container only exists because
+		// total > 0 — but a defensive read must not call it finished.
+		{"completed with no total", containerInfo{number: 1, total: 0, completed: 1}, false},
+	}
+	for _, tc := range cases {
+		if got := tc.c.finished(); got != tc.want {
+			t.Errorf("%s: finished() = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 

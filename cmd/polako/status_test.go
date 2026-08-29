@@ -171,7 +171,7 @@ func TestStatusJSONMatchesTheTextReport(t *testing.T) {
 		Blocked:    []statusDocBlocked{{Issue: 7, QuietSeconds: ptrInt64(26 * 3600)}},
 		Parked:     []int{9},
 		Proposed:   []int{},
-		Containers: []int{},
+		Containers: []statusDocContainer{},
 	}
 	if !slices.Equal(doc.Queue.Ready, want.Ready) ||
 		!slices.Equal(doc.Queue.Parked, want.Parked) ||
@@ -351,7 +351,7 @@ func TestStatusInheritsTheCurationGate(t *testing.T) {
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			"1": {Open: true, Labels: []string{proposedLabel}},
-			"2": {Open: true, SubIssues: 3},
+			"2": {Open: true, SubIssues: 3, SubIssuesCompleted: 1},
 			"3": {Open: true},
 		},
 		// #1 was worked before somebody labelled it: excluded from the queue is
@@ -371,7 +371,7 @@ func TestStatusInheritsTheCurationGate(t *testing.T) {
 	if want := []int{1}; !slices.Equal(snap.queues.proposed, want) {
 		t.Errorf("proposed = %v, want %v", snap.queues.proposed, want)
 	}
-	if want := []int{2}; !slices.Equal(snap.queues.containers, want) {
+	if want := []containerInfo{{number: 2, total: 3, completed: 1}}; !slices.Equal(snap.queues.containers, want) {
 		t.Errorf("containers = %v, want %v", snap.queues.containers, want)
 	}
 	if len(snap.queues.blocked)+len(snap.queues.parked) != 0 {
@@ -390,13 +390,60 @@ func TestStatusInheritsTheCurationGate(t *testing.T) {
 	for _, want := range []string{
 		"ready       1 issue — #3",
 		"proposed    1 issue — #1, labelled proposed",
-		"containers  1 issue — #2, tracking sub-issues rather than work",
+		"containers  1 issue — #2 (1/3 closed)",
 		"#40  issue-1  #1     mergeable  passing  clear",
 		"curate #1 (drop proposed to queue them)",
 	} {
 		if !strings.Contains(printed, want) {
 			t.Errorf("report is missing %q\ngot:\n%s", want, printed)
 		}
+	}
+}
+
+// The containers row tells a finished epic — every sub-issue closed, waiting
+// only on a human to close the container itself — from one still in progress,
+// in both the text report and the JSON document.
+func TestStatusReportsFinishedAndLiveContainers(t *testing.T) {
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6},
+			"147": {Open: true, SubIssues: 5, SubIssuesCompleted: 1},
+		},
+	})
+
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	want := []containerInfo{
+		{number: 113, total: 6, completed: 6},
+		{number: 147, total: 5, completed: 1},
+	}
+	if !slices.Equal(snap.queues.containers, want) {
+		t.Fatalf("containers = %+v, want %+v", snap.queues.containers, want)
+	}
+
+	var out strings.Builder
+	renderStatus(&out, report{}, cfg, snap)
+	printed := out.String()
+	if want := "containers  2 issues — #113 (6/6 closed — yours to close), #147 (1/5 closed)"; !strings.Contains(printed, want) {
+		t.Errorf("report is missing %q\ngot:\n%s", want, printed)
+	}
+
+	var jsonOut strings.Builder
+	if err := renderStatusJSON(&jsonOut, cfg, snap); err != nil {
+		t.Fatalf("renderStatusJSON: %v", err)
+	}
+	var doc statusDoc
+	if err := json.Unmarshal([]byte(jsonOut.String()), &doc); err != nil {
+		t.Fatalf("output did not parse as JSON: %v\n%s", err, jsonOut.String())
+	}
+	wantDoc := []statusDocContainer{
+		{Issue: 113, Total: 6, Completed: 6, Finished: true},
+		{Issue: 147, Total: 5, Completed: 1, Finished: false},
+	}
+	if !slices.Equal(doc.Queue.Containers, wantDoc) {
+		t.Errorf("queue.containers = %+v, want %+v", doc.Queue.Containers, wantDoc)
 	}
 }
 

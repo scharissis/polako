@@ -276,7 +276,7 @@ scharissis/polako
   awaiting you  1 issue — #9 (quiet 26h)
   parked        1 issue — #5, labelled needs-human
   proposed      2 issues — #27, #28, labelled proposed
-  containers    1 issue — #12, tracking sub-issues rather than work
+  containers    1 issue — #12 (2/5 closed)
   next          #14 — its branch already has PR #61, so it would wait on that rather than run the skill again
 
 open prs on issue branches
@@ -352,7 +352,7 @@ polako status -json | jq .
     "blocked": [{ "issue": 9, "quiet_seconds": 93600 }],
     "parked": [5],
     "proposed": [27, 28],
-    "containers": [12]
+    "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false }]
   },
   "next": {
     "issue": 14,
@@ -386,6 +386,14 @@ strings the text columns print, including `not read` for a PR past the
 eight-PR cap whose state was never looked up — `unknown` is a different,
 also-real state: gh was asked and does not know), and `needs_you` is the
 closing line's clauses as an array instead of a `;`-joined sentence.
+
+`queue.containers` is objects, not bare numbers — `{ "issue", "total",
+"completed", "finished" }` — so a caller can tell a finished container from
+one still in progress without a second call. `finished` is `total > 0 &&
+completed == total` computed once in Go rather than left for every consumer
+to reimplement — a jq script checks the field rather than repeating the
+comparison. This narrows the shape #118 originally published, where it was a
+plain array of issue numbers like every other list here.
 
 Every array field is always present as `[]`, never `null`, even when empty —
 `.queue.ready[]` never needs a `// empty` guard. `quiet_seconds` is the one
