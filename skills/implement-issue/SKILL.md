@@ -192,47 +192,27 @@ don't post again, and stop.
    /commit`, `go -C <worktree> test/vet/build`, or the ecosystem's own
    equivalent — the same rule Phase 1 set: nothing here moves the session's
    cwd there for you.
-2. MANDATORY GATE — do not create a PR until this step has run. It writes two
-   markers into PLAN.md's `## Review` section, never the same instant: "Reviewed
-   through: <sha>" — written by c each time c actually runs, and never rewritten
-   by the fix commits that follow it — and "Gate complete through: <sha>" —
-   written once, in d, only after every finding is resolved *and* the
-   rebuilt/retested/audited checks below have all passed. Two markers because
-   one can't do both jobs: fix commits move HEAD past whatever "reviewed"
-   pointed at, so an exact match against HEAD would make the resume path it
-   must open for actually unreachable the moment the first fix lands, and
-   closing the gate the instant the last finding's status is written would let
-   a run that dies before the tests below even started pass itself as fully
-   reviewed.
-   a. Check for a resume point first.
-      - PLAN.md has a `## Review` section whose "Gate complete through: <sha>"
-        equals issue-$issue's current HEAD (`git -C <worktree> rev-parse
-        HEAD`) — the gate ran to completion for every commit now on this
-        branch: skip b–d below and go straight to step 3.
-      - PLAN.md has a `## Review` section without that match, but its
-        "Reviewed through: <sha>" is an ancestor of (or equal to) current
-        HEAD (`git -C <worktree> merge-base --is-ancestor <sha> HEAD`) —
-        *and* every commit between that sha and HEAD is one this section's
-        findings already account for (`git -C <worktree> log <sha>..HEAD
-        --oneline` against the findings marked "fixed" — each fix commit
-        names its finding per step d, so this is a direct match, not a
-        guess). A commit that matches a finding still marked "pending" —
-        a death between committing the fix and updating its status, not a
-        stray commit — is not a mismatch: update that finding to "fixed"
-        and keep checking the rest. Only a commit no finding names at all
-        means something other than this gate's own fix loop landed on the
-        branch — treat the whole bullet as not matching and fall to the
-        next one. Once every commit in range is accounted for (directly or
-        by that reconciliation), the review itself does not need repeating:
-        skip b and c, and resume at d — working whatever findings are still
-        "pending" after reconciliation (there may be none left, if a
-        previous run died after the last fix landed but before d's own
-        tests/audit finished; d still has to run those before this counts
-        as done).
-      - No `## Review` section, one whose "Reviewed through" sha is *not* an
-        ancestor of current HEAD, or one where an unaccounted-for commit sits
-        between the two — history moved in some way other than this gate's
-        own fixes — gets neither shortcut: run b–d in full.
+2. MANDATORY GATE — do not create a PR until this step has run. It writes one
+   marker into PLAN.md's `## Review` section — "Reviewed through: <sha>",
+   written by c each time c actually runs — that a. reads to decide whether
+   the expensive part (the 8-subagent review itself) needs repeating. Nothing
+   else in this step is checkpointed: b (a fetch and an `--ff-only` merge) and
+   the retest/typecheck/lint/audit at the end of d are all cheap and
+   idempotent next to c, so they simply run every time d is reached rather
+   than needing their own resume state to skip.
+   a. Check for a resume point first. If PLAN.md has a `## Review` section
+      whose "Reviewed through: <sha>" is an ancestor of (or equal to)
+      issue-$issue's current HEAD (`git -C <worktree> merge-base
+      --is-ancestor <sha> HEAD` after `git -C <worktree> rev-parse HEAD`) —
+      the review already covers this branch's history, whatever landed on it
+      since (this skill's own fix commits, most likely, but b below will
+      catch a stale base regardless of what it turns out to be) — skip c and
+      go straight to d, working whatever findings PLAN.md still shows as
+      "pending" (there may be none, if a previous run died after the last
+      fix landed but before d's own checks finished; d runs them again
+      regardless, cheaply). No such section, or one whose sha is *not* an
+      ancestor of current HEAD — nothing reviewed yet, or history moved in
+      some way this shortcut can't account for — runs b–d in full.
    b. Bring the local default branch up to date first: `git -C <main-checkout>
       merge --ff-only` against the `origin/…` ref Phase 1 resolved, where
       `<main-checkout>` is the first line of `git worktree list` — a
@@ -246,9 +226,9 @@ don't post again, and stop.
       refs. The review resolves this branch's base from that local ref, and
       a drain merges on GitHub and never pulls, so the ref falls a commit
       behind per merged PR. Left stale it folds somebody else's merged PR
-      into the diff. Run this even when the fallback below stands in for c —
-      skipping it there would leave a manual review comparing against the
-      same stale base, unguarded by anything that would otherwise catch it.
+      into the diff. Run this even when a's shortcut skips straight to d, or
+      when the fallback below stands in for c — a stale base is exactly as
+      possible after a resume, or on a substitute review, as on a first pass.
    c. Invoke `/code-review high issue-$issue` — no `--fix`. Name the branch
       every time: the review forks a fresh agent that starts in the
       session's cwd, which this skill never moves, so with no target it
@@ -275,37 +255,36 @@ don't post again, and stop.
       noting it was a substitute pass rather than the invocation above.
    d. Work the findings still marked "pending" — all of them the first time
       through, only the leftover ones on a run resuming mid-fix, none at all
-      if a previous run already fixed every one and only died before this
-      step's own checks below ran.
+      if a previous run already fixed every one.
       - Before starting a pending finding, check `git -C <worktree> status
         --porcelain` — a death between applying and committing an earlier
         attempt at this same finding leaves stray uncommitted edits behind.
         Finish and commit them if they are this finding's own fix, revert
         them if they are not, before touching anything else; never layer a
         fresh fix attempt on top of unexplained edits already sitting there.
-      - For each pending finding: decide whether it needs a fix, apply it,
-        commit it in the repo's usual convention with the finding named in
-        the commit message (step a's resume check matches fix commits back
-        to findings by that name), and update that finding's line in
-        PLAN.md's `## Review` section to "fixed" or "not fixed — <reason>"
-        before moving to the next one, so a death between two findings
-        leaves the first one's progress recorded rather than redone.
-      - Once every finding is resolved — not before — re-run the test suite,
-        typecheck and lint, the same tools step 1 used: a fix commit that
-        breaks the build is only caught here if this looks again.
-      - Then check the finding's commits against `git -C <worktree> log
-        --oneline` for issue-$issue's own commits — bare `git log --oneline`
-        reads whatever branch the session's cwd happens to have checked out,
-        not issue-$issue's, and "own" here means this branch's commits, this
+      - For each pending finding: decide whether it needs a fix, apply and
+        commit it in the repo's usual convention — one finding, one commit,
+        never batching several findings' edits into a single commit, since
+        that would recreate the same all-or-nothing loss this design exists
+        to avoid — then update that finding's line in PLAN.md's `## Review`
+        section to "fixed" or "not fixed — <reason>" before moving to the
+        next one, so a death between two findings leaves the first one's
+        progress recorded rather than redone. (If a resumed run finds a
+        "pending" finding whose fix is already present in the code — a death
+        between committing it and writing this status line — there is
+        nothing left to fix: just update the status and move on.)
+      - Once every finding is resolved: re-run the test suite, typecheck and
+        lint, the same tools step 1 used — a fix commit that breaks the
+        build is only caught here if this looks again — then check every
+        finding's commits against `git -C <worktree> log --oneline` for
+        issue-$issue's own commits. Bare `git log --oneline` reads whatever
+        branch the session's cwd happens to have checked out, not
+        issue-$issue's, and "own" here means this branch's commits, this
         run's or an earlier run's, not only ones made in this exact turn.
         Every finding has to sit on one of them; one that names a file or
         commit from outside this branch's own history means the base in b
         was wrong — revert any fix edit outside those commits, correct the
         base, and invoke c again.
-      - Only once both of those pass, write "Gate complete through: <the
-        commit issue-$issue's HEAD resolves to right now>" into PLAN.md's
-        `## Review` section — this is what step a's first bullet looks for,
-        and nothing before this point may write it.
    Leave PLAN.md itself uncommitted throughout, same as every other section
    in it — it resumes because the worktree persists across runs of this
    issue, not because it is on a commit.

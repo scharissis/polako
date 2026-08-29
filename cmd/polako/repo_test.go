@@ -535,23 +535,22 @@ func TestReviewGateDoesNotAutoApplyFixes(t *testing.T) {
 	}
 }
 
-// The two markers a resumed run reads to decide whether the gate already ran
-// are the entire resumability contract issue #216 added. Losing either
-// string silently turns every resume back into a full re-review — the exact
-// cost the issue was filed about — without any test failing to say so.
+// "Reviewed through" is the entire resumability contract issue #216 added —
+// the one thing a resumed run reads to decide whether the expensive 8-subagent
+// review needs repeating. Losing it silently turns every resume back into a
+// full re-review — the exact cost the issue was filed about — without any
+// test failing to say so.
 func TestReviewGateRecordsResumeMarkers(t *testing.T) {
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
-	// >= 2 per marker, not just present: step a reads each one (the resume
-	// check) and step c or d has to separately say to write it, or the
-	// marker step a looks for is never actually produced by anything.
-	for _, marker := range []string{"Reviewed through", "Gate complete through"} {
-		if n := strings.Count(skill, marker); n < 2 {
-			t.Errorf("SKILL.md mentions %q only %d time(s) — step a's resume check reads it and"+
-				" a separate step has to write it, so fewer than two mentions means either the"+
-				" read or the write side of this marker is gone, and issue #216's"+
-				" full-re-review-on-every-death regresses silently", marker, n)
-		}
+	// >= 2, not just present: step a reads it (the resume check) and step c
+	// has to separately say to write it, or the marker step a looks for is
+	// never actually produced by anything.
+	if n := strings.Count(skill, "Reviewed through"); n < 2 {
+		t.Errorf("SKILL.md mentions %q only %d time(s) — step a's resume check reads it and"+
+			" step c has to separately write it, so fewer than two mentions means either the"+
+			" read or the write side of this marker is gone, and issue #216's"+
+			" full-re-review-on-every-death regresses silently", "Reviewed through", n)
 	}
 }
 
