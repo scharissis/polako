@@ -2033,6 +2033,44 @@ func TestDrainRetriesAFailedContainerCloseNextShift(t *testing.T) {
 	}
 }
 
+// GitHub's issue list lags a close by seconds, so a container this shift just
+// closed can still show up open and finished on the very next pass. The
+// shift-local memo is what stops that stale row closing it, notifying or
+// summarising it a second time.
+func TestCloseFinishedContainersIgnoresAStaleListing(t *testing.T) {
+	captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6},
+		},
+	})
+	told := notifyLog(t, &cfg)
+	commented, closedThisShift := map[int]bool{}, map[int]bool{}
+	stale := []containerInfo{{number: 113, total: 6, completed: 6}}
+
+	first, err := closeFinishedContainers(context.Background(), cfg, stale, commented, closedThisShift)
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first call = %v, %v, want it to close #113", first, err)
+	}
+	// The same listing again, as if the close has not propagated yet.
+	second, err := closeFinishedContainers(context.Background(), cfg, stale, commented, closedThisShift)
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if len(second) != 0 {
+		t.Errorf("second call closed %v, want nothing — the memo should skip it", second)
+	}
+	epicDone := 0
+	for _, line := range told() {
+		if strings.Contains(line, notifyPrefix+"EVENT=epic-done") {
+			epicDone++
+		}
+	}
+	if epicDone != 1 {
+		t.Errorf("epic-done fired %d times across the two calls, want exactly 1", epicDone)
+	}
+}
+
 // A container with exactly one child is grammar, not an edge case: the log
 // line and the comment body must both say "1 sub-issue", not "1 sub-issues".
 func TestDrainNamesASingleSubIssueCorrectly(t *testing.T) {

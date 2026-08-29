@@ -82,8 +82,8 @@ in the PR body rather than doing it quietly.
   for its children. A container whose children have all closed is closed by the
   drain that notices, with a comment on the thread saying so; reopening it is
   the human judgment, and costs one click. The machine is not deciding whether
-  the work is done — the children decided that by closing, each behind a PR a
-  human merged — only that "every child closed" normally means "the epic is
+  the work is done — the children decided that by closing, normally each behind
+  a merged PR — only that "every child closed" normally means "the epic is
   finished", which is true nearly always and wrong reversibly the rest of the
   time. A container a human has held — `needs-human`, or still `proposed` — is
   never closed automatically, and is named in the exit summary as theirs to

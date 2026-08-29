@@ -136,9 +136,9 @@ notices**, with a comment on its thread first saying why:
 ```
 
 The machine is not judging whether the work is done — the children decided that
-by closing, each behind a PR a human merged — it acts on the near-certain
-reading that "every child closed" means "the epic is finished", which a reopen
-undoes for one click the rare time it is wrong. The comment is posted first,
+by closing — it acts on the near-certain reading that "every child closed"
+means "the epic is finished", which a reopen undoes for one click the rare time
+it is wrong. The comment is posted first,
 always: it is the record of why the close happened, and it carries a marker so
 a shift whose close failed retries only the close next time rather than
 commenting twice. It names how many children closed, not which ones — listing

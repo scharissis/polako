@@ -1092,6 +1092,10 @@ func drain(ctx context.Context, cfg config) error {
 	// a memo so this shift does not re-read a finished container's thread on
 	// every pass once it already knows the marker is there.
 	commentedContainers := map[int]bool{}
+	// Same shape again: the containers this shift has already tried to close, so
+	// a stale post-close listing does not re-fire epic-done and a failing close
+	// warns once a shift rather than once a pass.
+	closedContainers := map[int]bool{}
 	// The containers this shift closed, accumulated across passes for the exit
 	// summary: a container closed mid-shift is gone from the next listing, so
 	// lastContainers can no longer speak for it. Not state either — a restart
@@ -1151,7 +1155,7 @@ func drain(ctx context.Context, cfg config) error {
 		}
 		lastContainers = containers
 		logHeldBack(heldBack, skip)
-		closedNow, err := closeFinishedContainers(ctx, cfg, containers, commentedContainers)
+		closedNow, err := closeFinishedContainers(ctx, cfg, containers, commentedContainers, closedContainers)
 		closedEpics = append(closedEpics, closedNow...)
 		if err != nil {
 			return finish(err)
@@ -1376,15 +1380,17 @@ const finishedContainerMarker = "<!-- polako: epic finished -->"
 
 // finishedContainerComment is the record of why the close that follows it
 // happened, posted first. The wording reports rather than asks: the machine is
-// not judging whether the work is done — the children decided that by closing,
-// each behind a PR a human merged — it is acting on the near-certain reading
-// that "every child closed" means "the epic is finished", which a reopen undoes
-// for one click the rare time it is wrong. The child issues are not named:
-// containerInfo carries only their count, and listing them by number would cost
-// an extra `gh` call per container.
+// not judging whether the work is done — the children decided that by closing —
+// it acts on the near-certain reading that "every child closed" means "the epic
+// is finished", which a reopen undoes for one click the rare time it is wrong.
+// It says only that the children are closed, which is all the sub-issue rollup
+// proves; whether each closed behind a merged PR is not a claim to make on a
+// permanent thread. The child issues are not named: containerInfo carries only
+// their count, and listing them by number would cost an extra `gh` call per
+// container.
 func finishedContainerComment(c containerInfo) string {
-	return fmt.Sprintf("All %s are closed, each behind its own merged PR, so I closed this epic. "+
-		"If the children did not add up to the design recorded above, reopen it — that costs one click.\n\n%s",
+	return fmt.Sprintf("All %s closed, so I closed this epic. If the children did not add up to "+
+		"the design recorded above, reopen it — that costs one click.\n\n%s",
 		plural(c.total, "sub-issue"), finishedContainerMarker)
 }
 
@@ -1404,8 +1410,11 @@ func finishedContainerComment(c containerInfo) string {
 // close is gated only on the container still being open — which every container
 // in this listing is, because the listing is --state open — so a shift that
 // commented and then failed to close retries only the close next time rather
-// than being turned away by its own marker. Once the close lands the container
-// drops out of the open listing for good, so there is no repeat pass to guard.
+// than being turned away by its own marker. That retry is next *shift*, not
+// next pass: closedThisShift records every container this shift has already
+// tried to close, success or failure, so a single stale listing (GitHub's
+// issue list lags a close by seconds) does not fire epic-done twice, and a
+// close that keeps failing warns once a shift rather than once a pass.
 //
 // notifyEpicDone fires once, on the successful close: naturally once-ever, since
 // the container is gone from every later listing. A held container fires
@@ -1419,10 +1428,10 @@ func finishedContainerComment(c containerInfo) string {
 // process on purpose, which propagates like every other gh call in this loop.
 // Returns the containers it closed this call, for the exit summary. Never
 // reached on a dry run — dryRun and drain are separate paths off run().
-func closeFinishedContainers(ctx context.Context, cfg config, containers []containerInfo, commented map[int]bool) ([]containerInfo, error) {
+func closeFinishedContainers(ctx context.Context, cfg config, containers []containerInfo, commented, closedThisShift map[int]bool) ([]containerInfo, error) {
 	var closed []containerInfo
 	for _, c := range containers {
-		if !c.finished() || c.held {
+		if !c.finished() || c.held || closedThisShift[c.number] {
 			continue
 		}
 		if !commented[c.number] {
@@ -1453,10 +1462,12 @@ func closeFinishedContainers(ctx context.Context, cfg config, containers []conta
 			if ctx.Err() != nil {
 				return closed, ctx.Err()
 			}
+			closedThisShift[c.number] = true
 			narrate(sevWarning, "could not close finished epic #%d (%v) — the comment saying why is on the thread; "+
 				"the close is retried next shift", c.number, err)
 			continue
 		}
+		closedThisShift[c.number] = true
 		closed = append(closed, c)
 		log.Printf("epic #%d: all %s closed — commented and closed it", c.number, plural(c.total, "sub-issue"))
 		notify(ctx, cfg, notification{event: notifyEpicDone, issue: c.number,
