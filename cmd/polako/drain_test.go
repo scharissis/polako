@@ -852,6 +852,47 @@ func TestDrainParksAPermissionRefusalWithoutResuming(t *testing.T) {
 	}
 }
 
+// Issue #182: the ask does not have to be the run's last word. On #169 it
+// landed in a turn partway through and the run wrapped up on a sentence the
+// head anchor could not catch, so the issue parked as "no PR and no questions".
+// A permission ask read off any turn now names the fix in the park reason —
+// without changing that the issue parks, or when.
+func TestDrainNamesAPermissionAskMadeMidRun(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "permissionmidrun", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a permission ask must not end the drain: %v", err)
+	}
+
+	recs := terminalRecords(t, records, cfg.repo)
+	if len(recs) != 1 || recs[0].Outcome != issueNeedsHuman || recs[0].ParkReason != parkPermission {
+		t.Fatalf("terminal record = %+v, want needs_human / %s", recs, parkPermission)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"the run stopped to ask for a permission this allowlist does not grant",
+		"-add-tools",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
+	}
+	// Nothing was on disk, so nothing to resume — and the generic "produced
+	// nothing" sentence must not be what a person is left with.
+	if strings.Contains(out, "the run completed without opening a PR") {
+		t.Errorf("parked with the generic reason despite a permission ask\ngot:\n%s", out)
+	}
+	if got := strings.Count(out, "session started"); got != 1 {
+		t.Errorf("%d runs dispatched, want 1\ngot:\n%s", got, out)
+	}
+}
+
 // The wording, over the combinations a drain test would need a separate
 // checkout apiece to reach. Worth pinning by hand: this text is often the only
 // thing a person is told about a run, and "no commits" beside a dirty worktree
