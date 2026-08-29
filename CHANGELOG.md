@@ -13,6 +13,18 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.13.0]
+
+### What's Changed
+* fix: plan-backlog declares the dependency order it works out by @scharissis in https://github.com/scharissis/polako/pull/206 (closes #178)
+* fix: implement-issue stops on an open blocker before creating anything by @scharissis in https://github.com/scharissis/polako/pull/207 (closes #180)
+* feat: the usage probe — the plan's own limits, read free and fail-soft by @scharissis in https://github.com/scharissis/polako/pull/208 (closes #138)
+* feat: the usage gate — stop a shift before it eats the week by @scharissis in https://github.com/scharissis/polako/pull/211 (closes #139)
+* feat: stats windows, and what an issue costs the plan by @scharissis in https://github.com/scharissis/polako/pull/220 (closes #140)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.12.3...v0.13.0
+
 ## [0.12.3]
 
 ### What's Changed
