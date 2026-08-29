@@ -852,6 +852,59 @@ func TestDrainParksAPermissionRefusalWithoutResuming(t *testing.T) {
 	}
 }
 
+// Issue #209: #126's actual shape — a refused tool_result mid-run, the CLI's
+// own stated fact, with a clean final result that reads as ordinary prose
+// (permissionRefusal's head anchor would miss it). Before this fix the run
+// fell through to "produced nothing" and burned the clean-exit resume budget
+// three times before parking as retries_exhausted; now the structural signal
+// parks it on the first run, under the same permission category, with the
+// refused command named for the operator.
+func TestDrainParksARefusedToolResultWithoutResuming(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "toolrefused", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	calls := filepath.Join(t.TempDir(), "gh-calls.log")
+	t.Setenv(fakeGhLogEnv, calls)
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a refused tool_result must not end the drain: %v", err)
+	}
+
+	recs := terminalRecords(t, records, cfg.repo)
+	if len(recs) != 1 || recs[0].Outcome != issueNeedsHuman || recs[0].ParkReason != parkPermission {
+		t.Fatalf("terminal record = %+v, want needs_human / %s", recs, parkPermission)
+	}
+
+	out := buf.String()
+	if want := "the run stopped to ask for a permission this allowlist does not grant"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+	if want := "gh issue close 1"; !strings.Contains(out, want) {
+		t.Errorf("log should name the refused command\ngot:\n%s", out)
+	}
+	// One run, not the clean-exit resume budget: resuming would only replay
+	// the same session against the same allowlist and hit the same wall.
+	if got := strings.Count(out, "session started"); got != 1 {
+		t.Errorf("%d runs dispatched, want 1\ngot:\n%s", got, out)
+	}
+
+	posted, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatalf("reading the fake gh call log: %v", err)
+	}
+	if want := "the run stopped to ask for a permission"; !strings.Contains(string(posted), want) {
+		t.Errorf("no gh call carried the reason to the thread\ngot:\n%s", posted)
+	}
+	// The refused command is operator-facing detail (aside), not posted —
+	// same rule as a worktree's local path.
+	if strings.Contains(string(posted), "gh issue close 1") {
+		t.Errorf("the refused command must not reach the public issue thread\ngot:\n%s", posted)
+	}
+}
+
 // Issue #182: the ask does not have to be the run's last word. On #169 it
 // landed in a turn partway through and the run wrapped up on a sentence the
 // head anchor could not catch, so the issue parked as "no PR and no questions".
