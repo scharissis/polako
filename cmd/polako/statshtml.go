@@ -170,6 +170,9 @@ func buildHTMLReport(ds dataset, issues []*issueStats, summary statsSummary, opt
 	}
 
 	rep.Cards = headlineCards(summary)
+	if card, ok := planCostCard(summary.plan); ok {
+		rep.Cards = append(rep.Cards, card)
+	}
 	rep.Chart = costChart(ds)
 	for _, b := range []htmlBreakdown{issueBreakdown(issues), runBreakdown(ds)} {
 		if len(b.Bars) > 0 {
@@ -177,7 +180,7 @@ func buildHTMLReport(ds dataset, issues []*issueStats, summary statsSummary, opt
 		}
 	}
 	rep.Sections = []htmlSection{
-		{"issues", issuePairs(summary.issues)},
+		{"issues", issuePairs(summary.issues, summary.plan)},
 		{"runs", runPairs(summary.runs)},
 		{"cost", costPairs(summary.cost)},
 		{"human latency", latencyPairs(summary.latency)},
@@ -231,6 +234,27 @@ func headlineCards(summary statsSummary) []htmlCard {
 	}
 }
 
+// planCostCard is the plan-cost-per-issue card, conditional on there being a
+// usable sample — the same "absent, not a card of zeroes" rule
+// planCostPairs applies to the text report's own line.
+func planCostCard(p planCostSummary) (htmlCard, bool) {
+	if p.n == 0 {
+		return htmlCard{}, false
+	}
+	note := "of a week, median — upper bound"
+	if p.median > 0 {
+		note = fmt.Sprintf("median, about %d issues to a full week", int(math.Round(100/p.median)))
+	}
+	if p.hasCrossCheck {
+		window := p.crossCheckWindow
+		if window == "" {
+			window = "reported window"
+		}
+		note += fmt.Sprintf(" — polako %d%% of last %s", p.crossCheckPercent, window)
+	}
+	return htmlCard{"plan cost per issue", pct1(p.median), note}, true
+}
+
 // --- proportion bars ---
 
 // tone colours a slice by what it means, so the shape of a batch reads before
@@ -242,7 +266,7 @@ func tone(key string) string {
 		return "good"
 	case issueNeedsHuman, issueClosed, "crash", "error", "auth", "no-skill":
 		return "bad"
-	case inFlight, "no-turns", "stalled", "interrupted", "budget":
+	case inFlight, "no-turns", "stalled", "interrupted", "limit", "budget":
 		return "warn"
 	}
 	return "flat"
@@ -316,7 +340,7 @@ func runBreakdown(ds dataset) htmlBreakdown {
 	return htmlBreakdown{
 		Caption: "of " + plural(len(ds.runs), "run"),
 		Bars: proportionBars(counts, []string{"ok", "error", "no-turns", "crash", "stalled",
-			"interrupted", "no-skill", "auth", "budget"}),
+			"interrupted", "no-skill", "auth", "limit", "budget"}),
 	}
 }
 

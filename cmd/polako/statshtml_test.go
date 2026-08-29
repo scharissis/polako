@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -429,5 +430,45 @@ func TestProportionBarsKeepUnknownValuesNeutral(t *testing.T) {
 	}
 	if bars[1].Label != "brand new" || bars[1].Tone != "flat" {
 		t.Errorf("an unknown value should be shown, neutral: %+v", bars[1])
+	}
+}
+
+// The plan-cost card joins the headline row only when there is a usable
+// sample to show — same "absent, not a card of zeroes" rule the text line
+// follows. Built through statsReport with a fake claudeBin, like every other
+// probe-adjacent stats test in this package, rather than htmlReportOf's
+// public runStats: this fixture has samples, so a real "claude" resolved off
+// PATH would otherwise be probed for the cross-check.
+func TestStatsHTMLPlanCostCard(t *testing.T) {
+	t.Setenv(fakeClaudeEnv, "stream")
+	t.Setenv(fakeUsageEnv, "sub")
+	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second}
+	ds, issues, summary, err := statsReport(context.Background(), cfg, statsOptions{}, planCostDir(t), fixtureNow)
+	if err != nil {
+		t.Fatalf("statsReport: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "report.html")
+	if err := writeHTMLReport(path, ds, issues, summary, statsOptions{}, fixtureNow); err != nil {
+		t.Fatalf("writeHTMLReport: %v", err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading the report -html wrote: %v", err)
+	}
+	page := string(b)
+	if !strings.Contains(page, "plan cost per issue") {
+		t.Errorf("no plan-cost card in the page:\n%s", page)
+	}
+	if !strings.Contains(page, "polako 29% of last 24h") {
+		t.Errorf("no cross-check figure on the card:\n%s", page)
+	}
+}
+
+// No terminal issue anywhere in this fixture carries a sample, so the card
+// is absent — never a card reporting a percentage nobody measured.
+func TestStatsHTMLOmitsPlanCostCardWithoutSamples(t *testing.T) {
+	page := htmlReportOf(t, fixtureDir(t))
+	if strings.Contains(page, "plan cost per issue") {
+		t.Errorf("no samples in this fixture, want no plan-cost card:\n%s", page)
 	}
 }

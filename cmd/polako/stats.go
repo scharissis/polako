@@ -25,12 +25,14 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -52,6 +54,25 @@ const (
 
 // byGroups is the whitelist and the order the error message lists them in.
 var byGroups = []string{byIssue, byModel, byTag, byShift}
+
+// The -window values. Each resolves to a from/periodEnd pair rather than a
+// bare cutoff — the calendar boundary is what the header's progress line
+// measures against, and what a script (statsDocWindow) wants over "-since
+// happened to be 6h19m".
+const (
+	windowToday   = "today"
+	windowWeek    = "week"
+	windowMonth   = "month"
+	windowSession = "session"
+)
+
+// statsWindows is the whitelist and the order the error message lists them
+// in, the -window twin of byGroups.
+var statsWindows = []string{windowToday, windowWeek, windowMonth, windowSession}
+
+// sessionWindow is the plan's own session length, approximated: see
+// resolveWindowBounds's windowSession case.
+const sessionWindow = 5 * time.Hour
 
 // orList renders a choice the way the flag's help and its error both want it:
 // "issue, model, tag or shift", so a message that lists four reads as English
@@ -80,13 +101,14 @@ const noneGroup = "(none)"
 var errFlagsReported = errors.New("invalid flags")
 
 type statsOptions struct {
-	repo  string
-	since time.Duration
-	by    string
-	shift string
-	runs  bool
-	html  string
-	json  bool
+	repo   string
+	since  time.Duration
+	window string
+	by     string
+	shift  string
+	runs   bool
+	html   string
+	json   bool
 }
 
 // runStats is the `stats` subcommand: parse its own flags, read the records,
@@ -104,6 +126,8 @@ func runStats(args []string, out, errOut io.Writer, now time.Time, rpt report) e
 		"directory holding the run-data records (default ~/.polako/metrics)")
 	fs.StringVar(&opt.repo, "repo", "", "only count records for this repository (owner/name)")
 	fs.DurationVar(&opt.since, "since", 0, "only count records newer than this ago (e.g. 168h)")
+	fs.StringVar(&opt.window, "window", "",
+		"report a calendar-aligned window instead of -since: "+orList(statsWindows))
 	fs.StringVar(&opt.shift, "shift", "",
 		`only count records from this shift's id, or "`+shiftLast+`" for the newest shift in scope`)
 	fs.StringVar(&opt.by, "by", "", "also break the numbers down by "+orList(byGroups))
@@ -140,6 +164,25 @@ func runStats(args []string, out, errOut io.Writer, now time.Time, rpt report) e
 		// for a window, with no line in the output to correct them.
 		return fmt.Errorf("-since %s is negative — it is how far back to look, e.g. -since 168h", opt.since)
 	}
+	// fs.Visit rather than a zero check: -since 0s is a real (if odd) explicit
+	// value, and only an explicit -since should collide with an explicit
+	// -window. Neither silently wins over the other.
+	var sinceSet, windowSet bool
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "since":
+			sinceSet = true
+		case "window":
+			windowSet = true
+		}
+	})
+	if sinceSet && windowSet {
+		return fmt.Errorf("-since and -window both name a window to report — pass one, not both")
+	}
+	opt.window = strings.TrimSpace(opt.window)
+	if opt.window != "" && !slices.Contains(statsWindows, opt.window) {
+		return fmt.Errorf("-window %q: choose one of %s", opt.window, orList(statsWindows))
+	}
 	if opt.by != "" && !slices.Contains(byGroups, opt.by) {
 		return fmt.Errorf("-by %q: choose one of %s", opt.by, orList(byGroups))
 	}
@@ -150,12 +193,16 @@ func runStats(args []string, out, errOut io.Writer, now time.Time, rpt report) e
 	if err != nil {
 		return err
 	}
-	ds, err := loadRecords(dir, opt, now)
+	// context.Background() rather than a param this function would have to
+	// grow: the one thing here that reaches outside the process is
+	// probeUsage, best-effort and bounded by its own usageTimeout, so nothing
+	// downstream needs external cancellation the way a long-running drain
+	// does.
+	cfg := config{claudeBin: "claude", usageTimeout: defaultUsageProbeTimeout}
+	ds, issues, summary, err := statsReport(context.Background(), cfg, opt, dir, now)
 	if err != nil {
 		return err
 	}
-	issues := rollUpIssues(ds)
-	summary := buildStatsSummary(ds, issues, opt)
 
 	// The confirmation below moves to errOut under -json, so stdout carries
 	// exactly the one document a script piping it into jq expects — never in
@@ -180,6 +227,165 @@ func runStats(args []string, out, errOut io.Writer, now time.Time, rpt report) e
 	}
 	fmt.Fprintf(confirm, "\nwrote the HTML report to %s\n", opt.html)
 	return nil
+}
+
+// statsReport is runStats's testable core: resolve -window (probing the
+// plan's own usage when it might answer either the week anchor or the
+// plan-cost cross-check below), load the records it resolved to, and build
+// the one summary every renderer — text, -json, -html — formats from. Split
+// out so a test can hand it a cfg whose claudeBin points at a fake CLI, the
+// same seam readStatus already gives status's own tests.
+func statsReport(ctx context.Context, cfg config, opt statsOptions, dir string, now time.Time) (dataset, []*issueStats, statsSummary, error) {
+	var bounds windowBounds
+	var probe *usageSnapshot
+	if opt.window != "" {
+		var err error
+		bounds, probe, err = resolveWindowBounds(ctx, cfg, opt, dir, now)
+		if err != nil {
+			return dataset{}, nil, statsSummary{}, err
+		}
+		// Reuses the existing -since cutoff machinery in loadRecords rather
+		// than teaching it a second kind of bound: since = now - from is the
+		// exact inverse of the cutoff computation there (cutoff = now -
+		// since), so this round-trips to the same instant regardless of DST
+		// — time.Time subtraction and addition both work in absolute time,
+		// never wall-clock arithmetic.
+		opt.since = now.Sub(bounds.from)
+	}
+
+	ds, err := loadRecords(dir, opt, now)
+	if err != nil {
+		return dataset{}, nil, statsSummary{}, err
+	}
+	issues := rollUpIssues(ds)
+
+	// The plan-cost cross-check needs the same probe attribution -window
+	// week may already have fetched above, reused here rather than asked
+	// twice; failing that, one attempt iff there is a sample this report
+	// would otherwise show with no cross-check at all.
+	if probe == nil && issuesHaveUsageSamples(issues) {
+		if snap, ok := probeUsage(ctx, cfg); ok {
+			probe = &snap
+		}
+	}
+
+	summary := buildStatsSummary(ds, issues, opt, now, bounds, probe)
+	return ds, issues, summary, nil
+}
+
+// windowBounds is what -window resolved to: the span used to filter records
+// (from) and the calendar period a progress line is measured against
+// (periodEnd) — always in the future relative to from, even when now has
+// already passed it (a session block that ended is still worth showing as a
+// completed period).
+type windowBounds struct {
+	from, periodEnd time.Time
+	// anchor names how the window picked its start, for the header line and
+	// -json's window.anchor. Empty for today and month, whose start is
+	// simply the top of the calendar unit and needs no explanation.
+	anchor string
+}
+
+// resolveWindowBounds turns -window into calendar bounds, in the machine's
+// local zone and via AddDate rather than a fixed Duration — the difference
+// that lets "today" and "month" survive a DST change or a month boundary:
+// AddDate adds calendar units and lets the clock fall wherever that lands,
+// where a fixed 24h/730h add would carry a DST hour's error into every
+// bound computed from it.
+func resolveWindowBounds(ctx context.Context, cfg config, opt statsOptions, dir string, now time.Time) (windowBounds, *usageSnapshot, error) {
+	loc := now.Location()
+	switch opt.window {
+	case windowToday:
+		from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+		return windowBounds{from: from, periodEnd: from.AddDate(0, 0, 1)}, nil, nil
+	case windowMonth:
+		from := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
+		return windowBounds{from: from, periodEnd: from.AddDate(0, 1, 0)}, nil, nil
+	case windowWeek:
+		return resolveWeekWindow(ctx, cfg, now, loc)
+	case windowSession:
+		from, ok := sessionAnchor(dir, opt, now)
+		if !ok {
+			// No run in the lookback to anchor to: a plain 5h ending now,
+			// still labelled approximate below rather than presented as a
+			// real block boundary nobody has seen.
+			from = now.Add(-sessionWindow)
+		}
+		return windowBounds{from: from, periodEnd: from.Add(sessionWindow), anchor: "approximate"}, nil, nil
+	}
+	return windowBounds{}, nil, fmt.Errorf("unknown -window %q", opt.window) // unreachable: runStats validates first
+}
+
+// resolveWeekWindow anchors to the plan's own weekly reset when probeUsage
+// can answer, and falls back to the most recent Monday 00:00 local
+// otherwise, saying which one won.
+func resolveWeekWindow(ctx context.Context, cfg config, now time.Time, loc *time.Location) (windowBounds, *usageSnapshot, error) {
+	fallback := windowBounds{from: mondayStart(now, loc), anchor: "monday"}
+	fallback.periodEnd = fallback.from.AddDate(0, 0, 7)
+	snap, ok := probeUsage(ctx, cfg)
+	if !ok {
+		return fallback, nil, nil
+	}
+	if bounds, ok := weekAnchorFromProbe(snap, now); ok {
+		return bounds, &snap, nil
+	}
+	return fallback, &snap, nil
+}
+
+// weekAnchorFromProbe is resolveWeekWindow's pure half, split out so it can
+// be tested against a hand-built snapshot rather than a live probe whose own
+// reset parsing is keyed to the real wall clock (probeUsage calls
+// time.Now() itself — see usage.go — so nothing above this function can be
+// pinned to a test's own clock). Rolls the reset clause back in 7-day steps
+// to the most recent occurrence at or before now: the clause names the
+// *next* reset, which for a weekly pool is always exactly 7 days ahead of
+// the one before it.
+func weekAnchorFromProbe(snap usageSnapshot, now time.Time) (windowBounds, bool) {
+	week, ok := poolByLabel(snap.pools, "week")
+	if !ok || !week.hasReset {
+		return windowBounds{}, false
+	}
+	anchor := week.reset
+	for anchor.After(now) {
+		anchor = anchor.AddDate(0, 0, -7)
+	}
+	return windowBounds{from: anchor, periodEnd: anchor.AddDate(0, 0, 7), anchor: "the plan's reset"}, true
+}
+
+// mondayStart is the most recent Monday 00:00 local at or before now — the
+// week -window's fallback anchor, and the same "Monday means the same thing
+// to everyone" reasoning the HTML chart's own week bucketing already uses
+// (statshtml.go's bucketStart), applied in the local zone rather than UTC
+// since this is what a person reads the report in.
+func mondayStart(now time.Time, loc *time.Location) time.Time {
+	local := now.In(loc)
+	day := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc)
+	return day.AddDate(0, 0, -((int(day.Weekday()) + 6) % 7))
+}
+
+// sessionAnchor finds the earliest run in the last 5h, the approximation
+// -window session anchors to. It reuses loadRecords rather than duplicating
+// its record-reading and -repo filtering, bounded to the same 5h lookback
+// the resulting window can never exceed — so this never reads more of the
+// directory than the final report will.
+func sessionAnchor(dir string, opt statsOptions, now time.Time) (time.Time, bool) {
+	probe := opt
+	probe.since, probe.window = sessionWindow, ""
+	ds, err := loadRecords(dir, probe, now)
+	if err != nil {
+		return time.Time{}, false
+	}
+	var earliest time.Time
+	for _, r := range ds.runs {
+		t := recTime(r.TS)
+		if t.IsZero() {
+			continue
+		}
+		if earliest.IsZero() || t.Before(earliest) {
+			earliest = t
+		}
+	}
+	return earliest, !earliest.IsZero()
 }
 
 // statsDir resolves where to read from. "off" is the one value that means
@@ -414,6 +620,18 @@ func (r issueRecord) enriched() bool {
 	return r.ChangedFiles > 0 || r.Additions > 0 || r.Deletions > 0 || r.PROpened != ""
 }
 
+// hasUsageSamples reports whether the usage gate's two week-usage samples
+// reached this record — the same "either field nonzero" heuristic enriched
+// uses above, and for the same reason: 0 and "never sampled" are
+// indistinguishable on the wire (WeekUsageAtPickup/WeekUsageAtTerminal's own
+// doc comment in metrics.go names this trade), so a record genuinely
+// sampled at exactly 0% on both readings reads as unsampled too. That is the
+// safe direction — it undercounts the plan-cost line's sample size rather
+// than ever averaging in a delta that was never actually measured.
+func (r issueRecord) hasUsageSamples() bool {
+	return r.WeekUsageAtPickup > 0 || r.WeekUsageAtTerminal > 0
+}
+
 // endOf is when a run stopped, falling back to when it started: a record
 // written by a path that never learned an end time is still worth a span.
 func endOf(r runRecord) time.Time {
@@ -561,16 +779,18 @@ type statsSummary struct {
 	runs    runsSummary
 	cost    costSummary
 	latency latencySummary
+	plan    planCostSummary
 }
 
-func buildStatsSummary(ds dataset, issues []*issueStats, opt statsOptions) statsSummary {
+func buildStatsSummary(ds dataset, issues []*issueStats, opt statsOptions, now time.Time, bounds windowBounds, probe *usageSnapshot) statsSummary {
 	from, to := window(ds)
 	return statsSummary{
-		source:  buildSourceSummary(ds, opt, from, to),
+		source:  buildSourceSummary(ds, opt, from, to, now, bounds),
 		issues:  buildIssuesSummary(issues),
 		runs:    buildRunsSummary(ds),
 		cost:    buildCostSummary(ds, issues, from, to),
 		latency: buildLatencySummary(issues),
+		plan:    buildPlanCostSummary(issues, probe),
 	}
 }
 
@@ -579,17 +799,29 @@ type sourceSummary struct {
 	records     int
 	skipped     int
 	unread      []string
-	windowFrom  time.Time
+	windowFrom  time.Time // the data's own extent — never the requested window, see window(ds)
 	windowTo    time.Time
 	scope       string // scopeSuffix(opt, ds), trimmed — the text report's own prose
 	repos       []string
 	repoFilter  string
 	sinceFilter time.Duration
 	shift       string // ds.shift: the resolved id, "" when -shift was not given
+
+	// The following are set only when -window was given: the resolved
+	// calendar bounds it named, which the printed "window" line and
+	// statsDocWindow (-json) show in place of the data-extent pair above —
+	// the requested window's own edges are what a person who asked for
+	// "today" wants named, not wherever the data inside it happened to
+	// start and stop.
+	reqWindow string // "" unless -window was given: "today"/"week"/"month"/"session"
+	reqFrom   time.Time
+	reqTo     time.Time // the period's calendar end, not now — see windowBounds
+	reqAnchor string    // "" except week ("the plan's reset"/"monday") and session ("approximate")
+	reqNow    time.Time
 }
 
-func buildSourceSummary(ds dataset, opt statsOptions, from, to time.Time) sourceSummary {
-	return sourceSummary{
+func buildSourceSummary(ds dataset, opt statsOptions, from, to time.Time, now time.Time, bounds windowBounds) sourceSummary {
+	s := sourceSummary{
 		files:       ds.files,
 		records:     len(ds.runs) + len(ds.issues),
 		skipped:     ds.skipped,
@@ -602,6 +834,10 @@ func buildSourceSummary(ds dataset, opt statsOptions, from, to time.Time) source
 		sinceFilter: opt.since,
 		shift:       ds.shift,
 	}
+	if opt.window != "" {
+		s.reqWindow, s.reqFrom, s.reqTo, s.reqAnchor, s.reqNow = opt.window, bounds.from, bounds.periodEnd, bounds.anchor, now
+	}
+	return s
 }
 
 // issuesSummary holds the numbers issuePairs formats. done == 0 means
@@ -806,7 +1042,7 @@ func render(w io.Writer, rpt report, ds dataset, issues []*issueStats, summary s
 
 	fmt.Fprintf(w, "%s\n", rpt.bold(fmt.Sprintf("run data from %s", ds.dir)))
 	printPairs(w, rpt, "", sourcePairs(summary.source))
-	printPairs(w, rpt, "issues", issuePairs(summary.issues))
+	printPairs(w, rpt, "issues", issuePairs(summary.issues, summary.plan))
 	printPairs(w, rpt, "runs", runPairs(summary.runs))
 	printPairs(w, rpt, "cost", costPairs(summary.cost))
 	printPairs(w, rpt, "human latency", latencyPairs(summary.latency))
@@ -829,7 +1065,14 @@ func scopeSuffix(opt statsOptions, ds dataset) string {
 	if opt.repo != "" {
 		parts = append(parts, "for "+opt.repo)
 	}
-	if opt.since > 0 {
+	switch {
+	case opt.window != "":
+		// The header's own "window" line already gives the resolved bounds
+		// and the progress through them; naming the window here too, without
+		// repeating either, is what lets a report get to "filtered" without
+		// backtracking to work out that -window is why.
+		parts = append(parts, "for "+opt.window)
+	case opt.since > 0:
 		parts = append(parts, "in the last "+dur(opt.since))
 	}
 	// The resolved id, never the literal "last": a report that names the drain
@@ -853,7 +1096,10 @@ func sourcePairs(s sourceSummary) [][2]string {
 		pairs = append(pairs, [2]string{"could not open",
 			fmt.Sprintf("%s — %s", plural(len(s.unread), "file"), strings.Join(s.unread, ", "))})
 	}
-	if !s.windowFrom.IsZero() {
+	switch {
+	case s.reqWindow != "":
+		pairs = append(pairs, [2]string{"window", reqWindowLine(s)})
+	case !s.windowFrom.IsZero():
 		span := ""
 		if d := s.windowTo.Sub(s.windowFrom); d > 0 {
 			span = fmt.Sprintf(" (%s)", dur(d))
@@ -867,6 +1113,31 @@ func sourcePairs(s sourceSummary) [][2]string {
 		pairs = append(pairs, [2]string{"repos", strings.Join(s.repos, ", ")})
 	}
 	return pairs
+}
+
+// reqWindowLine renders the resolved -window bounds and how far through the
+// window now falls: the progress a fixed -since has no equivalent of, since
+// a calendar window has a known end and -since does not.
+func reqWindowLine(s sourceSummary) string {
+	total := s.reqTo.Sub(s.reqFrom)
+	elapsed := s.reqNow.Sub(s.reqFrom)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	if elapsed > total {
+		elapsed = total
+	}
+	remaining := total - elapsed
+	var pct float64
+	if total > 0 {
+		pct = 100 * elapsed.Seconds() / total.Seconds()
+	}
+	label := s.reqWindow
+	if s.reqAnchor != "" {
+		label += " — anchor: " + s.reqAnchor
+	}
+	return fmt.Sprintf("%s → %s (%s; %s elapsed, %s left, %.0f%% through)",
+		stamp(s.reqFrom), stamp(s.reqTo), label, dur(elapsed), dur(remaining), pct)
 }
 
 // window is the span the records actually cover, which is what a rate has to
@@ -910,7 +1181,7 @@ func repoNames(ds dataset) []string {
 	return names
 }
 
-func issuePairs(s issuesSummary) [][2]string {
+func issuePairs(s issuesSummary, plan planCostSummary) [][2]string {
 	if s.done == 0 {
 		return [][2]string{{"terminal", "none yet — every issue in this window is still in flight"},
 			{"in flight", strconv.Itoa(s.inFlight)}}
@@ -935,10 +1206,11 @@ func issuePairs(s issuesSummary) [][2]string {
 	pairs = append(pairs, [2]string{"in flight", strconv.Itoa(s.inFlight)})
 
 	change := changePairsFrom(s.change)
+	planPairs := planCostPairs(plan)
 	if s.priced == 0 {
 		pairs = append(pairs, [2]string{"per issue",
 			"nothing to price — no terminal issue has runs in this window"})
-		return append(pairs, change...)
+		return append(append(pairs, change...), planPairs...)
 	}
 
 	// Say what the averages are over whenever that is not every terminal
@@ -957,7 +1229,7 @@ func issuePairs(s issuesSummary) [][2]string {
 		[2]string{"tokens per issue", fmt.Sprintf("%s mean, %s median (%s)",
 			count(int64(s.tokensMean)), count(s.tokensMedian), split(s.tokensSplitSum, s.tokensSplitN))},
 	)
-	return append(pairs, change...)
+	return append(append(pairs, change...), planPairs...)
 }
 
 // changePairsFrom formats what the work actually changed, from a
@@ -975,6 +1247,105 @@ func changePairsFrom(c *changeSummary) [][2]string {
 	}
 	return [][2]string{{"change per issue",
 		fmt.Sprintf("%s (medians over %s with PR data)", line, plural(c.n, "issue"))}}
+}
+
+// planCostSummary is what a terminal issue cost the plan: the delta between
+// its two week-usage samples (#139's usage gate), as a percentage of a
+// week. It is stated as the upper bound it is — the delta counts everything
+// the account did during that span, including the operator's own
+// interactive session on another machine — which is why crossCheckPercent,
+// the probe's own attribution figure over a different, self-reported
+// window, is carried beside it and never folded into it.
+type planCostSummary struct {
+	n            int // issues with a usable (non-negative) sample
+	unsampled    int // terminal issues with no sample, or one a mid-issue reset invalidated
+	mean, median float64
+
+	hasCrossCheck     bool
+	crossCheckPercent int
+	crossCheckWindow  string
+}
+
+// buildPlanCostSummary reads the delta straight off each terminal record —
+// nothing here is summed across runs, unlike every other per-issue figure,
+// because the two samples are already cumulative account state rather than
+// something this issue alone produced.
+func buildPlanCostSummary(issues []*issueStats, probe *usageSnapshot) planCostSummary {
+	var s planCostSummary
+	var deltas []float64
+	for _, is := range issues {
+		if is.terminal == nil || !is.terminal.hasUsageSamples() {
+			if is.terminal != nil {
+				s.unsampled++
+			}
+			continue
+		}
+		delta := float64(is.terminal.WeekUsageAtTerminal - is.terminal.WeekUsageAtPickup)
+		if delta < 0 {
+			// A reset landed mid-issue: the terminal reading belongs to a
+			// fresh cycle, not a continuation of the pickup one, so
+			// subtracting them means nothing — counted with the unsampled
+			// issues rather than as a false near-zero.
+			s.unsampled++
+			continue
+		}
+		deltas = append(deltas, delta)
+	}
+	s.n = len(deltas)
+	if s.n > 0 {
+		s.mean, s.median = mean(deltas), median(deltas)
+	}
+	if probe != nil && probe.hasAttribution && probe.attribution.hasPluginPercent {
+		s.hasCrossCheck = true
+		s.crossCheckPercent = probe.attribution.pluginPercent
+		s.crossCheckWindow = probe.attribution.windowLabel
+	}
+	return s
+}
+
+// issuesHaveUsageSamples reports whether probing for the plan-cost
+// cross-check is worth the call at all — no point asking the CLI for its own
+// attribution figure to sit beside a line the report is not going to print.
+func issuesHaveUsageSamples(issues []*issueStats) bool {
+	for _, is := range issues {
+		if is.terminal != nil && is.terminal.hasUsageSamples() {
+			return true
+		}
+	}
+	return false
+}
+
+// pct1 renders a percentage to one decimal place, trailing zero trimmed —
+// trimZero's own rule, reused here rather than duplicated.
+func pct1(f float64) string { return trimZero(f) + "%" }
+
+// planCostPairs is the "plan cost per issue" line — absent entirely when no
+// terminal issue in scope has a usable sample, exactly the treatment
+// changePairsFrom already gives an empty "change per issue" (nil, not a line
+// of zeroes standing in for "never measured"). When some but not all do, it
+// names how many were left out, the same "(medians over N issues with PR
+// data)" convention changePairsFrom uses for the same situation.
+func planCostPairs(p planCostSummary) [][2]string {
+	if p.n == 0 {
+		return nil
+	}
+	line := fmt.Sprintf("%s mean, %s median of a week", pct1(p.mean), pct1(p.median))
+	if p.median > 0 {
+		line += fmt.Sprintf(" — about %d issues to a full week", int(math.Round(100/p.median)))
+	}
+	note := "upper bound: counts everything the account did meanwhile, not just this issue"
+	if p.hasCrossCheck {
+		window := p.crossCheckWindow
+		if window == "" {
+			window = "the reported window"
+		}
+		note += fmt.Sprintf("; polako's own share was %d%% of the last %s", p.crossCheckPercent, window)
+	}
+	line += " (" + note + ")"
+	if p.unsampled > 0 {
+		line += fmt.Sprintf(" (over %s — %s had no usable reading)", plural(p.n, "issue"), plural(p.unsampled, "issue"))
+	}
+	return [][2]string{{"plan cost per issue", line}}
 }
 
 func runPairs(s runsSummary) [][2]string {

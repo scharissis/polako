@@ -32,8 +32,39 @@ type statsDoc struct {
 	Runs    statsDocRuns    `json:"runs"`
 	Cost    statsDocCost    `json:"cost"`
 	Latency statsDocLatency `json:"latency"`
-	By      *statsDocBy     `json:"by,omitempty"`
-	RunLog  []statsDocRun   `json:"run_log,omitempty"`
+	// Window is the resolved -window bounds, present only when the flag was
+	// given — the typed twin of the text report's "window" header line.
+	Window *statsDocWindow `json:"window,omitempty"`
+	// Plan is what a terminal issue cost the plan, present only when at
+	// least one has a usable sample — see statsDocPlan.
+	Plan   *statsDocPlan `json:"plan,omitempty"`
+	By     *statsDocBy   `json:"by,omitempty"`
+	RunLog []statsDocRun `json:"run_log,omitempty"`
+}
+
+// statsDocWindow is -window's resolved bounds: the calendar period it named,
+// how far now falls through it, and — for "week" alone — which anchor won,
+// "monday" or "the plan's reset".
+type statsDocWindow struct {
+	Kind             string  `json:"kind"`
+	From             string  `json:"from"`
+	PeriodEnd        string  `json:"period_end"`
+	Anchor           string  `json:"anchor,omitempty"`
+	ElapsedSeconds   float64 `json:"elapsed_seconds"`
+	RemainingSeconds float64 `json:"remaining_seconds"`
+}
+
+// statsDocPlan is planCostPairs's typed twin. CrossCheckPercent and
+// CrossCheckWindow are absent together when the probe never answered — the
+// same "no cross-check figure" state the text line simply omits the
+// parenthetical for.
+type statsDocPlan struct {
+	MeanPercent       float64 `json:"mean_percent_of_week"`
+	MedianPercent     float64 `json:"median_percent_of_week"`
+	SampledIssues     int     `json:"sampled_issues"`
+	UnsampledIssues   int     `json:"unsampled_issues"`
+	CrossCheckPercent *int    `json:"cross_check_percent,omitempty"`
+	CrossCheckWindow  string  `json:"cross_check_window,omitempty"`
 }
 
 // statsDocScope names what was asked for. SinceSeconds is a pointer because
@@ -215,12 +246,61 @@ func statsDocFrom(ds dataset, issues []*issueStats, summary statsSummary, opt st
 		Cost:    statsDocCostFrom(summary.cost),
 		Latency: statsDocLatencyFrom(summary.latency),
 	}
+	doc.Window = statsDocWindowFrom(summary.source)
+	doc.Plan = statsDocPlanFrom(summary.plan)
 	if opt.by != "" {
 		by := statsDocByFrom(ds, issues, opt.by)
 		doc.By = &by
 	}
 	if opt.runs {
 		doc.RunLog = statsDocRunsLogFrom(ds)
+	}
+	return doc
+}
+
+// statsDocWindowFrom reads the resolved bounds sourceSummary already carries
+// — reqWindowLine's own typed source, so the text line and this document
+// cannot disagree about a figure. nil when -window was not given.
+func statsDocWindowFrom(s sourceSummary) *statsDocWindow {
+	if s.reqWindow == "" {
+		return nil
+	}
+	total := s.reqTo.Sub(s.reqFrom)
+	elapsed := s.reqNow.Sub(s.reqFrom)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	if elapsed > total {
+		elapsed = total
+	}
+	return &statsDocWindow{
+		Kind:             s.reqWindow,
+		From:             stamp(s.reqFrom),
+		PeriodEnd:        stamp(s.reqTo),
+		Anchor:           s.reqAnchor,
+		ElapsedSeconds:   elapsed.Seconds(),
+		RemainingSeconds: (total - elapsed).Seconds(),
+	}
+}
+
+// statsDocPlanFrom is planCostSummary's typed twin. nil exactly when
+// planCostPairs prints nothing at all — no terminal issue in scope carries a
+// usable sample — so the two can never disagree about when there is nothing
+// to show.
+func statsDocPlanFrom(p planCostSummary) *statsDocPlan {
+	if p.n == 0 {
+		return nil
+	}
+	doc := &statsDocPlan{
+		MeanPercent:     p.mean,
+		MedianPercent:   p.median,
+		SampledIssues:   p.n,
+		UnsampledIssues: p.unsampled,
+	}
+	if p.hasCrossCheck {
+		pct := p.crossCheckPercent
+		doc.CrossCheckPercent = &pct
+		doc.CrossCheckWindow = p.crossCheckWindow
 	}
 	return doc
 }
