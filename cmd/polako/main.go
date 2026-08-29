@@ -932,7 +932,7 @@ func run(ctx context.Context, cfg config) error {
 // real invocation — so the command can be piped somewhere useful instead of
 // being fished out of a transcript.
 func dryRun(ctx context.Context, cfg config, out io.Writer) error {
-	ready, blocked, err := openIssues(ctx, cfg)
+	ready, blocked, heldBack, err := openIssues(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -950,6 +950,7 @@ func dryRun(ctx context.Context, cfg config, out io.Writer) error {
 	if waiting := workable(blocked); len(waiting) > 0 {
 		log.Printf("waiting on an answer: %s", issueRefs(waiting))
 	}
+	logHeldBack(heldBack, cfg.skip)
 	// The drain takes the lowest ready issue. With none, it runs the lowest
 	// issue waiting on an answer, to find out whether the reply is already on
 	// the thread — which is what awaitAnswer does on a drain that flagged none
@@ -1111,10 +1112,11 @@ func drain(ctx context.Context, cfg config) error {
 			notify(ctx, cfg, notification{event: notifyStopped, reason: reason})
 			return finish(nil)
 		}
-		ready, blocked, err := openIssues(ctx, cfg)
+		ready, blocked, heldBack, err := openIssues(ctx, cfg)
 		if err != nil {
 			return finish(err)
 		}
+		logHeldBack(heldBack, skip)
 		issue := pickLowest(ready, skip)
 		if issue == 0 {
 			blocked = slices.DeleteFunc(blocked, func(n int) bool { return skip[n] })
@@ -2413,24 +2415,30 @@ func issueLabelTools(issue int) string {
 // other is a line an operator needs at the top of a shift rather than once per
 // issue. See config.queue.
 type queueMemo struct {
-	subIssuesOff atomic.Bool
-	saidProposed atomic.Bool
+	extendedFieldsOff atomic.Bool
+	saidProposed      atomic.Bool
 }
 
-// seesSubIssues reports whether the listing should still ask for the sub-issue
-// rollup — true until a gh turns out not to have it.
-func (c config) seesSubIssues() bool {
-	return c.queue == nil || !c.queue.subIssuesOff.Load()
+// seesExtendedFields reports whether the listing should still ask for the
+// sub-issue rollup and the blockedBy dependency connection — true until a gh
+// turns out not to have one of them. The two share one flag and one warning
+// rather than each getting their own: a gh that rejects either is old enough
+// to assume it lacks both, and probing them separately would only cost the
+// shift a second retry to learn the same thing.
+func (c config) seesExtendedFields() bool {
+	return c.queue == nil || !c.queue.extendedFieldsOff.Load()
 }
 
-// dropSubIssues gives up on the rollup for the rest of the shift and says so.
-// Nil-safe like seesSubIssues, and losing the memo costs little: one rejected
-// call per listing, and the warning repeated with it.
-func (c config) dropSubIssues() {
-	if c.queue != nil && c.queue.subIssuesOff.Swap(true) {
+// dropExtendedFields gives up on the rollup and the dependency connection for
+// the rest of the shift and says so. Nil-safe like seesExtendedFields, and
+// losing the memo costs little: one rejected call per listing, and the
+// warning repeated with it.
+func (c config) dropExtendedFields() {
+	if c.queue != nil && c.queue.extendedFieldsOff.Swap(true) {
 		return
 	}
-	narrate(sevWarning, "gh too old to see sub-issues; container issues will be treated as workable — upgrade gh")
+	narrate(sevWarning, "gh too old to see sub-issues or blockedBy dependencies; "+
+		"container issues will be treated as workable and blocked issues will be treated as ready — upgrade gh")
 }
 
 // sayProposals names what the curation gate is holding back, once a shift, so a
@@ -3242,24 +3250,43 @@ func pickLowest(numbers []int, skip map[int]bool) int {
 // openIssues asks GitHub what there is to work: the issues ready now, and the
 // ones a run already flagged for a human. -strict-order folds the second list
 // back into the first, which is the whole of what the flag does — a flagged
-// issue keeps its place in the queue, and everything behind it waits.
-func openIssues(ctx context.Context, cfg config) (ready, blocked []int, err error) {
+// issue keeps its place in the queue, and everything behind it waits. heldBack
+// is untouched by the flag either way: unlike an awaiting-answer issue, running
+// one again this pass cannot reveal anything the same listing didn't already
+// know, so it never rejoins ready and is reported alongside instead.
+func openIssues(ctx context.Context, cfg config) (ready, blocked []int, heldBack []heldBackInfo, err error) {
 	q, err := openQueues(ctx, cfg)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if cfg.strictOrder {
-		return append(q.ready, q.blocked...), nil, nil
+		return append(q.ready, q.blocked...), nil, q.heldBack, nil
 	}
-	return q.ready, q.blocked, nil
+	return q.ready, q.blocked, q.heldBack, nil
 }
 
-// What the queue is derived from: the labels the exclusions read, and the
-// sub-issue rollup that says an issue is a container rather than a work item.
-// See listOpenIssues for the gh that cannot serve the second one.
+// logHeldBack narrates every issue this pass is putting down for an open
+// blocker — once per issue no matter how many blockers it names, since
+// openIssues is called once per pass and this is called once per that call.
+// -skip already told the operator once about a number they typed themselves,
+// so it is quiet about those.
+func logHeldBack(heldBack []heldBackInfo, skip map[int]bool) {
+	for _, h := range heldBack {
+		if skip[h.number] {
+			continue
+		}
+		log.Printf("issue #%d blocked by %s — skipping this pass", h.number, issueRefs(h.blockers))
+	}
+}
+
+// What the queue is derived from: the labels the exclusions read, the
+// sub-issue rollup that says an issue is a container rather than a work item,
+// and the blockedBy connection that says a ready issue has an unmerged
+// prerequisite. See listOpenIssues for the gh that cannot serve the last two.
 const (
 	issueFields    = "number,labels"
 	subIssuesField = "subIssuesSummary"
+	blockedByField = "blockedBy"
 )
 
 // openQueues reads the open backlog off GitHub and sorts it. Both readers of
@@ -3282,11 +3309,12 @@ func openQueues(ctx context.Context, cfg config) (issueQueues, error) {
 }
 
 // listOpenIssues makes the listing call, and copes with a gh too old to know
-// what a sub-issue is: that one rejects the whole --json set before it asks
-// GitHub anything, so the fallback is to ask again without the field. Inside
-// one retryRead attempt rather than around it, so the fallback costs the caller
-// no part of its retry allowance, and remembered for the shift, so the rejected
-// call is paid for once rather than once per issue.
+// what a sub-issue or a blockedBy dependency is: that one rejects the whole
+// --json set before it asks GitHub anything, so the fallback is to ask again
+// without either field. Inside one retryRead attempt rather than around it, so
+// the fallback costs the caller no part of its retry allowance, and remembered
+// for the shift, so the rejected call is paid for once rather than once per
+// issue.
 func listOpenIssues(ctx context.Context, cfg config) ([]byte, error) {
 	args := func(fields string) []string {
 		a := []string{"issue", "list", "--state", "open", "--limit", "200", "--json", fields}
@@ -3295,12 +3323,12 @@ func listOpenIssues(ctx context.Context, cfg config) ([]byte, error) {
 		}
 		return a
 	}
-	if !cfg.seesSubIssues() {
+	if !cfg.seesExtendedFields() {
 		return gh(ctx, cfg, args(issueFields)...)
 	}
-	out, err := gh(ctx, cfg, args(issueFields+","+subIssuesField)...)
+	out, err := gh(ctx, cfg, args(issueFields+","+subIssuesField+","+blockedByField)...)
 	if unknownJSONField(err) {
-		cfg.dropSubIssues()
+		cfg.dropExtendedFields()
 		return gh(ctx, cfg, args(issueFields)...)
 	}
 	return out, err
@@ -3329,12 +3357,19 @@ func unknownJSONField(err error) bool {
 // to take off a label that would change nothing. They are still listed, because
 // "not workable" is not "not open" — anything asking which open issues exist,
 // `status` deciding whose PR is still live among them, has to see them.
+//
+// heldBack is a fifth bucket, carved only out of what would otherwise be
+// ready: an issue with an open blockedBy dependency. Unlike every other
+// exclusion here it is not written anywhere and not a judgement a human made —
+// it is recomputed from this same listing every pass, so it holds no queue up
+// for longer than its blocker stays open.
 type issueQueues struct {
 	ready      []int
 	blocked    []int
 	parked     []int
 	proposed   []int
 	containers []containerInfo
+	heldBack   []heldBackInfo
 }
 
 // containerInfo is one container issue and the sub-issue rollup that says
@@ -3344,6 +3379,14 @@ type containerInfo struct {
 	number    int
 	total     int
 	completed int
+}
+
+// heldBackInfo is one otherwise-ready issue put down for this pass because at
+// least one of its blockedBy dependencies is still open, and the open ones
+// among them, ascending — what the skip log names.
+type heldBackInfo struct {
+	number   int
+	blockers []int
 }
 
 // finished is the one predicate for "this epic is done", so the rest of the
@@ -3359,30 +3402,43 @@ func (c containerInfo) finished() bool {
 // question it answers is "is this issue still open?" rather than "would a drain
 // work it", so an exclusion must not shorten it.
 func (q issueQueues) open() []int {
-	all := make([]int, 0, len(q.ready)+len(q.blocked)+len(q.parked)+len(q.proposed)+len(q.containers))
+	all := make([]int, 0, len(q.ready)+len(q.blocked)+len(q.parked)+len(q.proposed)+
+		len(q.containers)+len(q.heldBack))
 	for _, list := range [][]int{q.ready, q.blocked, q.parked, q.proposed} {
 		all = append(all, list...)
 	}
 	for _, c := range q.containers {
 		all = append(all, c.number)
 	}
+	for _, h := range q.heldBack {
+		all = append(all, h.number)
+	}
 	return all
 }
 
-// selectableIssues reads a `gh issue list --json number,labels,subIssuesSummary`
-// payload and sorts it into the queues: issues ready now, issues already
-// waiting on a human answer, issues a previous drain parked, and issues a
-// machine proposed that nobody has approved. Only the first two are worth
-// working, which is what stops the queue handing back the same unimplementable
-// issue on every pass. Labels are matched case-insensitively, the way GitHub
-// itself treats them.
+// selectableIssues reads a `gh issue list
+// --json number,labels,subIssuesSummary,blockedBy` payload and sorts it into
+// the queues: issues ready now, issues already waiting on a human answer,
+// issues a previous drain parked, issues a machine proposed that nobody has
+// approved, and issues put down for this pass because a dependency has not
+// merged. Only the first two are worth working, which is what stops the queue
+// handing back the same unimplementable issue on every pass. Labels are
+// matched case-insensitively, the way GitHub itself treats them.
 //
-// The order of the cases is the precedence, and two of them are decisions. A
-// container is dropped ahead of every label, because "never a work item" is
-// structural and outranks anything written on it. And needs-human beats
-// proposed, because parking is a judgement a human has already made about that
-// issue — which also keeps the ignoring-proposals line honest, since every
-// issue it counts really would queue if the label came off.
+// The order of the cases is the precedence, and three of them are decisions.
+// A container is dropped ahead of every label, because "never a work item" is
+// structural and outranks anything written on it. Needs-human beats proposed,
+// because parking is a judgement a human has already made about that issue —
+// which also keeps the ignoring-proposals line honest, since every issue it
+// counts really would queue if the label came off. And an open blockedBy
+// dependency is checked last, only against what the switch would otherwise
+// call ready: a needs-human, proposed or awaiting-answer classification wins
+// outright regardless of any blocker. Awaiting-answer in particular keeps its
+// own dedicated poll for a reply (awaitAnswer) running whether or not some
+// unrelated dependency has merged — demoting it to held-back on a blocker
+// would silently stop that poll with nothing to say so. Held-back is also the
+// one exclusion here that is not a durable, labelled judgement: it is
+// recomputed from this same listing every pass, so it sits below all four.
 //
 // Every list comes back ascending because the drain works them lowest first,
 // and `gh issue list` guarantees no order of its own.
@@ -3390,6 +3446,21 @@ func selectableIssues(raw []byte) (issueQueues, error) {
 	var issues []ghIssue
 	if err := json.Unmarshal(raw, &issues); err != nil {
 		return issueQueues{}, fmt.Errorf("parsing issue list: %w", err)
+	}
+	// The state a blockedBy node names is what settles openness. A gh whose
+	// node carries no state at all falls back to this — presence among the
+	// numbers this same open-issues listing already found — numbers already
+	// in hand, no second request paid for an approximation. Built only when
+	// something could actually use it: most listings carry no blockedBy node
+	// at all, whether because no issue names a dependency yet or because
+	// dropExtendedFields already gave up on the field for the shift, and the
+	// common case should not pay for a map this fallback will never consult.
+	var seenOpen map[int]bool
+	if slices.ContainsFunc(issues, func(is ghIssue) bool { return len(is.BlockedBy.Nodes) > 0 }) {
+		seenOpen = make(map[int]bool, len(issues))
+		for _, is := range issues {
+			seenOpen[is.Number] = true
+		}
 	}
 	q := issueQueues{ready: make([]int, 0, len(issues))}
 	for _, is := range issues {
@@ -3409,7 +3480,11 @@ func selectableIssues(raw []byte) (issueQueues, error) {
 		case is.hasLabel(awaitingAnswerLabel):
 			q.blocked = append(q.blocked, is.Number)
 		default:
-			q.ready = append(q.ready, is.Number)
+			if blockers := openBlockers(is, seenOpen); len(blockers) > 0 {
+				q.heldBack = append(q.heldBack, heldBackInfo{number: is.Number, blockers: blockers})
+			} else {
+				q.ready = append(q.ready, is.Number)
+			}
 		}
 	}
 	slices.Sort(q.ready)
@@ -3417,15 +3492,36 @@ func selectableIssues(raw []byte) (issueQueues, error) {
 	slices.Sort(q.parked)
 	slices.Sort(q.proposed)
 	slices.SortFunc(q.containers, func(a, b containerInfo) int { return a.number - b.number })
+	slices.SortFunc(q.heldBack, func(a, b heldBackInfo) int { return a.number - b.number })
 	return q, nil
 }
 
-// ghIssue is one row of `gh issue list --json number,labels,subIssuesSummary`.
+// openBlockers returns, ascending, the blockedBy dependencies of is that this
+// listing cannot show as closed — the set that keeps an otherwise-ready issue
+// from being worked this pass. Two blockers that name each other resolve
+// independently and in the same pass, so a dependency cycle costs each issue
+// one skip rather than a hang: nothing here iterates on anything but is's own
+// (short, GitHub-bounded) blocker list.
+func openBlockers(is ghIssue, seenOpen map[int]bool) []int {
+	var out []int
+	for _, b := range is.BlockedBy.Nodes {
+		if b.open(seenOpen) {
+			out = append(out, b.Number)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// ghIssue is one row of
+// `gh issue list --json number,labels,subIssuesSummary,blockedBy`.
 //
 // SubIssues is absent from the payload of a gh too old to know the field, and
 // absent on GitHub for an issue with no children — the same zero either way,
 // which is the whole of what the old-gh degradation costs: containers read as
-// ordinary work items, and a warning says so.
+// ordinary work items, and a warning says so. BlockedBy degrades the same way
+// — absent means no dependency this run can see, so it never holds up a
+// listing that never asked for it.
 type ghIssue struct {
 	Number    int       `json:"number"`
 	Labels    []ghLabel `json:"labels"`
@@ -3433,10 +3529,39 @@ type ghIssue struct {
 		Total     int `json:"total"`
 		Completed int `json:"completed"`
 	} `json:"subIssuesSummary"`
+	BlockedBy struct {
+		Nodes []ghBlocker `json:"nodes"`
+	} `json:"blockedBy"`
 }
 
 type ghLabel struct {
 	Name string `json:"name"`
+}
+
+// ghBlocker is one issue named in another's blockedBy connection.
+type ghBlocker struct {
+	Number int `json:"number"`
+	// State is GitHub's own "OPEN"/"CLOSED", matched case-insensitively since
+	// nothing pins gh to one casing. Empty on a gh whose blockedBy support
+	// does not carry it — open falls back to the listing itself then.
+	State string `json:"state"`
+}
+
+// open reports whether b still blocks. A state this call actually named wins
+// outright, and settles it correctly regardless of `-label`: a blocker this
+// same call would never have listed on its own account — wrong label, or
+// none at all — still blocks while it is open, because its blockedBy state
+// travels with the connection rather than with the top-level filter. Without
+// a state, seenOpen — every number this same open-issues listing found —
+// stands in instead, and that guarantee narrows: a blocker outside -label's
+// scope has no row of its own to be found by, so this path reads it as closed
+// whether or not it truly is. The gap is the price of the no-second-request
+// rule on a gh old enough to omit state in the first place.
+func (b ghBlocker) open(seenOpen map[int]bool) bool {
+	if b.State != "" {
+		return !strings.EqualFold(b.State, "closed")
+	}
+	return seenOpen[b.Number]
 }
 
 // hasLabel matches case-insensitively, the way GitHub treats label names.
