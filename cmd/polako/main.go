@@ -1077,8 +1077,12 @@ func drain(ctx context.Context, cfg config) error {
 	var results []issueResult
 	// The containers the most recent successful listing found — carried across
 	// passes so the exit summary can name one that finished mid-shift without
-	// an extra `gh` call or a merge-moment hook: the pass after the one that
-	// merged an epic's last child already reflects it.
+	// an extra `gh` call or a merge-moment hook: the next pass to run one
+	// already reflects an epic's last child merging. A shift that stops
+	// without a next pass — -once after one issue, -max-session-cost, a fatal
+	// error — reports what this listing knew and no more, same as any other
+	// "ends before it re-lists" exit; the next shift's own first pass says
+	// the rest.
 	var lastContainers []containerInfo
 	// Every exit goes through finish, fatal ones included: a session that died
 	// on issue nine should still account for the eight before it. The issue it
@@ -1365,12 +1369,16 @@ func drainSummary(results []issueResult, containers []containerInfo, elapsed tim
 	var epics []string
 	for _, c := range containers {
 		if c.finished() {
-			epics = append(epics, fmt.Sprintf("  epic    #%d: all %d sub-issues closed — close it when the design is satisfied",
-				c.number, c.total))
+			epics = append(epics, fmt.Sprintf("  epic    #%d: all %s closed — close it when the design is satisfied",
+				c.number, plural(c.total, "sub-issue")))
 		}
 	}
-	if len(results) == 0 && len(epics) == 0 {
-		return nil
+	// A shift that touched no issue has nothing to summarize in the usual
+	// sense, but a container the queue already shows finished is still worth
+	// naming on its own — printing "0 issues merged, 0 issues parked" over it
+	// would be exactly the noise this early return exists to avoid.
+	if len(results) == 0 {
+		return epics
 	}
 	total, approximated := 0.0, 0
 	for _, r := range results {

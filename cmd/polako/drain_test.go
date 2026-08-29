@@ -2409,6 +2409,31 @@ func TestDrainSummaryOmitsContainersThatAreNotFinished(t *testing.T) {
 	}
 }
 
+// A container with exactly one sub-issue is still a container — SubIssues.Total
+// > 0 is the whole of the rule — so the singular has to read right too.
+func TestDrainSummaryNamesAFinishedContainerOfOne(t *testing.T) {
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}},
+		[]containerInfo{{number: 113, total: 1, completed: 1}}, time.Minute), "\n")
+	if want := "epic    #113: all 1 sub-issue closed — close it when the design is satisfied"; !strings.Contains(got, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
+	}
+}
+
+// A shift that touches no issue at all — the backlog's only open item is a
+// container already finished before this shift ever ran — still has the one
+// thing worth saying, without the "0 issues merged, 0 issues parked" header
+// that would otherwise frame it as a no-op.
+func TestDrainSummaryReportsAFinishedContainerEvenWithNoIssueResults(t *testing.T) {
+	got := strings.Join(drainSummary(nil,
+		[]containerInfo{{number: 113, total: 6, completed: 6}}, time.Minute), "\n")
+	if want := "epic    #113: all 6 sub-issues closed — close it when the design is satisfied"; !strings.Contains(got, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
+	}
+	if strings.Contains(got, "merged") || strings.Contains(got, "parked") {
+		t.Errorf("no issue was touched, so the summary should not claim 0 of either\ngot:\n%s", got)
+	}
+}
+
 // The point of the cost cap: a run reports what it spent, the cap says that is
 // the lot, and the issue is parked with the arithmetic in the reason rather
 // than resumed into another bill.
