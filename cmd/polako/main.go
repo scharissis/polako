@@ -932,7 +932,7 @@ func run(ctx context.Context, cfg config) error {
 // real invocation — so the command can be piped somewhere useful instead of
 // being fished out of a transcript.
 func dryRun(ctx context.Context, cfg config, out io.Writer) error {
-	ready, blocked, heldBack, err := openIssues(ctx, cfg)
+	ready, blocked, heldBack, _, err := openIssues(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -1075,12 +1075,21 @@ func drain(ctx context.Context, cfg config) error {
 	states := map[int]*issueState{}
 
 	var results []issueResult
+	// The containers the most recent successful listing found — carried across
+	// passes so the exit summary can name one that finished mid-shift without
+	// an extra `gh` call or a merge-moment hook: the next pass to run one
+	// already reflects an epic's last child merging. A shift that stops
+	// without a next pass — -once after one issue, -max-session-cost, a fatal
+	// error — reports what this listing knew and no more, same as any other
+	// "ends before it re-lists" exit; the next shift's own first pass says
+	// the rest.
+	var lastContainers []containerInfo
 	// Every exit goes through finish, fatal ones included: a session that died
 	// on issue nine should still account for the eight before it. The issue it
 	// died on is not among them — unfinished is not an outcome — so a run that
 	// dies on its first issue has nothing to summarize and says nothing.
 	finish := func(err error) error {
-		if lines := drainSummary(append(results, stillWaiting(states)...), time.Since(started)); len(lines) > 0 {
+		if lines := drainSummary(append(results, stillWaiting(states)...), lastContainers, time.Since(started)); len(lines) > 0 {
 			narrate(sevSection, "%s", lines[0]) // the shift's own closing heading
 			for _, line := range lines[1:] {
 				log.Print(line)
@@ -1112,10 +1121,11 @@ func drain(ctx context.Context, cfg config) error {
 			notify(ctx, cfg, notification{event: notifyStopped, reason: reason})
 			return finish(nil)
 		}
-		ready, blocked, heldBack, err := openIssues(ctx, cfg)
+		ready, blocked, heldBack, containers, err := openIssues(ctx, cfg)
 		if err != nil {
 			return finish(err)
 		}
+		lastContainers = containers
 		logHeldBack(heldBack, skip)
 		issue := pickLowest(ready, skip)
 		if issue == 0 {
@@ -1349,9 +1359,26 @@ func ensureLabel(ctx context.Context, cfg config, name, color, description strin
 // same way: a drain that spent nothing — one that only waited on a PR an
 // earlier process opened — would otherwise report "$0.00 spent", which reads
 // as a free backlog rather than as an absent number.
-func drainSummary(results []issueResult, elapsed time.Duration) []string {
+//
+// containers is the most recent listing the drain made, not this shift's own
+// bookkeeping — a container earns its line by being finished when the shift's
+// last look at the queue happened to see it, whether or not this shift is
+// what finished it. Scope is already decided upstream: a container outside
+// `-label` was never in that listing to begin with.
+func drainSummary(results []issueResult, containers []containerInfo, elapsed time.Duration) []string {
+	var epics []string
+	for _, c := range containers {
+		if c.finished() {
+			epics = append(epics, fmt.Sprintf("  epic    #%d: all %s closed — close it when the design is satisfied",
+				c.number, plural(c.total, "sub-issue")))
+		}
+	}
+	// A shift that touched no issue has nothing to summarize in the usual
+	// sense, but a container the queue already shows finished is still worth
+	// naming on its own — printing "0 issues merged, 0 issues parked" over it
+	// would be exactly the noise this early return exists to avoid.
 	if len(results) == 0 {
-		return nil
+		return epics
 	}
 	total, approximated := 0.0, 0
 	for _, r := range results {
@@ -1404,7 +1431,8 @@ func drainSummary(results []issueResult, elapsed time.Duration) []string {
 		lines = append(lines, "  waiting "+strings.Join(waiting, ", ")+
 			" — reply on the thread and the next shift picks them up")
 	}
-	return append(lines, parked...)
+	lines = append(lines, parked...)
+	return append(lines, epics...)
 }
 
 // issueRefs renders a list of issue numbers the way the rest of the output
@@ -3254,15 +3282,15 @@ func pickLowest(numbers []int, skip map[int]bool) int {
 // is untouched by the flag either way: unlike an awaiting-answer issue, running
 // one again this pass cannot reveal anything the same listing didn't already
 // know, so it never rejoins ready and is reported alongside instead.
-func openIssues(ctx context.Context, cfg config) (ready, blocked []int, heldBack []heldBackInfo, err error) {
+func openIssues(ctx context.Context, cfg config) (ready, blocked []int, heldBack []heldBackInfo, containers []containerInfo, err error) {
 	q, err := openQueues(ctx, cfg)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	if cfg.strictOrder {
-		return append(q.ready, q.blocked...), nil, q.heldBack, nil
+		return append(q.ready, q.blocked...), nil, q.heldBack, q.containers, nil
 	}
-	return q.ready, q.blocked, q.heldBack, nil
+	return q.ready, q.blocked, q.heldBack, q.containers, nil
 }
 
 // logHeldBack narrates every issue this pass is putting down for an open

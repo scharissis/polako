@@ -122,6 +122,20 @@ own sub-issue rollup. A `gh` too old to report that rollup gets one warning and
 carries on, with container issues treated as ordinary work; the `proposed`
 exclusion is labels alone and never depends on it.
 
+A container all of whose sub-issues have closed earns a line in the exit
+summary — the design is done in substance, and only a human closing the epic
+itself remains:
+
+```
+  epic    #113: all 6 sub-issues closed — close it when the design is satisfied
+```
+
+Sourced from the queue listing the drain already re-reads every pass, so
+merging the last child of an epic mid-shift is enough — no extra `gh` call.
+Present only when earned, absent entirely when nothing is finished, and
+scoped the same way the rest of the queue is: a container outside `-label`
+is never in that listing to begin with.
+
 **A ready issue with an open `blockedBy` dependency is put down for this pass**
 rather than worked — a listing that already flags a container also flags an
 unmerged prerequisite, in the same call. Nothing is written anywhere: the next

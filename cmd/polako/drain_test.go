@@ -1680,6 +1680,86 @@ func TestDrainStillStopsOnAFatalError(t *testing.T) {
 	}
 }
 
+// A shift that ends on a fatal error still names an epic its last listing
+// found finished — the pass that fetched it happened before the fatal
+// dispatch, and finish is what every exit runs through, errors included.
+func TestDrainNamesAFinishedEpicEvenWhenItEndsOnAFatalError(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "authfail", &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true},
+			// A container, never picked up as work — issue 3 is what the second
+			// pass dispatches, and what the fake CLI's "authfail" mode fails on.
+			"2": {Open: true, SubIssues: 3, SubIssuesCompleted: 3},
+			"3": {Open: true},
+		},
+		PRs: map[string]*fakePR{"issue-1": {Number: 8, State: "MERGED"}},
+	})
+
+	err := drain(context.Background(), cfg)
+	if !errors.Is(err, errAuth) {
+		t.Fatalf("drain error = %v, want it to carry %v", err, errAuth)
+	}
+	if want := "epic    #2: all 3 sub-issues closed — close it when the design is satisfied"; !strings.Contains(buf.String(), want) {
+		t.Errorf("a fatal exit must still name the finished epic: missing %q\ngot:\n%s",
+			want, buf.String())
+	}
+}
+
+// The point of the issue: a shift that merges the last child of an epic
+// during its own run says so on its way out, sourced from the listing the
+// loop already made rather than an extra `gh` call.
+func TestDrainNamesAnEpicThatFinishesMidShift(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true, SubIssues: 2, SubIssuesCompleted: 2},
+			// Its PR is already merged, so the shift closes it without a claude
+			// run and then finds nothing else workable.
+			"2": {Open: true},
+		},
+		PRs: map[string]*fakePR{"issue-2": {Number: 9, State: "MERGED"}},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	out := buf.String()
+	if want := "epic    #1: all 2 sub-issues closed — close it when the design is satisfied"; !strings.Contains(out, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, out)
+	}
+	if want := "summary: 1 issue merged, 0 issues parked"; !strings.Contains(out, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, out)
+	}
+}
+
+// A container outside `-label`'s scope is never in the listing this reads
+// from — the same rule a held-back blocker follows — so a finished one there
+// is never this shift's business to report.
+func TestDrainDoesNotNameAFinishedEpicOutsideLabelScope(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			// Finished, but carries none of the label the shift is scoped to.
+			"1": {Open: true, SubIssues: 2, SubIssuesCompleted: 2},
+			"2": {Open: true, Labels: []string{"bug"}},
+		},
+		PRs: map[string]*fakePR{"issue-2": {Number: 9, State: "MERGED"}},
+	})
+	cfg.label = "bug"
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "epic") {
+		t.Errorf("issue 1's epic is outside -label's scope and should go unmentioned\ngot:\n%s", out)
+	}
+	if want := "summary: 1 issue merged, 0 issues parked"; !strings.Contains(out, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, out)
+	}
+}
+
 func TestDrainHonoursOnceAfterAPark(t *testing.T) {
 	captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
@@ -1860,7 +1940,7 @@ func TestOpenIssuesKeepsAHeldBackIssueOutUnderStrictOrder(t *testing.T) {
 	})
 	cfg.strictOrder = true
 
-	ready, blocked, heldBack, err := openIssues(context.Background(), cfg)
+	ready, blocked, heldBack, _, err := openIssues(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("openIssues: %v", err)
 	}
@@ -2231,7 +2311,7 @@ func TestDrainSummaryReportsEveryOutcome(t *testing.T) {
 		{issue: 2},
 		{issue: 5},
 		{issue: 3, awaiting: true},
-	}, 90*time.Minute), "\n")
+	}, nil, 90*time.Minute), "\n")
 
 	for _, want := range []string{
 		"summary: 2 issues merged, 1 issue parked, 1 issue awaiting an answer, 1h30m of wall clock",
@@ -2248,7 +2328,7 @@ func TestDrainSummaryReportsEveryOutcome(t *testing.T) {
 // Most drains have nothing waiting, and a bucket that reads "0 issues awaiting
 // an answer" on every ordinary run is noise in the one line anybody reads.
 func TestDrainSummaryOmitsAnEmptyWaitingBucket(t *testing.T) {
-	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, time.Minute), "\n")
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil, time.Minute), "\n")
 	if want := "summary: 1 issue merged, 0 issues parked, 1m of wall clock"; !strings.Contains(got, want) {
 		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
 	}
@@ -2260,7 +2340,7 @@ func TestDrainSummaryOmitsAnEmptyWaitingBucket(t *testing.T) {
 // A drain that never reached an issue has nothing to summarize, and "0 issues
 // merged" on every empty backlog is noise.
 func TestDrainSummaryIsSilentWithoutResults(t *testing.T) {
-	if got := drainSummary(nil, time.Minute); got != nil {
+	if got := drainSummary(nil, nil, time.Minute); got != nil {
 		t.Errorf("summary = %v, want nothing", got)
 	}
 }
@@ -2271,7 +2351,7 @@ func TestDrainSummaryPricesTheDrainAndEachIssue(t *testing.T) {
 		{issue: 1, parked: true, reason: "no PR and no questions", cost: 2.5},
 		{issue: 2, cost: 4},
 		{issue: 3, awaiting: true, cost: 0.25},
-	}, 90*time.Minute), "\n")
+	}, nil, 90*time.Minute), "\n")
 
 	for _, want := range []string{
 		"$6.75 spent, 1h30m of wall clock",
@@ -2292,7 +2372,7 @@ func TestDrainSummaryPricesTheDrainAndEachIssue(t *testing.T) {
 func TestDrainSummarySaysWhenTheTotalUndercounts(t *testing.T) {
 	got := strings.Join(drainSummary([]issueResult{
 		{issue: 1, cost: 4, approximated: 2},
-	}, time.Minute), "\n")
+	}, nil, time.Minute), "\n")
 
 	if want := "$4.00 spent (2 runs reported none, so that is an undercount)"; !strings.Contains(got, want) {
 		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
@@ -2302,9 +2382,55 @@ func TestDrainSummarySaysWhenTheTotalUndercounts(t *testing.T) {
 // A drain that only waited on a PR an earlier process opened spent nothing,
 // and "$0.00" reads as a free backlog rather than as an absent number.
 func TestDrainSummaryOmitsDollarsItNeverSpent(t *testing.T) {
-	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, time.Minute), "\n")
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil, time.Minute), "\n")
 	if strings.Contains(got, "$") {
 		t.Errorf("an uncosted drain should print no dollars at all\ngot:\n%s", got)
+	}
+}
+
+// A finished container earns its own line, keyed off the same listing that
+// already threw its containers away before this issue — carried through
+// rather than re-fetched.
+func TestDrainSummaryNamesAFinishedContainer(t *testing.T) {
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}},
+		[]containerInfo{{number: 113, total: 6, completed: 6}}, time.Minute), "\n")
+	if want := "epic    #113: all 6 sub-issues closed — close it when the design is satisfied"; !strings.Contains(got, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
+	}
+}
+
+// Most drains touch no epic at all, and a container list with nothing
+// finished in it should read exactly like no container list.
+func TestDrainSummaryOmitsContainersThatAreNotFinished(t *testing.T) {
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}},
+		[]containerInfo{{number: 113, total: 6, completed: 3}}, time.Minute), "\n")
+	if strings.Contains(got, "epic") {
+		t.Errorf("no container finished, so the summary should not mention one\ngot:\n%s", got)
+	}
+}
+
+// A container with exactly one sub-issue is still a container — SubIssues.Total
+// > 0 is the whole of the rule — so the singular has to read right too.
+func TestDrainSummaryNamesAFinishedContainerOfOne(t *testing.T) {
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}},
+		[]containerInfo{{number: 113, total: 1, completed: 1}}, time.Minute), "\n")
+	if want := "epic    #113: all 1 sub-issue closed — close it when the design is satisfied"; !strings.Contains(got, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
+	}
+}
+
+// A shift that touches no issue at all — the backlog's only open item is a
+// container already finished before this shift ever ran — still has the one
+// thing worth saying, without the "0 issues merged, 0 issues parked" header
+// that would otherwise frame it as a no-op.
+func TestDrainSummaryReportsAFinishedContainerEvenWithNoIssueResults(t *testing.T) {
+	got := strings.Join(drainSummary(nil,
+		[]containerInfo{{number: 113, total: 6, completed: 6}}, time.Minute), "\n")
+	if want := "epic    #113: all 6 sub-issues closed — close it when the design is satisfied"; !strings.Contains(got, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
+	}
+	if strings.Contains(got, "merged") || strings.Contains(got, "parked") {
+		t.Errorf("no issue was touched, so the summary should not claim 0 of either\ngot:\n%s", got)
 	}
 }
 
