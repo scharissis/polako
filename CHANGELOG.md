@@ -13,6 +13,22 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.12.2]
+
+### What's Changed
+* fix: the exit summary names the epics this shift finished by @scharissis in https://github.com/scharissis/polako/pull/188 (closes #169)
+* fix: a finished epic gets one comment on its own thread, once by @scharissis in https://github.com/scharissis/polako/pull/189 (closes #170)
+* fix: notify fires when an epic's last child closes by @scharissis in https://github.com/scharissis/polako/pull/191 (closes #171)
+* chore: resumed_from is the resume target, not a session chain by @scharissis in https://github.com/scharissis/polako/pull/192 (closes #172)
+* test: fail when a shipping fix sits unreleased for a day by @scharissis in https://github.com/scharissis/polako/pull/193 (closes #181)
+* chore(docs): updated demo by @scharissis in https://github.com/scharissis/polako/pull/194
+* fix: name the tool-grant remedy when a mid-run permission ask parks an issue by @scharissis in https://github.com/scharissis/polako/pull/195 (closes #182)
+* fix: name the installed plugin id in the version-skew remedy by @scharissis in https://github.com/scharissis/polako/pull/196 (closes #190)
+* feat: polako closes a finished epic itself, and says so on the thread by @scharissis in https://github.com/scharissis/polako/pull/198 (closes #197)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.12.1...v0.12.2
+
 ## [0.12.1]
 
 ### What's Changed
