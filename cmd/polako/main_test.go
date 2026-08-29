@@ -222,6 +222,16 @@ func fakeClaude(mode string) int {
 	case "crash":
 		emit(`{"type":"system","subtype":"init","session_id":"sess-crash","model":"claude-opus-5"}`)
 		return 7
+	case "deathrattle":
+		// Issue #166's shape: a --resume the CLI kills on arrival still
+		// emits one assistant event before it dies — an empty usage
+		// block, no tool use — which used to be enough to count as
+		// progress and reset the -retries budget every single attempt.
+		// Every invocation looks like this, fresh or resumed, so the
+		// loop never finds a fruitful one.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-death","model":"claude-opus-5"}`)
+		emit(`{"type":"assistant","session_id":"sess-death","message":{"content":[],"usage":{}}}`)
+		return 1
 	case "costlycrash":
 		// Reported what it spent and then died anyway. The combination is what
 		// a cost cap needs to be exercised end to end: a run that leaves a bill
