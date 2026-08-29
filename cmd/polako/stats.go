@@ -179,6 +179,18 @@ func runStats(args []string, out, errOut io.Writer, now time.Time, rpt report) e
 	if sinceSet && windowSet {
 		return fmt.Errorf("-since and -window both name a window to report — pass one, not both")
 	}
+	// An explicit argument beats a POLAKO_SINCE/POLAKO_WINDOW default the
+	// same way applyEnvDefaults already promises for every flag on its own
+	// — but that promise is per-flag, so it says nothing about the other
+	// flag in this pair. Without this, an explicit -since with no -window
+	// argument would still be silently overridden below by a -window
+	// picked up from the environment, and "arguments win" would be false
+	// for exactly the one flag pair that checks it.
+	if sinceSet {
+		opt.window = ""
+	} else if windowSet {
+		opt.since = 0
+	}
 	opt.window = strings.TrimSpace(opt.window)
 	if opt.window != "" && !slices.Contains(statsWindows, opt.window) {
 		return fmt.Errorf("-window %q: choose one of %s", opt.window, orList(statsWindows))

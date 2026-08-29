@@ -8,6 +8,7 @@ package main
 // fake claudeBin — a different rig from the rest of that file.
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -393,5 +394,43 @@ func TestPlanCostNoProbeCallWithoutSamples(t *testing.T) {
 		if strings.Contains(a, "/usage") {
 			t.Errorf("probed /usage with nothing to cross-check: argv %q", a)
 		}
+	}
+}
+
+// --- -since / -window vs. an env default ---
+
+// applyEnvDefaults's "arguments win" promise is per-flag, so it says nothing
+// about -since and -window overriding each other — this is the pair's own
+// check, so it needs its own regression: an explicit -since must still beat
+// a POLAKO_WINDOW default sitting in the environment, not be silently
+// overridden by it once resolveWindowBounds runs.
+func TestExplicitSinceBeatsAWindowEnvDefault(t *testing.T) {
+	clearEnvDefaults(t)
+	t.Setenv(envVarName("window"), "week")
+	var out bytes.Buffer
+	if err := runStats([]string{"-since", "1h", "-metrics", fixtureDir(t)}, &out, io.Discard, fixtureNow, report{}); err != nil {
+		t.Fatalf("runStats: %v", err)
+	}
+	if strings.Contains(out.String(), "for week") || strings.Contains(out.String(), "anchor:") {
+		t.Errorf("explicit -since did not beat POLAKO_WINDOW=week:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "in the last 1h") {
+		t.Errorf("-since 1h did not take effect:\n%s", out.String())
+	}
+}
+
+// The mirror image: an explicit -window must beat a POLAKO_SINCE default.
+func TestExplicitWindowBeatsASinceEnvDefault(t *testing.T) {
+	clearEnvDefaults(t)
+	t.Setenv(envVarName("since"), "1h")
+	var out bytes.Buffer
+	if err := runStats([]string{"-window", "today", "-metrics", fixtureDir(t)}, &out, io.Discard, fixtureNow, report{}); err != nil {
+		t.Fatalf("runStats: %v", err)
+	}
+	if strings.Contains(out.String(), "in the last") {
+		t.Errorf("POLAKO_SINCE=1h leaked through an explicit -window:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "for today") {
+		t.Errorf("-window today did not take effect:\n%s", out.String())
 	}
 }
