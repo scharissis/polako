@@ -2373,7 +2373,18 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 						// log to learn it was even asked. Naming it here changes
 						// neither that we park nor that a resume was tried first:
 						// control reaches this line only once resuming is done.
-						reason, category = permissionParkReason, parkPermission
+						//
+						// The category still follows a bound when one stopped the
+						// resume: a cap or an exhausted resume budget is a
+						// parkBudget/parkRetries in the report whether or not the
+						// run also asked for a tool, for the same reason the crash
+						// arm files those causes that way — otherwise clearing
+						// needs-human after -add-tools just burns back into the
+						// same ceiling.
+						reason = permissionParkReason
+						if bound == "" {
+							category = parkPermission
+						}
 					}
 					if bound != "" {
 						reason += "; " + bound
@@ -2824,13 +2835,12 @@ func (r *runReport) observe(ev streamEvent) {
 			case "tool_use":
 				r.toolUses++
 			case "text":
-				// The same head-anchored test permissionRefusal runs on the
-				// final text, applied to each turn as it streams: a turn that
-				// opens by asking for approval is the run narrating its own
-				// block, not a permissions issue quoted back in a summary, so
-				// the anchor's guard against the latter survives being read
-				// earlier. Latched — a later ordinary turn does not unsay it.
-				if permissionRefusal(c.Text) {
+				// A turn that opens by asking for approval is the run
+				// narrating its own block, not a permissions issue quoted back
+				// in a summary — the head anchor's guard against the latter
+				// survives being read earlier. Latched: a later ordinary turn
+				// does not unsay it.
+				if permissionAskMidRun(c.Text) {
 					r.permissionAsked = true
 				}
 			}
@@ -2996,17 +3006,42 @@ const permissionParkReason = "the run stopped to ask for a permission this " +
 // toward "this was an ordinary run" and the list stays conservative rather
 // than broad.
 func permissionRefusal(result string) bool {
-	return headMatchesAny(result,
-		"this requires user confirmation", // the wording observed on #138
-		"this requires confirmation",
-		"this requires approval",
-		"this requires your approval",
-		"can you approve",
-		"could you approve",
+	return headMatchesAny(result, slices.Concat(permissionAskSignatures, []string{
+		// "I lack permission for X" — an accurate description of a wall the
+		// run hit. As a run's *final* words with no PR it reads the same as
+		// the asks above; mid-turn it is as often the run narrating a
+		// workaround ("i don't have permission to run the full suite here,
+		// but ..."), so permissionAskMidRun leaves these out.
 		"i need permission to",
 		"i don't have permission to",
 		"i do not have permission to",
-	)
+	})...)
+}
+
+// permissionAskSignatures are the phrasings that read as the run stopping its
+// turn to ask the operator to approve something — not merely reporting a
+// missing permission. permissionRefusal adds the weaker "I lack permission"
+// forms; permissionAskMidRun does not, because those turn up mid-run in prose
+// that then works around the wall rather than stopping on it.
+var permissionAskSignatures = []string{
+	"this requires user confirmation", // the wording observed on #138
+	"this requires confirmation",
+	"this requires approval",
+	"this requires your approval",
+	"can you approve",
+	"could you approve",
+}
+
+// permissionAskMidRun reports whether an assistant turn that is not the run's
+// last word is nonetheless the run stopping to ask for approval — the shape
+// #169 hit, where the ask ("This requires user confirmation to proceed") landed
+// partway through and the run then wrapped up on a sentence permissionRefusal's
+// head anchor could not catch. Same head anchor as permissionRefusal so a
+// permissions issue quoted mid-sentence still does not match, but a narrower
+// signature set: a mid-run turn saying only that it "does not have permission"
+// is too often the run describing a wall it then goes around.
+func permissionAskMidRun(text string) bool {
+	return headMatchesAny(text, permissionAskSignatures...)
 }
 
 // limitResetRe reads the reset clause out of a limit refusal — "resets 10:50am

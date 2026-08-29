@@ -2327,6 +2327,17 @@ func TestObserveReadsAPermissionAskFromAnEarlierTurn(t *testing.T) {
 	if quoting.permissionAsked {
 		t.Error("permissionAsked should be false — the turn quoted the phrase, it did not ask")
 	}
+
+	// A mid-run turn that opens by reporting a missing permission and then
+	// works around it is not a stop-to-ask: the "I lack permission" phrasings
+	// are in permissionRefusal for a final-word match only, not the mid-run
+	// scan, so this must not latch.
+	var workaround runReport
+	workaround.observe(turn("I don't have permission to run the full suite here, but I'll run the affected package."))
+	workaround.observe(streamEvent{Type: "result", Subtype: "success", Result: "Opened a PR."})
+	if workaround.permissionAsked {
+		t.Error("permissionAsked should be false — the turn described a wall it then went around")
+	}
 }
 
 // --- version skew between the two halves ---
