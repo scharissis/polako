@@ -1397,11 +1397,13 @@ func TestCapNotesNameEveryCapInForce(t *testing.T) {
 }
 
 // TestPreflightPairsSaysNothingUnasked pins the gate each row promises: unset
-// (the zero-value config, no log path) must produce no rows at all — the
-// startup block earns its keep only when there is something to disclose.
+// (the zero-value config, no log path) produces exactly one row — the
+// unconditional epics disclosure — and nothing else. Every other row earns its
+// keep only when there is something to disclose.
 func TestPreflightPairsSaysNothingUnasked(t *testing.T) {
-	if got := preflightPairs(config{}, ""); len(got) != 0 {
-		t.Errorf("preflightPairs(zero value) = %v, want no rows", got)
+	got := preflightPairs(config{}, "")
+	if len(got) != 1 || got[0][0] != "epics" {
+		t.Errorf("preflightPairs(zero value) = %v, want only the epics row", got)
 	}
 }
 
@@ -1425,7 +1427,7 @@ func TestPreflightPairsGatesAndOrdersEveryRow(t *testing.T) {
 	}
 	got := preflightPairs(cfg, "/tmp/logs/shift.log")
 	wantLabels := []string{
-		"queue", "dry-run", "caps", "post-summary", "notify", "remote", "run data", "shift", "shift log",
+		"epics", "queue", "dry-run", "caps", "post-summary", "notify", "remote", "run data", "shift", "shift log",
 	}
 	if len(got) != len(wantLabels) {
 		t.Fatalf("preflightPairs with every condition set = %d rows %v, want %d rows %v",
@@ -1436,11 +1438,11 @@ func TestPreflightPairsGatesAndOrdersEveryRow(t *testing.T) {
 			t.Errorf("row %d label = %q, want %q (full: %v)", i, got[i][0], want, got)
 		}
 	}
-	if !strings.Contains(got[0][1], `"ready"`) {
-		t.Errorf("queue row = %q, want it to name the -label value", got[0][1])
+	if !strings.Contains(got[1][1], `"ready"`) {
+		t.Errorf("queue row = %q, want it to name the -label value", got[1][1])
 	}
-	if !strings.Contains(got[6][1], "/tmp/metrics") || !strings.Contains(got[7][1], "abc123") {
-		t.Errorf("run data/shift rows = %v, want the recorder dir and shift id named", got[6:8])
+	if !strings.Contains(got[7][1], "/tmp/metrics") || !strings.Contains(got[8][1], "abc123") {
+		t.Errorf("run data/shift rows = %v, want the recorder dir and shift id named", got[7:9])
 	}
 }
 

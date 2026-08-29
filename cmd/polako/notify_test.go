@@ -304,9 +304,9 @@ func TestNotifyFiresWhenTheDrainStopsEarly(t *testing.T) {
 	}
 }
 
-// The event this epic (#171) adds: notify fires the same occasion the
-// container earns its comment, carrying the container's number and its
-// closed-child count.
+// The event this epic (#171) adds: notify fires the occasion polako closes a
+// finished container, carrying the container's number and its closed-child
+// count.
 func TestNotifyFiresWhenAnEpicsLastChildCloses(t *testing.T) {
 	captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
@@ -339,7 +339,7 @@ func TestNotifyFiresWhenAnEpicsLastChildCloses(t *testing.T) {
 }
 
 // A container with children still open must never be mistaken for one that
-// just finished — commentFinishedContainers only acts on c.finished(), and
+// just finished — closeFinishedContainers only acts on c.finished(), and
 // notify must follow the same gate.
 func TestNotifyDoesNotFireForAPartlyFinishedEpic(t *testing.T) {
 	captureLog(t)
@@ -361,41 +361,35 @@ func TestNotifyDoesNotFireForAPartlyFinishedEpic(t *testing.T) {
 	}
 }
 
-// The once-ever gate is the thread comment: a container this shift finds
-// already commented must not fire epic-done again, on this shift or a later
-// one — an operator should not be paged every night about an epic they have
-// not got round to closing.
-func TestNotifyDoesNotRefireForAnAlreadyCommentedEpic(t *testing.T) {
+// An operator should not be paged every night about an epic they have chosen
+// to hold open: needs-human on the container is that choice, and a held
+// container fires epic-done on no shift, first or later.
+func TestNotifyDoesNotPageEveryShiftForAHeldEpic(t *testing.T) {
 	captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
-			"113": {
-				Open: true, SubIssues: 6, SubIssuesCompleted: 6,
-				Comments: 1,
-				Bodies:   map[int]string{1: "All 6 sub-issues are closed.\n\n" + finishedContainerMarker},
-			},
-			// A second, ordinary issue so the drain's loop passes over the
-			// container more than once before the backlog clears.
-			"2": {Open: true},
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Labels: []string{needsHumanLabel}},
 		},
-		PRs: map[string]*fakePR{"issue-2": {Number: 9, State: "MERGED"}},
+		Labels: []string{needsHumanLabel},
 	})
 	told := notifyLog(t, &cfg)
 
-	if err := drain(context.Background(), cfg); err != nil {
-		t.Fatalf("drain: %v", err)
+	for shift := 1; shift <= 2; shift++ {
+		if err := drain(context.Background(), cfg); err != nil {
+			t.Fatalf("shift %d: %v", shift, err)
+		}
 	}
 
 	for _, line := range told() {
 		if strings.Contains(line, notifyPrefix+"EVENT=epic-done") {
-			t.Errorf("re-notified epic-done for an already-commented container\ngot: %s", line)
+			t.Errorf("fired epic-done for a held container\ngot: %s", line)
 		}
 	}
 }
 
 // A notify command is a courtesy, same as every other event: a failing or
 // hanging hook must cost the operator that notification and nothing else —
-// the comment still posts and the shift still completes.
+// the epic is still commented on and closed, and the shift still completes.
 func TestNotifyFailureForEpicDoneDoesNotAffectTheShift(t *testing.T) {
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
@@ -411,8 +405,8 @@ func TestNotifyFailureForEpicDoneDoesNotAffectTheShift(t *testing.T) {
 	}
 
 	is := finalGhState(t, path).Issues["113"]
-	if is.Comments != 1 {
-		t.Errorf("comments on #113 = %d, want exactly 1 even though -notify failed", is.Comments)
+	if is.Open || !strings.Contains(is.Bodies[1], finishedContainerMarker) {
+		t.Errorf("#113 = open %v, bodies %v, want it commented and closed even though -notify failed", is.Open, is.Bodies)
 	}
 	if !strings.Contains(buf.String(), "-notify command failed for epic-done #113") {
 		t.Errorf("log is missing the -notify failure\ngot:\n%s", buf.String())

@@ -102,7 +102,7 @@ It fires on five states, and nothing else:
 | `awaiting-answer` | A run stopped to ask something on the issue thread. Reply there and the next shift folds it in. |
 | `cleared` | The backlog is empty. Nothing is left to work. |
 | `stopped` | The shift ended before the backlog did: a fatal error, or `-max-session-cost` spent. |
-| `epic-done` | An epic's last child closed. The one event above for something good rather than something stuck — closing the container itself is still a human's call, so it still needs you. Fires once, the moment the epic's thread gets its comment, never again for the same epic. |
+| `epic-done` | An epic's last child closed and the drain closed the container, with a comment on the thread saying so. The one event above for something good rather than something stuck. Fires once, on the close; a container a human has held with `needs-human` or `proposed` is left open and fires nothing. |
 
 The context arrives in the environment, so the command needs no arguments:
 
@@ -353,7 +353,7 @@ polako status -json | jq .
     "blocked": [{ "issue": 9, "quiet_seconds": 93600 }],
     "parked": [5],
     "proposed": [27, 28],
-    "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false }]
+    "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false, "held": false }]
   },
   "next": {
     "issue": 14,
@@ -389,12 +389,15 @@ also-real state: gh was asked and does not know), and `needs_you` is the
 closing line's clauses as an array instead of a `;`-joined sentence.
 
 `queue.containers` is objects, not bare numbers — `{ "issue", "total",
-"completed", "finished" }` — so a caller can tell a finished container from
-one still in progress without a second call. `finished` is `total > 0 &&
+"completed", "finished", "held" }` — so a caller can tell a finished container
+from one still in progress without a second call. `finished` is `total > 0 &&
 completed == total` computed once in Go rather than left for every consumer
 to reimplement — a jq script checks the field rather than repeating the
-comparison. This narrows the shape #118 originally published, where it was a
-plain array of issue numbers like every other list here.
+comparison. `held` is `true` when `needs-human` or `proposed` is on the
+container: a finished one with `held: false` is about to be closed by the next
+shift, a finished one with `held: true` is the caller's to close. This narrows
+the shape #118 originally published, where it was a plain array of issue
+numbers like every other list here.
 
 Every array field is always present as `[]`, never `null`, even when empty —
 `.queue.ready[]` never needs a `// empty` guard. `quiet_seconds` is the one

@@ -444,14 +444,18 @@ func queuePairs(snap statusSnapshot) [][2]string {
 }
 
 // containerRefs renders each container with its sub-issue rollup, so the
-// containers row tells a finished epic — every child closed, waiting only on
-// a human to close the container itself — from one still in progress.
+// containers row tells a finished epic — every child closed — from one still in
+// progress, and a finished one polako will close on its next pass from one a
+// human has held open with needs-human or proposed.
 func containerRefs(containers []containerInfo) string {
 	refs := make([]string, len(containers))
 	for i, c := range containers {
 		ref := fmt.Sprintf("#%d (%d/%d closed", c.number, c.completed, c.total)
-		if c.finished() {
+		switch {
+		case c.finished() && c.held:
 			ref += " — yours to close"
+		case c.finished():
+			ref += " — the next shift closes it"
 		}
 		refs[i] = ref + ")"
 	}
@@ -636,6 +640,19 @@ func needsYouParts(snap statusSnapshot) []string {
 		parts = append(parts, fmt.Sprintf("curate %s (drop %s to queue them)",
 			issueRefs(snap.queues.proposed), proposedLabel))
 	}
+	// A finished container polako would close itself, so it is not yours — but
+	// one a human has held with needs-human or proposed it will not touch, and
+	// that one is now the operator's to close.
+	var heldEpics []int
+	for _, c := range snap.queues.containers {
+		if c.finished() && c.held {
+			heldEpics = append(heldEpics, c.number)
+		}
+	}
+	if len(heldEpics) > 0 {
+		parts = append(parts, fmt.Sprintf("close %s (every sub-issue closed; held open by %s or %s)",
+			issueRefs(heldEpics), needsHumanLabel, proposedLabel))
+	}
 	return parts
 }
 
@@ -689,6 +706,11 @@ type statusDocContainer struct {
 	Total     int  `json:"total"`
 	Completed int  `json:"completed"`
 	Finished  bool `json:"finished"`
+	// Held is containerInfo.held: a human has put needs-human or proposed on the
+	// container, so the drain leaves it alone rather than closing it once
+	// finished. Without this a caller cannot tell a finished container that is
+	// about to be closed from one it must close itself.
+	Held bool `json:"held"`
 }
 
 // statusDocBlocked is one issue awaiting an answer. QuietSeconds is a pointer
@@ -748,7 +770,7 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 	containers := make([]statusDocContainer, 0, len(snap.queues.containers))
 	for _, c := range snap.queues.containers {
 		containers = append(containers, statusDocContainer{
-			Issue: c.number, Total: c.total, Completed: c.completed, Finished: c.finished(),
+			Issue: c.number, Total: c.total, Completed: c.completed, Finished: c.finished(), Held: c.held,
 		})
 	}
 
