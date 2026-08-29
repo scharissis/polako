@@ -79,7 +79,16 @@ in the PR body rather than doing it quietly.
   labels — so a parent made by hand is protected too. That detection is
   structural rather than labelled on purpose: a label says what something is
   called, the sub-issue rollup says what it *is*. Its body is the design record
-  for its children; closing it is a human judgment.
+  for its children. A container whose children have all closed is closed by the
+  drain that notices, with a comment on the thread saying so; reopening it is
+  the human judgment, and costs one click. The machine is not deciding whether
+  the work is done — the children decided that by closing, normally each behind
+  a merged PR — only that "every child closed" normally means "the epic is
+  finished", which is true nearly always and wrong reversibly the rest of the
+  time. A container a human has held — `needs-human`, or still `proposed` — is
+  never closed automatically, and is named in the exit summary as theirs to
+  close. This does not touch *nothing merges itself*: no PR is merged, opened or
+  closed by it, and nothing is committed to the default branch.
 - **`issue-N` branch naming is a contract.** The supervisor finds a PR by its
   head branch; the skill is what names the branch. Changing either side means
   changing both, and `-branch-prefix` has to keep working.

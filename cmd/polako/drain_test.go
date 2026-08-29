@@ -1731,10 +1731,10 @@ func TestDrainStillStopsOnAFatalError(t *testing.T) {
 	}
 }
 
-// A shift that ends on a fatal error still names an epic its last listing
-// found finished — the pass that fetched it happened before the fatal
-// dispatch, and finish is what every exit runs through, errors included.
-func TestDrainNamesAFinishedEpicEvenWhenItEndsOnAFatalError(t *testing.T) {
+// A shift that ends on a fatal error still names an epic it closed on an
+// earlier pass — the accumulator survives into finish, which every exit runs
+// through, errors included.
+func TestDrainNamesAnEpicItClosedEvenWhenItEndsOnAFatalError(t *testing.T) {
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "authfail", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -1751,18 +1751,18 @@ func TestDrainNamesAFinishedEpicEvenWhenItEndsOnAFatalError(t *testing.T) {
 	if !errors.Is(err, errAuth) {
 		t.Fatalf("drain error = %v, want it to carry %v", err, errAuth)
 	}
-	if want := "epic    #2: all 3 sub-issues closed — close it when the design is satisfied"; !strings.Contains(buf.String(), want) {
-		t.Errorf("a fatal exit must still name the finished epic: missing %q\ngot:\n%s",
+	if want := "epic    #2: all 3 sub-issues closed — closed it"; !strings.Contains(buf.String(), want) {
+		t.Errorf("a fatal exit must still name the epic it closed: missing %q\ngot:\n%s",
 			want, buf.String())
 	}
 }
 
-// The point of the issue: a shift that merges the last child of an epic
-// during its own run says so on its way out, sourced from the listing the
-// loop already made rather than an extra `gh` call.
+// A shift that finds the last child of an epic already merged closes the epic
+// itself and says so on its way out, sourced from the listing the loop already
+// made rather than an extra `gh` call.
 func TestDrainNamesAnEpicThatFinishesMidShift(t *testing.T) {
 	buf := captureLog(t)
-	cfg, _ := drainConfig(t, "stream", &ghState{
+	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
 			"1": {Open: true, SubIssues: 2, SubIssuesCompleted: 2},
 			// Its PR is already merged, so the shift closes it without a claude
@@ -1775,8 +1775,11 @@ func TestDrainNamesAnEpicThatFinishesMidShift(t *testing.T) {
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
+	if finalGhState(t, path).Issues["1"].Open {
+		t.Error("the finished, unheld epic should have been closed")
+	}
 	out := buf.String()
-	if want := "epic    #1: all 2 sub-issues closed — close it when the design is satisfied"; !strings.Contains(out, want) {
+	if want := "epic    #1: all 2 sub-issues closed — closed it"; !strings.Contains(out, want) {
 		t.Errorf("summary is missing %q\ngot:\n%s", want, out)
 	}
 	if want := "summary: 1 issue merged, 0 issues parked"; !strings.Contains(out, want) {
@@ -1871,10 +1874,10 @@ func TestDrainWorksNeitherProposalsNorContainers(t *testing.T) {
 }
 
 // The point of the whole issue: a finished container — every child closed —
-// gets exactly one comment on its own thread, naming the count rather than
+// gets one comment on its own thread saying why, naming the count rather than
 // the children (containerInfo carries no child numbers, and fetching them
-// would cost an extra call this drain does not make).
-func TestDrainCommentsOnceOnAFinishedContainer(t *testing.T) {
+// would cost an extra call this drain does not make), and is then closed.
+func TestDrainClosesAFinishedContainer(t *testing.T) {
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -1887,9 +1890,6 @@ func TestDrainCommentsOnceOnAFinishedContainer(t *testing.T) {
 	}
 
 	is := finalGhState(t, path).Issues["113"]
-	if is.Comments != 1 {
-		t.Fatalf("comments on #113 = %d, want exactly 1", is.Comments)
-	}
 	body := is.Bodies[1]
 	if !strings.Contains(body, "6 sub-issues") {
 		t.Errorf("comment body = %q, want it to name the count", body)
@@ -1900,18 +1900,16 @@ func TestDrainCommentsOnceOnAFinishedContainer(t *testing.T) {
 	if !strings.Contains(body, finishedContainerMarker) {
 		t.Errorf("comment body = %q, want the idempotency marker", body)
 	}
-	if !is.Open {
-		t.Error("the container itself must not be closed — that is a human's call")
+	if is.Open {
+		t.Error("the finished, unheld container should have been closed")
 	}
-	if !strings.Contains(buf.String(), "epic #113: all 6 sub-issues closed — commented, yours to close") {
+	if !strings.Contains(buf.String(), "epic #113: all 6 sub-issues closed — commented and closed it") {
 		t.Errorf("log is missing the epic-finished line\ngot:\n%s", buf.String())
 	}
 }
 
-// Idempotent, and that is the load-bearing part: a shift that sees the same
-// finished container a second time — because a prior shift already commented,
-// or because this drain's loop revisits the same container across issues —
-// must say nothing further.
+// A shift that finds the marker already on the thread — a prior shift commented
+// and then failed to close — must not comment a second time, only close.
 func TestDrainDoesNotCommentTwiceOnAFinishedContainer(t *testing.T) {
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -1932,8 +1930,11 @@ func TestDrainDoesNotCommentTwiceOnAFinishedContainer(t *testing.T) {
 	}
 
 	is := finalGhState(t, path).Issues["113"]
-	if is.Comments != 1 {
-		t.Errorf("comments on #113 = %d, want the pre-existing 1 and no more", is.Comments)
+	if is.Open {
+		t.Error("the already-commented container should still have been closed")
+	}
+	if len(is.Bodies) != 1 || is.Bodies[1] != "All 6 sub-issues are closed.\n\n"+finishedContainerMarker {
+		t.Errorf("bodies on #113 = %v, want the pre-existing comment and no new one", is.Bodies)
 	}
 }
 
@@ -1955,16 +1956,22 @@ func TestDrainRecognisesTheMarkerAfterTheProseIsReworded(t *testing.T) {
 		t.Fatalf("drain: %v", err)
 	}
 
-	if got := finalGhState(t, path).Issues["113"].Comments; got != 1 {
-		t.Errorf("comments on #113 = %d, want the reworded one left alone", got)
+	is := finalGhState(t, path).Issues["113"]
+	if len(is.Bodies) != 1 {
+		t.Errorf("bodies on #113 = %v, want the reworded one left alone", is.Bodies)
+	}
+	if is.Open {
+		t.Error("the container should still have been closed")
 	}
 }
 
 // A comment that fails to post is a warning, not a park and not fatal —
 // nothing in the drain depends on it landing, and the next shift tries again.
+// The close does not happen either: the comment is the record of why, and a
+// close with no explanation is the thing this avoids.
 func TestDrainWarnsWhenItCannotCommentOnAFinishedContainer(t *testing.T) {
 	buf := captureLog(t)
-	cfg, _ := drainConfig(t, "stream", &ghState{
+	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
 			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6},
 		},
@@ -1975,12 +1982,92 @@ func TestDrainWarnsWhenItCannotCommentOnAFinishedContainer(t *testing.T) {
 		t.Fatalf("a comment that fails to post must not end the drain: %v", err)
 	}
 
+	if !finalGhState(t, path).Issues["113"].Open {
+		t.Error("the container must not be closed when the comment saying why never posted")
+	}
 	out := buf.String()
 	if !strings.Contains(out, "could not comment on finished epic #113") {
 		t.Errorf("log is missing the warning\ngot:\n%s", out)
 	}
 	if !strings.Contains(out, "backlog cleared") {
 		t.Errorf("the shift must carry on after the warning\ngot:\n%s", out)
+	}
+}
+
+// A close that fails is a warning, the shift carries on, and the next shift
+// retries the close alone — the comment saying why is already on the thread,
+// so it is not posted a second time.
+func TestDrainRetriesAFailedContainerCloseNextShift(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6},
+		},
+		// The first shift's close fails; the second shift's succeeds.
+		FailReads: map[string]int{"issue close": 1},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("first shift: %v", err)
+	}
+	is := finalGhState(t, path).Issues["113"]
+	if !is.Open {
+		t.Fatal("the container should still be open after the close failed")
+	}
+	if !strings.Contains(is.Bodies[1], finishedContainerMarker) {
+		t.Errorf("the comment saying why should have posted before the failed close, got %v", is.Bodies)
+	}
+	if !strings.Contains(buf.String(), "could not close finished epic #113") {
+		t.Errorf("first shift is missing the close warning\ngot:\n%s", buf.String())
+	}
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("second shift: %v", err)
+	}
+	is = finalGhState(t, path).Issues["113"]
+	if is.Open {
+		t.Error("the second shift should have retried and landed the close")
+	}
+	if len(is.Bodies) != 1 {
+		t.Errorf("bodies on #113 = %v, want no second comment on the retry", is.Bodies)
+	}
+}
+
+// GitHub's issue list lags a close by seconds, so a container this shift just
+// closed can still show up open and finished on the very next pass. The
+// shift-local memo is what stops that stale row closing it, notifying or
+// summarising it a second time.
+func TestCloseFinishedContainersIgnoresAStaleListing(t *testing.T) {
+	captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6},
+		},
+	})
+	told := notifyLog(t, &cfg)
+	commented, closedThisShift := map[int]bool{}, map[int]bool{}
+	stale := []containerInfo{{number: 113, total: 6, completed: 6}}
+
+	first, err := closeFinishedContainers(context.Background(), cfg, stale, commented, closedThisShift)
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first call = %v, %v, want it to close #113", first, err)
+	}
+	// The same listing again, as if the close has not propagated yet.
+	second, err := closeFinishedContainers(context.Background(), cfg, stale, commented, closedThisShift)
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if len(second) != 0 {
+		t.Errorf("second call closed %v, want nothing — the memo should skip it", second)
+	}
+	epicDone := 0
+	for _, line := range told() {
+		if strings.Contains(line, notifyPrefix+"EVENT=epic-done") {
+			epicDone++
+		}
+	}
+	if epicDone != 1 {
+		t.Errorf("epic-done fired %d times across the two calls, want exactly 1", epicDone)
 	}
 }
 
@@ -2009,16 +2096,13 @@ func TestDrainNamesASingleSubIssueCorrectly(t *testing.T) {
 // The marker check is a network read, and re-running it on every pass of the
 // drain's loop for a container whose answer this shift already knows would
 // be a call spent for nothing. A shift-local memo, mirroring the loop's own
-// skip map, is what keeps it to one read and one write for the whole shift —
-// this pins that down at the gh-call level rather than only at the resulting
-// comment count.
+// skip map, is what keeps it to one read and one comment for the whole shift.
 func TestDrainReadsAFinishedContainerOnceInAShift(t *testing.T) {
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
 			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6},
 			// Two ordinary issues, both closed by an already-merged PR, so the
-			// drain's loop passes over the container's queue entry three times
-			// (before #2, before #3, and once more finding the backlog clear)
+			// drain's loop passes over the container's queue entry more than once
 			// without ever running a claude session.
 			"2": {Open: true},
 			"3": {Open: true},
@@ -2044,6 +2128,65 @@ func TestDrainReadsAFinishedContainerOnceInAShift(t *testing.T) {
 	}
 	if got := strings.Count(string(argv), "issue comment 113"); got != 1 {
 		t.Errorf("#113 was commented %d times, want exactly 1\n%s", got, argv)
+	}
+	if got := strings.Count(string(argv), "issue close 113"); got != 1 {
+		t.Errorf("#113 was closed %d times, want exactly 1 (it leaves the listing after)\n%s", got, argv)
+	}
+}
+
+// needs-human on a container means hands off: a finished one carrying it is not
+// commented and not closed, and the exit summary names it as the operator's to
+// close.
+func TestDrainLeavesAHeldFinishedContainerAlone(t *testing.T) {
+	for _, label := range []string{needsHumanLabel, proposedLabel} {
+		t.Run(label, func(t *testing.T) {
+			buf := captureLog(t)
+			cfg, path := drainConfig(t, "stream", &ghState{
+				Issues: map[string]*fakeIssue{
+					"113": {Open: true, SubIssues: 4, SubIssuesCompleted: 4, Labels: []string{label}},
+				},
+				Labels: []string{needsHumanLabel, proposedLabel},
+			})
+			told := notifyLog(t, &cfg)
+
+			if err := drain(context.Background(), cfg); err != nil {
+				t.Fatalf("drain: %v", err)
+			}
+
+			is := finalGhState(t, path).Issues["113"]
+			if !is.Open || len(is.Bodies) != 0 {
+				t.Errorf("held container #113 = open %v, bodies %v, want it untouched", is.Open, is.Bodies)
+			}
+			if want := "epic    #113: all 4 sub-issues closed — close it when the design is satisfied"; !strings.Contains(buf.String(), want) {
+				t.Errorf("summary should still name the held epic: missing %q\ngot:\n%s", want, buf.String())
+			}
+			for _, line := range told() {
+				if strings.Contains(line, notifyPrefix+"EVENT=epic-done") {
+					t.Errorf("a held container must not fire epic-done\ngot: %s", line)
+				}
+			}
+		})
+	}
+}
+
+// Scope is the queue's scope: a finished container outside -label is neither
+// commented nor closed — it was never this shift's business.
+func TestDrainDoesNotCloseAFinishedContainerOutsideLabelScope(t *testing.T) {
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true, SubIssues: 2, SubIssuesCompleted: 2},
+			"2": {Open: true, Labels: []string{"bug"}},
+		},
+		PRs: map[string]*fakePR{"issue-2": {Number: 9, State: "MERGED"}},
+	})
+	cfg.label = "bug"
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	is := finalGhState(t, path).Issues["1"]
+	if !is.Open || len(is.Bodies) != 0 {
+		t.Errorf("out-of-scope container #1 = open %v, bodies %v, want it untouched", is.Open, is.Bodies)
 	}
 }
 
@@ -2295,8 +2438,11 @@ func TestSelectableIssuesDropsContainers(t *testing.T) {
 	want := []containerInfo{
 		{number: 4, total: 3, completed: 1},
 		{number: 5, total: 1, completed: 0},
-		{number: 6, total: 2, completed: 0},
-		{number: 7, total: 2, completed: 0},
+		// needs-human and proposed still land a container here, not in parked or
+		// proposed — but held records the label so the drain leaves a finished
+		// one for a human rather than closing it.
+		{number: 6, total: 2, completed: 0, held: true},
+		{number: 7, total: 2, completed: 0, held: true},
 	}
 	if !slices.Equal(q.containers, want) {
 		t.Errorf("containers = %+v, want %+v — the completed count travels with the total", q.containers, want)
@@ -2539,7 +2685,7 @@ func TestDrainSummaryReportsEveryOutcome(t *testing.T) {
 		{issue: 2},
 		{issue: 5},
 		{issue: 3, awaiting: true},
-	}, nil, 90*time.Minute), "\n")
+	}, nil, nil, 90*time.Minute), "\n")
 
 	for _, want := range []string{
 		"summary: 2 issues merged, 1 issue parked, 1 issue awaiting an answer, 1h30m of wall clock",
@@ -2556,7 +2702,7 @@ func TestDrainSummaryReportsEveryOutcome(t *testing.T) {
 // Most drains have nothing waiting, and a bucket that reads "0 issues awaiting
 // an answer" on every ordinary run is noise in the one line anybody reads.
 func TestDrainSummaryOmitsAnEmptyWaitingBucket(t *testing.T) {
-	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil, time.Minute), "\n")
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil, nil, time.Minute), "\n")
 	if want := "summary: 1 issue merged, 0 issues parked, 1m of wall clock"; !strings.Contains(got, want) {
 		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
 	}
@@ -2568,7 +2714,7 @@ func TestDrainSummaryOmitsAnEmptyWaitingBucket(t *testing.T) {
 // A drain that never reached an issue has nothing to summarize, and "0 issues
 // merged" on every empty backlog is noise.
 func TestDrainSummaryIsSilentWithoutResults(t *testing.T) {
-	if got := drainSummary(nil, nil, time.Minute); got != nil {
+	if got := drainSummary(nil, nil, nil, time.Minute); got != nil {
 		t.Errorf("summary = %v, want nothing", got)
 	}
 }
@@ -2579,7 +2725,7 @@ func TestDrainSummaryPricesTheDrainAndEachIssue(t *testing.T) {
 		{issue: 1, parked: true, reason: "no PR and no questions", cost: 2.5},
 		{issue: 2, cost: 4},
 		{issue: 3, awaiting: true, cost: 0.25},
-	}, nil, 90*time.Minute), "\n")
+	}, nil, nil, 90*time.Minute), "\n")
 
 	for _, want := range []string{
 		"$6.75 spent, 1h30m of wall clock",
@@ -2600,7 +2746,7 @@ func TestDrainSummaryPricesTheDrainAndEachIssue(t *testing.T) {
 func TestDrainSummarySaysWhenTheTotalUndercounts(t *testing.T) {
 	got := strings.Join(drainSummary([]issueResult{
 		{issue: 1, cost: 4, approximated: 2},
-	}, nil, time.Minute), "\n")
+	}, nil, nil, time.Minute), "\n")
 
 	if want := "$4.00 spent (2 runs reported none, so that is an undercount)"; !strings.Contains(got, want) {
 		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
@@ -2610,19 +2756,45 @@ func TestDrainSummarySaysWhenTheTotalUndercounts(t *testing.T) {
 // A drain that only waited on a PR an earlier process opened spent nothing,
 // and "$0.00" reads as a free backlog rather than as an absent number.
 func TestDrainSummaryOmitsDollarsItNeverSpent(t *testing.T) {
-	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil, time.Minute), "\n")
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil, nil, time.Minute), "\n")
 	if strings.Contains(got, "$") {
 		t.Errorf("an uncosted drain should print no dollars at all\ngot:\n%s", got)
 	}
 }
 
-// A finished container earns its own line, keyed off the same listing that
-// already threw its containers away before this issue — carried through
-// rather than re-fetched.
-func TestDrainSummaryNamesAFinishedContainer(t *testing.T) {
-	got := strings.Join(drainSummary([]issueResult{{issue: 2}},
+// A container this shift closed itself earns the "closed it" line, from the
+// accumulator the drain carries across passes — a container closed mid-shift
+// is gone from the next listing and can only be named from there.
+func TestDrainSummaryNamesAContainerItClosed(t *testing.T) {
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil,
 		[]containerInfo{{number: 113, total: 6, completed: 6}}, time.Minute), "\n")
+	if want := "epic    #113: all 6 sub-issues closed — closed it"; !strings.Contains(got, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
+	}
+}
+
+// A finished container still in the last listing is one a human held with
+// needs-human or proposed — polako closes the rest on sight — so it keeps the
+// older "yours to close" mood.
+func TestDrainSummaryNamesAHeldFinishedContainer(t *testing.T) {
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}},
+		[]containerInfo{{number: 113, total: 6, completed: 6, held: true}}, nil, time.Minute), "\n")
 	if want := "epic    #113: all 6 sub-issues closed — close it when the design is satisfied"; !strings.Contains(got, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
+	}
+}
+
+// A container closed just before a stop that skips the re-list is in both the
+// accumulator and the stale last listing — it must be named once, from the
+// accumulator.
+func TestDrainSummaryNamesAJustClosedContainerOnce(t *testing.T) {
+	c := containerInfo{number: 113, total: 6, completed: 6}
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}},
+		[]containerInfo{c}, []containerInfo{c}, time.Minute), "\n")
+	if n := strings.Count(got, "#113"); n != 1 {
+		t.Errorf("epic #113 named %d times, want exactly 1\ngot:\n%s", n, got)
+	}
+	if want := "epic    #113: all 6 sub-issues closed — closed it"; !strings.Contains(got, want) {
 		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
 	}
 }
@@ -2631,7 +2803,7 @@ func TestDrainSummaryNamesAFinishedContainer(t *testing.T) {
 // finished in it should read exactly like no container list.
 func TestDrainSummaryOmitsContainersThatAreNotFinished(t *testing.T) {
 	got := strings.Join(drainSummary([]issueResult{{issue: 2}},
-		[]containerInfo{{number: 113, total: 6, completed: 3}}, time.Minute), "\n")
+		[]containerInfo{{number: 113, total: 6, completed: 3}}, nil, time.Minute), "\n")
 	if strings.Contains(got, "epic") {
 		t.Errorf("no container finished, so the summary should not mention one\ngot:\n%s", got)
 	}
@@ -2640,21 +2812,20 @@ func TestDrainSummaryOmitsContainersThatAreNotFinished(t *testing.T) {
 // A container with exactly one sub-issue is still a container — SubIssues.Total
 // > 0 is the whole of the rule — so the singular has to read right too.
 func TestDrainSummaryNamesAFinishedContainerOfOne(t *testing.T) {
-	got := strings.Join(drainSummary([]issueResult{{issue: 2}},
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil,
 		[]containerInfo{{number: 113, total: 1, completed: 1}}, time.Minute), "\n")
-	if want := "epic    #113: all 1 sub-issue closed — close it when the design is satisfied"; !strings.Contains(got, want) {
+	if want := "epic    #113: all 1 sub-issue closed — closed it"; !strings.Contains(got, want) {
 		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
 	}
 }
 
-// A shift that touches no issue at all — the backlog's only open item is a
-// container already finished before this shift ever ran — still has the one
-// thing worth saying, without the "0 issues merged, 0 issues parked" header
-// that would otherwise frame it as a no-op.
-func TestDrainSummaryReportsAFinishedContainerEvenWithNoIssueResults(t *testing.T) {
-	got := strings.Join(drainSummary(nil,
+// A shift that touches no issue at all — the backlog's only open item was a
+// container it closed — still has the one thing worth saying, without the
+// "0 issues merged, 0 issues parked" header that would frame it as a no-op.
+func TestDrainSummaryReportsAClosedContainerEvenWithNoIssueResults(t *testing.T) {
+	got := strings.Join(drainSummary(nil, nil,
 		[]containerInfo{{number: 113, total: 6, completed: 6}}, time.Minute), "\n")
-	if want := "epic    #113: all 6 sub-issues closed — close it when the design is satisfied"; !strings.Contains(got, want) {
+	if want := "epic    #113: all 6 sub-issues closed — closed it"; !strings.Contains(got, want) {
 		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
 	}
 	if strings.Contains(got, "merged") || strings.Contains(got, "parked") {

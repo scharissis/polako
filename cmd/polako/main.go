@@ -938,11 +938,18 @@ func run(ctx context.Context, cfg config) error {
 // real invocation — so the command can be piped somewhere useful instead of
 // being fished out of a transcript.
 func dryRun(ctx context.Context, cfg config, out io.Writer) error {
-	// Containers are not this command's business: a dry run says what the
-	// next issue would be, and a container is never that issue.
-	ready, blocked, heldBack, _, err := openIssues(ctx, cfg)
+	// A dry run says what the next issue would be, and a container is never that
+	// issue — but a real run also closes a finished, unheld container before it
+	// picks one up, so this names the containers it would close and writes
+	// nothing, the same promise the rest of the command keeps.
+	ready, blocked, heldBack, containers, err := openIssues(ctx, cfg)
 	if err != nil {
 		return err
+	}
+	for _, c := range containers {
+		if c.finished() && !c.held {
+			log.Printf("epic #%d: all %s closed — would comment on it and close it", c.number, plural(c.total, "sub-issue"))
+		}
 	}
 	// What the operator would see if they ran it for real, in the two queues
 	// the drain actually keeps. -skip is applied here as well, so a queue this
@@ -1085,6 +1092,15 @@ func drain(ctx context.Context, cfg config) error {
 	// a memo so this shift does not re-read a finished container's thread on
 	// every pass once it already knows the marker is there.
 	commentedContainers := map[int]bool{}
+	// Same shape again: the containers this shift has already tried to close, so
+	// a stale post-close listing does not re-fire epic-done and a failing close
+	// warns once a shift rather than once a pass.
+	closedContainers := map[int]bool{}
+	// The containers this shift closed, accumulated across passes for the exit
+	// summary: a container closed mid-shift is gone from the next listing, so
+	// lastContainers can no longer speak for it. Not state either — a restart
+	// re-derives an epic's closed state from GitHub like everything else.
+	var closedEpics []containerInfo
 
 	var results []issueResult
 	// The containers the most recent successful listing found — carried across
@@ -1101,7 +1117,7 @@ func drain(ctx context.Context, cfg config) error {
 	// died on is not among them — unfinished is not an outcome — so a run that
 	// dies on its first issue has nothing to summarize and says nothing.
 	finish := func(err error) error {
-		if lines := drainSummary(append(results, stillWaiting(states)...), lastContainers, time.Since(started)); len(lines) > 0 {
+		if lines := drainSummary(append(results, stillWaiting(states)...), lastContainers, closedEpics, time.Since(started)); len(lines) > 0 {
 			narrate(sevSection, "%s", lines[0]) // the shift's own closing heading
 			for _, line := range lines[1:] {
 				log.Print(line)
@@ -1139,7 +1155,9 @@ func drain(ctx context.Context, cfg config) error {
 		}
 		lastContainers = containers
 		logHeldBack(heldBack, skip)
-		if err := commentFinishedContainers(ctx, cfg, containers, commentedContainers); err != nil {
+		closedNow, err := closeFinishedContainers(ctx, cfg, containers, commentedContainers, closedContainers)
+		closedEpics = append(closedEpics, closedNow...)
+		if err != nil {
 			return finish(err)
 		}
 		issue := pickLowest(ready, skip)
@@ -1353,78 +1371,109 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string) {
 	}
 }
 
-// finishedContainerMarker tags the one comment a finished container gets, so
-// a later shift — or the same shift, seeing the same container again next
-// pass — can tell it already said its piece. Matched as a substring of a
-// comment's body, so rewording the prose around it never breaks the check.
+// finishedContainerMarker tags the comment polako leaves on a container before
+// it closes it, so a shift whose close failed can tell, next time round, that
+// the explanation is already on the thread and only the close needs retrying.
+// Matched as a substring of a comment's body, so rewording the prose around it
+// never breaks the check.
 const finishedContainerMarker = "<!-- polako: epic finished -->"
 
-// finishedContainerComment is the one write a finished container gets. The
-// child issues are not named: containerInfo carries only their count, and
-// listing them by number would cost an extra `gh` call per container — for a
-// line an operator can already see by opening the epic itself.
+// finishedContainerComment is the record of why the close that follows it
+// happened, posted first. The wording reports rather than asks: the machine is
+// not judging whether the work is done — the children decided that by closing —
+// it acts on the near-certain reading that "every child closed" means "the epic
+// is finished", which a reopen undoes for one click the rare time it is wrong.
+// It says only that the children are closed, which is all the sub-issue rollup
+// proves; whether each closed behind a merged PR is not a claim to make on a
+// permanent thread. The child issues are not named: containerInfo carries only
+// their count, and listing them by number would cost an extra `gh` call per
+// container.
 func finishedContainerComment(c containerInfo) string {
-	return fmt.Sprintf("All %s closed. Closing this one is yours to judge: the body above "+
-		"is the design record, and only you can say the children added up to it.\n\n%s",
+	return fmt.Sprintf("All %s closed, so I closed this epic. If the children did not add up to "+
+		"the design recorded above, reopen it — that costs one click.\n\n%s",
 		plural(c.total, "sub-issue"), finishedContainerMarker)
 }
 
-// commentFinishedContainers tells a human, once, that an epic is done in
-// substance: every child closed, waiting only on someone to close the
-// container itself. Idempotency across shifts comes from the marker: a
-// container's thread is read for it before anything is posted — reading
-// before writing is the same idea awaitAnswer applies to notice a reply,
-// even though the two check different things on the thread (a marker here,
-// a comment ID past a baseline there). notifyEpicDone fires on the same
-// occasion the comment newly posts, never on the branch that finds the
-// marker already there, so a shift that finds the comment already posted
-// re-notifies nobody.
+// closeFinishedContainers closes every container in scope whose children have
+// all closed, commenting on the thread first to say why — a close with no
+// explanation on the thread is the thing that would make this feel arbitrary.
+// A container a human has held (needs-human, or still proposed) is left alone:
+// not commented, not closed, named in the exit summary as theirs to close. That
+// opt-out needs no new flag — needs-human on the container already means hands
+// off everywhere else, and exclusion beats inclusion the same way
+// selectableIssues orders it.
 //
-// done is this shift's own memo of containers already confirmed — not
-// durable, exactly like the drain loop's own skip map — so a container that
-// stays in the queue and is seen again on every later pass of the loop is
-// not re-read off GitHub once this shift already knows its answer.
+// The comment and the close are two different questions and one flag cannot
+// answer both. The comment is gated on the marker: the thread is read once per
+// shift (the commented memo, mirroring the drain loop's own skip map, keeps it
+// to one read) and the comment posted only if it is not already there. The
+// close is gated only on the container still being open — which every container
+// in this listing is, because the listing is --state open — so a shift that
+// commented and then failed to close retries only the close next time rather
+// than being turned away by its own marker. That retry is next *shift*, not
+// next pass: closedThisShift records every container this shift has already
+// tried to close, success or failure, so a single stale listing (GitHub's
+// issue list lags a close by seconds) does not fire epic-done twice, and a
+// close that keeps failing warns once a shift rather than once a pass.
 //
-// Best-effort like parkIssue's own comment: nothing else in the drain reads
-// this comment back, so a failure here is a warning and the shift carries
-// on — except a context cancellation, which is the operator stopping the
-// process on purpose rather than a GitHub hiccup, and is propagated rather
-// than logged as one, matching every other gh call in this loop. Never
-// reached on a dry run — dryRun and drain are separate paths off run(), and
-// dryRun never calls this.
-func commentFinishedContainers(ctx context.Context, cfg config, containers []containerInfo, done map[int]bool) error {
+// notifyEpicDone fires once, on the successful close: naturally once-ever, since
+// the container is gone from every later listing. A held container fires
+// nothing — with no comment there is no durable anchor to fire once against,
+// and firing it every shift is exactly the "paged every night about an epic you
+// have not closed" failure the marker gate was built to prevent.
+//
+// Best-effort like parkIssue's own comment: nothing else in the drain reads any
+// of this back, so a failed comment or a failed close is a warning and the
+// shift carries on — except a context cancellation, the operator stopping the
+// process on purpose, which propagates like every other gh call in this loop.
+// Returns the containers it closed this call, for the exit summary. Never
+// reached on a dry run — dryRun and drain are separate paths off run().
+func closeFinishedContainers(ctx context.Context, cfg config, containers []containerInfo, commented, closedThisShift map[int]bool) ([]containerInfo, error) {
+	var closed []containerInfo
 	for _, c := range containers {
-		if !c.finished() || done[c.number] {
+		if !c.finished() || c.held || closedThisShift[c.number] {
 			continue
 		}
-		comments, err := issueComments(ctx, cfg, c.number)
-		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
+		if !commented[c.number] {
+			comments, err := issueComments(ctx, cfg, c.number)
+			if err != nil {
+				if ctx.Err() != nil {
+					return closed, ctx.Err()
+				}
+				narrate(sevWarning, "could not read #%d's thread to check for the epic-finished note (%v) — "+
+					"will try again next pass", c.number, err)
+				continue
 			}
-			narrate(sevWarning, "could not read #%d's thread to check for the epic-finished note (%v) — "+
-				"will try again next pass", c.number, err)
-			continue
-		}
-		if slices.ContainsFunc(comments, func(cm issueComment) bool {
-			return strings.Contains(cm.Body, finishedContainerMarker)
-		}) {
-			done[c.number] = true
-			continue
-		}
-		if _, err := gh(ctx, cfg, "issue", "comment", strconv.Itoa(c.number), "--body", finishedContainerComment(c)); err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
+			hasMarker := slices.ContainsFunc(comments, func(cm issueComment) bool {
+				return strings.Contains(cm.Body, finishedContainerMarker)
+			})
+			if !hasMarker {
+				if _, err := gh(ctx, cfg, "issue", "comment", strconv.Itoa(c.number), "--body", finishedContainerComment(c)); err != nil {
+					if ctx.Err() != nil {
+						return closed, ctx.Err()
+					}
+					narrate(sevWarning, "could not comment on finished epic #%d (%v) — will try again next pass", c.number, err)
+					continue
+				}
 			}
-			narrate(sevWarning, "could not comment on finished epic #%d (%v) — will try again next pass", c.number, err)
+			commented[c.number] = true
+		}
+		if _, err := gh(ctx, cfg, "issue", "close", strconv.Itoa(c.number), "--reason", "completed"); err != nil {
+			if ctx.Err() != nil {
+				return closed, ctx.Err()
+			}
+			closedThisShift[c.number] = true
+			narrate(sevWarning, "could not close finished epic #%d (%v) — the comment saying why is on the thread; "+
+				"the close is retried next shift", c.number, err)
 			continue
 		}
-		done[c.number] = true
-		log.Printf("epic #%d: all %s closed — commented, yours to close", c.number, plural(c.total, "sub-issue"))
+		closedThisShift[c.number] = true
+		closed = append(closed, c)
+		log.Printf("epic #%d: all %s closed — commented and closed it", c.number, plural(c.total, "sub-issue"))
 		notify(ctx, cfg, notification{event: notifyEpicDone, issue: c.number,
-			reason: fmt.Sprintf("all %s closed — yours to close", plural(c.total, "sub-issue"))})
+			reason: fmt.Sprintf("all %s closed — closed it", plural(c.total, "sub-issue"))})
 	}
-	return nil
+	return closed, nil
 }
 
 // ensureLabel declares a label on the repository, and errors if it was already
@@ -1449,15 +1498,25 @@ func ensureLabel(ctx context.Context, cfg config, name, color, description strin
 // earlier process opened — would otherwise report "$0.00 spent", which reads
 // as a free backlog rather than as an absent number.
 //
-// containers is the most recent listing the drain made, not this shift's own
-// bookkeeping — a container earns its line by being finished when the shift's
-// last look at the queue happened to see it, whether or not this shift is
-// what finished it. Scope is already decided upstream: a container outside
-// `-label` was never in that listing to begin with.
-func drainSummary(results []issueResult, containers []containerInfo, elapsed time.Duration) []string {
+// closed is the containers this shift closed itself; containers is the most
+// recent listing the drain made. An epic earns a line either way, but a
+// different one: "closed it" for one polako closed, and the older "close it
+// when the design is satisfied" for one still open at the last look — which,
+// now that a finished unheld container is closed on sight, means one a human
+// held with needs-human or proposed (or, rarely, one whose close failed and
+// was already warned about). Scope is decided upstream: a container outside
+// `-label` was in neither set to begin with. A container closed just before a
+// stop that skips the re-list is in both — named once, from closed.
+func drainSummary(results []issueResult, containers, closed []containerInfo, elapsed time.Duration) []string {
 	var epics []string
+	closedNums := make(map[int]bool, len(closed))
+	for _, c := range closed {
+		closedNums[c.number] = true
+		epics = append(epics, fmt.Sprintf("  epic    #%d: all %s closed — closed it",
+			c.number, plural(c.total, "sub-issue")))
+	}
 	for _, c := range containers {
-		if c.finished() {
+		if c.finished() && !closedNums[c.number] {
 			epics = append(epics, fmt.Sprintf("  epic    #%d: all %s closed — close it when the design is satisfied",
 				c.number, plural(c.total, "sub-issue")))
 		}
@@ -1620,6 +1679,13 @@ func preflight(ctx context.Context, cfg *config) error {
 // comment too literally.
 func preflightPairs(cfg config, logPath string) [][2]string {
 	var pairs [][2]string
+	// Unconditional, unlike every row below it: a shift closes a finished
+	// container (every child closed) on its own, writing to human-curated state
+	// without being asked, which is the class of thing -post-summary and -remote
+	// disclose at startup. Held with needs-human or proposed, it is left alone.
+	pairs = append(pairs, [2]string{"epics",
+		"a finished container (every sub-issue closed) is closed with a comment saying so — " +
+			"put needs-human on one to hold it open"})
 	if cfg.label != "" {
 		// Not said at all before this: the issue asks for -label to surface
 		// here. Unset (the default, unfiltered queue) says nothing, the same
@@ -3600,12 +3666,17 @@ type issueQueues struct {
 }
 
 // containerInfo is one container issue and the sub-issue rollup that says
-// whether the epic it tracks is done in substance, waiting only on a human to
-// close it.
+// whether the epic it tracks is done in substance.
 type containerInfo struct {
 	number    int
 	total     int
 	completed int
+	// held is true when a human has put needs-human or proposed on the
+	// container: either one means hands off, so a finished container carrying
+	// one is left for a person to close rather than closed by the drain. The
+	// same exclusion precedence selectableIssues uses everywhere else — a label
+	// a human wrote outranks what the drain would otherwise do.
+	held bool
 }
 
 // heldBackInfo is one otherwise-ready issue put down for this pass because at
@@ -3699,6 +3770,7 @@ func selectableIssues(raw []byte) (issueQueues, error) {
 				number:    is.Number,
 				total:     is.SubIssues.Total,
 				completed: is.SubIssues.Completed,
+				held:      is.hasLabel(needsHumanLabel) || is.hasLabel(proposedLabel),
 			})
 		case is.hasLabel(needsHumanLabel):
 			q.parked = append(q.parked, is.Number)

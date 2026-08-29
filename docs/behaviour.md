@@ -128,32 +128,40 @@ own sub-issue rollup. A `gh` too old to report that rollup gets one warning and
 carries on, with container issues treated as ordinary work; the `proposed`
 exclusion is labels alone and never depends on it.
 
-A container all of whose sub-issues have closed earns a line in the exit
-summary — the design is done in substance, and only a human closing the epic
-itself remains:
+**A container all of whose sub-issues have closed is closed by the drain that
+notices**, with a comment on its thread first saying why:
+
+```
+  epic    #113: all 6 sub-issues closed — closed it
+```
+
+The machine is not judging whether the work is done — the children decided that
+by closing — it acts on the near-certain reading that "every child closed"
+means "the epic is finished", which a reopen undoes for one click the rare time
+it is wrong. The comment is posted first,
+always: it is the record of why the close happened, and it carries a marker so
+a shift whose close failed retries only the close next time rather than
+commenting twice. It names how many children closed, not which ones — listing
+them by number would cost an extra `gh` call. A comment that fails to post is a
+warning and the close does not happen; a close that fails is a warning and the
+next shift retries it. Neither parks anything and neither is fatal.
+
+Sourced from the queue listing the drain already re-reads every pass, so
+merging the last child of an epic mid-shift is enough — no extra `gh` call.
+Scoped the same way the rest of the queue is: a container outside `-label` is
+never in that listing, so it is neither commented on nor closed.
+
+**A container a human has held is left alone.** `needs-human` or `proposed` on
+the container means hands off — it is not commented on and not closed, and it
+keeps the older exit-summary line naming it as yours to close:
 
 ```
   epic    #113: all 6 sub-issues closed — close it when the design is satisfied
 ```
 
-Sourced from the queue listing the drain already re-reads every pass, so
-merging the last child of an epic mid-shift is enough — no extra `gh` call.
-Present only when earned, absent entirely when nothing is finished, and
-scoped the same way the rest of the queue is: a container outside `-label`
-is never in that listing to begin with.
-
-**A finished container also gets one comment, once, on its own thread.** The
-exit summary above scrolls past, and an unattended shift has nobody watching
-it — so the durable half of "this epic is finished" lives where the person
-who has to judge it is already looking, and where it is still there next
-week. A container's body is the design record for its children, and only you
-can judge whether they added up to it. The comment is idempotent by
-construction — it carries a marker the drain checks the thread for before
-posting, so a later shift that finds the same finished container again says
-nothing further, and a comment that fails to post is a warning rather than a
-park. It names how many children closed, not which ones: a container carries
-their count, and listing them by number would cost an extra `gh` call this
-drain does not make.
+That is the per-epic opt-out, and it needs no new flag: `needs-human` on the
+container already means "hold this" everywhere else. `polako status` names a
+held finished container in its `needs you` line for the same reason.
 
 **A ready issue with an open `blockedBy` dependency is put down for this pass**
 rather than worked — a listing that already flags a container also flags an

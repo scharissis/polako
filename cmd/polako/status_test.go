@@ -400,14 +400,15 @@ func TestStatusInheritsTheCurationGate(t *testing.T) {
 	}
 }
 
-// The containers row tells a finished epic — every sub-issue closed, waiting
-// only on a human to close the container itself — from one still in progress,
-// in both the text report and the JSON document.
+// The containers row tells three states apart, in both the text report and the
+// JSON document: a live epic still in progress, a finished one the next shift
+// will close on its own, and a finished one a human has held open.
 func TestStatusReportsFinishedAndLiveContainers(t *testing.T) {
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6},
 			"147": {Open: true, SubIssues: 5, SubIssuesCompleted: 1},
+			"150": {Open: true, SubIssues: 4, SubIssuesCompleted: 4, Labels: []string{needsHumanLabel}},
 		},
 	})
 
@@ -418,6 +419,7 @@ func TestStatusReportsFinishedAndLiveContainers(t *testing.T) {
 	want := []containerInfo{
 		{number: 113, total: 6, completed: 6},
 		{number: 147, total: 5, completed: 1},
+		{number: 150, total: 4, completed: 4, held: true},
 	}
 	if !slices.Equal(snap.queues.containers, want) {
 		t.Fatalf("containers = %+v, want %+v", snap.queues.containers, want)
@@ -426,8 +428,12 @@ func TestStatusReportsFinishedAndLiveContainers(t *testing.T) {
 	var out strings.Builder
 	renderStatus(&out, report{}, cfg, snap)
 	printed := out.String()
-	if want := "containers  2 issues — #113 (6/6 closed — yours to close), #147 (1/5 closed)"; !strings.Contains(printed, want) {
+	if want := "containers  3 issues — #113 (6/6 closed — the next shift closes it), " +
+		"#147 (1/5 closed), #150 (4/4 closed — yours to close)"; !strings.Contains(printed, want) {
 		t.Errorf("report is missing %q\ngot:\n%s", want, printed)
+	}
+	if want := "close #150 (every sub-issue closed; held open by needs-human or proposed)"; !strings.Contains(printed, want) {
+		t.Errorf("needs-you line is missing %q\ngot:\n%s", want, printed)
 	}
 
 	var jsonOut strings.Builder
@@ -441,6 +447,7 @@ func TestStatusReportsFinishedAndLiveContainers(t *testing.T) {
 	wantDoc := []statusDocContainer{
 		{Issue: 113, Total: 6, Completed: 6, Finished: true},
 		{Issue: 147, Total: 5, Completed: 1, Finished: false},
+		{Issue: 150, Total: 4, Completed: 4, Finished: true, Held: true},
 	}
 	if !slices.Equal(doc.Queue.Containers, wantDoc) {
 		t.Errorf("queue.containers = %+v, want %+v", doc.Queue.Containers, wantDoc)

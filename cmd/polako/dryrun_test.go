@@ -23,8 +23,8 @@ func TestDryRunSaysWhatItWouldDoAndChangesNothing(t *testing.T) {
 			"2": {Open: true, Labels: []string{awaitingAnswerLabel}},
 			"3": {Open: true, Labels: []string{needsHumanLabel}},
 			"4": {Open: true},
-			// A finished container: a real drain would comment on this one, and a
-			// dry run must not — it never calls commentFinishedContainers at all.
+			// A finished container: a real drain would comment on it and close it,
+			// and a dry run names that but writes nothing.
 			"5": {Open: true, SubIssues: 6, SubIssuesCompleted: 6},
 		},
 	})
@@ -76,6 +76,7 @@ func TestDryRunSaysWhatItWouldDoAndChangesNothing(t *testing.T) {
 		"ready: #1", // #3 is parked and #4 is skipped, so neither is offered
 		"waiting on an answer: #2",
 		"issue #1 would be worked next",
+		"epic #5: all 6 sub-issues closed — would comment on it and close it",
 	} {
 		if !strings.Contains(said, want) {
 			t.Errorf("log is missing %q\ngot:\n%s", want, said)
@@ -118,6 +119,32 @@ func TestDryRunInheritsTheCurationGate(t *testing.T) {
 		if !strings.Contains(said, want) {
 			t.Errorf("log is missing %q\ngot:\n%s", want, said)
 		}
+	}
+}
+
+// A dry run names a finished container it would close, but not one a human has
+// held with needs-human — a real run would leave that alone too.
+func TestDryRunNamesOnlyContainersItWouldClose(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true},
+			"7": {Open: true, SubIssues: 2, SubIssuesCompleted: 2},
+			"8": {Open: true, SubIssues: 2, SubIssuesCompleted: 2, Labels: []string{needsHumanLabel}},
+		},
+	})
+
+	var out strings.Builder
+	if err := dryRun(context.Background(), cfg, &out); err != nil {
+		t.Fatalf("dryRun: %v", err)
+	}
+
+	said := buf.String()
+	if !strings.Contains(said, "epic #7: all 2 sub-issues closed — would comment on it and close it") {
+		t.Errorf("dry run should name the finished, unheld container\ngot:\n%s", said)
+	}
+	if strings.Contains(said, "epic #8") {
+		t.Errorf("dry run named a held container it would not touch\ngot:\n%s", said)
 	}
 }
 
