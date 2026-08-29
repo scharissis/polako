@@ -301,6 +301,26 @@ type issueRecord struct {
 	Reviews      int    `json:"reviews,omitempty"`
 	PROpened     string `json:"pr_opened,omitempty"`
 	PRMerged     string `json:"pr_merged,omitempty"`
+
+	// The plan's own week-usage percent, sampled as this issue was picked up
+	// and again as it reached this terminal state — what the ledger needs to
+	// say what the issue cost the plan. Omitted, same as the enrichment
+	// above, whenever the usage gate was off or a probe along the way could
+	// not answer; 0 and "not sampled" are indistinguishable here, the same
+	// trade the fields above already make.
+	WeekUsageAtPickup   int `json:"week_usage_at_pickup_pct,omitempty"`
+	WeekUsageAtTerminal int `json:"week_usage_at_terminal_pct,omitempty"`
+}
+
+// issueUsageSamples is the plan's week-usage percent read at an issue's
+// pickup and again at its terminal state, threaded through recordIssue
+// separately from prFacts because it comes off the usage probe rather than
+// off GitHub.
+type issueUsageSamples struct {
+	atPickup    int
+	hasPickup   bool
+	atTerminal  int
+	hasTerminal bool
 }
 
 // prFacts is what GitHub knows about a PR that the event stream cannot: how
@@ -565,13 +585,13 @@ func (r *recorder) recordRun(cfg config, rc runContext, rep runReport) runRecord
 // nowhere else, and a hand-back that named nothing records parkUnknown — so a
 // missing field can only ever mean a record older than the field, and never a
 // park nobody categorised.
-func (r *recorder) recordIssue(cfg config, issue, pr int, outcome, why string, facts prFacts) {
+func (r *recorder) recordIssue(cfg config, issue, pr int, outcome, why string, facts prFacts, usage issueUsageSamples) {
 	if outcome != issueNeedsHuman {
 		why = ""
 	} else if why == "" {
 		why = parkUnknown
 	}
-	r.append(cfg.repo, issueRecord{
+	rec := issueRecord{
 		V:          recordVersion,
 		Kind:       "issue",
 		TS:         stamp(time.Now()),
@@ -589,7 +609,14 @@ func (r *recorder) recordIssue(cfg config, issue, pr int, outcome, why string, f
 		Reviews:      facts.Reviews,
 		PROpened:     facts.Opened,
 		PRMerged:     facts.Merged,
-	})
+	}
+	if usage.hasPickup {
+		rec.WeekUsageAtPickup = usage.atPickup
+	}
+	if usage.hasTerminal {
+		rec.WeekUsageAtTerminal = usage.atTerminal
+	}
+	r.append(cfg.repo, rec)
 }
 
 // append writes one record as one line. Every failure path warns at most once

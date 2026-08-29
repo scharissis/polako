@@ -417,7 +417,63 @@ func capNotes(cfg config) string {
 	if cfg.maxSessionCost > 0 {
 		parts = append(parts, "-max-session-cost "+usd(cfg.maxSessionCost)+" for this shift")
 	}
+	if cfg.maxSessionUsage > 0 {
+		parts = append(parts, fmt.Sprintf("-max-session-usage %d%% for this shift", cfg.maxSessionUsage))
+	}
+	if cfg.maxWeekUsage > 0 {
+		parts = append(parts, fmt.Sprintf("-max-week-usage %d%% for this shift", cfg.maxWeekUsage))
+	}
 	return strings.Join(parts, ", ")
+}
+
+// usageGateOn is whether either usage cap is set. Every probe call this file
+// makes on the usage gate's behalf is guarded by it, so a shift that sets
+// neither flag pays no cost for a feature it never asked for — no extra
+// `claude -p /usage` exec, no new log line, behaviour byte-for-byte what it
+// was before this gate existed.
+func usageGateOn(cfg config) bool {
+	return cfg.maxSessionUsage > 0 || cfg.maxWeekUsage > 0
+}
+
+// usageGateReason reports whether the plan's own usage has crossed a
+// configured threshold, and if so, the sentence to stop the shift with. A
+// probe that cannot answer never trips it — same direction every uncertainty
+// here resolves in, as with authFailure and lacksCommand — and neither does a
+// gated pool the probe's answer simply did not include.
+func usageGateReason(ctx context.Context, cfg config) (string, bool) {
+	if !usageGateOn(cfg) {
+		return "", false
+	}
+	snap, ok := probeUsage(ctx, cfg)
+	if !ok {
+		log.Print("usage gate: could not read the plan's usage this pass — proceeding without it")
+		return "", false
+	}
+	if cfg.maxSessionUsage > 0 {
+		if pool, found := poolByLabel(snap.pools, "session"); found && pool.percent >= cfg.maxSessionUsage {
+			return usageGateStopReason("session", "-max-session-usage", cfg.maxSessionUsage, pool), true
+		}
+	}
+	if cfg.maxWeekUsage > 0 {
+		if pool, found := poolByLabel(snap.pools, "week"); found && pool.percent >= cfg.maxWeekUsage {
+			return usageGateStopReason("week", "-max-week-usage", cfg.maxWeekUsage, pool), true
+		}
+	}
+	return "", false
+}
+
+// usageGateStopReason is the sentence usageGateReason stops the shift with:
+// what it saw, the flag that tripped, and when that pool resets if the probe
+// could read a reset clause.
+func usageGateStopReason(label, flagName string, threshold int, pool usagePool) string {
+	reset := ""
+	if pool.hasReset {
+		reset = fmt.Sprintf("; it resets %s", formatUsageReset(pool.reset))
+	}
+	return fmt.Sprintf(
+		"this shift's %s usage is at %d%%, at or over its %s of %d%% — stopping here%s; "+
+			"everything is on GitHub, so starting again once it resets carries on where this left off",
+		label, pool.percent, flagName, threshold, reset)
 }
 
 // needsHumanLabel takes a parked issue out of the queue. It is deliberately the
@@ -528,8 +584,18 @@ type config struct {
 	maxCost        float64
 	maxIssueTime   time.Duration
 	maxSessionCost float64
-	skip           map[int]bool
-	once           bool
+	// maxSessionUsage and maxWeekUsage are the plan's own limits rather than
+	// this binary's arithmetic: percentages read off probeUsage's "session"
+	// and "week (all models)" pools. Checked between issues exactly where
+	// maxSessionCost is, for the same reason — ending a shift cleanly means
+	// declining more work, not killing a run part-way — and like it, never a
+	// park: nothing is wrong with the issue, so it stays in the queue for
+	// whichever shift finds the pool reset. Both zero — off — unless an
+	// operator sets one.
+	maxSessionUsage int
+	maxWeekUsage    int
+	skip            map[int]bool
+	once            bool
 	// strictOrder keeps the queue in strict ascending order, so an issue
 	// waiting on a human answer holds up every issue behind it. Off by
 	// default: the no-conflict guarantee comes from one issue being in flight
@@ -787,6 +853,10 @@ func parseFlags() config {
 		"park an issue once this shift's runs on it have taken this much run time (0 disables)")
 	flag.Float64Var(&cfg.maxSessionCost, "max-session-cost", 0,
 		"end the shift between issues once its runs have cost this many dollars (0 disables)")
+	flag.IntVar(&cfg.maxSessionUsage, "max-session-usage", 0,
+		"end the shift between issues once the plan's current-session usage reaches this percent (0 disables)")
+	flag.IntVar(&cfg.maxWeekUsage, "max-week-usage", 0,
+		"end the shift between issues once the plan's current-week usage reaches this percent (0 disables)")
 	flag.StringVar(&skip, "skip", "", "comma-separated issue numbers to skip (head-of-line escape hatch)")
 	flag.BoolVar(&cfg.once, "once", false,
 		"process a single issue to a merge, a park or a question, then exit")
@@ -1092,6 +1162,15 @@ type issueState struct {
 	// once an answer lands, and then dying before it reports a session of its
 	// own, still has one to resume rather than starting over from nothing.
 	session string
+	// weekUsageAtPickup is the plan's week-usage percent sampled at the start
+	// of the processIssue call currently working this issue. Set fresh on
+	// every call rather than once per issue, so an issue put down for an
+	// answer and picked back up later gets the pickup that belongs to the leg
+	// which actually reaches a terminal state, not a stale one from before the
+	// wait. Zero value (unset) when the usage gate is off or the probe could
+	// not answer.
+	weekUsageAtPickup    int
+	hasWeekUsageAtPickup bool
 }
 
 // drain works the queue until it empties, an issue proves fatal, or -once says
@@ -1170,6 +1249,14 @@ func drain(ctx context.Context, cfg config) error {
 			log.Print(reason)
 			// A clean exit, but the backlog is not drained and only a person can
 			// decide to raise the budget — which is what notifyStopped is for.
+			notify(ctx, cfg, notification{event: notifyStopped, reason: reason})
+			return finish(nil)
+		}
+		// Same placement and the same reasoning as the cost budget above: read
+		// between issues and never inside one, and never a park — the plan's own
+		// limit is a fact about the account, not about this issue.
+		if reason, stop := usageGateReason(ctx, cfg); stop {
+			log.Print(reason)
 			notify(ctx, cfg, notification{event: notifyStopped, reason: reason})
 			return finish(nil)
 		}
@@ -2102,6 +2189,21 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 	// resolves its base.
 	syncDefaultBranch(ctx, cfg)
 
+	// The pickup half of the two samples the ledger reads a terminal record
+	// for — see issueState.weekUsageAtPickup. Sampled here rather than at the
+	// call site that dispatched into processIssue, so it covers every way in
+	// (a fresh pickup, a resume after a crash, a resume once an answer
+	// landed) with the one line. Guarded by usageGateOn for the same reason
+	// the gate check itself is: an operator who set neither flag gets no
+	// extra probe call and no change in behaviour.
+	if usageGateOn(cfg) {
+		if snap, ok := probeUsage(ctx, cfg); ok {
+			if pool, found := poolByLabel(snap.pools, "week"); found {
+				st.weekUsageAtPickup, st.hasWeekUsageAtPickup = pool.percent, true
+			}
+		}
+	}
+
 	// tally is what -post-summary reports. It lives on the state rather than
 	// here so an issue put down for an answer and picked up later still reports
 	// every run behind it. Nothing reads it back once the process ends, so it
@@ -2115,7 +2217,15 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 	// errors and Ctrl+C are deliberately not outcomes: the issue is still open
 	// and unparked, and the next drain resumes it.
 	terminal := func(prNumber int, outcome, why string) {
-		cfg.rec.recordIssue(cfg, issue, prNumber, outcome, why, lookupPRFacts(ctx, cfg, prNumber))
+		usage := issueUsageSamples{atPickup: st.weekUsageAtPickup, hasPickup: st.hasWeekUsageAtPickup}
+		if usageGateOn(cfg) {
+			if snap, ok := probeUsage(ctx, cfg); ok {
+				if pool, found := poolByLabel(snap.pools, "week"); found {
+					usage.atTerminal, usage.hasTerminal = pool.percent, true
+				}
+			}
+		}
+		cfg.rec.recordIssue(cfg, issue, prNumber, outcome, why, lookupPRFacts(ctx, cfg, prNumber), usage)
 	}
 
 	// parked is terminal for the hand-backs, and the reason it files them under

@@ -313,6 +313,17 @@ about the issue, and a limit is a fact about the account. Ctrl+C during the
 wait is safe as ever — state lives in GitHub, and rerunning after the reset
 picks the issue back up.
 
+**`-max-session-usage` and `-max-week-usage` are the fence in front of that
+wall.** The refusal above is the CLI stopping a run mid-issue once the account
+is already over; these end the shift between issues, before a run gets that
+far, once the plan's own `/usage` reports either pool at or over the
+percentage you set. Off by default, checked exactly where `-max-session-cost`
+is, and never a park — nothing is wrong with the issue, so it stays in the
+queue for whichever shift finds the pool reset. A probe that cannot answer —
+an old CLI with no `/usage`, an account with no subscription, an unparseable
+reply — never stops a shift over it: it logs once and the drain carries on as
+if neither flag were set, for that pass.
+
 **Human touchpoints are deliberately just two**, both on GitHub:
 
 1. Answering clarification questions the skill posts on an issue thread.

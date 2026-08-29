@@ -2939,6 +2939,149 @@ func TestDrainStopsCleanlyOnTheSessionBudget(t *testing.T) {
 	}
 }
 
+// The plan's own usage limit ends the drain exactly the way the session
+// budget above does — cleanly, between issues, parking nothing — because it
+// too is a fact about the account rather than about any one issue.
+func TestDrainStopsCleanlyOnTheWeekUsageGate(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true},
+			"2": {Open: true},
+		},
+	})
+	t.Setenv(fakeUsageEnv, "sub") // week (all models): 52% used
+	cfg.maxWeekUsage = 50
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("an exhausted usage gate is a clean exit: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	for _, n := range []string{"1", "2"} {
+		if got := st.Issues[n]; slices.Contains(got.Labels, needsHumanLabel) || got.Comments != 0 {
+			t.Errorf("issue %s = %+v, want it left untouched rather than parked", n, got)
+		}
+		if !st.Issues[n].Open {
+			t.Errorf("issue %s should still be open — the gate must not close anything", n)
+		}
+	}
+
+	out := buf.String()
+	if want := "this shift's week usage is at 52%, at or over its -max-week-usage of 50% — stopping here; it resets Sep 2"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+	if strings.Contains(out, "=== issue #1 ===") {
+		t.Errorf("an issue was picked up after the gate tripped\ngot:\n%s", out)
+	}
+}
+
+// -max-session-usage is the sibling pool, gated and reported the same way.
+func TestDrainStopsCleanlyOnTheSessionUsageGate(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	t.Setenv(fakeUsageEnv, "sub") // session: 42% used
+	cfg.maxSessionUsage = 40
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("an exhausted usage gate is a clean exit: %v", err)
+	}
+
+	if got := finalGhState(t, path).Issues["1"]; slices.Contains(got.Labels, needsHumanLabel) {
+		t.Errorf("issue 1 = %+v, want it left untouched rather than parked", got)
+	}
+
+	out := buf.String()
+	if want := "this shift's session usage is at 42%, at or over its -max-session-usage of 40% — stopping here"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+}
+
+// Both flags default off, and the gate must cost an unconfigured shift
+// nothing — not a stop, not a probe call, not a log line — even against a
+// fake CLI that would happily answer /usage if asked.
+func TestDrainUsageGateOffChangesNothing(t *testing.T) {
+	buf := captureLog(t)
+	getArgs := watchClaudeArgs(t)
+	// Restart safety: a PR already on the branch means no claude run at all,
+	// so this is a clean merge with nothing about the run itself in play.
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		PRs:    map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
+	})
+	t.Setenv(fakeUsageEnv, "sub")
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	if got := finalGhState(t, path).Issues["1"]; got.Open {
+		t.Error("issue 1 should have merged")
+	}
+	for _, argv := range getArgs() {
+		if strings.Contains(argv, "/usage") {
+			t.Errorf("a shift with neither usage flag set called the usage probe: %q", argv)
+		}
+	}
+	if strings.Contains(buf.String(), "usage gate") || strings.Contains(buf.String(), "usage probe") {
+		t.Errorf("a shift with neither usage flag set logged about usage\ngot:\n%s", buf.String())
+	}
+}
+
+// A probe that cannot answer — an old CLI with no /usage, here — never stops
+// a shift: the gate abstains, logs one line per attempt rather than a retry
+// storm, and the issue is worked as if neither flag were set.
+func TestDrainUsageGateAbstainsWhenTheProbeCannotAnswer(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		PRs:    map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
+	})
+	cfg.maxWeekUsage = 50 // fakeUsageEnv is unset: the fake CLI has no /usage
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a probe that cannot answer must not end the drain: %v", err)
+	}
+
+	if got := finalGhState(t, path).Issues["1"]; got.Open {
+		t.Error("issue 1 should have merged — the gate must not have stopped it")
+	}
+	// Once before issue 1 is picked up and once more when the loop comes back
+	// round to find the backlog empty — two gate checks, each abstaining with
+	// its own single line rather than retrying.
+	if got := strings.Count(buf.String(), "usage gate: could not read the plan's usage"); got != 2 {
+		t.Errorf("abstained %d times, want exactly 2 (one per gate check this drain made)\ngot:\n%s", got, buf.String())
+	}
+}
+
+// The ledger's two samples — the plan's week usage as the issue was picked up
+// and again as it reached a terminal state — land on the same terminal record
+// the park reason and the PR enrichment already do.
+func TestDrainRecordsUsageSamplesOnTheTerminalRecord(t *testing.T) {
+	captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	t.Setenv(fakeUsageEnv, "sub") // week (all models): 52% used, both samples
+	cfg.maxWeekUsage = 99         // high enough that the gate never trips
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	recs := terminalRecords(t, records, cfg.repo)
+	if len(recs) != 1 {
+		t.Fatalf("wrote %d terminal records, want 1", len(recs))
+	}
+	if recs[0].WeekUsageAtPickup != 52 || recs[0].WeekUsageAtTerminal != 52 {
+		t.Errorf("terminal record = %+v, want both usage samples at 52", recs[0])
+	}
+}
+
 // Waking from sleep is exactly when a gh call fails for a few seconds, because
 // the network has not reassociated yet. The paths that wait on something always
 // shrugged that off and tried again; the lookups that decide what to work next
