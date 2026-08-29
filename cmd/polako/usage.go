@@ -39,7 +39,11 @@ type usagePool struct {
 // anything, only the one number the banner names as this binary's own
 // share of the window.
 type usageAttribution struct {
-	windowLabel      string
+	windowLabel string
+	// plugin is the id parseUsageAttribution searched the "Top plugins" line
+	// for — cfg.skill's own plugin half, not a compile-time constant, because
+	// -skill is documented as pointing at any plugin, not only this repo's own.
+	plugin           string
 	pluginPercent    int
 	hasPluginPercent bool
 }
@@ -75,10 +79,11 @@ func probeUsage(ctx context.Context, cfg config) (usageSnapshot, bool) {
 		log.Printf("usage probe: %v", err)
 		return usageSnapshot{}, false
 	}
-	var res struct {
-		Result  string `json:"result"`
-		IsError bool   `json:"is_error"`
-	}
+	// streamEvent's fields line up with a plain (non-streaming) `--output-format
+	// json` reply too — the same IsError/Result pair the CLI's stream-json
+	// "result" event carries — so this reuses that type rather than
+	// redeclaring the same two fields under a new name.
+	var res streamEvent
 	if err := json.Unmarshal(out, &res); err != nil {
 		log.Printf("usage probe: parsing the CLI's response: %v", err)
 		return usageSnapshot{}, false
@@ -87,7 +92,23 @@ func probeUsage(ctx context.Context, cfg config) (usageSnapshot, bool) {
 		log.Printf("usage probe: the CLI reported no usage")
 		return usageSnapshot{}, false
 	}
-	snap, ok := parseUsage(res.Result, time.Now())
+	// The plugin this run's own share should be read off is whichever plugin
+	// -skill names, not always this repo's own: -skill is documented as
+	// pointing anywhere, and warnOnVersionSkew already cuts cfg.skill this
+	// same way for the same reason. status has no -skill at all (cfg.skill
+	// is always "" there) and reports on this repo's own plugin by default,
+	// same as an unconfigured -skill would; only an explicit -skill naming a
+	// hand-installed skill (no "plugin:" prefix) names no plugin to
+	// attribute to at all.
+	plugin := pluginName
+	if cfg.skill != "" {
+		name, _, ok := strings.Cut(cfg.skill, ":")
+		if !ok {
+			name = ""
+		}
+		plugin = name
+	}
+	snap, ok := parseUsage(res.Result, time.Now(), plugin)
 	if !ok {
 		log.Printf("usage probe: could not read a plan out of the CLI's /usage output")
 	}
@@ -109,7 +130,7 @@ var usagePoolRe = regexp.MustCompile(`(?im)^Current\s+(.+?):\s*(\d{1,3})%\s+used
 // it understood, per the same doctrine limitRefusal and limitReset use:
 // head-anchored matching, and no guessed value ever stands in for one that
 // could not be read.
-func parseUsage(text string, now time.Time) (usageSnapshot, bool) {
+func parseUsage(text string, now time.Time, plugin string) (usageSnapshot, bool) {
 	var snap usageSnapshot
 	for _, m := range usagePoolRe.FindAllStringSubmatch(text, -1) {
 		pct, err := strconv.Atoi(m[2])
@@ -127,7 +148,7 @@ func parseUsage(text string, now time.Time) (usageSnapshot, bool) {
 	if len(snap.pools) == 0 {
 		return usageSnapshot{}, false
 	}
-	snap.attribution, snap.hasAttribution = parseUsageAttribution(text)
+	snap.attribution, snap.hasAttribution = parseUsageAttribution(text, plugin)
 	return snap, true
 }
 
@@ -175,11 +196,23 @@ func usageReset(clause string, now time.Time) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	at := now.In(loc)
-	reset := time.Date(at.Year(), month, day, hour, minute, 0, 0, loc)
-	if at.Sub(reset) > usageResetStaleGrace {
-		reset = reset.AddDate(1, 0, 0)
+	// Tried this year and next, rather than at.Year() alone: time.Date does
+	// not reject an invalid day, it normalizes one, and a Feb 29 clause is
+	// only ever a real date in a leap year. Round-tripping the month/day
+	// catches that case (this year's Feb 29 candidate would otherwise
+	// silently become Mar 1 and then be judged stale) as well as any other
+	// day/month combination this build's own bounds do not already rule
+	// out.
+	for _, year := range [...]int{at.Year(), at.Year() + 1} {
+		reset := time.Date(year, month, day, hour, minute, 0, 0, loc)
+		if reset.Month() != month || reset.Day() != day {
+			continue
+		}
+		if at.Sub(reset) <= usageResetStaleGrace {
+			return reset, true
+		}
 	}
-	return reset, true
+	return time.Time{}, false
 }
 
 // parseMonthName accepts both the short ("Aug") and long ("August") forms
@@ -213,22 +246,25 @@ var usagePluginShareRe = regexp.MustCompile(`([\w.:/-]+)\s+(\d{1,3})%`)
 // still a full answer, not a partial one. ok is true if either half — the
 // window label or this binary's own plugin share — was found; the banner
 // only ever needs both together, but a probe partial in this half too is
-// still worth carrying.
-func parseUsageAttribution(text string) (usageAttribution, bool) {
+// still worth carrying. plugin is empty for a hand-installed skill (no
+// "plugin:" prefix on -skill), which names no plugin to search for at all.
+func parseUsageAttribution(text string, plugin string) (usageAttribution, bool) {
 	var attr usageAttribution
 	found := false
 	if m := usageWindowRe.FindStringSubmatch(text); m != nil {
 		attr.windowLabel = m[1]
 		found = true
 	}
-	if m := usageTopPluginsRe.FindStringSubmatch(text); m != nil {
-		for _, p := range usagePluginShareRe.FindAllStringSubmatch(m[1], -1) {
-			if strings.EqualFold(p[1], pluginName) {
-				if pct, err := strconv.Atoi(p[2]); err == nil {
-					attr.pluginPercent, attr.hasPluginPercent = pct, true
-					found = true
+	if plugin != "" {
+		if m := usageTopPluginsRe.FindStringSubmatch(text); m != nil {
+			for _, p := range usagePluginShareRe.FindAllStringSubmatch(m[1], -1) {
+				if strings.EqualFold(p[1], plugin) {
+					if pct, err := strconv.Atoi(p[2]); err == nil && pct >= 0 && pct <= 100 {
+						attr.plugin, attr.pluginPercent, attr.hasPluginPercent = p[1], pct, true
+						found = true
+					}
+					break
 				}
-				break
 			}
 		}
 	}
@@ -292,7 +328,7 @@ func usageLine(snap usageSnapshot) string {
 		if snap.attribution.windowLabel != "" {
 			period = "the last " + snap.attribution.windowLabel
 		}
-		line += fmt.Sprintf(" — %s was %d%% of %s", pluginName, snap.attribution.pluginPercent, period)
+		line += fmt.Sprintf(" — %s was %d%% of %s", snap.attribution.plugin, snap.attribution.pluginPercent, period)
 	}
 	return line
 }
