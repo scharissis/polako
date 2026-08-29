@@ -419,10 +419,11 @@ polako tidy
 
 ```
 scharissis/polako
+
 would reclaim (-apply to do it)
-  issue  branch     why             action
-  #115   issue-115  closed          worktree removed, branch deleted
-  #130   issue-130  merged (PR #201) worktree removed, branch deleted
+  issue  branch     why               action
+  #115   issue-115  closed            worktree removed, branch deleted
+  #130   issue-130  merged (PR #201)  worktree removed, branch deleted
 
 skipped
   issue  branch     reason
