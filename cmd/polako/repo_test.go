@@ -719,8 +719,8 @@ const releaseGrace = 24 * time.Hour
 // removed it. CLAUDE.md already states the rule ("a fix that lands without a
 // bump reaches nobody"); this makes it fail loudly instead of being remembered.
 //
-// It trips when a non-merge commit touching either shipping path — skills/ or
-// cmd/, the two halves that ship together — has been unreleased for longer than
+// It trips when a change touching either shipping path — skills/ or cmd/, the
+// two halves that ship together — has been on main, unreleased, for longer than
 // releaseGrace. The bound is time, not a commit count: one fix sitting for a
 // week is the same defect as ten in an afternoon, and a count lets the first
 // slip by. Test-only changes are excluded — they never reach a `go install`
@@ -737,14 +737,10 @@ func TestShippingFixesDoNotSitUnreleased(t *testing.T) {
 		return strings.TrimSpace(string(out)), err == nil
 	}
 
-	if _, ok := git("rev-parse", "--git-dir"); !ok {
-		t.Skip("not a git checkout: nothing to check release freshness against")
-	}
-
 	// In CI the check has to run — a silent skip is the same as not having it —
-	// so a checkout without the history or tags this needs is a failure there,
-	// naming the fix. Everywhere else it is a skip: a shallow or tagless clone
-	// is a normal thing to be working in.
+	// so a checkout that cannot answer (not a repo, shallow, no tags) is a
+	// failure there, naming the fix. Everywhere else it is a skip: a shallow or
+	// tagless clone is a normal thing to be working in.
 	inCI := os.Getenv("GITHUB_ACTIONS") == "true"
 	unavailable := func(why string) {
 		if inCI {
@@ -753,6 +749,10 @@ func TestShippingFixesDoNotSitUnreleased(t *testing.T) {
 		t.Skipf("%s", why)
 	}
 
+	if _, ok := git("rev-parse", "--git-dir"); !ok {
+		unavailable("not a git checkout")
+		return
+	}
 	if shallow, _ := git("rev-parse", "--is-shallow-repository"); shallow == "true" {
 		unavailable("shallow clone: the release tags are not present")
 		return
@@ -789,11 +789,12 @@ func TestShippingFixesDoNotSitUnreleased(t *testing.T) {
 		return
 	}
 
-	// Non-merge, so the subjects name the fixes rather than the PRs and the
-	// dates are the commits' own; %ct is the committer time, when the change
-	// joined a history heading for a release. Test files are dropped: they do
-	// not ship to a `go install` user.
-	log, ok := git("log", "--no-merges", "--pretty=format:%ct%x09%h%x09%s",
+	// First-parent, so a date is when the change landed on main — a merge
+	// commit's %ct — not when it was written on a branch that may have lived
+	// for days before a same-day release made it current. The subject is then
+	// the merge's ("Merge pull request #N …"), which points at the PR to
+	// release. Test files are dropped: they do not ship to a `go install` user.
+	log, ok := git("log", "--first-parent", "--pretty=format:%ct%x09%h%x09%s",
 		latestTag+"..HEAD", "--", "skills", "cmd", ":(exclude)*_test.go")
 	if !ok {
 		unavailable("could not list commits since " + latestTag)
