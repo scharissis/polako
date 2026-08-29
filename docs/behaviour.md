@@ -122,6 +122,30 @@ own sub-issue rollup. A `gh` too old to report that rollup gets one warning and
 carries on, with container issues treated as ordinary work; the `proposed`
 exclusion is labels alone and never depends on it.
 
+**A ready issue with an open `blockedBy` dependency is put down for this pass**
+rather than worked — a listing that already flags a container also flags an
+unmerged prerequisite, in the same call. Nothing is written anywhere: the next
+listing that finds the blocker closed hands the issue straight back to ready,
+the same shift or a later one. The log names what it is waiting on rather than
+going quiet about it:
+
+```
+issue #171 blocked by #170 — skipping this pass
+```
+
+A blocker outside `-label`'s scope still blocks while it is open — the gate is
+whether the work landed, not whether it was this shift's business — and two
+issues blocking each other are both put down without a hang, the rest of the
+backlog unaffected. A container, `needs-human`, `proposed` or
+`awaiting-answer` classification always wins over a blocker: `awaiting-answer`
+in particular keeps its own poll for a reply running regardless of whether some
+unrelated dependency has merged. `-strict-order` does not fold a held-back
+issue into the queue the way it does an awaiting-answer one — running it again
+this pass cannot show anything the same listing did not already know. A `gh`
+too old to see `blockedBy` shares the sub-issue rollup's one warning rather
+than raising a second, and carries on with blocked issues treated as ordinary
+work.
+
 **A run that has to ask something labels the issue `awaiting-answer`**, and the
 supervisor keys off that label rather than off the thread getting busier. The
 distinction matters because plenty of things comment on an issue that are not
