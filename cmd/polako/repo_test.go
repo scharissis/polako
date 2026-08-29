@@ -571,6 +571,46 @@ func TestSkillSaysTheRunGetsOneTurn(t *testing.T) {
 	}
 }
 
+// issue #180: a run given an issue with an open, unmet blocker started
+// implementing anyway, because nothing looked. The fix reads `blockedBy` in
+// the same `gh issue view` call Phase 0 already makes — no new call, no wider
+// grant — and stops before Phase 1 creates a worktree or branch for an issue
+// an open blocker should have held back.
+func TestPhase0ReadsBlockedBy(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	if !strings.Contains(skill, "gh issue view $issue --json number,title,state,body,comments,blockedBy") {
+		t.Error("Phase 0's issue read no longer asks for blockedBy, so an issue with an open" +
+			" blocker looks identical to one with none")
+	}
+}
+
+// The check has to run before anything is created, or a stop here is too
+// late to matter: a worktree or branch already exists for an issue an open
+// blocker should have held back, and now there is something to clean up.
+func TestPhase0ChecksBlockedByBeforeAnythingIsCreated(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	blockerCheck := strings.Index(skill, "Check `blockedBy` before Phase 1 creates anything")
+	worktreeAdd := strings.Index(skill, "git worktree add")
+	if blockerCheck < 0 {
+		t.Fatal("SKILL.md no longer checks blockedBy before Phase 1 creates anything")
+	}
+	if worktreeAdd < 0 || blockerCheck > worktreeAdd {
+		t.Error("the blockedBy check does not come before `git worktree add`, so a run could" +
+			" create a worktree for an issue an open blocker should have stopped")
+	}
+
+	// An open blocker has to ask, not proceed — reusing the one stop shape the
+	// skill already has, never inventing a fourth.
+	for _, marker := range []string{"An open blocker not yet raised", "and stop. Do not create the worktree or the branch"} {
+		if !strings.Contains(skill, marker) {
+			t.Errorf("SKILL.md no longer says %q — without it an open blocker reads as something"+
+				" to note rather than something that stops the run before it creates anything", marker)
+		}
+	}
+}
+
 // The label command is allowlisted per run by issueLabelTools, as a prefix with
 // the issue number ahead of the flag. SKILL.md is where that command is
 // actually spelled, so the grant and the spelling are one contract with two
