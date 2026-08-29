@@ -197,19 +197,29 @@ The footer names the document and the short SHA the repository was at, which is
 what lets the *next* run tell its own earlier proposals from a human's issues,
 from GitHub alone.
 
-If `gh issue create` rejects `--parent` — an older `gh` has no sub-issue
-support — file everything flat instead and fold the epic's design into a plain
-tracking issue that lists its children by number. Say which mode you ended up
-in, in the report, and say the cost of the flat mode outright: a tracking issue
-with no sub-issues is not a container, so nothing structural keeps an unattended
-run off it. Its title starts `Tracking:` and its first line says it is a design
-record to close rather than to queue, so a curator lifting the gate on the batch
-does not hand an unattended run a design document to implement.
+A child with blockers carries both flags in one call, so a rejection has to be
+attributed correctly rather than guessed: `gh`'s unknown-flag error names the
+flag it is rejecting, and that name is what decides which of the two fallbacks
+below applies — not which child the error happened on. Read it off the first
+failing call and decide once, not per issue; do not run a second, narrower call
+just to isolate which flag failed, which would be exactly the diligence-probe
+this skill's `gh` surface forbids.
 
-If it rejects `--blocked-by` — the same older `gh`, no dependency support —
-degrade the way `--parent` does: decide once, not per issue, and create every
-child without it. The `Depends on:` line still goes in each body, so the order
-is prose again. Say so in the Phase 5 report along with the cost: the
+If the error names `--parent` — an older `gh` has no sub-issue support at all,
+so `--blocked-by` was never reachable either — file everything flat instead and
+fold the epic's design into a plain tracking issue that lists its children by
+number. Say which mode you ended up in, in the report, and say the cost of the
+flat mode outright: a tracking issue with no sub-issues is not a container, so
+nothing structural keeps an unattended run off it. Its title starts `Tracking:`
+and its first line says it is a design record to close rather than to queue, so
+a curator lifting the gate on the batch does not hand an unattended run a
+design document to implement.
+
+If the error names `--blocked-by` alone — `--parent` is supported, only
+dependency links are not — degrade just that flag: keep `--parent` on every
+child, decide once, not per issue, and drop `--blocked-by` from the rest of
+this run's create calls. The `Depends on:` line still goes in each body, so the
+order is prose again. Say so in the Phase 5 report along with the cost: the
 relationships are not on GitHub, so nothing downstream — the drain, the
 implement skill — can respect them.
 
