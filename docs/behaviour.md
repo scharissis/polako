@@ -136,7 +136,12 @@ issue #171 blocked by #170 — skipping this pass
 A blocker outside `-label`'s scope still blocks while it is open — the gate is
 whether the work landed, not whether it was this shift's business — and two
 issues blocking each other are both put down without a hang, the rest of the
-backlog unaffected. A container, `needs-human`, `proposed` or
+backlog unaffected. That out-of-scope guarantee holds when GitHub's own state
+comes back on the `blockedBy` connection, which is the ordinary case; a `gh`
+old enough to omit it falls back to asking whether the blocker showed up
+anywhere in this same listing, and an out-of-`-label` blocker has no row of
+its own to be found by there — the one gap the no-second-request rule leaves
+open on such a host. A container, `needs-human`, `proposed` or
 `awaiting-answer` classification always wins over a blocker: `awaiting-answer`
 in particular keeps its own poll for a reply running regardless of whether some
 unrelated dependency has merged. `-strict-order` does not fold a held-back

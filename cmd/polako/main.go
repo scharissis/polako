@@ -3450,10 +3450,17 @@ func selectableIssues(raw []byte) (issueQueues, error) {
 	// The state a blockedBy node names is what settles openness. A gh whose
 	// node carries no state at all falls back to this — presence among the
 	// numbers this same open-issues listing already found — numbers already
-	// in hand, no second request paid for an approximation.
-	seenOpen := make(map[int]bool, len(issues))
-	for _, is := range issues {
-		seenOpen[is.Number] = true
+	// in hand, no second request paid for an approximation. Built only when
+	// something could actually use it: most listings carry no blockedBy node
+	// at all, whether because no issue names a dependency yet or because
+	// dropExtendedFields already gave up on the field for the shift, and the
+	// common case should not pay for a map this fallback will never consult.
+	var seenOpen map[int]bool
+	if slices.ContainsFunc(issues, func(is ghIssue) bool { return len(is.BlockedBy.Nodes) > 0 }) {
+		seenOpen = make(map[int]bool, len(issues))
+		for _, is := range issues {
+			seenOpen[is.Number] = true
+		}
 	}
 	q := issueQueues{ready: make([]int, 0, len(issues))}
 	for _, is := range issues {
@@ -3541,10 +3548,15 @@ type ghBlocker struct {
 }
 
 // open reports whether b still blocks. A state this call actually named wins
-// outright; failing that, seenOpen — every number this same open-issues
-// listing found — stands in, which is why an out-of-`-label` blocker still
-// blocks (its own blockedBy state is unaffected by our filter on the
-// top-level rows) while a closed one, present or not, does not.
+// outright, and settles it correctly regardless of `-label`: a blocker this
+// same call would never have listed on its own account — wrong label, or
+// none at all — still blocks while it is open, because its blockedBy state
+// travels with the connection rather than with the top-level filter. Without
+// a state, seenOpen — every number this same open-issues listing found —
+// stands in instead, and that guarantee narrows: a blocker outside -label's
+// scope has no row of its own to be found by, so this path reads it as closed
+// whether or not it truly is. The gap is the price of the no-second-request
+// rule on a gh old enough to omit state in the first place.
 func (b ghBlocker) open(seenOpen map[int]bool) bool {
 	if b.State != "" {
 		return !strings.EqualFold(b.State, "closed")
