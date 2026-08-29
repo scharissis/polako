@@ -2,11 +2,12 @@ name: Start a release
 
 # The entry point of the release pipeline: run it from the Actions tab, pick a
 # bump, and it opens the release PR — plugin.json bumped, CHANGELOG.md given a
-# draft section made of the commit subjects since the last release. Rewriting
-# that draft into operator-facing notes and merging the PR is the human half;
-# cut-release.yml takes over from the merge. Nothing here releases anything: a
-# PR this workflow opens can sit, be edited, or be closed unmerged, and nobody
-# downstream ever sees it.
+# section of GitHub's own release notes for the range: every merged PR as a
+# linked bullet with its author and the issues it closed, capped by a compare
+# link. Reading that section, adding prose where a change deserves it, and
+# merging the PR is the human half; cut-release.yml takes over from the merge.
+# Nothing here releases anything: a PR this workflow opens can sit, be edited,
+# or be closed unmerged, and nobody downstream ever sees it.
 
 on:
   workflow_dispatch:
@@ -34,8 +35,8 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      # Full history: the changelog draft is the commit subjects since the last
-      # release tag, which a depth-1 clone cannot see.
+      # Full history: the previous release's tag has to be visible locally to
+      # be named as the floor of the release-notes range.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -115,32 +116,53 @@ jobs:
           HAS_RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN != '' }}
           WORKFLOW_TOKEN: ${{ github.token }}
         run: |
-          # The draft is the raw material for the release notes, grouped the
-          # way Keep a Changelog groups it: feat under Added, fix under Fixed,
-          # the rest under Changed. Release and publish chores are this
-          # pipeline's own plumbing, not changes anyone upgrades for.
-          range="v$CURRENT..HEAD"
-          git rev-parse -q --verify "refs/tags/v$CURRENT^{commit}" >/dev/null || range=HEAD
-          subjects=$(git log --no-merges --format='%s' "$range" \
-            | grep -Ev '^chore\(release\):|^chore: publish ' || true)
-          added=$(printf '%s\n' "$subjects" | grep -E '^feat' || true)
-          fixed=$(printf '%s\n' "$subjects" | grep -E '^fix' || true)
-          changed=$(printf '%s\n' "$subjects" | grep -Ev '^feat|^fix|^$' || true)
-          strip() { sed -E 's/^[a-z]+(\([^)]*\))?!?: //; s/^/- /'; }
+          # The section is GitHub's own release notes for the range: every
+          # merged PR as a linked bullet with its author, capped by a compare
+          # link — the same material a plain-subjects dump buried. Generated
+          # here, into the PR, rather than at publish time, so the notes are
+          # readable and editable before anything is cut. The previous cycle's
+          # release and publish PRs are this pipeline's own plumbing, not
+          # changes anyone upgrades for, so their bullets are dropped.
+          args=(-f "tag_name=v$NEXT" -f "target_commitish=$GITHUB_SHA")
+          if git rev-parse -q --verify "refs/tags/v$CURRENT^{commit}" >/dev/null; then
+            args+=(-f "previous_tag_name=v$CURRENT")
+          fi
+          notes=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            "${args[@]}" --jq .body)
+
+          # A bullet names a PR; the issues that PR closed are what the
+          # backlog actually tracks, so each bullet is annotated with them —
+          # that is what makes "was #166 in this release?" answerable by
+          # searching the notes. Best effort per line: a lookup that fails
+          # leaves its bullet bare rather than failing the release over an
+          # annotation.
+          enrich() {
+            while IFS= read -r line; do
+              case "$line" in
+              \**/pull/*)
+                pr=${line##*/pull/}
+                pr=${pr%%[!0-9]*}
+                closes=$(gh pr view "$pr" --json closingIssuesReferences \
+                  --jq '[.closingIssuesReferences[].number] | map("#\(.)") | join(", ")' \
+                  2>/dev/null) || closes=""
+                if [ -n "$closes" ]; then
+                  line="$line (closes $closes)"
+                fi
+                ;;
+              esac
+              printf '%s\n' "$line"
+            done
+          }
           {
             echo "## [$NEXT]"
-            if [ -n "$added" ]; then
-              echo; echo '### Added'; echo; printf '%s\n' "$added" | strip
-            fi
-            if [ -n "$fixed" ]; then
-              echo; echo '### Fixed'; echo; printf '%s\n' "$fixed" | strip
-            fi
-            if [ -n "$changed" ]; then
-              echo; echo '### Changed'; echo; printf '%s\n' "$changed" | strip
-            fi
-            if [ -z "$added$fixed$changed" ]; then
-              echo; echo "_No commits since v$CURRENT; write the notes by hand._"
-            fi
+            echo
+            # Headings demoted one level to sit under the version heading,
+            # which is the boundary the release workflow's section extraction
+            # keys on.
+            printf '%s\n' "$notes" \
+              | sed 's/^## /### /' \
+              | grep -vE '^\* chore: publish |^\* chore\(release\): ' \
+              | enrich
           } > /tmp/section.md
 
           awk 'NR==FNR { section = section $0 ORS; next }
@@ -162,11 +184,11 @@ jobs:
           {
             echo "Starts the release of $NEXT. **Merging this PR is what cuts it.**"
             echo
-            echo "The CHANGELOG.md section in the diff is a draft made from the commit"
-            echo "subjects since v$CURRENT. Rewrite it into what an operator needs to"
-            echo "know before upgrading — add an **Operator impact** line if this"
-            echo "release changes what an unattended run does (the changelog's own"
-            echo "preamble says why) — then merge."
+            echo "The CHANGELOG.md section in the diff is the release notes: every PR"
+            echo "since v$CURRENT, linked, with its author and the issues it closed."
+            echo "Add an **Operator impact** line if this release changes what an"
+            echo "unattended run does (the changelog's own preamble says why), edit"
+            echo "anything else that deserves prose, then merge."
             echo
             echo "From the merge, the rest is automatic: *Cut a release* tags the merge"
             echo "commit twice, *Release* builds the five binaries and publishes the"

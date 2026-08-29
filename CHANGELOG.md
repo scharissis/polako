@@ -1,13 +1,17 @@
 # Changelog
 
-Notable changes per release, newest first. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the versioning rules —
-and why minor is the breaking axis before 1.0 — are in
-[Publishing and versioning](README.md#publishing-and-versioning).
+One section per release, newest first. Since 0.13.0 a section is the release
+notes GitHub generates when the release PR opens: every merged PR as a linked
+bullet with its author and the issues it closed, capped by a compare link — so
+"was #166 in this release?" is answered by searching this file. The versioning
+rules — and why minor is the breaking axis before 1.0 — are in
+[Publishing and versioning](docs/releasing.md).
 
 Entries carry an **Operator impact** line when a release changes what an
-unattended run does, rather than only what the code looks like. Those are the
-lines worth reading before upgrading a machine that works a backlog overnight.
+unattended run does, rather than only what the code looks like. That line is
+still written by a person, in the release PR, because no PR list can say what
+a change means for a machine working a backlog overnight — those lines are the
+ones worth reading before upgrading one.
 
 ## [0.12.0]
 
