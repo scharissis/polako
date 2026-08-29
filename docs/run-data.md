@@ -218,6 +218,7 @@ human latency
 | `-metrics` | `~/.polako/metrics` | Directory to read records from — the same path a shift writes to. |
 | `-repo` | *(every repository)* | Only count records for one repository, `owner/name`. |
 | `-since` | *(all of it)* | Only count records newer than this, e.g. `-since 168h`. |
+| `-window` | *(off)* | Report a calendar-aligned window instead of `-since`: `today`, `week`, `month` or `session` — see [Calendar windows](#calendar-windows--window) below. Errors if `-since` is also given. |
 | `-shift` | *(every shift)* | Only count records from one shift — its id, or `last` for the newest shift in scope. |
 | `-by` | *(none)* | Add a breakdown table: `issue`, `model`, `tag` or `shift`. |
 | `-runs` | *(off)* | Add the run log: one row per run, with the session id that reopens it — see [Reopening a past run](#reopening-a-past-run--runs). |
@@ -297,6 +298,94 @@ undercount, and its dollars read as zero, because pricing belongs to the CLI
 and this binary never guesses at it. Those runs are counted out separately
 rather than mixed in silently — a crash-prone configuration should not get to
 look cheap.
+
+## Calendar windows: `-window`
+
+`-since` looks back a fixed span from whenever you happen to run `stats`. A
+plan's own limits don't reset on a rolling clock like that — they reset at a
+calendar boundary — so `-window` names one instead:
+
+```bash
+polako stats -window today    # local midnight to now
+polako stats -window week     # the plan's own week, or Monday 00:00 local
+polako stats -window month    # the 1st of the month, local, to now
+polako stats -window session  # an approximation of the plan's 5h block
+```
+
+`-window` and `-since` both name a window to report; giving both is a flag
+error naming the conflict rather than one silently winning.
+
+`today` and `month` resolve in the machine's local zone, from local midnight
+and the 1st of the month respectively — computed with calendar arithmetic
+(add a day, add a month) rather than a fixed 24h/730h span, which is what
+lets the bound land on the right side of a DST change or a month with 28, 30
+or 31 days in it, every time, rather than drifting an hour or a day off on
+the transitions where a fixed span would.
+
+`week` anchors to the plan's own weekly reset when a live usage probe (the
+same one [`-max-week-usage`](#capping-what-a-shift-spends) and `polako
+status` read) can answer, rolled back in 7-day steps to the most recent
+occurrence at or before now. When the probe can't answer — no subscription,
+an old CLI, offline — it falls back to the most recent Monday 00:00 local.
+Either way the `window` line in the header names which anchor won, because a
+plan whose week resets on a Wednesday evening is not the same window as the
+ISO week, and a report that silently picked the wrong one is indistinguishable
+from one that picked right.
+
+`session` approximates the plan's five-hour block: the 5h span anchored to
+the earliest run seen in the last 5h, or a plain "5h ending now" when there
+is none to anchor to. It is always named as an approximation in the header —
+the plan's own session boundaries are not read off anywhere `stats` can see,
+only guessed at from where the work actually landed.
+
+Whichever window is in force, the header's `window` line reports the
+resolved bounds, how far through the window now falls, and how much of it is
+left:
+
+```
+  window  2026-08-24T00:00:00Z → 2026-08-25T00:00:00Z (today; 9h12m elapsed, 14h48m left, 38% through)
+```
+
+`-json` carries the same facts as a typed `window` object (`kind`, `from`,
+`period_end`, `anchor`, `elapsed_seconds`, `remaining_seconds`), present only
+when `-window` was given.
+
+## What an issue costs the plan
+
+When [the usage gate](#capping-what-a-shift-spends) is on, each issue's
+terminal record carries two samples of the plan's own week-usage percentage —
+one from when the issue was picked up, one from when it reached a terminal
+state. The delta between them is what that issue cost the plan, as a
+percentage of a week, and the issues section adds a line for it:
+
+```
+  plan cost per issue  1.4% mean, 1.7% median of a week — about 59 issues to a full week (upper bound: counts everything the account did meanwhile, not just this issue; polako's own share was 29% of the last 24h)
+```
+
+**Stated as the upper bound it is.** The delta counts everything the account
+did during that span — including your own interactive session on another
+machine, or any other automation sharing the plan — not only this issue's own
+runs. The parenthetical after it is the cross-check: the usage probe's own
+attribution figure (the same "polako was N% of the last 24h" line `work`'s
+banner and `polako status` print), a different, self-reported measure over a
+different window. It sits beside the mean/median and is never folded into it.
+
+The line is absent entirely when no terminal issue in scope carries a usable
+sample — the usage gate was off, or every probe along the way failed to
+answer — the same treatment the PR-size line above already gets. When some
+issues have a sample and others don't, the line still prints and names how
+many were left out.
+
+One reading is dropped rather than averaged in: a mid-issue reset makes the
+terminal sample belong to a fresh weekly cycle rather than a continuation of
+the pickup one, so subtracting them would produce a meaningless negative
+number. That issue is counted the same as an unsampled one.
+
+`-json` carries the same figures as a typed `plan` object (`mean_percent_of_week`,
+`median_percent_of_week`, `sampled_issues`, `unsampled_issues`, and
+`cross_check_percent`/`cross_check_window` when the probe answered), present
+only when at least one issue has a usable sample. The HTML report adds the
+same figures as a card, under the same condition.
 
 ## Telling one shift from another: `-shift`
 

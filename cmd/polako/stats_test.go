@@ -599,6 +599,8 @@ func TestStatsRejectsBadInput(t *testing.T) {
 		"an unknown flag":    {"-nope"},
 		"an unparseable dur": {"-since", "forever"},
 		"a negative -since":  {"-since", "-168h"},
+		"an unknown -window": {"-window", "fortnight"},
+		"-window and -since": {"-window", "today", "-since", "1h"},
 	}
 	for name, args := range cases {
 		t.Run(name, func(t *testing.T) {

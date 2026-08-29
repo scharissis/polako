@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The whole document, pinned, over the simplest fixture there is: one run,
@@ -298,5 +301,83 @@ func TestStatsJSONHTMLConfirmationGoesToStderr(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("-html %s: file was not written (%v)", path, err)
+	}
+}
+
+// window is present, typed, and matches the header line's own numbers —
+// present only when -window was given, the same "absent, not zeroed" rule
+// every other conditional field on this document already follows.
+//
+// Goes through statsReport with a fake claudeBin rather than stats()'s
+// public runStats: -window today needs no probe, but this keeps the same
+// hermetic pattern every probe-adjacent stats test in this package uses,
+// rather than depending on runStats's default claudeBin ("claude") failing
+// to resolve on whatever machine runs the suite.
+func TestStatsJSONWindow(t *testing.T) {
+	t.Setenv(fakeClaudeEnv, "stream")
+	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second}
+	now := time.Date(2026, 8, 25, 15, 0, 0, 0, time.UTC)
+	opt := statsOptions{window: windowToday}
+
+	ds, issues, summary, err := statsReport(context.Background(), cfg, opt, t.TempDir(), now)
+	if err != nil {
+		t.Fatalf("statsReport: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := renderStatsJSON(&buf, ds, issues, summary, opt); err != nil {
+		t.Fatalf("renderStatsJSON: %v", err)
+	}
+	var doc statsDoc
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("output did not parse as JSON: %v\n%s", err, buf.String())
+	}
+	if doc.Window == nil {
+		t.Fatal("window is nil, want it present under -window")
+	}
+	want := statsDocWindow{
+		Kind: "today", From: "2026-08-25T00:00:00Z", PeriodEnd: "2026-08-26T00:00:00Z",
+		ElapsedSeconds: (15 * time.Hour).Seconds(), RemainingSeconds: (9 * time.Hour).Seconds(),
+	}
+	if *doc.Window != want {
+		t.Errorf("window = %+v, want %+v", *doc.Window, want)
+	}
+	if doc.Plan != nil {
+		t.Errorf("plan = %+v, want nil — no run data at all in this fixture", doc.Plan)
+	}
+}
+
+// plan carries the same figures planCostPairs' text line does, cross-check
+// included, and is nil exactly when that line is absent.
+func TestStatsJSONPlan(t *testing.T) {
+	t.Setenv(fakeClaudeEnv, "stream")
+	t.Setenv(fakeUsageEnv, "sub")
+	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second}
+
+	ds, issues, summary, err := statsReport(context.Background(), cfg, statsOptions{}, planCostDir(t), fixtureNow)
+	if err != nil {
+		t.Fatalf("statsReport: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := renderStatsJSON(&buf, ds, issues, summary, statsOptions{}); err != nil {
+		t.Fatalf("renderStatsJSON: %v", err)
+	}
+	var doc statsDoc
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("output did not parse as JSON: %v\n%s", err, buf.String())
+	}
+	if doc.Plan == nil {
+		t.Fatal("plan is nil, want it present — three issues carry a usable sample")
+	}
+	if doc.Plan.SampledIssues != 3 || doc.Plan.UnsampledIssues != 2 {
+		t.Errorf("plan sampled/unsampled = %d/%d, want 3/2", doc.Plan.SampledIssues, doc.Plan.UnsampledIssues)
+	}
+	if doc.Plan.MeanPercent != 5 || doc.Plan.MedianPercent != 4 {
+		t.Errorf("plan mean/median = %v/%v, want 5/4", doc.Plan.MeanPercent, doc.Plan.MedianPercent)
+	}
+	if doc.Plan.CrossCheckPercent == nil || *doc.Plan.CrossCheckPercent != 29 || doc.Plan.CrossCheckWindow != "24h" {
+		t.Errorf("cross check = %+v, want 29%% over 24h — the fake CLI's usageSample", doc.Plan)
+	}
+	if doc.Window != nil {
+		t.Errorf("window = %+v, want nil — -window was not given", doc.Window)
 	}
 }
