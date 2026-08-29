@@ -1369,7 +1369,10 @@ func finishedContainerComment(c containerInfo) string {
 // container's thread is read for it before anything is posted — reading
 // before writing is the same idea awaitAnswer applies to notice a reply,
 // even though the two check different things on the thread (a marker here,
-// a comment ID past a baseline there).
+// a comment ID past a baseline there). notifyEpicDone fires on the same
+// occasion the comment newly posts, never on the branch that finds the
+// marker already there, so a shift that finds the comment already posted
+// re-notifies nobody.
 //
 // done is this shift's own memo of containers already confirmed — not
 // durable, exactly like the drain loop's own skip map — so a container that
@@ -1412,6 +1415,8 @@ func commentFinishedContainers(ctx context.Context, cfg config, containers []con
 		}
 		done[c.number] = true
 		log.Printf("epic #%d: all %s closed — commented, yours to close", c.number, plural(c.total, "sub-issue"))
+		notify(ctx, cfg, notification{event: notifyEpicDone, issue: c.number,
+			reason: fmt.Sprintf("all %s closed — yours to close", plural(c.total, "sub-issue"))})
 	}
 	return nil
 }
