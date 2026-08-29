@@ -374,6 +374,16 @@ func TestPlanSkillClosesItsGhSurface(t *testing.T) {
 		t.Error("SKILL.md no longer states the closed `gh` surface as \"three call shapes\"," +
 			" so nothing bounds which gh commands a plan run may use")
 	}
+
+	// issue #178 widened `gh issue create` by one flag and named the ceiling in
+	// the same breath: `--parent` and `--blocked-by`, and no other write flag.
+	// Drop that clause and the surface paragraph stops accounting for the flag
+	// the create form now carries.
+	if !strings.Contains(flat, "`--parent` and `--blocked-by`, and no other write flag") {
+		t.Error("the gh-surface paragraph no longer bounds `gh issue create`'s flags to" +
+			" `--parent` and `--blocked-by` — without that ceiling the create form's" +
+			" `--blocked-by` reads as an improvised widening rather than a licensed one")
+	}
 }
 
 // The estimate is the curator's cheapest signal, and it is only useful if it is
@@ -410,6 +420,39 @@ func TestPlanSkillCreatesIssuesAndNothingElse(t *testing.T) {
 		if strings.Contains(skill, forbidden) {
 			t.Errorf("SKILL.md spells %q; a plan run's entire write surface is `gh issue create`"+
 				" plus the scratch body file it deletes", forbidden)
+		}
+	}
+}
+
+// issue #178: a plan run works out the child dependency order and then throws
+// the answer away, expressing it only as creation order plus prose that names
+// children by ordinal ("the first child of this epic") — a lookup a reader can
+// get wrong in silence. The fix declares the order: `--blocked-by` on the child
+// create call, a fixed-shape `Depends on:` line in the body, and prose that
+// names issue numbers only. These three lines carry that contract.
+func TestPlanSkillDeclaresDependencyOrder(t *testing.T) {
+	skill := planSkill(t)
+
+	if !strings.Contains(skill, "--blocked-by") {
+		t.Error("SKILL.md never spells `--blocked-by`, so a child's blockers are declared" +
+			" nowhere on GitHub and the dependency order is prose the drain cannot read")
+	}
+
+	// The body's dependency line has one shape so a curator can scan it and
+	// repo_test.go can pin it: numbers first, then what each supplies.
+	shape := regexp.MustCompile(`(?m)^[ \t]*Depends on: #\d+(, #\d+)* — .+$`)
+	if !shape.MatchString(skill) {
+		t.Error("SKILL.md spells no `Depends on: #N[, #N] — <what each supplies>` line, so the" +
+			" body's dependency line has no fixed shape to hold proposals to")
+	}
+
+	// The ordinal form is retired by name — an ordinal is a lookup that can be
+	// got wrong, a number cannot — so the skill has to say so, not just stop
+	// using it.
+	for _, marker := range []string{"never an ordinal", "the first child of this epic"} {
+		if !strings.Contains(skill, marker) {
+			t.Errorf("SKILL.md no longer retires the ordinal form by naming it (%q); without that"+
+				" a run falls back to 'the first child of this epic', the silent lookup #178 was about", marker)
 		}
 	}
 }
