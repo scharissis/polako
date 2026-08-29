@@ -440,13 +440,25 @@ func usageGateOn(cfg config) bool {
 // probe that cannot answer never trips it — same direction every uncertainty
 // here resolves in, as with authFailure and lacksCommand — and neither does a
 // gated pool the probe's answer simply did not include.
+//
+// This probes independently of sampleWeekUsage's own call inside processIssue
+// a few lines below, rather than sharing one snapshot for both: an issue
+// dispatched off the "awaiting answer" path can follow this check by minutes
+// (awaitAnswer sleeps up to -poll before it returns one), so a cached reading
+// handed to that issue's pickup sample would silently go stale for exactly
+// the case sampling most needs to get right. The probe itself is cheap and
+// meant to be called routinely (see probeUsage's own doc comment), so the
+// extra exec buys correctness rather than costing anything worth trading it
+// away for.
 func usageGateReason(ctx context.Context, cfg config) (string, bool) {
 	if !usageGateOn(cfg) {
 		return "", false
 	}
 	snap, ok := probeUsage(ctx, cfg)
 	if !ok {
-		log.Print("usage gate: could not read the plan's usage this pass — proceeding without it")
+		log.Print("usage gate: could not read the plan's usage this pass " +
+			"(an older claude with no /usage, or an unparseable reply) — " +
+			"proceeding as if -max-session-usage and -max-week-usage were unset until the next check")
 		return "", false
 	}
 	if cfg.maxSessionUsage > 0 {
@@ -474,6 +486,27 @@ func usageGateStopReason(label, flagName string, threshold int, pool usagePool) 
 		"this shift's %s usage is at %d%%, at or over its %s of %d%% — stopping here%s; "+
 			"everything is on GitHub, so starting again once it resets carries on where this left off",
 		label, pool.percent, flagName, threshold, reset)
+}
+
+// sampleWeekUsage is the one-line "what does the plan's week usage read right
+// now" primitive processIssue's pickup and terminal sampling both need.
+// Always returns a fresh reading — off (usageGateOn false), a failed probe,
+// and a snapshot with no "week" pool all collapse to (0, false) alike, so a
+// caller that assigns both return values unconditionally can never be left
+// holding a previous call's stale answer.
+func sampleWeekUsage(ctx context.Context, cfg config) (int, bool) {
+	if !usageGateOn(cfg) {
+		return 0, false
+	}
+	snap, ok := probeUsage(ctx, cfg)
+	if !ok {
+		return 0, false
+	}
+	pool, found := poolByLabel(snap.pools, "week")
+	if !found {
+		return 0, false
+	}
+	return pool.percent, true
 }
 
 // needsHumanLabel takes a parked issue out of the queue. It is deliberately the
@@ -1163,12 +1196,13 @@ type issueState struct {
 	// own, still has one to resume rather than starting over from nothing.
 	session string
 	// weekUsageAtPickup is the plan's week-usage percent sampled at the start
-	// of the processIssue call currently working this issue. Set fresh on
-	// every call rather than once per issue, so an issue put down for an
-	// answer and picked back up later gets the pickup that belongs to the leg
-	// which actually reaches a terminal state, not a stale one from before the
-	// wait. Zero value (unset) when the usage gate is off or the probe could
-	// not answer.
+	// of the processIssue call currently working this issue. Overwritten
+	// unconditionally on every call rather than once per issue, so an issue
+	// put down for an answer and picked back up later gets the pickup that
+	// belongs to the leg which actually reaches a terminal state — and a
+	// later leg's failed probe resets this to (0, false) rather than leaving
+	// an earlier leg's reading in place. Unset when the usage gate is off, no
+	// recorder is configured, or the probe could not answer.
 	weekUsageAtPickup    int
 	hasWeekUsageAtPickup bool
 }
@@ -2193,15 +2227,15 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 	// for — see issueState.weekUsageAtPickup. Sampled here rather than at the
 	// call site that dispatched into processIssue, so it covers every way in
 	// (a fresh pickup, a resume after a crash, a resume once an answer
-	// landed) with the one line. Guarded by usageGateOn for the same reason
-	// the gate check itself is: an operator who set neither flag gets no
-	// extra probe call and no change in behaviour.
-	if usageGateOn(cfg) {
-		if snap, ok := probeUsage(ctx, cfg); ok {
-			if pool, found := poolByLabel(snap.pools, "week"); found {
-				st.weekUsageAtPickup, st.hasWeekUsageAtPickup = pool.percent, true
-			}
-		}
+	// landed) with the one line. Unconditional so a second or third leg's
+	// failed probe overwrites an earlier leg's reading with "not sampled"
+	// rather than leaving it in place — st outlives a single call for an
+	// issue put down for an answer, and a stale pickup from before the wait
+	// is worse than none. Skipped when nothing would read it: -metrics off
+	// (or no recorder at all) makes recordIssue's own write a no-op, so
+	// sampling for it would be a probe call spent on a value nobody keeps.
+	if cfg.rec.enabled() {
+		st.weekUsageAtPickup, st.hasWeekUsageAtPickup = sampleWeekUsage(ctx, cfg)
 	}
 
 	// tally is what -post-summary reports. It lives on the state rather than
@@ -2218,12 +2252,8 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 	// and unparked, and the next drain resumes it.
 	terminal := func(prNumber int, outcome, why string) {
 		usage := issueUsageSamples{atPickup: st.weekUsageAtPickup, hasPickup: st.hasWeekUsageAtPickup}
-		if usageGateOn(cfg) {
-			if snap, ok := probeUsage(ctx, cfg); ok {
-				if pool, found := poolByLabel(snap.pools, "week"); found {
-					usage.atTerminal, usage.hasTerminal = pool.percent, true
-				}
-			}
+		if cfg.rec.enabled() {
+			usage.atTerminal, usage.hasTerminal = sampleWeekUsage(ctx, cfg)
 		}
 		cfg.rec.recordIssue(cfg, issue, prNumber, outcome, why, lookupPRFacts(ctx, cfg, prNumber), usage)
 	}
