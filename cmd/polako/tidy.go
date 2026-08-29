@@ -136,6 +136,17 @@ func reclaim(ctx context.Context, cfg config, apply bool) ([]tidyResult, error) 
 	// itself follows picking up an issue.
 	syncDefaultBranch(ctx, cfg)
 
+	if apply {
+		// A worktree whose directory was removed by hand still marks its
+		// branch checked out, by git's own admin records, until pruned —
+		// which would otherwise fail that branch's delete below for a reason
+		// nothing there would explain. Once for the whole sweep, before it
+		// looks at any branch, rather than once per worktree-less branch it
+		// finds along the way: cheap either way, but there is no reason to
+		// pay for it twice per branch let alone N times.
+		_, _ = git(ctx, cfg, "worktree", "prune")
+	}
+
 	raw, err := git(ctx, cfg, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
 	if err != nil {
 		return nil, fmt.Errorf("listing local branches: %w", err)
@@ -172,6 +183,19 @@ func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply
 	}
 
 	w := inspectLeftWork(ctx, cfg, issue)
+	if w.path != "" && samePath(w.path, cfg.dir) {
+		// git refuses to remove the main working tree, but a linked one gets
+		// no such protection — `git worktree remove` deletes it even while
+		// its own process is running with that directory as its cwd, which is
+		// exactly what every other git/gh call in this sweep does (cfg.dir is
+		// always the working directory capture() runs in). An operator who
+		// cd's into a finished issue's worktree and runs tidy from right
+		// there would otherwise have the ground removed out from under the
+		// rest of this very sweep.
+		res.reason = fmt.Sprintf("its worktree (%s) is the checkout tidy is running from — "+
+			"rerun from the main checkout instead", w.path)
+		return res
+	}
 	if !w.counted {
 		res.reason = "could not tell whether it's merged into the default branch"
 		return res
@@ -201,13 +225,14 @@ func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply
 			res.reason = fmt.Sprintf("could not remove worktree %s: %v", w.path, err)
 			return res
 		}
-	} else {
-		// A worktree whose directory is already gone still marks the branch
-		// checked out, by git's own admin records, until pruned — which would
-		// otherwise fail the branch delete below for a reason nothing here
-		// would explain. Harmless when there was never a worktree at all.
-		_, _ = git(ctx, cfg, "worktree", "prune")
 	}
+	// -d, not -D: it re-checks that branch is merged, against the checkout's
+	// own HEAD rather than the origin ancestor check above, and refusing here
+	// is safe — the worktree is already gone, and the branch is picked up
+	// again on the next run. -D would skip that check instead of merely
+	// duplicating it, and this is the one verb whose actions cannot be undone,
+	// so a redundant safety net stays rather than being traded for a tidier
+	// exit on the rare run where cfg.dir is not sitting on the default branch.
 	if _, err := git(ctx, cfg, "branch", "-d", branch); err != nil {
 		res.reason = fmt.Sprintf("removed its worktree but could not delete branch %s: %v", branch, err)
 		return res
@@ -277,6 +302,21 @@ func unpushedReason(ctx context.Context, cfg config, branch string) string {
 		return fmt.Sprintf("has commits not pushed to origin/%s", branch)
 	}
 	return ""
+}
+
+// samePath reports whether a and b name the same location on disk, resolving
+// symlinks first so a path through /tmp and the same path through its
+// resolved form (e.g. /private/tmp on macOS) still compare equal. Falls back
+// to a plain Clean comparison when either side does not resolve — treating an
+// unresolvable path as possibly-the-same is the side to err on here, since
+// this exists to refuse a removal rather than allow one.
+func samePath(a, b string) bool {
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	if errA == nil && errB == nil {
+		return ra == rb
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 // --- rendering ---

@@ -29,6 +29,15 @@ func tidyGh(t *testing.T, st *ghState) {
 	t.Setenv(fakeGhEnv, path)
 }
 
+// The same flags-only contract every other verb's entry point holds to; see
+// TestRunStatusRejectsAnArgument in main_test.go for the sibling this mirrors.
+func TestRunTidyRejectsAnArgument(t *testing.T) {
+	err := runTidy(context.Background(), []string{"12"}, &strings.Builder{}, report{})
+	if err == nil || !strings.Contains(err.Error(), "tidy takes flags only") {
+		t.Errorf("err = %v, want a complaint about the argument", err)
+	}
+}
+
 func tidyCfg(t *testing.T, dir string) config {
 	t.Helper()
 	return config{
@@ -266,6 +275,41 @@ func TestReclaimIgnoresADetachedWorktree(t *testing.T) {
 	}
 	if _, err := os.Stat(wt); err != nil {
 		t.Errorf("the detached worktree must be left alone: %v", err)
+	}
+}
+
+// git protects its own main working tree from `worktree remove`, but a linked
+// one gets no such protection — it is removed even while a process is running
+// with that directory as its cwd, which is exactly what every git/gh call
+// tidy makes does (cfg.dir is always capture()'s working directory). An
+// operator who cd's into a finished issue's worktree and points -dir there
+// instead of at the main checkout must be refused, not have the ground
+// removed out from under the rest of the sweep.
+func TestReclaimRefusesToRemoveTheWorktreeItIsRunningFrom(t *testing.T) {
+	_, checkout := upstream(t)
+	mergeIssueBranch(t, checkout, "issue-8", "feature-8")
+	wt := filepath.Join(t.TempDir(), "issue-8-worktree")
+	gitAt(t, checkout, "worktree", "add", wt, "issue-8")
+
+	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"8": {Open: false}}})
+	cfg := tidyCfg(t, wt) // -dir points at the linked worktree itself
+
+	results, err := reclaim(context.Background(), cfg, true)
+	if err != nil {
+		t.Fatalf("reclaim: %v", err)
+	}
+	r := findTidyResult(t, results, 8)
+	if r.reclaimed {
+		t.Fatalf("tidy must not remove the worktree it is running from: %+v", r)
+	}
+	if !strings.Contains(r.reason, "running from") {
+		t.Errorf("reason = %q, want it to name this as the worktree tidy is running from", r.reason)
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Errorf("the worktree tidy is running from must still be there: %v", err)
+	}
+	if out := gitAt(t, checkout, "branch", "--list", "issue-8"); out == "" {
+		t.Error("branch issue-8 was deleted, but tidy must not touch the worktree it is running from")
 	}
 }
 
