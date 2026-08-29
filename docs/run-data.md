@@ -13,9 +13,10 @@ hash of the tool allowlist, the strategy knobs, and the three versions in play
 (this binary, the installed skill, and the
 Claude CLI). One more object per issue records how it ended —
 `merged`, `closed_unmerged` or `needs_human` — and, when it was handed back, why
-(`park_reason`: `budget`, `retries_exhausted`, `produced_nothing`, `no_skill`,
-`auth`, `conflict_remediation`, `checks_remediation`, `review_remediation`,
-`pr_state`, or `unknown` when the path could not say) — and, when GitHub could
+(`park_reason`: `budget`, `retries_exhausted`, `produced_nothing`,
+`permission_refused`, `no_skill`, `auth`, `conflict_remediation`,
+`checks_remediation`, `review_remediation`, `pr_state`, or `unknown` when the
+path could not say) — and, when GitHub could
 be asked, what the PR turned out to be: additions, deletions, changed files,
 how many reviews it drew, and when it opened and merged. That is one extra `gh pr view`
 as each issue ends, and none at all under `-metrics off`.

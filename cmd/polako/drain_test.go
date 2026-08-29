@@ -597,7 +597,7 @@ func TestDrainParksADeadIssueAndKeepsGoing(t *testing.T) {
 
 	out := buf.String()
 	for _, want := range []string{
-		"issue #1 needs a human: the run completed but produced no PR and no questions",
+		"issue #1 needs a human: the run completed without opening a PR",
 		// A park is when somebody wants to read what the run actually did, so
 		// the id that reopens it goes beside the reason — in the log, never in
 		// the reason itself, which is posted to the issue thread.
@@ -608,7 +608,7 @@ func TestDrainParksADeadIssueAndKeepsGoing(t *testing.T) {
 		// honest share of the bill is nothing.
 		"summary: 1 issue merged, 1 issue parked, $0.50 spent",
 		"merged  #2 ($0.00)",
-		"parked  #1 ($0.50) — the run completed but produced no PR and no questions",
+		"parked  #1 ($0.50) — the run completed without opening a PR",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log is missing %q\ngot:\n%s", want, out)
@@ -672,7 +672,7 @@ func TestDrainParkSaysWhatTheRunLeftBehind(t *testing.T) {
 
 	out := buf.String()
 	for _, want := range []string{
-		"the run completed but produced no PR and no questions; it has been resumed 2 times " +
+		"the run completed without opening a PR; it has been resumed 2 times " +
 			"after ending a turn without opening a PR and has still not opened one, which needs " +
 			"a human; branch issue-1 has 1 commit " +
 			"and its worktree has uncommitted changes in 1 file — the run left work behind, " +
@@ -728,7 +728,7 @@ func TestDrainParkSaysNothingExtraWhenTheRunLeftNothing(t *testing.T) {
 	}
 
 	out := buf.String()
-	if want := "parked  #1 ($0.50) — the run completed but produced no PR and no questions\n"; !strings.Contains(out, want) {
+	if want := "parked  #1 ($0.50) — the run completed without opening a PR\n"; !strings.Contains(out, want) {
 		t.Errorf("log is missing %q\ngot:\n%s", want, out)
 	}
 	for _, unwanted := range []string{"left work behind", "branch issue-1 has", "the work it left is in"} {
@@ -742,6 +742,65 @@ func TestDrainParkSaysNothingExtraWhenTheRunLeftNothing(t *testing.T) {
 	if got := strings.Count(out, "session started"); got != 1 {
 		t.Errorf("%d runs dispatched, want 1 — a run that left nothing must not be resumed\ngot:\n%s",
 			got, out)
+	}
+}
+
+// Issue #157: a run blocked on an ungranted tool used to park with the same
+// sentence as one that decided nothing, which is false reassurance — the run
+// asked something, it was just never posted where a person would see it. It
+// now gets its own category, a reason naming the actual fix, and — since
+// retrying replays the identical session against the identical allowlist —
+// parks on the first clean exit rather than spending the resume budget
+// rediscovering the same wall.
+func TestDrainParksAPermissionRefusalWithoutResuming(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "permissionblocked", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	cfg.shiftID = "shift99"
+	calls := filepath.Join(t.TempDir(), "gh-calls.log")
+	t.Setenv(fakeGhLogEnv, calls)
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a permission refusal must not end the drain: %v", err)
+	}
+
+	recs := terminalRecords(t, records, cfg.repo)
+	if len(recs) != 1 || recs[0].Outcome != issueNeedsHuman || recs[0].ParkReason != parkPermission {
+		t.Fatalf("terminal record = %+v, want needs_human / %s", recs, parkPermission)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"the run stopped to ask for a permission this allowlist does not grant",
+		"-add-tools",
+		// Both identifiers useless off this machine, and both log-only — see
+		// the checks against the fake gh call log below.
+		"issue #1: `claude --resume sess-blocked` reopens what the last skill run on it did",
+		"issue #1: `polako stats -shift shift99` reports on this shift alone",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
+	}
+	if got := strings.Count(out, "session started"); got != 1 {
+		t.Errorf("%d runs dispatched, want 1 — resuming would only replay the same refusal\ngot:\n%s",
+			got, out)
+	}
+
+	posted, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatalf("reading the fake gh call log: %v", err)
+	}
+	if want := "the run stopped to ask for a permission"; !strings.Contains(string(posted), want) {
+		t.Errorf("no gh call carried the reason to the thread\ngot:\n%s", posted)
+	}
+	for _, unwanted := range []string{"sess-blocked", "shift99"} {
+		if strings.Contains(string(posted), unwanted) {
+			t.Errorf("a gh call carried an operator-only identifier %q to the thread\ngot:\n%s", unwanted, posted)
+		}
 	}
 }
 
@@ -1192,7 +1251,7 @@ func TestDrainDoesNotReadStrayCommentsAsQuestions(t *testing.T) {
 	if got := st.Issues["1"].Labels; !slices.Contains(got, needsHumanLabel) {
 		t.Errorf("issue 1 labels = %v, want it parked rather than waited on", got)
 	}
-	if want := "the run completed but produced no PR and no questions"; !strings.Contains(buf.String(), want) {
+	if want := "the run completed without opening a PR"; !strings.Contains(buf.String(), want) {
 		t.Errorf("log is missing %q\ngot:\n%s", want, buf.String())
 	}
 }
@@ -2274,7 +2333,7 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 			tune:  func(_ *testing.T, cfg *config) { cfg.retries = 2 },
 			runs:  1, // nothing to salvage, so nothing to resume
 			check: func(t *testing.T, err error, st *ghState, out string) {
-				if got, want := parkedFor(t, err), "the run completed but produced no PR and no questions"; got != want {
+				if got, want := parkedFor(t, err), "the run completed without opening a PR"; got != want {
 					t.Errorf("park reason = %q, want %q", got, want)
 				}
 			},

@@ -228,7 +228,7 @@ func TestNotifyFiresWhenAnIssueParksAndWhenTheBacklogDrains(t *testing.T) {
 		notifyPrefix + "EVENT=parked",
 		notifyPrefix + "ISSUE=1",
 		notifyPrefix + "REPO=example/repo",
-		"no PR and no questions", // the park's own reason, so a hook can quote it
+		"without opening a PR", // the park's own reason, so a hook can quote it
 	} {
 		if !strings.Contains(got[0], want) {
 			t.Errorf("the park notification is missing %q\ngot: %s", want, got[0])

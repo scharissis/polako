@@ -148,7 +148,7 @@ A shift ends by telling you what it did:
 ```
 summary: 3 issues merged, 1 issue parked, $35.00 spent, 6h12m of wall clock
   merged  #14 ($9.80), #15 ($12.40), #17 ($8.60)
-  parked  #16 ($4.20) — the run completed but produced no PR and no questions
+  parked  #16 ($4.20) — the run completed without opening a PR
 ```
 
 ## Planning a backlog

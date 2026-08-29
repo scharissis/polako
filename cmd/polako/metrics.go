@@ -90,15 +90,20 @@ const (
 // record written before this field existed — that one carries nothing at all,
 // and stats counts it as unrecorded.
 const (
-	parkBudget    = "budget"            // a -max-cost or -max-issue-time cap
-	parkRetries   = "retries_exhausted" // claude kept dying and the resumes ran out
-	parkNothing   = "produced_nothing"  // a clean run that opened no PR and asked nothing
-	parkNoSkill   = "no_skill"          // -skill names nothing this installation has
-	parkAuth      = "auth"              // the API refused the token
-	parkConflicts = "conflict_remediation"
-	parkChecks    = "checks_remediation"
-	parkReview    = "review_remediation"
-	parkPRState   = "pr_state" // the PR is in a state the supervisor does not know
+	parkBudget  = "budget"            // a -max-cost or -max-issue-time cap
+	parkRetries = "retries_exhausted" // claude kept dying and the resumes ran out
+	parkNothing = "produced_nothing"  // a clean run that opened no PR and left nothing behind
+	parkNoSkill = "no_skill"          // -skill names nothing this installation has
+	parkAuth    = "auth"              // the API refused the token
+	// The run's own final words, retained now rather than dropped, asked to be
+	// granted a tool this allowlist refused. Filed apart from parkNothing for
+	// the same reason parkBudget and parkRetries already are: the lever is
+	// -add-tools, an operator setting, not the skill.
+	parkPermission = "permission_refused"
+	parkConflicts  = "conflict_remediation"
+	parkChecks     = "checks_remediation"
+	parkReview     = "review_remediation"
+	parkPRState    = "pr_state" // the PR is in a state the supervisor does not know
 	// Closed without merging — a human's decision, and the one park whose
 	// record says closed_unmerged rather than needs_human. recordIssue drops
 	// the reason there, because the outcome has already said it; the category
@@ -112,7 +117,7 @@ const (
 // merged. breakdown appends anything a newer version wrote, so the list never
 // has to be exhaustive.
 var parkReasonOrder = []string{parkNoSkill, parkAuth, parkBudget, parkRetries,
-	parkNothing, parkConflicts, parkChecks, parkReview, parkPRState, parkPRClosed, parkUnknown}
+	parkNothing, parkPermission, parkConflicts, parkChecks, parkReview, parkPRState, parkPRClosed, parkUnknown}
 
 // Where a run's numbers came from. Crash, stall and interrupt never emit a
 // result event, yet burned real tokens; those runs report the tally observed

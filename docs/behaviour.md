@@ -48,20 +48,31 @@ pick it straight back up — remove the label to put it back in. The process exi
 ```
 summary: 3 issues merged, 1 issue parked, $18.40 spent, 6h12m of wall clock
   merged  #14 ($4.90), #15 ($6.12), #17 ($5.11)
-  parked  #16 ($2.27) — the run completed but produced no PR and no questions
+  parked  #16 ($2.27) — the run completed without opening a PR
 ```
 
 Dollars appear only this shift spent some: one that merely waited on a PR
 an earlier process opened prints the line without them rather than claiming a
 free backlog.
 
-**A run that ends cleanly without a PR is not automatically a failure.** Three
+**A run that ends cleanly without a PR is not automatically a failure.** Four
 different runs end that way: one that was stuck or confused and decided nothing,
 one that finished the change and then ended its turn believing something would
-bring it back — under `claude -p` nothing will — and one that simply ran out of
-road mid-task. The last two have the work sitting on disk, so before it parks,
-`polako` asks git what is there: commits on `issue-N` ahead of the default
-branch, and uncommitted changes in the worktree.
+bring it back — under `claude -p` nothing will — one that simply ran out of
+road mid-task, and one that asked to be granted a tool the allowlist never
+included and got nobody to answer, since nothing was there to. The middle two
+have the work sitting on disk, so before it parks, `polako` asks git what is there: commits
+on `issue-N` ahead of the default branch, and uncommitted changes in the
+worktree. The fourth is read off the run's own final words instead, and parks
+straight away rather than being retried — resuming replays the same session
+against the same allowlist and hits the identical wall, so only `-add-tools`
+fixes it:
+
+```
+  parked  #16 ($2.27) — the run stopped to ask for a permission this allowlist
+  does not grant — add the missing tool with -add-tools, then remove
+  needs-human to retry
+```
 
 If it finds work, it resumes the session to finish it, telling that run outright
 that its turn ended the process and there is no later one. If it finds nothing,
@@ -74,7 +85,7 @@ ending its turn cannot outlive both caps. When a cap is what stopped one, the
 park says which:
 
 ```
-  parked  #16 ($2.27) — the run completed but produced no PR and no questions;
+  parked  #16 ($2.27) — the run completed without opening a PR;
   it has been resumed 2 times after ending a turn without opening a PR and has
   still not opened one, which needs a human; branch issue-16 has no commits and
   its worktree has uncommitted changes in 6 files — the run left work behind,
