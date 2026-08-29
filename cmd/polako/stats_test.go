@@ -16,7 +16,10 @@ import (
 // a hard kill, a field this reader has never seen, a record kind it has never
 // seen, an issue that reached a terminal state twice, a crash that streamed
 // tokens without ever reporting a result, and the resumed session that
-// finished its work.
+// finished its work. That last row's "resumed_from" equals its own "session"
+// on purpose, not by accident of the fixture: the CLI keeps the session id
+// across --resume, so the resume target is always the id the run then
+// reports (see runRecord.ResumedFrom).
 const fixtureMain = `
 {"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T09:20:00Z","repo":"scharissis/polako","issue":12,"pr":0,"reason":"implement","attempt":0,"session":"s12a","status":"ok","subtype":"success","outcome":"posted_questions","turns":20,"tool_uses":18,"wall_ms":1200000,"api_ms":900000,"cost_usd":1.10,"usage_source":"result","tokens":{"in":2000,"out":30000,"cache_read":4000000,"cache_write":200000},"model":"claude-opus-5","tag":"baseline","future_field":"a field written by a newer version"}
 {"v":1,"kind":"run","ts":"2026-08-20T12:30:00Z","ended":"2026-08-20T13:00:00Z","repo":"scharissis/polako","issue":12,"pr":34,"reason":"answers","attempt":0,"session":"s12b","status":"ok","subtype":"success","outcome":"opened_pr","turns":40,"tool_uses":35,"wall_ms":1800000,"api_ms":1400000,"cost_usd":2.50,"usage_source":"result","tokens":{"in":3000,"out":50000,"cache_read":6000000,"cache_write":300000},"model":"claude-opus-5","tag":"baseline"}
