@@ -5132,14 +5132,6 @@ func ensureIssueClosed(ctx context.Context, cfg config, issue, prNumber int) err
 	return nil
 }
 
-// cleanupWorktree removes the worktree the skill worked this issue in, once its
-// PR has merged. The path is resolved from `git worktree list`, never built: the
-// sibling convention holds for maybe half the worktrees that exist — a
-// desktop-app run puts its own somewhere else entirely — and a constructed path
-// that misses just discards the removal silently. Best-effort throughout: a
-// worktree that cannot be removed is the operator's to clear, not worth ending a
-// drain over, but it is said rather than swallowed.
-//
 // syncDefaultBranch brings the main checkout's default branch up to whatever
 // origin has. A drain never pulls — a human merges on GitHub and the drain only
 // watches — so the local ref falls a commit behind on every merge, and anything
@@ -5196,6 +5188,13 @@ func syncDefaultBranch(ctx context.Context, cfg config) {
 	}
 }
 
+// cleanupWorktree removes the worktree the skill worked this issue in, once its
+// PR has merged. The path is resolved from `git worktree list`, never built: the
+// sibling convention holds for maybe half the worktrees that exist — a
+// desktop-app run puts its own somewhere else entirely — and a constructed path
+// that misses just discards the removal silently. Best-effort throughout: a
+// worktree that cannot be removed is the operator's to clear, not worth ending a
+// drain over, but it is said rather than swallowed.
 func cleanupWorktree(ctx context.Context, cfg config, issue int) {
 	// prune runs whichever way the rest goes: it is what clears the admin
 	// entries whose directories a run already deleted by hand, and those exist
@@ -5220,9 +5219,21 @@ func cleanupWorktree(ctx context.Context, cfg config, issue int) {
 	// so a worktree still holding one is not this process's to delete. leftWork
 	// already discounts PLAN.md, which the skill leaves untracked in every
 	// worktree it creates and never cleans up.
-	if w := inspectLeftWork(ctx, cfg, issue); w.dirty > 0 {
+	w := inspectLeftWork(ctx, cfg, issue)
+	if w.path == "" {
+		// inspectLeftWork blanks the path when `git status` in the worktree
+		// could not be read — an index lock, a half-broken checkout. The
+		// directory is here (we just stat'd it), so this is "could not tell
+		// whether there is work in it", and forcing over an unknown is the
+		// thing this change exists to stop.
+		narrate(sevWarning, "could not check the worktree for %s at %s for uncommitted work — "+
+			"left it in place; inspect it and remove it by hand with `git worktree remove --force %s`",
+			branch, path, path)
+		return
+	}
+	if w.dirty > 0 {
 		narrate(sevWarning, "left the worktree for %s in place — %s has uncommitted changes in %s "+
-			"that the merge did not take; save or discard them, then `git worktree remove %s`",
+			"that the merge did not take; save or discard them, then `git worktree remove --force %s`",
 			branch, path, plural(w.dirty, "file"), path)
 		return
 	}
