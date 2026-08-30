@@ -845,9 +845,10 @@ func TestLogEventRendersProgressLines(t *testing.T) {
 		`{"type":"result","subtype":"success","duration_ms":1141000,"num_turns":74,"total_cost_usd":4.12,"is_error":false,` +
 			`"result":"Unknown skill: polako:implement-issue"}`,
 	}
+	var el eventLog
 	for _, e := range events {
 		if ev, ok := parseEvent([]byte(e)); ok {
-			logEvent(ev)
+			el.event(ev)
 		}
 	}
 
@@ -858,9 +859,10 @@ func TestLogEventRendersProgressLines(t *testing.T) {
 		"→ Bash: gh issue view 48",
 		"→ Write: PLAN.md",
 		// The result text must reach the log: for a run the CLI answered
-		// itself, it is the only place the diagnosis ever appears.
+		// itself, it is the only place the diagnosis ever appears. The
+		// "finished" line is dispatchClaude's to emit, not event's — see
+		// TestFinishLineRendersFromTheReport.
 		"Unknown skill: polako:implement-issue",
-		"finished (ok) — 74 turns, 19m1s, $4.12",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q\ngot:\n%s", want, out)
@@ -881,27 +883,54 @@ func TestLogEventNamesTheSession(t *testing.T) {
 	if !ok {
 		t.Fatal("init event should parse")
 	}
-	logEvent(ev)
+	(&eventLog{}).event(ev)
 	if want := "session started (model claude-opus-5, session 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9)"; !strings.Contains(buf.String(), want) {
 		t.Errorf("output missing %q\ngot:\n%s", want, buf.String())
 	}
 }
 
-func TestLogEventMarksErrorResults(t *testing.T) {
-	buf := captureLog(t)
-	ev, ok := parseEvent([]byte(`{"type":"result","subtype":"error_max_turns","num_turns":9,"is_error":true}`))
-	if !ok {
-		t.Fatal("a result event should parse")
+// finishLine renders the run's single finish milestone from the report, so a
+// run whose review gate woke it five times still finishes once — at the last
+// result's standing, not the first background task's.
+func TestFinishLineRendersFromTheReport(t *testing.T) {
+	feed := func(lines ...string) *runReport {
+		rep := &runReport{turns: -1}
+		for _, l := range lines {
+			ev, ok := parseEvent([]byte(l))
+			if !ok {
+				t.Fatalf("parseEvent rejected %s", l)
+			}
+			rep.observe(ev)
+		}
+		return rep
 	}
-	logEvent(ev)
-	got := buf.String()
-	if !strings.Contains(got, "finished (ERROR: error_max_turns)") {
-		t.Errorf("error results should be flagged\ngot: %s", got)
+
+	// The whole run's standing, not the first result event's: six results
+	// streamed, the last one is the run's.
+	sev, line := finishLine(feed(
+		`{"type":"result","subtype":"success","num_turns":16,"duration_ms":61000,"total_cost_usd":12.00}`,
+		`{"type":"result","subtype":"success","num_turns":74,"duration_ms":1141000,"total_cost_usd":29.57}`,
+	))
+	if sev != sevSuccess {
+		t.Errorf("sev = %v, want sevSuccess", sev)
 	}
-	// This event carries no result text — the shape old CLIs still send on
-	// every run — so nothing but the finished line may render.
-	if strings.Contains(got, "[claude] \n") {
-		t.Errorf("an absent result text must not render an empty line\ngot: %s", got)
+	if want := "[claude] finished (ok) — 74 turns, 19m1s, $29.57"; line != want {
+		t.Errorf("line = %q, want %q", line, want)
+	}
+
+	// An error subtype is named; is_error is the authority even when the
+	// subtype still says "success".
+	sev, line = finishLine(feed(`{"type":"result","subtype":"error_max_turns","num_turns":9,"is_error":true}`))
+	if sev != sevError {
+		t.Errorf("sev = %v, want sevError", sev)
+	}
+	if !strings.Contains(line, "finished (ERROR: error_max_turns)") {
+		t.Errorf("line = %q, want it to flag the error subtype", line)
+	}
+
+	sev, line = finishLine(feed(`{"type":"result","subtype":"success","is_error":true}`))
+	if sev != sevError || strings.Contains(line, "success") {
+		t.Errorf("line = %q (sev %v), want a bare ERROR with no self-contradicting subtype", line, sev)
 	}
 }
 

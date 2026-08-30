@@ -135,24 +135,42 @@ func wireSinks(t *testing.T, u *ui) {
 	})
 }
 
+// replayStream feeds a stream-json transcript through the two consumers
+// dispatchClaude wires up — the event renderer and the report — and then
+// emits the run's one finish milestone from the report the way dispatchClaude
+// does once the scan loop ends. It is the closest a unit test gets to a real
+// dispatch.
+func replayStream(t *testing.T, lines ...string) *runReport {
+	t.Helper()
+	var el eventLog
+	rep := &runReport{turns: -1}
+	for _, l := range lines {
+		ev, ok := parseEvent([]byte(l))
+		if !ok {
+			t.Fatalf("parseEvent rejected %s", l)
+		}
+		rep.observe(ev)
+		el.event(ev)
+	}
+	if rep.hasResult {
+		sev, line := finishLine(rep)
+		narrate(sev, "%s", line)
+	}
+	return rep
+}
+
 // The terminal's audience is an operator glancing over: a healthy run is a
 // pair of lines, and the conversation between them belongs to the shift log.
 func TestQuietTerminalShowsARunAsMilestones(t *testing.T) {
 	var term, file bytes.Buffer
 	wireSinks(t, &ui{terminal: &term, file: &file})
 
-	for _, line := range []string{
+	replayStream(t,
 		`{"type":"system","subtype":"init","model":"claude-opus-5","session_id":"sess-1"}`,
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"Gathering context on issue #48."}]}}`,
 		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"gh issue view 48"}}]}}`,
 		`{"type":"result","subtype":"success","num_turns":74,"duration_ms":1141000,"total_cost_usd":4.12,"result":"Done."}`,
-	} {
-		ev, ok := parseEvent([]byte(line))
-		if !ok {
-			t.Fatalf("parseEvent rejected %s", line)
-		}
-		logEvent(ev)
-	}
+	)
 
 	for _, want := range []string{"session started (model claude-opus-5", "finished (ok) — 74 turns"} {
 		if !strings.Contains(term.String(), want) {
@@ -181,11 +199,78 @@ func TestQuietTerminalStillShowsAnErrorsResultText(t *testing.T) {
 	if !ok {
 		t.Fatal("a result event should parse")
 	}
-	logEvent(ev)
+	(&eventLog{}).event(ev)
 
 	if !strings.Contains(term.String(), "Unknown skill") {
 		t.Errorf("an error's result text is the diagnosis and belongs on the terminal\ngot:\n%s", term.String())
 	}
+}
+
+// The CLI emits an init and a result per dequeued prompt, so a run whose
+// review gate wakes the main loop over and over streams several of each. Only
+// the run as a whole starts and finishes once; the rest are background tasks
+// returning and belong in the shift log, or a healthy run reads as a crash
+// loop that cost several times what it did (issue #224).
+func TestBackgroundTaskWakeupsDoNotRepeatTheMilestones(t *testing.T) {
+	var term, file bytes.Buffer
+	wireSinks(t, &ui{terminal: &term, file: &file})
+
+	replayStream(t,
+		`{"type":"system","subtype":"init","model":"claude-opus-5","session_id":"sess-1"}`,
+		`{"type":"result","subtype":"success","num_turns":16,"duration_ms":61000,"total_cost_usd":12.00,"result":"a"}`,
+		`{"type":"system","subtype":"init","model":"claude-opus-5","session_id":"sess-1"}`,
+		`{"type":"result","subtype":"success","num_turns":74,"duration_ms":1141000,"total_cost_usd":29.57,"result":"b"}`,
+	)
+
+	if got := strings.Count(term.String(), "session started"); got != 1 {
+		t.Errorf("terminal shows %d \"session started\", want 1\ngot:\n%s", got, term.String())
+	}
+	if got := strings.Count(term.String(), "finished ("); got != 1 {
+		t.Errorf("terminal shows %d finish lines, want 1\ngot:\n%s", got, term.String())
+	}
+	// The one finish line is the whole run's standing — the last result's
+	// numbers and cumulative cost, not the first background task's.
+	if !strings.Contains(term.String(), "finished (ok) — 74 turns, 19m1s, $29.57") {
+		t.Errorf("terminal finish line is not the run's standing\ngot:\n%s", term.String())
+	}
+	// The shift log still keeps every wakeup, worded for what it is.
+	if !strings.Contains(file.String(), "resumed after a background task") {
+		t.Errorf("shift log missing the repeated init\ngot:\n%s", file.String())
+	}
+}
+
+// The single finish line reflects how the run actually ended, not an earlier
+// result event: a transient error mid-stream must not bury a successful
+// finish, and a run that ends in error must say so however healthy it looked
+// on the way.
+func TestFinishLineReflectsTheFinalState(t *testing.T) {
+	t.Run("a later ok finish is not buried by an earlier error", func(t *testing.T) {
+		var term, file bytes.Buffer
+		wireSinks(t, &ui{terminal: &term, file: &file})
+		replayStream(t,
+			`{"type":"system","subtype":"init","model":"claude-opus-5"}`,
+			`{"type":"result","subtype":"error_max_turns","num_turns":9,"is_error":true}`,
+			`{"type":"result","subtype":"success","num_turns":40,"duration_ms":600000,"total_cost_usd":5.00}`,
+		)
+		if strings.Contains(term.String(), "ERROR") {
+			t.Errorf("an earlier error result must not be the operator's last word\ngot:\n%s", term.String())
+		}
+		if !strings.Contains(term.String(), "finished (ok) — 40 turns") {
+			t.Errorf("terminal missing the run's real finish\ngot:\n%s", term.String())
+		}
+	})
+	t.Run("a run that ends in error says so", func(t *testing.T) {
+		var term, file bytes.Buffer
+		wireSinks(t, &ui{terminal: &term, file: &file})
+		replayStream(t,
+			`{"type":"system","subtype":"init","model":"claude-opus-5"}`,
+			`{"type":"result","subtype":"success","num_turns":10}`,
+			`{"type":"result","subtype":"error_max_turns","num_turns":9,"is_error":true}`,
+		)
+		if !strings.Contains(term.String(), "finished (ERROR: error_max_turns)") {
+			t.Errorf("a run ending in error must say so on the terminal\ngot:\n%s", term.String())
+		}
+	})
 }
 
 func TestVerboseMirrorsDetailToTheTerminal(t *testing.T) {

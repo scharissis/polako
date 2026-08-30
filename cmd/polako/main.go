@@ -3668,6 +3668,7 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 64*1024), maxEventBytes)
 	missing := "" // the diagnosis, once the inventory rules the prompt's command out
+	var el eventLog
 	for sc.Scan() {
 		lastEvent.Store(time.Now().UnixNano())
 		ev, ok := parseEvent(sc.Bytes())
@@ -3683,7 +3684,7 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 			continue
 		}
 		rep.observe(ev)
-		logEvent(ev)
+		el.event(ev)
 		// An unknown slash command no longer shows up as a zero-turn exit:
 		// the CLI (2.1.85) answers it with an ordinary-looking success
 		// result. The init event's command inventory is the early tell, and
@@ -3726,6 +3727,16 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	rep.interrupted = ctx.Err() != nil
 	rep.overBudget = overspent.Load()
 	rep.stderrTail = errTail.String()
+	// One finish line for the run, emitted here rather than per result event:
+	// the CLI sends a result per dequeued prompt, so a run that woke on five
+	// background tasks streamed six, and observe has already reduced them to
+	// the last one's standing. Gated on a result having arrived at all — a
+	// crash, stall or interrupt reaches this line too, and each is reported as
+	// itself below, not as a finish.
+	if rep.hasResult {
+		sev, line := finishLine(&rep)
+		narrate(sev, "%s", line)
+	}
 	if rep.skillMissing {
 		return rep, fmt.Errorf("%w: %s", errNoWork, missing)
 	}
@@ -3768,11 +3779,28 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	return rep, err
 }
 
-// logEvent renders one stream-json event as a single progress line. The run's
-// start and finish are milestones; the turns between them — every tool call
-// and assistant message — are detail, so a watching terminal sees a run as a
-// pair of lines and the shift log keeps the whole conversation.
-func logEvent(ev streamEvent) {
+// eventLog carries the one thing rendering the stream needs to remember: that
+// this invocation has already announced itself. The CLI emits a system/init
+// event for every dequeued prompt, not once per process — so a review-gate
+// subagent finishing and waking the main loop looks byte-for-byte like a
+// session starting again (issue #224). The first init is the run's milestone;
+// the rest are that wakeup, and belong in the shift log rather than on an
+// operator's glance. Per invocation, not per process: a genuine --resume is a
+// new dispatchClaude call with a new eventLog, so it still announces itself,
+// and the drain_test.go assertions counting "session started" per run stay
+// exact.
+type eventLog struct {
+	started bool
+}
+
+// event renders one stream-json event as a single progress line. A run's start
+// is a milestone and its finish is another — but the finish is emitted once by
+// dispatchClaude from the whole run's standing (finishLine), because the CLI
+// sends a result event per dequeued prompt and only the last one is the run's.
+// The turns between start and finish — every tool call and assistant message —
+// are detail, so a watching terminal sees a run as a pair of lines and the
+// shift log keeps the whole conversation.
+func (el *eventLog) event(ev streamEvent) {
 	switch ev.Type {
 	case "system":
 		if ev.Subtype == "init" {
@@ -3784,6 +3812,14 @@ func logEvent(ev streamEvent) {
 			if ev.SessionID != "" {
 				session = ", session " + ev.SessionID
 			}
+			if el.started {
+				// A later init is the main loop waking on a finished background
+				// task, not a new session — same model, same id. To the shift
+				// log, so a heavy review gate does not read as a crash loop.
+				detail.Printf("[claude] resumed after a background task (model %s%s)", ev.Model, session)
+				return
+			}
+			el.started = true
 			log.Printf("[claude] session started (model %s%s)", ev.Model, session)
 		}
 	case "assistant":
@@ -3798,11 +3834,13 @@ func logEvent(ev streamEvent) {
 			}
 		}
 	case "result":
-		// The final text first: for a healthy run it restates the last
-		// assistant message, but a result the CLI synthesized itself —
-		// "Unknown skill: x" — appears nowhere else in the stream, and is
-		// usually the whole diagnosis. That is why an error's text is a
-		// milestone while a healthy run's is detail.
+		// The result text: for a healthy run it restates the last assistant
+		// message and is detail, but a result the CLI synthesized itself —
+		// "Unknown skill: x" — appears nowhere else in the stream and is
+		// usually the whole diagnosis, so an error's text is a milestone. The
+		// "finished" line itself is not emitted here — see finishLine — because
+		// a background-task wakeup ends with its own result event too, and ten
+		// of those read as a run that cost ten times what it did.
 		if t := strings.TrimSpace(ev.Result); t != "" {
 			if ev.IsError {
 				log.Printf("[claude] %s", clip(t, 160))
@@ -3810,23 +3848,27 @@ func logEvent(ev streamEvent) {
 				detail.Printf("[claude] %s", clip(t, 160))
 			}
 		}
-		status := "ok"
-		if ev.IsError {
-			// is_error is the authority, not the subtype: the CLI reports an
-			// authentication failure as is_error with subtype "success",
-			// which rendered as the self-contradicting "ERROR: success".
-			status = "ERROR"
-			if ev.Subtype != "" && ev.Subtype != "success" {
-				status += ": " + ev.Subtype
-			}
-		}
-		sev := sevSuccess
-		if ev.IsError {
-			sev = sevError
-		}
-		narrate(sev, "[claude] finished (%s) — %d turns, %s, $%.2f", status, ev.NumTurns,
-			(time.Duration(ev.DurationMS) * time.Millisecond).Round(time.Second), ev.TotalCost)
 	}
+}
+
+// finishLine renders a run's one finish milestone from the report observe
+// built — the last result event's standing, the same numbers the run record
+// and the exit status carry. Its caller emits it once, after the stream ends,
+// only when a result actually arrived: a crash, a stall or an interrupt is the
+// caller's to report, not a finish.
+func finishLine(rep *runReport) (severity, string) {
+	status, sev := "ok", sevSuccess
+	if rep.isError {
+		// is_error is the authority, not the subtype: the CLI reports an
+		// authentication failure as is_error with subtype "success", which
+		// rendered as the self-contradicting "ERROR: success".
+		status, sev = "ERROR", sevError
+		if rep.subtype != "" && rep.subtype != "success" {
+			status += ": " + rep.subtype
+		}
+	}
+	return sev, fmt.Sprintf("[claude] finished (%s) — %d turns, %s, $%.2f", status, rep.turns,
+		(time.Duration(rep.wallMS) * time.Millisecond).Round(time.Second), rep.costUSD)
 }
 
 // toolDetail extracts the most human-useful field from a tool's input.
