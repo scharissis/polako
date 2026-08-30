@@ -112,6 +112,15 @@ type fakeIssue struct {
 	// a gh whose blockedBy support does not carry one, standing in for
 	// whatever the real shape turns out to omit.
 	BlockedByNoState []int `json:"blocked_by_no_state"`
+
+	// Mine marks an issue this fake gh's authenticated account created — every
+	// issue `issue create` files, and what `issue list --author @me` filters to.
+	// It is how `polako plan`'s label pass tells its own run's output from an
+	// issue a person filed by hand mid-run.
+	Mine bool `json:"mine"`
+	// Milestone is the title `issue edit --milestone` set, or an `issue create`
+	// carried — all the plan label pass reads or writes here.
+	Milestone string `json:"milestone"`
 }
 
 type fakePR struct {
@@ -261,7 +270,7 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 		return fmt.Sprintf(`{"nameWithOwner":%q,"visibility":%q}`, st.Repo, vis), false, 0
 
 	case "issue list":
-		return listIssues(st, flagVal("--label"), flagVal("--json"))
+		return listIssues(st, flagVal("--label"), flagVal("--author"), flagVal("--json"))
 
 	case "issue view":
 		is := issue()
@@ -316,8 +325,9 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 		return "[" + strings.Join(comments, ",") + "]", counting, 0
 
 	case "issue create":
-		// The only shape `plan` preflight makes: the `--parent` capability
-		// probe. A gh with sub-issue support lists the flag in its help.
+		// `plan` preflight makes the `--parent` capability probe; a real plan
+		// run makes the creates themselves. A gh with sub-issue support lists
+		// the flag in its help.
 		if slices.Contains(args, "--help") {
 			help := "Create a new issue\n\nFLAGS\n  -b, --body string   Supply a body.\n"
 			if !st.NoSubIssues {
@@ -325,13 +335,42 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			}
 			return help, false, 0
 		}
-		fmt.Fprintf(os.Stderr, "fake gh: unhandled `issue create` %q\n", strings.Join(args, " "))
-		return "", false, 1
+		// A real create: file the next-numbered issue, open, authored by @me.
+		// Labels are validated against the repository the way GitHub does, so a
+		// smuggled label has to be one a test actually declared.
+		next := 1
+		for k := range st.Issues {
+			if n, err := strconv.Atoi(k); err == nil && n >= next {
+				next = n + 1
+			}
+		}
+		created := &fakeIssue{Open: true, Mine: true}
+		for i := 0; i+1 < len(args); i++ {
+			switch args[i] {
+			case "--label":
+				if !slices.Contains(st.Labels, args[i+1]) {
+					fmt.Fprintf(os.Stderr, "could not add label: '%s' not found\n", args[i+1])
+					return "", false, 1
+				}
+				created.Labels = append(created.Labels, args[i+1])
+			case "--milestone":
+				created.Milestone = args[i+1]
+			}
+		}
+		if st.Issues == nil {
+			st.Issues = map[string]*fakeIssue{}
+		}
+		st.Issues[strconv.Itoa(next)] = created
+		return fmt.Sprintf("https://github.com/%s/issues/%d\n", st.Repo, next), true, 0
 
 	case "issue edit":
 		is := issue()
 		if is == nil {
 			return "", false, 1
+		}
+		if ms := flagVal("--milestone"); ms != "" {
+			is.Milestone = ms
+			return "", true, 0
 		}
 		if label := flagVal("--remove-label"); label != "" {
 			is.Labels = slices.DeleteFunc(is.Labels, func(l string) bool { return l == label })
@@ -510,10 +549,12 @@ func commitsJSON(committedAt string) string {
 // fields is what the caller asked for, because three things turn on it: an old
 // gh refuses the call outright rather than the field, a payload only carries
 // the sub-issue rollup when the rollup was asked for, and the same for the
-// blockedBy connection.
-func listIssues(st *ghState, label, fields string) (out string, changed bool, code int) {
+// blockedBy connection and the milestone. author is `--author @me` when the
+// plan label pass wants only what this account filed, "" otherwise.
+func listIssues(st *ghState, label, author, fields string) (out string, changed bool, code int) {
 	subIssues := strings.Contains(fields, "subIssuesSummary")
 	blockedBy := strings.Contains(fields, "blockedBy")
+	milestone := strings.Contains(fields, "milestone")
 	if (subIssues || blockedBy) && st.OldGh {
 		// Refused before any listing happens, so no countdown ticks: what gh
 		// checks here is its own field table, not the repository. Both
@@ -553,11 +594,21 @@ func listIssues(st *ghState, label, fields string) (out string, changed bool, co
 		if !is.Open || (label != "" && !slices.Contains(is.Labels, label)) {
 			continue
 		}
+		if author == "@me" && !is.Mine {
+			continue
+		}
 		var labels []string
 		for _, l := range is.Labels {
 			labels = append(labels, fmt.Sprintf(`{"name":%q}`, l))
 		}
 		row := fmt.Sprintf(`{"number":%d,"labels":[%s]`, n, strings.Join(labels, ","))
+		if milestone {
+			if is.Milestone == "" {
+				row += `,"milestone":null`
+			} else {
+				row += fmt.Sprintf(`,"milestone":{"title":%q}`, is.Milestone)
+			}
+		}
 		if subIssues {
 			// The whole rollup rather than the two numbers the queue reads, so
 			// the payload is the shape gh really hands back.

@@ -5,13 +5,20 @@ package main
 // it proposes a curated backlog — epics and one-PR issues — behind the
 // `proposed` label a human lifts to queue the work.
 //
-// This is the verb's skeleton: dispatch, its own FlagSet, preflight with the
-// `--parent` capability probe and the batch milestone, and a working
-// `-dry-run`. The run itself — spawning claude, counting issues against the
-// cap, and the label pass that normalises what the run created so the curation
-// gate does not depend on the model remembering — arrives with issue #103. So
-// until then a real (non-`-dry-run`) invocation refuses: at no commit can
-// `polako plan` start a run the label pass does not police.
+// The run is one claude invocation through execClaude — the same entry `work`
+// uses — bracketed by two enforcement mechanisms that make the curation gate
+// structural rather than a thing the model has to remember:
+//
+//   - the cap. dispatchClaude counts `gh issue create` tool calls and kills the
+//     run at -max-issues, the way it kills a stalled one.
+//   - the label pass. runPlan snapshots the open backlog before the run and,
+//     after it — always, even on a crash, a cap kill or a Ctrl+C — normalises
+//     every issue this account created since to carry *exactly* the `proposed`
+//     label, and attaches the batch milestone to any the skill missed. A
+//     failure to label is reported loudly, never swallowed.
+//
+// Run-data records and the notify event are not wired yet (issue #next); the
+// flags for them parse and are otherwise inert.
 
 import (
 	"context"
@@ -24,6 +31,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -57,15 +65,6 @@ const planTools = "Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git 
 	"Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh search issues:*),Bash(gh issue create:*)," +
 	"Read,Glob,Grep,TodoWrite,Write"
 
-// planNotRunnableErr is what a real (non-`-dry-run`) `polako plan` returns
-// until issue #103 lands the run path and its label pass. Naming #103 keeps
-// the operator from filing "plan is broken" and points them at `-dry-run`
-// meanwhile.
-var planNotRunnableErr = errors.New("polako plan cannot start a run yet: the run path — spawning the skill, " +
-	"holding it to -max-issues, and the label pass that normalises what it created so the curation gate " +
-	"does not depend on the model — arrives with issue #103. Until then, `polako plan -dry-run` prints the " +
-	"invocation it will make.")
-
 // planBriefMax is where -h stops taking a -brief and starts advising a file: a
 // vision past a couple of thousand characters is a document, and belongs in one
 // so the provenance footer can carry its sha.
@@ -93,9 +92,10 @@ type planOptions struct {
 }
 
 // runPlan is the `plan` subcommand: parse its own flags, preflight, then either
-// print the invocation a run would make (-dry-run) or refuse until #103 lands
-// the run path. Its config is built the lightweight way status's and tidy's
-// are, not work's heavier preflight.
+// print the invocation a run would make (-dry-run) or make it — snapshot the
+// backlog, spawn the skill through execClaude, and run the label pass over
+// whatever it created. Its config is built the lightweight way status's and
+// tidy's are, not work's heavier preflight.
 func runPlan(ctx context.Context, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("plan", flag.ContinueOnError)
 	fs.SetOutput(out)
@@ -114,21 +114,21 @@ func runPlan(ctx context.Context, args []string, out io.Writer) error {
 	fs.StringVar(&opt.permissionMode, "permission-mode", "acceptEdits", "claude --permission-mode")
 	fs.StringVar(&opt.tools, "tools", planTools, "comma-separated --allowedTools for the run (replaces the default plan set)")
 	fs.StringVar(&opt.addTools, "add-tools", "", "extra --allowedTools entries, appended to -tools instead of replacing it")
-	fs.DurationVar(&opt.stall, "stall", 15*time.Minute, "kill and resume a run with no output events for this long (0 disables)")
-	fs.Float64Var(&opt.maxCost, "max-cost", 0, "stop the run once it has cost this many dollars (0 disables)")
-	fs.StringVar(&opt.metrics, "metrics", "", `directory for run-data records, or "off" (default ~/.polako/metrics)`)
-	fs.StringVar(&opt.tag, "run-tag", "", "label recorded with the run, for comparing one batch against another")
+	fs.DurationVar(&opt.stall, "stall", 15*time.Minute, "kill a run with no output events for this long (0 disables)")
+	fs.Float64Var(&opt.maxCost, "max-cost", 0, "warn once the run has cost this many dollars (0 disables; advisory — a one-shot run has no next run to bound)")
+	fs.StringVar(&opt.metrics, "metrics", "", `directory for run-data records, or "off" (default ~/.polako/metrics) — inert until run-data lands`)
+	fs.StringVar(&opt.tag, "run-tag", "", "label recorded with the run, for comparing one batch against another — inert until run-data lands")
 	fs.StringVar(&opt.notifyCmd, "notify", "",
-		"command to run when the run needs a human, with context in "+notifyPrefix+"* (see docs/reference.md)")
+		"command checked at preflight, for the human-needed hook — inert until the notify event lands (see docs/reference.md)")
 	fs.BoolVar(&opt.dryRun, "dry-run", false,
 		"resolve the document, print the claude invocation the run would get, and exit without running or writing anything")
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako plan (-vision <doc> | -brief \"<text>\") [flags]\n\n"+
 			"Propose a curated backlog from a vision document: run the plan-backlog skill\n"+
 			"unattended, filing epics and one-PR issues behind the `proposed` label a human\n"+
-			"lifts to queue the work.\n\n"+
-			"Skeleton for now — a real run refuses until the enforcing label pass lands (#103);\n"+
-			"`polako plan -dry-run` prints the invocation it will make.\n\n"+envUsage+"\nFlags:\n")
+			"lifts to queue the work. Every issue the run creates is normalised to carry\n"+
+			"exactly that label before this exits, and the run is capped at -max-issues.\n\n"+
+			"`polako plan -dry-run` prints the invocation a run would make and touches nothing.\n\n"+envUsage+"\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	if err := applyEnvDefaults(fs); err != nil {
@@ -148,19 +148,271 @@ func runPlan(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	// Refuse before preflight, not after: a real run cannot start until #103, and
-	// preflight's gate declaration writes to GitHub (the `proposed` label, the
-	// batch milestone). Running it first would leave those behind as the side
-	// effect of a `polako plan` that then reports it did nothing — the trap a
-	// forgotten -dry-run falls into.
-	if !opt.dryRun {
-		return planNotRunnableErr
-	}
 	milestone, hierarchical, err := planPreflight(ctx, &cfg, &opt)
 	if err != nil {
 		return err
 	}
-	return planDryRun(cfg, opt, milestone, hierarchical, out)
+	if opt.dryRun {
+		return planDryRun(cfg, opt, milestone, hierarchical, out)
+	}
+	return planRun(ctx, cfg, opt, milestone, out)
+}
+
+// planRun is a real `polako plan`: snapshot the open backlog, spawn the skill
+// through execClaude, then — whatever the run's own outcome — normalise every
+// issue this account created since. The snapshot has to be taken here rather
+// than inside planNormalise, before the run rather than after, so an issue a
+// person files by hand mid-run is told apart from one the skill created.
+func planRun(ctx context.Context, cfg config, opt planOptions, milestone string, out io.Writer) error {
+	before, err := planOpenIssues(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("could not read the backlog before the run (is gh authenticated for %s?): %w",
+			cfg.repo, err)
+	}
+
+	prompt := planPrompt(cfg, opt)
+	log.Printf("running %s from %s — capped at %s", cfg.skill, planPromptLabel(opt), plural(opt.maxIssues, "issue"))
+	rep, runErr := execClaude(ctx, cfg, prompt, "", cfg.skill, 0)
+
+	// The label pass runs no matter how the run ended — a clean finish, the cap
+	// kill, a crash, a Ctrl+C. The curation gate is the whole point of the verb,
+	// and an issue the run filed but this process never labelled is an
+	// unguarded proposal an unattended drain would pick up. So it always gets
+	// its own context, detached from the parent's cancellation and bounded on
+	// its own — a shutdown signal that lands mid-pass must not be what strands
+	// a proposal unlabelled.
+	passCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	defer cancel()
+	if ctx.Err() != nil {
+		narrate(sevWarning, "the run was interrupted — still normalising anything it created before exiting")
+	}
+	pass := planNormalise(passCtx, cfg, before, milestone)
+	pass.report(opt, rep)
+
+	// Order of the exit conditions: a failed label pass is the loudest, because
+	// it means a proposal may be sitting unguarded. Then an interrupt — the
+	// operator's own doing, reported as itself and not as a crash. Then the
+	// run's own failure.
+	if perr := pass.err(); perr != nil {
+		return perr
+	}
+	if ctx.Err() != nil {
+		// dispatchClaude returns the raw "signal: killed" wait error on a
+		// context kill, not context.Canceled, so the interrupt has to be read
+		// from the context itself — the same check processIssue makes.
+		return ctx.Err()
+	}
+	switch {
+	case runErr == nil:
+		return nil
+	case errors.Is(runErr, errPlanCap):
+		// Not an error to the operator: the cap is a setting they chose, the
+		// run did what it was told, and the pass above already normalised
+		// everything. Reported, not raised.
+		return nil
+	case errors.Is(runErr, errNoWork):
+		return fmt.Errorf("%w — check that -skill %q names a skill this installation has; "+
+			"plugin skills are namespaced <plugin>:<skill>", runErr, cfg.skill)
+	case errors.Is(runErr, errAuth):
+		return authAdvice(runErr)
+	default:
+		return fmt.Errorf("the plan run did not finish cleanly: %w — any %s it did create are labelled; "+
+			"rerun `polako plan` to continue, the skill deduplicates from GitHub", runErr, proposedLabel)
+	}
+}
+
+// planPromptLabel names what a run is planning from, for the one log line that
+// announces it — the document path, or that it is an inline brief.
+func planPromptLabel(opt planOptions) string {
+	if opt.vision != "" {
+		return opt.vision
+	}
+	return "an inline brief"
+}
+
+// planOpenIssues is the set of open issue numbers before the run — the baseline
+// the label pass diffs against, so an issue a person files by hand while the
+// run is going is told apart from one the skill created. Open issues only: a
+// proposal is created open, and a closed one is nothing an unattended drain
+// would ever pick up.
+func planOpenIssues(ctx context.Context, cfg config) (map[int]bool, error) {
+	raw, err := gh(ctx, cfg, "issue", "list", "--state", "open", "--limit", "1000", "--json", "number")
+	if err != nil {
+		return nil, err
+	}
+	var rows []struct {
+		Number int `json:"number"`
+	}
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil, fmt.Errorf("unreadable issue list: %w", err)
+	}
+	seen := make(map[int]bool, len(rows))
+	for _, r := range rows {
+		seen[r.Number] = true
+	}
+	return seen, nil
+}
+
+// planPassOutcome is what the enforcing label pass did — reported once, and
+// turned into planRun's exit status. failures is the load-bearing field: an
+// action that did not take means a proposal may be sitting unguarded, so it is
+// collected here rather than swallowed and it makes `polako plan` exit nonzero.
+type planPassOutcome struct {
+	created   int      // new issues this account was found to have filed
+	labelled  []int    // issues confirmed to carry exactly proposedLabel afterwards
+	stripped  int      // stray labels removed, across all of them
+	milestone []int    // issues the batch milestone was newly attached to
+	failures  []string // one line per action that did not take — loud
+	listErr   error    // the after-listing itself failed: nothing could be checked
+}
+
+// planNormalise is the enforcing label pass. It lists the issues this gh
+// account has open, keeps the ones absent from `before` and numbered above
+// everything that was there — the run's own output — and forces each to carry
+// *exactly* proposedLabel, attaching the batch milestone to any that has none.
+// This is what keeps the `-label` queue-gate humans-only: `Bash(gh issue
+// create:*)` is a prefix and no prefix can say "create, but not with that
+// flag", so the create stays wide and the cleanup happens here.
+//
+// The `> maxBefore` guard is what makes the truncation of either listing safe:
+// GitHub issue numbers only ever climb, so anything the run filed outnumbers
+// everything open before it, and an old issue this account filed that fell off
+// the end of the `before` page is never mistaken for the run's own.
+func planNormalise(ctx context.Context, cfg config, before map[int]bool, milestone string) planPassOutcome {
+	var out planPassOutcome
+	maxBefore := 0
+	for n := range before {
+		if n > maxBefore {
+			maxBefore = n
+		}
+	}
+	raw, err := gh(ctx, cfg, "issue", "list", "--author", "@me", "--state", "open",
+		"--limit", "1000", "--json", "number,labels,milestone")
+	if err != nil {
+		out.listErr = err
+		return out
+	}
+	var rows []struct {
+		Number int `json:"number"`
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+		Milestone *struct {
+			Title string `json:"title"`
+		} `json:"milestone"`
+	}
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		out.listErr = fmt.Errorf("unreadable issue list: %w", err)
+		return out
+	}
+
+	for _, r := range rows {
+		if before[r.Number] || r.Number <= maxBefore {
+			continue // there before the run — not ours to touch
+		}
+		out.created++
+		n := strconv.Itoa(r.Number)
+		clean := true
+
+		hasProposed := false
+		for _, l := range r.Labels {
+			if l.Name == proposedLabel {
+				hasProposed = true
+				continue
+			}
+			if _, err := gh(ctx, cfg, "issue", "edit", n, "--remove-label", l.Name); err != nil {
+				out.failures = append(out.failures,
+					fmt.Sprintf("could not strip %q from #%d: %v", l.Name, r.Number, err))
+				clean = false
+				continue
+			}
+			log.Printf("plan: stripped %q from #%d — a proposal carries only %s", l.Name, r.Number, proposedLabel)
+			out.stripped++
+		}
+		if !hasProposed {
+			if _, err := gh(ctx, cfg, "issue", "edit", n, "--add-label", proposedLabel); err != nil {
+				out.failures = append(out.failures,
+					fmt.Sprintf("could not add %s to #%d: %v", proposedLabel, r.Number, err))
+				clean = false
+			} else {
+				log.Printf("plan: labelled #%d %s", r.Number, proposedLabel)
+			}
+		}
+		if clean {
+			out.labelled = append(out.labelled, r.Number)
+		}
+
+		if milestone != "" && (r.Milestone == nil || strings.TrimSpace(r.Milestone.Title) == "") {
+			if _, err := gh(ctx, cfg, "issue", "edit", n, "--milestone", milestone); err != nil {
+				out.failures = append(out.failures,
+					fmt.Sprintf("could not attach the %q milestone to #%d: %v", milestone, r.Number, err))
+			} else {
+				log.Printf("plan: attached the %q milestone to #%d", milestone, r.Number)
+				out.milestone = append(out.milestone, r.Number)
+			}
+		}
+	}
+	return out
+}
+
+// report says what the pass did, at the severity the outcome earns: an error
+// when it could not even list what to check, a warning when the run was capped
+// or overspent, success otherwise. The -max-cost check lives here because a
+// one-shot run has no next run for it to bound — unlike `work`, where the same
+// flag stops the drain dispatching another — so all it can do is say so.
+func (o planPassOutcome) report(opt planOptions, rep runReport) {
+	if o.listErr != nil {
+		narrate(sevError, "plan: could not list what the run created to normalise it (%v) — "+
+			"check the backlog for issues missing the %s label", o.listErr, proposedLabel)
+		return
+	}
+	if opt.maxCost > 0 && rep.costUSD >= opt.maxCost {
+		narrate(sevWarning, "plan: the run cost $%.2f, at or past the -max-cost of $%.2f", rep.costUSD, opt.maxCost)
+	}
+	sev := sevSuccess
+	if rep.capped || len(o.failures) > 0 {
+		sev = sevWarning
+	}
+	narrate(sev, "plan: %s", o.summary(rep))
+}
+
+func (o planPassOutcome) summary(rep runReport) string {
+	if o.created == 0 {
+		if rep.capped {
+			return "the run was capped before it created anything"
+		}
+		return "the run created no issues"
+	}
+	s := fmt.Sprintf("%s created, %d normalised to %s",
+		plural(o.created, "issue"), len(o.labelled), proposedLabel)
+	if o.stripped > 0 {
+		s += fmt.Sprintf(" (%s stripped)", plural(o.stripped, "stray label"))
+	}
+	if len(o.milestone) > 0 {
+		s += fmt.Sprintf(", milestone attached to %d", len(o.milestone))
+	}
+	if rep.capped {
+		s += " — stopped at the -max-issues cap"
+	}
+	if len(o.failures) > 0 {
+		s += fmt.Sprintf(" — %s FAILED, see above", plural(len(o.failures), "action"))
+	}
+	return s
+}
+
+// err is the pass's verdict as planRun's exit status: nil unless something did
+// not take, loud otherwise. A failed pass outranks a failed run in planRun,
+// because an unguarded proposal is the worse outcome to leave unsaid.
+func (o planPassOutcome) err() error {
+	if o.listErr != nil {
+		return fmt.Errorf("the label pass could not run (%w) — issues the run created may be unlabelled; "+
+			"list the backlog and add the %s label to any proposal missing it", o.listErr, proposedLabel)
+	}
+	if len(o.failures) == 0 {
+		return nil
+	}
+	return fmt.Errorf("the label pass left %s unapplied, so a proposal may be unguarded — "+
+		"fix by hand:\n  %s", plural(len(o.failures), "issue action"), strings.Join(o.failures, "\n  "))
 }
 
 // planConfig validates the vision/brief pair and builds the config the gh
@@ -197,6 +449,7 @@ func planConfig(opt *planOptions) (config, error) {
 		addTools:       opt.addTools,
 		stall:          opt.stall,
 		maxCost:        opt.maxCost,
+		maxIssues:      opt.maxIssues,
 		tag:            opt.tag,
 		notifyCmd:      opt.notifyCmd,
 		dryRun:         opt.dryRun,
@@ -216,10 +469,6 @@ func planConfig(opt *planOptions) (config, error) {
 // before a permission prompt can, and — for a real run only — the `proposed`
 // label and the batch milestone are ensured. A dry run declares nothing: it
 // runs the probe (a read) but creates no label and no milestone.
-//
-// Until #103 lands the run path, runPlan only reaches this on a dry run — a
-// real run refuses ahead of it. The !opt.dryRun branch is here, and tested,
-// so #103 wires the spawn by moving that refusal rather than by writing this.
 func planPreflight(ctx context.Context, cfg *config, opt *planOptions) (milestone string, hierarchical bool, err error) {
 	for _, bin := range []string{cfg.claudeBin, cfg.ghBin, "git"} {
 		if _, err := exec.LookPath(bin); err != nil {
@@ -256,10 +505,9 @@ func planPreflight(ctx context.Context, cfg *config, opt *planOptions) (mileston
 		}
 	}
 
-	// Discovered here rather than mid-run: an older gh with no sub-issue support
-	// would raise a permission prompt on `--parent` that an unattended run has
-	// nobody to answer. The skill takes its own fallback from the flag it is
-	// handed once #103 wires the spawn.
+	// Probed here so a dry run can report the shape a real run would take. The
+	// run itself does not need telling: the skill derives flat-vs-hierarchical
+	// from its own `gh issue create` error (see planPrompt).
 	hierarchical = ghCreatesSubIssues(ctx, *cfg)
 
 	milestone = planMilestoneTitle(opt)
@@ -378,15 +626,25 @@ func planDryRun(cfg config, opt planOptions, milestone string, hierarchical bool
 	return err
 }
 
-// planArgs is the headless plan invocation, built through buildArgs so a
-// dry run prints the argv #103's real dispatch will make rather than a second
+// planArgs is the headless plan invocation, built through buildArgs so a dry
+// run prints the exact argv planRun's real dispatch makes rather than a second
 // rendering of it — the pair that drifts the first time either side changes.
 func planArgs(cfg config, opt planOptions) []string {
+	return buildArgs(cfg, planPrompt(cfg, opt), "")
+}
+
+// planPrompt is the -p string the skill is invoked with: the slash command and
+// its two declared arguments, the document (or brief) and the optional focus.
+// Just those two — the shipped plan-backlog SKILL.md declares `arguments:
+// [vision, focus]` and nothing more: it derives flat-vs-hierarchical from its
+// own `gh issue create` error, and the batch milestone is attached binary-side
+// by the label pass, so there is nothing more for the prompt to carry.
+func planPrompt(cfg config, opt planOptions) string {
 	prompt := "/" + cfg.skill + " " + planSlashArg(planPromptSubject(opt))
 	if opt.focus != "" {
 		prompt += " " + planSlashArg(opt.focus)
 	}
-	return buildArgs(cfg, prompt, "")
+	return prompt
 }
 
 // planPromptSubject is the skill's first argument: the document path, or the
@@ -400,11 +658,8 @@ func planPromptSubject(opt planOptions) string {
 
 // planSlashArg wraps a slash-command argument in double quotes when it carries
 // whitespace, so the skill sees one argument rather than several, escaping any
-// embedded quote so the wrapping is not closed early. The exact quoting the
-// Claude CLI's slash-argument tokenizer wants is #103's to pin down when it
-// wires the spawn — this is the dry-run preview's best guess until then, and a
-// vision path or focus steer carrying a literal quote is the rare case it is
-// hedging against.
+// embedded quote so the wrapping is not closed early. A vision path or focus
+// steer carrying a literal quote is the rare case the escaping hedges against.
 func planSlashArg(s string) string {
 	if !strings.ContainsAny(s, " \t\"") {
 		return s
