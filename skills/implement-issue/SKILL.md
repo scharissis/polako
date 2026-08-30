@@ -234,15 +234,24 @@ don't post again, and stop.
       one whose sha is *not* an ancestor of current HEAD — nothing reviewed
       yet, or history moved in some way this shortcut can't account for —
       runs c and d in full.
-   c. Invoke `/code-review high issue-$issue` — no `--fix`. Name the branch
-      every time: the review forks a fresh agent that starts in the
-      session's cwd, which this skill never moves, so with no target it
-      reviews whatever that cwd holds instead — the main checkout on a
-      clean default branch under most invocations, meaning a change someone
-      already merged. The Skill call blocks until the review hands back its
-      findings — the finder subagents it fans out are the review's own to
-      await, not something this run watches with `ListAgents` or a poll loop
-      beside it, and issue #217 is a run that did exactly that on this gate.
+   c. Invoke `/code-review high issue-$issue`, and in the same request tell
+      the review its agent and every subagent under it must read and write
+      in `<worktree>` (its absolute path) — no `--fix`. Both halves aim the
+      review and neither is optional: the branch aims what it diffs,
+      `<worktree>` aims where it works. The review takes one branch or path
+      as its target, so the worktree goes in as that instruction rather
+      than a second target. Without it the review forks a fresh
+      agent that starts in the session's cwd, which this skill never moves,
+      so it reviews whatever that cwd holds — the main checkout on a clean
+      default branch under most invocations, a change someone already
+      merged — and the finder subagents it fans out open that checkout's
+      copy of every file your commits touched, the default-branch version
+      rather than yours, so a finding lands against the wrong body and a fix
+      written there lands outside the branch entirely (issue #219). The
+      Skill call blocks until the review hands back its findings — those
+      finder subagents are the review's own to await, not something this
+      run watches with `ListAgents` or a poll loop beside it, and issue #217
+      is a run that did exactly that on this gate.
       Leaving `--fix` off is deliberate: applying fixes is
       the slow part after the 8-subagent review itself returns, and a run
       that dies during it is exactly what left issue #216's gate with

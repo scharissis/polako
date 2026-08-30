@@ -481,6 +481,39 @@ func TestReviewGateNamesTheBranch(t *testing.T) {
 	}
 }
 
+// Naming the branch aims what the review diffs. It does not aim where the
+// review's own forked agent and the finder subagents under it read and write:
+// they start in the session's cwd, the main checkout, and this skill never
+// moves it. Left unnamed, they open the default-branch copy of every file the
+// branch changed — findings judged against the wrong body, and a fix written
+// there landing outside the branch (issue #219). The worktree has to be named
+// in the same breath as the branch, and like the branch it is one token easy
+// to drop.
+func TestReviewGateNamesTheWorktree(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	// Flattened, and checked over a window rather than one physical line: a
+	// reflow that splits the branch token from the worktree token must not
+	// fail a skill that is still correct — the same reason
+	// TestReviewGateDoesNotAutoApplyFixes moved off a line window.
+	flat := strings.Join(strings.Fields(skill), " ")
+	invoke := strings.Index(flat, "/code-review high issue-$issue")
+	if invoke < 0 {
+		t.Fatal("SKILL.md no longer invokes `/code-review high issue-$issue`;" +
+			" the mandatory review gate before a PR is gone")
+	}
+	window := flat[invoke:]
+	if len(window) > 240 {
+		window = window[:240]
+	}
+	if !strings.Contains(window, "<worktree>") {
+		t.Errorf("the review gate invokes /code-review without naming <worktree> alongside the"+
+			" branch, so its forked agent and the finder subagents under it stay in the session"+
+			" cwd (the main checkout) and read the default-branch copy of the changed files"+
+			" rather than the branch's (issue #219):\n\t%s", window)
+	}
+}
+
 // Naming the branch is only half of aiming the review. It resolves that
 // branch's base from the *local* default branch, and a drain never pulls — it
 // merges on GitHub — so that ref falls one commit behind per merged PR. Review
