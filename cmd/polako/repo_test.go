@@ -241,12 +241,7 @@ func TestShippedSkillMatchesTheDefaultFlag(t *testing.T) {
 	}
 }
 
-// planSkillDir is the intake-side skill this repo ships under skills/. It lives
-// here rather than beside skillDir in main.go because the binary has no plan
-// verb yet — that is phase 3 — and a constant no shipped code path reads is
-// dead weight in the binary. It moves to main.go when the verb that runs it
-// does.
-const planSkillDir = "plan-backlog"
+// planSkillDir now lives in plan.go, beside the `plan` verb that runs it.
 
 func planSkill(t *testing.T) string {
 	t.Helper()

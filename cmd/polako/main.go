@@ -749,6 +749,14 @@ func main() {
 	case "work":
 		// Drop the verb so the flag package parses what follows it.
 		os.Args = append(os.Args[:1], os.Args[2:]...)
+	case "plan":
+		// Its own context, cancelled by the same signals work honours: the
+		// preflight probes make a handful of gh calls, and Ctrl+C partway
+		// through should end them rather than be ignored.
+		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
+		defer stop()
+		runReport("plan", func() error { return runPlan(ctx, os.Args[2:], os.Stdout) })
+		return
 	case "stats":
 		rpt := newReport(isTerminal(os.Stdout))
 		runReport("stats", func() error { return runStats(os.Args[2:], os.Stdout, os.Stderr, time.Now(), rpt) })
@@ -836,6 +844,7 @@ func verbUsage(w io.Writer) {
 			"one issue at a time, with a human at every gate.\n\n"+
 			"Usage: polako <verb> [flags]\n\n"+
 			"  work    work the backlog: run the skill per issue, wait for each merge, unattended\n"+
+			"  plan    propose a backlog from a vision document, behind the `proposed` label (skeleton: -dry-run only)\n"+
 			"  status  print where the backlog stands, from GitHub (read-only)\n"+
 			"  stats   report on the run data already recorded (local, read-only)\n"+
 			"  tidy    reclaim the worktrees and branches of finished issues (dry-run by default)\n\n"+
