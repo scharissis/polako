@@ -805,6 +805,48 @@ func TestReleaseWorkflowsStayCoupled(t *testing.T) {
 	}
 }
 
+// A commit SHA is the only reference to a third-party action that says
+// exactly what will run. A major tag is whatever its owner last force-moved
+// it to, and here it would be moved onto workflows carrying `contents: write`
+// and `actions: write`. The other half of the pin is .github/dependabot.yml:
+// an exact reference with nothing to bump it goes stale in silence, so this
+// checks both, since either alone is worse than the pair.
+func TestWorkflowActionsArePinnedToSHAs(t *testing.T) {
+	dir := filepath.Join(repoRoot(), ".github", "workflows")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("reading %s: %v", dir, err)
+	}
+	isSHA := regexp.MustCompile(`^[0-9a-f]{40}$`)
+	pins := 0
+	for _, e := range entries {
+		if ext := filepath.Ext(e.Name()); e.IsDir() || (ext != ".yml" && ext != ".yaml") {
+			continue
+		}
+		for line := range strings.SplitSeq(readRepoFile(t, ".github", "workflows", e.Name()), "\n") {
+			ref, ok := strings.CutPrefix(strings.TrimPrefix(strings.TrimSpace(line), "- "), "uses: ")
+			if !ok {
+				continue
+			}
+			ref, _, _ = strings.Cut(ref, " ") // drop the trailing `# vX.Y.Z`
+			if strings.HasPrefix(ref, "./") {
+				continue // an action in this repository is not a supply chain
+			}
+			if _, version, found := strings.Cut(ref, "@"); !found || !isSHA.MatchString(version) {
+				t.Errorf(".github/workflows/%s uses %q — a moving tag is whatever it points at on the day a release runs; pin the commit SHA, with the version as a trailing comment so Dependabot can bump it", e.Name(), ref)
+				continue
+			}
+			pins++
+		}
+	}
+	if pins == 0 {
+		t.Error("no pinned actions found under .github/workflows — this test has stopped checking anything")
+	}
+	if !strings.Contains(readRepoFile(t, ".github", "dependabot.yml"), "github-actions") {
+		t.Error(".github/dependabot.yml no longer updates the github-actions ecosystem; the SHA pins above have nothing to bump them and go stale silently")
+	}
+}
+
 // Every flag is part of the interface, so every flag has to appear under
 // docs/ — work's and status's in reference.md, stats's beside the report it
 // describes in run-data.md. This is the check that catches a new flag shipped

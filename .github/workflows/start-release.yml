@@ -37,7 +37,7 @@ jobs:
     steps:
       # Full history: the previous release's tag has to be visible locally to
       # be named as the floor of the release-notes range.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 

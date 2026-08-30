@@ -1,0 +1,29 @@
+version: 2
+
+# The actions below are pinned to commit SHAs rather than to a moving major
+# tag, and this file is what keeps those pins from going stale silently. That
+# pairing is the point: a moving tag means whatever `actions/checkout@v4`
+# points at today runs inside workflows carrying `contents: write` and
+# `actions: write`, and a SHA pin says which commit that is. An exact pin with
+# nothing to bump it is the other failure, so neither half stands alone.
+#
+# One ecosystem, because there is only one with anything to update. go.mod has
+# no requires and there is no go.sum — stdlib-only is an invariant CI enforces
+# — so a `gomod` entry would be configuration that can never fire.
+#
+# Monthly rather than weekly, and routine bumps batched into one pull request:
+# nothing merges itself here, so every bump is something a human reads. Majors
+# are deliberately left out of the group and arrive one at a time, because a
+# major is a behaviour change to judge on its own.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
