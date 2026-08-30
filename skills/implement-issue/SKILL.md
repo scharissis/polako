@@ -234,15 +234,21 @@ don't post again, and stop.
       one whose sha is *not* an ancestor of current HEAD — nothing reviewed
       yet, or history moved in some way this shortcut can't account for —
       runs c and d in full.
-   c. Invoke `/code-review high issue-$issue` — no `--fix`. Name the branch
-      every time: the review forks a fresh agent that starts in the
-      session's cwd, which this skill never moves, so with no target it
-      reviews whatever that cwd holds instead — the main checkout on a
-      clean default branch under most invocations, meaning a change someone
-      already merged. The Skill call blocks until the review hands back its
-      findings — the finder subagents it fans out are the review's own to
-      await, not something this run watches with `ListAgents` or a poll loop
-      beside it, and issue #217 is a run that did exactly that on this gate.
+   c. Invoke `/code-review high issue-$issue`, naming `<worktree>` too — no
+      `--fix`. Name both every time. The branch aims what the review diffs;
+      `<worktree>` aims where it reads and writes. The review forks a fresh
+      agent that starts in the session's cwd, which this skill never moves,
+      so with no branch it reviews whatever that cwd holds instead — the
+      main checkout on a clean default branch under most invocations,
+      meaning a change someone already merged — and with no worktree the
+      finder subagents it fans out open that same checkout's copy of every
+      file your commits touched: the default-branch version rather than
+      yours, so a finding lands against the wrong body and a fix written
+      there lands outside the branch entirely (issue #219). The Skill call
+      blocks until the review hands back its findings — those finder
+      subagents are the review's own to await, not something this run
+      watches with `ListAgents` or a poll loop beside it, and issue #217 is
+      a run that did exactly that on this gate.
       Leaving `--fix` off is deliberate: applying fixes is
       the slow part after the 8-subagent review itself returns, and a run
       that dies during it is exactly what left issue #216's gate with
