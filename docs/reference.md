@@ -96,7 +96,7 @@ moments:
 polako work -notify ~/bin/tell-me
 ```
 
-It fires on five states, and nothing else:
+It fires on six states, and nothing else:
 
 | `POLAKO_NOTIFY_EVENT` | What happened |
 | --- | --- |
@@ -105,12 +105,13 @@ It fires on five states, and nothing else:
 | `cleared` | The backlog is empty. Nothing is left to work. |
 | `stopped` | The shift ended before the backlog did: a fatal error, `-max-session-cost` spent, or the plan's own usage reaching `-max-session-usage`/`-max-week-usage`. |
 | `epic-done` | An epic's last child closed and the drain closed the container, with a comment on the thread saying so. The one event above for something good rather than something stuck. Fires once, on the close; a container a human has held with `needs-human` or `proposed` is left open and fires nothing. |
+| `proposed` | A [`polako plan`](#planning-a-backlog-unattended-polako-plan) run finished with proposals behind the `proposed` label, waiting to be curated. `ISSUE` is empty — it is the whole batch. The one event a plan run raises, and it fires only when the run actually proposed something. |
 
 The context arrives in the environment, so the command needs no arguments:
 
 | Variable | Value |
 | --- | --- |
-| `POLAKO_NOTIFY_EVENT` | One of the five above. |
+| `POLAKO_NOTIFY_EVENT` | One of the six above. |
 | `POLAKO_NOTIFY_ISSUE` | The issue number, or empty when the whole shift rather than one issue needs you. |
 | `POLAKO_NOTIFY_REPO` | `owner/name`. |
 | `POLAKO_NOTIFY_REASON` | One line of English saying what happened and what to do about it. |
@@ -286,8 +287,14 @@ rather than something the model has to remember:
 The honest edge: an operator hand-filing an issue from the same account while a
 run is going is caught in the sweep — logged, visible, reversible, rare.
 
+When it ends — a clean finish, the `-max-issues` cap, a crash, a Ctrl+C — a
+plan run leaves the two traces every run leaves: one `kind:"plan"` line in the
+[run data](run-data.md), and, when it proposed something, one `proposed`
+[notification](#being-told-when-it-needs-you--notify) naming what awaits
+curation. A run that proposed nothing notifies nothing.
+
 `-dry-run` prints the exact `claude` invocation a run would make and touches
-nothing — no label, no milestone, no process.
+nothing — no label, no milestone, no process, no record, no notification.
 
 ```bash
 polako plan -vision docs/VISION.md -dry-run
@@ -307,7 +314,9 @@ polako plan -vision docs/VISION.md            # the real thing
 | `-stall` | `15m` | Kill a run with no output events for this long — the same silence watchdog `polako work` uses. `0` disables it. |
 | `-max-cost` | `0` | Warn once the run has cost this many dollars. Advisory only: a plan run is one `claude` invocation with no next run to decline, so unlike `polako work` there is nothing for the cap to stop — it is reported, not enforced. |
 | `-dir`, `-claude`, `-permission-mode`, `-dry-run` | | Same meaning as `polako work`'s flags above. |
-| `-metrics`, `-run-tag`, `-notify` | | Parsed with their `polako work` meanings, `-notify` checked at preflight, and otherwise inert until run-data records and the human-needed hook are wired for `plan`. |
+| `-metrics` | `~/.polako/metrics` | Directory for the one `kind:"plan"` record the run writes, or `off`. Same meaning and default as `polako work`'s. |
+| `-run-tag` | *(none)* | Label recorded with the `plan` record, so one batch's plan run can be compared against another in `polako stats`. |
+| `-notify` | *(none)* | Command run when the plan run finishes with proposals to curate — the `proposed` event above. Checked at preflight like `polako work`'s. |
 
 ## Where the backlog stands: `polako status`
 
