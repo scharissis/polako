@@ -13,6 +13,16 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.14.0]
+
+### What's Changed
+* fix: latch permissionRefused on a refused tool_result, not just prose by @scharissis in https://github.com/scharissis/polako/pull/223 (closes #209)
+* feat: give the review gate a resume point by @scharissis in https://github.com/scharissis/polako/pull/226 (closes #216)
+* fix: give the one-turn wait a polling floor by @scharissis in https://github.com/scharissis/polako/pull/228 (closes #217)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.13.0...v0.14.0
+
 ## [0.13.0]
 
 ### What's Changed
