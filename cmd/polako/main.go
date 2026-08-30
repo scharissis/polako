@@ -1207,6 +1207,34 @@ type issueState struct {
 	hasWeekUsageAtPickup bool
 }
 
+// resumeHint points the operator at the two local handles for an issue a shift
+// left mid-flight: the last skill run's transcript, and this shift's slice of
+// the run data. Both are machine-local — the transcript lives under ~/.claude —
+// so neither is GitHub-shaped state, and both are logged here and never posted
+// to the issue thread: the same reasoning that keeps the session id out of a
+// park's reason, which reaches the thread verbatim.
+//
+// "skill run", because a park raised while supervising a PR follows remediation
+// runs, which report sessions of their own that this state does not track;
+// those are on their own "session started" lines in the log above.
+//
+// Printed on a park, and — since #218 — on the interrupt and fatal exits too: a
+// Ctrl+C during a usage-limit wait used to drop a resumable 32-minute session,
+// review gate included, and say nothing.
+func resumeHint(cfg config, issue int, st *issueState) {
+	if st == nil {
+		return
+	}
+	if st.session != "" {
+		log.Printf("issue #%d: `claude --resume %s` reopens what the last skill run on it did",
+			issue, st.session)
+	}
+	if cfg.shiftID != "" {
+		log.Printf("issue #%d: `polako stats -shift %s` reports on this shift alone",
+			issue, cfg.shiftID)
+	}
+}
+
 // drain works the queue until it empties, an issue proves fatal, or -once says
 // stop. An issue that cannot be finished is parked rather than fatal, and an
 // issue waiting on a human answer is put down rather than waited on, so neither
@@ -1359,31 +1387,19 @@ func drain(ctx context.Context, cfg config) error {
 				log.Printf("issue #%d: %s", issue, aside)
 			}
 			// A park is exactly when somebody wants to read what the run
-			// actually did, and the session is the whole transcript of it. Kept
-			// out of the reason on purpose: that text is posted to the issue
-			// thread, and this id is nobody's business but the operator's.
-			//
-			// "skill run", because a park raised while supervising a PR follows
-			// remediation runs, which report sessions of their own that this
-			// state does not track. Those are in the log above, on their own
-			// "session started" lines.
-			if st.session != "" {
-				log.Printf("issue #%d: `claude --resume %s` reopens what the last skill run on it did",
-					issue, st.session)
-			}
-			// Same reasoning, same audience: an id useless off this machine, so
-			// it goes beside the resume line above rather than into the reason
-			// that reaches the thread.
-			if cfg.shiftID != "" {
-				log.Printf("issue #%d: `polako stats -shift %s` reports on this shift alone",
-					issue, cfg.shiftID)
-			}
+			// actually did, and the session is the whole transcript of it.
+			resumeHint(cfg, issue, st)
 			parkIssue(ctx, cfg, issue, reason)
 			// After the park, not before: by now the label and the comment
 			// saying why are on the issue, so somebody following the
 			// notification finds the whole story there.
 			notify(ctx, cfg, notification{event: notifyParked, issue: issue, reason: reason})
 		case err != nil:
+			// Ctrl+C mid-issue, or a fatal error: neither prints the park's
+			// resume hint, yet both leave a run's transcript on disk that
+			// somebody will want to reopen — and the id is dropped on exit
+			// otherwise (#218).
+			resumeHint(cfg, issue, st)
 			return finish(fmt.Errorf("issue #%d: %w", issue, err))
 		default:
 			results = append(results, spend(st, issueResult{issue: issue}))
@@ -2408,7 +2424,13 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 				// this can read falls back to one attempt per -poll rather
 				// than a tight loop.
 				if errors.Is(runErr, errLimit) {
-					record(0, outcomeNothing)
+					// outcomeUnknown, not outcomeNothing: the account cut this
+					// run off — mid-session, after a commit and a finished
+					// review gate on the shift #218 was filed from — so it never
+					// decided to produce nothing, and reading it as a run that
+					// did would bias every rate stats computes. The sibling
+					// Ctrl+C branch above records the same for the same reason.
+					record(0, outcomeUnknown)
 					wait := cfg.poll
 					if reset, ok := limitReset(rep.limitMsg, time.Now()); ok {
 						// Slack behind the CLI's own clock: a resume
