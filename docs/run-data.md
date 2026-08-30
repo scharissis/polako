@@ -99,14 +99,17 @@ polako work -max-cost 15 -max-issue-time 90m -max-session-cost 200 \
 - **`-max-session-cost`** — dollars this shift may spend before it stops.
 - **`-max-session-usage`** / **`-max-week-usage`** — the plan's own limits
   rather than this binary's arithmetic: percentages read off `claude`'s own
-  `/usage`, checked between issues exactly where `-max-session-cost` is and
-  for the same reason, and just as much never a park — this is a fact about
-  the account, not about the issue. See [behaviour.md](behaviour.md), "A
-  session limit is waited out, not retried against": that is the wall, this
-  is the fence in front of it. Whichever pool trips first stops the shift; a
-  probe that cannot answer — an old CLI with no `/usage`, an unparseable
-  reply — never does, it just logs once and the drain carries on uncapped
-  for that pass.
+  `/usage`, checked between issues exactly where `-max-session-cost` is, and
+  never a park — this is a fact about the account, not about the issue. Unlike
+  the cost caps they do not *stop* the shift: whichever pool is over its
+  ceiling, the drain waits that pool's own reset out and then carries on — the
+  fence behaving like the wall it fronts (see [behaviour.md](behaviour.md), "A
+  session limit is waited out, not retried against"). Starting a shift already
+  over the ceiling therefore waits rather than producing nothing. A weekly
+  reset can be days off, so that wait can be long; Ctrl+C is safe throughout,
+  since all state is on GitHub. A probe that cannot answer — an old CLI with no
+  `/usage`, an unparseable reply — trips nothing: it logs once and the drain
+  carries on uncapped for that pass.
 
 `-max-issue-time` is the one that catches what `-stall` cannot. That watchdog
 kills a run that has gone *silent*; an agent looping productively but uselessly

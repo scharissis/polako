@@ -315,14 +315,18 @@ picks the issue back up.
 
 **`-max-session-usage` and `-max-week-usage` are the fence in front of that
 wall.** The refusal above is the CLI stopping a run mid-issue once the account
-is already over; these end the shift between issues, before a run gets that
-far, once the plan's own `/usage` reports either pool at or over the
-percentage you set. Off by default, checked exactly where `-max-session-cost`
-is, and never a park — nothing is wrong with the issue, so it stays in the
-queue for whichever shift finds the pool reset. A probe that cannot answer —
-an old CLI with no `/usage`, an account with no subscription, an unparseable
-reply — never stops a shift over it: it logs once and the drain carries on as
-if neither flag were set, for that pass.
+is already over; these act between issues, before a run gets that far, once the
+plan's own `/usage` reports either pool at or over the percentage you set. Off
+by default, checked exactly where `-max-session-cost` is, and never a park —
+nothing is wrong with the issue. And the fence behaves like the wall: rather
+than ending the shift, the drain waits the tripped pool's own reset out and
+then carries on, so starting a shift that is already over the ceiling waits
+rather than producing nothing. A weekly pool's reset can be days away, which
+makes for a long wait; Ctrl+C stays safe the whole time, since all state is on
+GitHub and rerunning after the reset picks up where this left off. A probe
+that cannot answer — an old CLI with no `/usage`, an account with no
+subscription, an unparseable reply — trips nothing: it logs once and the drain
+carries on as if neither flag were set, for that pass.
 
 **Human touchpoints are deliberately just two**, both on GitHub:
 
