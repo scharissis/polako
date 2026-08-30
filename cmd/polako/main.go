@@ -3207,6 +3207,7 @@ func (r *runReport) observe(ev streamEvent) {
 			}
 		}
 	case "result":
+		firstResult := !r.hasResult
 		r.hasResult = true
 		r.subtype, r.isError = ev.Subtype, ev.IsError
 		r.authFailed = ev.IsError && authFailure(ev.Result)
@@ -3218,11 +3219,23 @@ func (r *runReport) observe(ev streamEvent) {
 		// ask — issue #209, where every one of #126's three final messages
 		// was ordinary prose despite the run having been refused a tool.
 		r.permissionRefused = r.permissionRefused || permissionRefusal(ev.Result)
-		r.turns = ev.NumTurns
-		r.wallMS, r.apiMS = ev.DurationMS, ev.DurationAPIMS
-		r.costUSD = ev.TotalCost
-		r.usage = tokenCounts{}
+		// The CLI emits one result event per dequeued prompt, not one per run:
+		// a run woken by ten finished background subagents streams ten, all
+		// flushed at exit (issue #227). num_turns, the two durations and the
+		// top-level usage block are that prompt turn's alone, so they add up
+		// across the events; total_cost_usd and modelUsage are
+		// session-cumulative and already whole on every event, so they stay
+		// last-wins. The two families are indistinguishable in the JSON — only
+		// what the CLI puts in them differs — so treating them differently is
+		// deliberate, not an oversight to "fix" back to matching assignments.
+		if firstResult {
+			r.turns = 0 // clear the -1 pre-result sentinel errNoWork reads
+		}
+		r.turns += ev.NumTurns
+		r.wallMS += ev.DurationMS
+		r.apiMS += ev.DurationAPIMS
 		r.usage.add(ev.Usage)
+		r.costUSD = ev.TotalCost
 		for name, u := range ev.ModelUsage {
 			if r.modelUsage == nil {
 				r.modelUsage = make(map[string]modelTokens, len(ev.ModelUsage))
@@ -3729,10 +3742,10 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	rep.stderrTail = errTail.String()
 	// One finish line for the run, emitted here rather than per result event:
 	// the CLI sends a result per dequeued prompt, so a run that woke on five
-	// background tasks streamed six, and observe has already reduced them to
-	// the last one's standing. Gated on a result having arrived at all — a
-	// crash, stall or interrupt reaches this line too, and each is reported as
-	// itself below, not as a finish.
+	// background tasks streamed six, and observe has already summed the
+	// per-turn fields across them (issue #227). Gated on a result having
+	// arrived at all — a crash, stall or interrupt reaches this line too, and
+	// each is reported as itself below, not as a finish.
 	if rep.hasResult {
 		sev, line := finishLine(&rep)
 		narrate(sev, "%s", line)
@@ -3796,10 +3809,10 @@ type eventLog struct {
 // event renders one stream-json event as a single progress line. A run's start
 // is a milestone and its finish is another — but the finish is emitted once by
 // dispatchClaude from the whole run's standing (finishLine), because the CLI
-// sends a result event per dequeued prompt and only the last one is the run's.
-// The turns between start and finish — every tool call and assistant message —
-// are detail, so a watching terminal sees a run as a pair of lines and the
-// shift log keeps the whole conversation.
+// sends a result event per dequeued prompt and observe sums their per-turn
+// fields into the one run total. The turns between start and finish — every
+// tool call and assistant message — are detail, so a watching terminal sees a
+// run as a pair of lines and the shift log keeps the whole conversation.
 func (el *eventLog) event(ev streamEvent) {
 	switch ev.Type {
 	case "system":
@@ -3852,10 +3865,10 @@ func (el *eventLog) event(ev streamEvent) {
 }
 
 // finishLine renders a run's one finish milestone from the report observe
-// built — the last result event's standing, the same numbers the run record
-// and the exit status carry. Its caller emits it once, after the stream ends,
-// only when a result actually arrived: a crash, a stall or an interrupt is the
-// caller's to report, not a finish.
+// built — turns and wall summed across every result event the run streamed,
+// the same numbers the run record and the exit status carry. Its caller emits
+// it once, after the stream ends, only when a result actually arrived: a
+// crash, a stall or an interrupt is the caller's to report, not a finish.
 func finishLine(rep *runReport) (severity, string) {
 	status, sev := "ok", sevSuccess
 	if rep.isError {

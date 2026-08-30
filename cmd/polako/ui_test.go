@@ -228,9 +228,10 @@ func TestBackgroundTaskWakeupsDoNotRepeatTheMilestones(t *testing.T) {
 	if got := strings.Count(term.String(), "finished ("); got != 1 {
 		t.Errorf("terminal shows %d finish lines, want 1\ngot:\n%s", got, term.String())
 	}
-	// The one finish line is the whole run's standing — the last result's
-	// numbers and cumulative cost, not the first background task's.
-	if !strings.Contains(term.String(), "finished (ok) — 74 turns, 19m1s, $29.57") {
+	// The one finish line is the whole run's standing — turns and wall summed
+	// across both result events (16+74, 61s+1141s), cost the last event's
+	// cumulative figure (issue #227).
+	if !strings.Contains(term.String(), "finished (ok) — 90 turns, 20m2s, $29.57") {
 		t.Errorf("terminal finish line is not the run's standing\ngot:\n%s", term.String())
 	}
 	// The shift log still keeps every wakeup, worded for what it is.
@@ -255,7 +256,9 @@ func TestFinishLineReflectsTheFinalState(t *testing.T) {
 		if strings.Contains(term.String(), "ERROR") {
 			t.Errorf("an earlier error result must not be the operator's last word\ngot:\n%s", term.String())
 		}
-		if !strings.Contains(term.String(), "finished (ok) — 40 turns") {
+		// is_error is the final event's (a clean success); turns are summed
+		// across both result events, 9 + 40 (issue #227).
+		if !strings.Contains(term.String(), "finished (ok) — 49 turns") {
 			t.Errorf("terminal missing the run's real finish\ngot:\n%s", term.String())
 		}
 	})

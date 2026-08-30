@@ -890,8 +890,9 @@ func TestLogEventNamesTheSession(t *testing.T) {
 }
 
 // finishLine renders the run's single finish milestone from the report, so a
-// run whose review gate woke it five times still finishes once — at the last
-// result's standing, not the first background task's.
+// run whose review gate woke it five times still finishes once — with the
+// per-turn fields summed across every result event, not just the last one's
+// (issue #227).
 func TestFinishLineRendersFromTheReport(t *testing.T) {
 	feed := func(lines ...string) *runReport {
 		rep := &runReport{turns: -1}
@@ -905,8 +906,10 @@ func TestFinishLineRendersFromTheReport(t *testing.T) {
 		return rep
 	}
 
-	// The whole run's standing, not the first result event's: six results
-	// streamed, the last one is the run's.
+	// The whole run's standing: two results streamed, turns and wall are the
+	// sum of both prompt turns (16+74, 61s+1141s) while total_cost_usd —
+	// session-cumulative and whole on every event — stays last-wins, not
+	// summed to $41.57.
 	sev, line := finishLine(feed(
 		`{"type":"result","subtype":"success","num_turns":16,"duration_ms":61000,"total_cost_usd":12.00}`,
 		`{"type":"result","subtype":"success","num_turns":74,"duration_ms":1141000,"total_cost_usd":29.57}`,
@@ -914,7 +917,7 @@ func TestFinishLineRendersFromTheReport(t *testing.T) {
 	if sev != sevSuccess {
 		t.Errorf("sev = %v, want sevSuccess", sev)
 	}
-	if want := "[claude] finished (ok) — 74 turns, 19m1s, $29.57"; line != want {
+	if want := "[claude] finished (ok) — 90 turns, 20m2s, $29.57"; line != want {
 		t.Errorf("line = %q, want %q", line, want)
 	}
 
@@ -931,6 +934,39 @@ func TestFinishLineRendersFromTheReport(t *testing.T) {
 	sev, line = finishLine(feed(`{"type":"result","subtype":"success","is_error":true}`))
 	if sev != sevError || strings.Contains(line, "success") {
 		t.Errorf("line = %q (sev %v), want a bare ERROR with no self-contradicting subtype", line, sev)
+	}
+}
+
+// Issue #227: a run with background subagents streams one result event per
+// dequeued prompt, all at exit. The per-prompt-turn fields — num_turns, the
+// two durations, the top-level usage block — accumulate across them; the
+// session-cumulative fields — total_cost_usd, modelUsage — stay last-wins,
+// since every event already carries the whole run's figure.
+func TestObserveSumsPerTurnFieldsAcrossResultEvents(t *testing.T) {
+	rep := runReport{turns: -1}
+	rep.observe(streamEvent{Type: "result", Subtype: "success",
+		DurationMS: 61000, DurationAPIMS: 40000, NumTurns: 16, TotalCost: 29.57,
+		Usage:      streamUsage{Input: 10, Output: 100, CacheRead: 1000, CacheWrite: 5},
+		ModelUsage: map[string]streamModelUsage{"claude-opus-5": {Output: 1000, CostUSD: 29.57}}})
+	rep.observe(streamEvent{Type: "result", Subtype: "success",
+		DurationMS: 1141000, DurationAPIMS: 800000, NumTurns: 74, TotalCost: 29.57,
+		Usage:      streamUsage{Input: 20, Output: 200, CacheRead: 2000, CacheWrite: 10},
+		ModelUsage: map[string]streamModelUsage{"claude-opus-5": {Output: 1000, CostUSD: 29.57}}})
+
+	if rep.turns != 90 {
+		t.Errorf("turns = %d, want 16+74=90", rep.turns)
+	}
+	if rep.wallMS != 1202000 || rep.apiMS != 840000 {
+		t.Errorf("wall/api = %d/%d ms, want 1202000/840000 summed", rep.wallMS, rep.apiMS)
+	}
+	if want := (tokenCounts{In: 30, Out: 300, CacheRead: 3000, CacheWrite: 15}); rep.usage != want {
+		t.Errorf("usage = %+v, want the sum %+v", rep.usage, want)
+	}
+	if rep.costUSD != 29.57 {
+		t.Errorf("costUSD = %v, want 29.57 last-wins, not doubled", rep.costUSD)
+	}
+	if got := rep.modelUsage["claude-opus-5"]; got.Out != 1000 || got.CostUSD != 29.57 {
+		t.Errorf("modelUsage entry = %+v, want last-wins (out 1000, $29.57), not summed", got)
 	}
 }
 
