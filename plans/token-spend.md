@@ -139,11 +139,14 @@ any) is documented and `0`-disableable.
 ### 4. `stats -by reason`
 
 **Problem.** Every run record carries `Reason` —
-`implement`/`resume`/`answers`/`remediate`/`checks`/`review`
+`implement`/`resume`/`unfinished`/`answers`/`remediate`/`checks`/`review`
 (`metrics.go:47`) — but `stats -by` only accepts `issue`/`model`/`tag`/`shift`
 (`stats.go:56`). So "how much of the batch went to the review-gate remediation
 loop vs first-pass implementation vs stall resumes" is a `jq` exercise, not a
-flag. That is exactly the breakdown #239 needs to target further work.
+flag. That is exactly the breakdown #239 needs to target further work — and
+`unfinished` (a `--resume` after a clean exit that opened no PR) is the row
+that says whether the skill's one-turn rule is holding, so a `-by reason`
+implementation must cover all seven, not drop it.
 
 **Shape.** Add `reason` to `byGroups` and its `-drain` echo, document it beside
 the others in `docs/run-data.md`, extend the `-by` test. Small, self-contained,
