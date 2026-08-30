@@ -177,6 +177,10 @@ func planRun(ctx context.Context, cfg config, opt planOptions, milestone string,
 	log.Printf("running %s from %s — capped at %s", cfg.skill, planPromptLabel(opt), plural(opt.maxIssues, "issue"))
 	started := time.Now()
 	rep, runErr := execClaude(ctx, cfg, prompt, "", cfg.skill, 0)
+	// Timed here, before the label pass, so the record's wall time is the run's
+	// own — the same boundary the drain draws around runClaude. The pass that
+	// follows is supervisor overhead and can spend up to two minutes on gh.
+	ended := time.Now()
 
 	// The label pass runs no matter how the run ended — a clean finish, the cap
 	// kill, a crash, a Ctrl+C. The curation gate is the whole point of the verb,
@@ -207,7 +211,7 @@ func planRun(ctx context.Context, cfg config, opt planOptions, milestone string,
 		cap:            opt.maxIssues,
 		labelsEnforced: pass.labelsEnforced(),
 		started:        started,
-		ended:          time.Now(),
+		ended:          ended,
 	})
 	if pass.created > 0 {
 		notify(context.WithoutCancel(ctx), cfg, notification{
@@ -257,8 +261,11 @@ func planPromptLabel(opt planOptions) string {
 
 // planVisionField is what the record's `vision` carries: the -vision path the
 // operator typed, or the literal "(brief)" for an inline one. A path is an
-// operator-chosen string and fair game; the brief's own text is vision-document
-// content and never enters a record, the standing recorder rule.
+// operator-chosen string and fair game; a brief can run to two thousand
+// characters of roadmap prose, which is document content and has no place in a
+// record — the standing recorder rule. (The batch `milestone` beside it is a
+// bounded identifier, the name of a real GitHub object the run attaches to
+// issues, so it is recorded as typed or derived.)
 func planVisionField(opt planOptions) string {
 	if opt.vision != "" {
 		return opt.vision
