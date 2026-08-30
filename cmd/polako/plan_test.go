@@ -8,6 +8,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -325,6 +327,38 @@ func TestPlanNormaliseForcesExactlyProposed(t *testing.T) {
 	}
 }
 
+// An old issue this account filed that fell off the end of the `before` page —
+// the listing is capped at 1000 — is not mistaken for the run's own output and
+// stripped: the `> maxBefore` guard holds because GitHub issue numbers only
+// ever climb.
+func TestPlanNormaliseLeavesPreRunIssuesBelowTheHighWaterMark(t *testing.T) {
+	cfg, statePath, _ := planTestConfig(t, &ghState{
+		Labels: []string{proposedLabel, "enhancement"},
+		Issues: map[string]*fakeIssue{
+			"5":   {Open: true, Mine: true, Labels: []string{"enhancement"}}, // old, absent from a truncated `before`
+			"900": {Open: true, Mine: true},                                  // newest before the run — the high-water mark
+			"901": {Open: true, Mine: true},                                  // the run's own
+		},
+	})
+	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
+
+	// `before` is missing #5, as a 1000-row cap would drop it.
+	out := planNormalise(context.Background(), cfg, map[int]bool{900: true}, "")
+	if out.created != 1 || len(out.labelled) != 1 {
+		t.Errorf("outcome = %+v, want only #901 treated as created", out)
+	}
+	st, err := readGhState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if is := st.Issues["5"]; !slices.Equal(is.Labels, []string{"enhancement"}) {
+		t.Errorf("#5 (pre-run, below the high-water mark) was normalised: %v", is.Labels)
+	}
+	if is := st.Issues["901"]; !slices.Contains(is.Labels, proposedLabel) {
+		t.Errorf("#901 (the run's own) was not labelled: %v", is.Labels)
+	}
+}
+
 // A label edit that does not take is collected, surfaced, and turned into a
 // nonzero exit — never swallowed, because an unlabelled proposal a drain would
 // pick up is the worst thing a plan run can leave behind.
@@ -423,6 +457,70 @@ func TestPlanRunCapsIssueCreationAndStillNormalises(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "-max-issues") {
 		t.Errorf("the log does not mention the cap:\n%s", buf.String())
+	}
+}
+
+// A shutdown signal mid-run surfaces as context.Canceled, not the run's raw
+// "did not finish cleanly" error — the CLI's process is killed through the
+// context and Wait then returns a bare "signal: killed", so planRun has to read
+// the interrupt from the context itself. The label pass still runs, on its own
+// detached deadline.
+func TestPlanRunInterruptReportsAsCancelled(t *testing.T) {
+	captureLog(t)
+	// "plancap" lingers after it has emitted its events, so the context kill —
+	// not the process's own exit — is what ends the run.
+	cfg, statePath := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plancap")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(100 * time.Millisecond); cancel() }()
+
+	opt := planOptions{vision: "VISION.md", maxIssues: 10}
+	cfg.maxIssues = opt.maxIssues
+	err := planRun(ctx, cfg, opt, "VISION", io.Discard)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("an interrupted plan run returned %v, want context.Canceled", err)
+	}
+
+	// The pass ran anyway: whatever the fake skill filed is labelled, not stranded.
+	st, err := readGhState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for n, is := range st.Issues {
+		if is.Mine && !slices.Contains(is.Labels, proposedLabel) {
+			t.Errorf("#%s was created but left unlabelled by an interrupted run: %v", n, is.Labels)
+		}
+	}
+}
+
+// isIssueCreate is what the -max-issues counter keys on: a Bash `gh issue
+// create`, in whatever shell dressing, but never the `--help` capability probe
+// and never a lookalike subcommand.
+func TestIsIssueCreate(t *testing.T) {
+	cases := []struct {
+		name, cmd string
+		want      bool
+	}{
+		{"plain", "gh issue create --title T --label proposed", true},
+		{"body-file and parent", "gh issue create --title T --body-file B.md --parent 4", true},
+		{"extra spaces", "gh  issue   create --title T", true},
+		{"after a cd", "cd /repo && gh issue create --title T", true},
+		{"help probe", "gh issue create --help", false},
+		{"help probe piped", "gh issue create --help | cat", false},
+		{"a list, not a create", "gh issue list --state open", false},
+		{"lookalike subcommand", "gh issue create-template --title T", false},
+		{"a path ending in gh", "/opt/bin/megh issue create", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := []byte(fmt.Sprintf(`{"command":%q}`, tc.cmd))
+			if got := isIssueCreate("Bash", in); got != tc.want {
+				t.Errorf("isIssueCreate(%q) = %v, want %v", tc.cmd, got, tc.want)
+			}
+		})
+	}
+	if isIssueCreate("Write", []byte(`{"command":"gh issue create"}`)) {
+		t.Error("isIssueCreate matched a non-Bash tool")
 	}
 }
 

@@ -177,22 +177,30 @@ func planRun(ctx context.Context, cfg config, opt planOptions, milestone string,
 	// The label pass runs no matter how the run ended — a clean finish, the cap
 	// kill, a crash, a Ctrl+C. The curation gate is the whole point of the verb,
 	// and an issue the run filed but this process never labelled is an
-	// unguarded proposal an unattended drain would pick up. So it gets its own
-	// context, detached from a cancelled parent, with a bound of its own.
-	passCtx := ctx
+	// unguarded proposal an unattended drain would pick up. So it always gets
+	// its own context, detached from the parent's cancellation and bounded on
+	// its own — a shutdown signal that lands mid-pass must not be what strands
+	// a proposal unlabelled.
+	passCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	defer cancel()
 	if ctx.Err() != nil {
-		var cancel context.CancelFunc
-		passCtx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
 		narrate(sevWarning, "the run was interrupted — still normalising anything it created before exiting")
 	}
 	pass := planNormalise(passCtx, cfg, before, milestone)
-	pass.report(cfg, opt, rep)
+	pass.report(opt, rep)
 
 	// Order of the exit conditions: a failed label pass is the loudest, because
-	// it means a proposal may be sitting unguarded. Then the run's own failure.
+	// it means a proposal may be sitting unguarded. Then an interrupt — the
+	// operator's own doing, reported as itself and not as a crash. Then the
+	// run's own failure.
 	if perr := pass.err(); perr != nil {
 		return perr
+	}
+	if ctx.Err() != nil {
+		// dispatchClaude returns the raw "signal: killed" wait error on a
+		// context kill, not context.Canceled, so the interrupt has to be read
+		// from the context itself — the same check processIssue makes.
+		return ctx.Err()
 	}
 	switch {
 	case runErr == nil:
@@ -202,8 +210,6 @@ func planRun(ctx context.Context, cfg config, opt planOptions, milestone string,
 		// run did what it was told, and the pass above already normalised
 		// everything. Reported, not raised.
 		return nil
-	case errors.Is(runErr, context.Canceled):
-		return runErr
 	case errors.Is(runErr, errNoWork):
 		return fmt.Errorf("%w — check that -skill %q names a skill this installation has; "+
 			"plugin skills are namespaced <plugin>:<skill>", runErr, cfg.skill)
@@ -261,14 +267,25 @@ type planPassOutcome struct {
 }
 
 // planNormalise is the enforcing label pass. It lists the issues this gh
-// account has open, keeps the ones absent from `before` — the run's own output
-// — and forces each to carry *exactly* proposedLabel, attaching the batch
-// milestone to any that has none. This is what keeps the `-label` queue-gate
-// humans-only: `Bash(gh issue create:*)` is a prefix and no prefix can say
-// "create, but not with that flag", so the create stays wide and the cleanup
-// happens here.
+// account has open, keeps the ones absent from `before` and numbered above
+// everything that was there — the run's own output — and forces each to carry
+// *exactly* proposedLabel, attaching the batch milestone to any that has none.
+// This is what keeps the `-label` queue-gate humans-only: `Bash(gh issue
+// create:*)` is a prefix and no prefix can say "create, but not with that
+// flag", so the create stays wide and the cleanup happens here.
+//
+// The `> maxBefore` guard is what makes the truncation of either listing safe:
+// GitHub issue numbers only ever climb, so anything the run filed outnumbers
+// everything open before it, and an old issue this account filed that fell off
+// the end of the `before` page is never mistaken for the run's own.
 func planNormalise(ctx context.Context, cfg config, before map[int]bool, milestone string) planPassOutcome {
 	var out planPassOutcome
+	maxBefore := 0
+	for n := range before {
+		if n > maxBefore {
+			maxBefore = n
+		}
+	}
 	raw, err := gh(ctx, cfg, "issue", "list", "--author", "@me", "--state", "open",
 		"--limit", "1000", "--json", "number,labels,milestone")
 	if err != nil {
@@ -290,7 +307,7 @@ func planNormalise(ctx context.Context, cfg config, before map[int]bool, milesto
 	}
 
 	for _, r := range rows {
-		if before[r.Number] {
+		if before[r.Number] || r.Number <= maxBefore {
 			continue // there before the run — not ours to touch
 		}
 		out.created++
@@ -343,7 +360,7 @@ func planNormalise(ctx context.Context, cfg config, before map[int]bool, milesto
 // or overspent, success otherwise. The -max-cost check lives here because a
 // one-shot run has no next run for it to bound — unlike `work`, where the same
 // flag stops the drain dispatching another — so all it can do is say so.
-func (o planPassOutcome) report(cfg config, opt planOptions, rep runReport) {
+func (o planPassOutcome) report(opt planOptions, rep runReport) {
 	if o.listErr != nil {
 		narrate(sevError, "plan: could not list what the run created to normalise it (%v) — "+
 			"check the backlog for issues missing the %s label", o.listErr, proposedLabel)
@@ -452,10 +469,6 @@ func planConfig(opt *planOptions) (config, error) {
 // before a permission prompt can, and — for a real run only — the `proposed`
 // label and the batch milestone are ensured. A dry run declares nothing: it
 // runs the probe (a read) but creates no label and no milestone.
-//
-// Until #103 lands the run path, runPlan only reaches this on a dry run — a
-// real run refuses ahead of it. The !opt.dryRun branch is here, and tested,
-// so #103 wires the spawn by moving that refusal rather than by writing this.
 func planPreflight(ctx context.Context, cfg *config, opt *planOptions) (milestone string, hierarchical bool, err error) {
 	for _, bin := range []string{cfg.claudeBin, cfg.ghBin, "git"} {
 		if _, err := exec.LookPath(bin); err != nil {
@@ -492,10 +505,9 @@ func planPreflight(ctx context.Context, cfg *config, opt *planOptions) (mileston
 		}
 	}
 
-	// Discovered here rather than mid-run: an older gh with no sub-issue support
-	// would raise a permission prompt on `--parent` that an unattended run has
-	// nobody to answer. The skill takes its own fallback from the flag it is
-	// handed once #103 wires the spawn.
+	// Probed here so a dry run can report the shape a real run would take. The
+	// run itself does not need telling: the skill derives flat-vs-hierarchical
+	// from its own `gh issue create` error (see planPrompt).
 	hierarchical = ghCreatesSubIssues(ctx, *cfg)
 
 	milestone = planMilestoneTitle(opt)

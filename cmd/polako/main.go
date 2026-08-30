@@ -3306,10 +3306,15 @@ func (r *runReport) observe(ev streamEvent) {
 // boundary so a path ending in "gh" or a `gh issue create-foo` subcommand that
 // never existed does not. A compound command that files two issues in one
 // tool_use still counts once — the same "observe counts tool_use events"
-// coarseness every other counter here has.
+// coarseness every other counter here has, and the reason -max-issues is
+// documented as a ceiling rather than an exact stop: a rejected create (an old
+// gh refusing `--parent`, say) that the skill retries flat counts twice, so the
+// cap can fire a create or two early. That is the safe direction to be wrong in.
 var ghIssueCreate = regexp.MustCompile(`(^|[^\w./-])gh\s+issue\s+create(\s|$)`)
 
 // isIssueCreate reports whether a tool_use is a Bash call that files an issue.
+// A `--help` invocation is not one: it is the capability probe, and counting it
+// against the cap would be absurd.
 func isIssueCreate(name string, input json.RawMessage) bool {
 	if name != "Bash" {
 		return false
@@ -3318,6 +3323,9 @@ func isIssueCreate(name string, input json.RawMessage) bool {
 		Command string `json:"command"`
 	}
 	if json.Unmarshal(input, &in) != nil {
+		return false
+	}
+	if strings.Contains(in.Command, "--help") {
 		return false
 	}
 	return ghIssueCreate.MatchString(in.Command)
