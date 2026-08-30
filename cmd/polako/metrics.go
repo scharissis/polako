@@ -60,10 +60,12 @@ const (
 
 // What a run left behind. A remediation run pushes to a PR that already
 // exists, so it leaves behind neither a new PR nor questions, and records
-// outcomeNothing. outcomeUnknown covers the narrow case where the run ended
-// but the GitHub call that would have told us what it produced failed — a
-// record saying "we could not look" beats a missing one, which would quietly
-// bias every rate computed from these files.
+// outcomeNothing. outcomeUnknown covers the cases where the run ended but what
+// it produced is genuinely not knowable: the GitHub call that would have told
+// us failed, or a wall cut the run off before it could finish — Ctrl+C, or a
+// usage limit refused mid-session. A record saying "we could not tell" beats
+// forcing one of those into outcomeNothing, which would read as a run that
+// decided to produce nothing and bias every rate computed from these files.
 const (
 	outcomeOpenedPR  = "opened_pr"
 	outcomeQuestions = "posted_questions"

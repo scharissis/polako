@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -128,6 +130,73 @@ func TestDrainWaitsOutASessionLimitThenShips(t *testing.T) {
 	}
 	if !strings.Contains(out, "--resume sess-limited") {
 		t.Errorf("the refused session is the one that must be resumed:\n%s", out)
+	}
+}
+
+// Issue #218: a Ctrl+C during the limit wait must leave the operator the id
+// that reopens the refused session. It is dropped on exit otherwise, and the
+// run that hit the limit had done real work — the park path prints this hint,
+// the interrupt path did not. The refused run is also recorded as "unknown",
+// not "nothing": the account cut it off, it did not decide to produce nothing.
+func TestDrainInterruptedMidLimitWaitNamesTheResumableSession(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "limitedrepeatthenships", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	cfg.shiftID = "shift-218"
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	// Bounded, because the failure this guards against is a wait that never
+	// ends; cancel() below is the Ctrl+C the test is really about.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	// The fake refuses over the limit and records the invocation before it
+	// emits anything, so ClaudeRuns >= 2 means the first run finished — its
+	// session id captured — and the drain is back in the refuse-and-wait loop.
+	go func() {
+		for {
+			if st, err := readGhState(path); err == nil && st.ClaudeRuns >= 2 {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+		cancel()
+	}()
+
+	if err := drain(ctx, cfg); !errors.Is(err, context.Canceled) {
+		t.Fatalf("drain err = %v, want context.Canceled", err)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"issue #1: `claude --resume sess-limited` reopens what the last skill run on it did",
+		"issue #1: `polako stats -shift shift-218` reports on this shift alone",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("interrupt during a limit wait dropped %q\ngot:\n%s", want, out)
+		}
+	}
+
+	var runOutcomes []string
+	for _, line := range readRecords(t, records, cfg.repo) {
+		var v struct{ Kind, Outcome string }
+		if err := json.Unmarshal([]byte(line), &v); err != nil {
+			t.Fatalf("record is not JSON: %v\n%s", err, line)
+		}
+		if v.Kind == "run" {
+			runOutcomes = append(runOutcomes, v.Outcome)
+		}
+	}
+	if len(runOutcomes) == 0 {
+		t.Fatal("no run records written")
+	}
+	for _, got := range runOutcomes {
+		if got != outcomeUnknown {
+			t.Errorf("run outcomes = %v, want every one %s: a run the account refused did not 'produce nothing'",
+				runOutcomes, outcomeUnknown)
+			break
+		}
 	}
 }
 
