@@ -72,11 +72,14 @@ To write nothing at all:
 polako work -metrics off
 ```
 
-Records are write-only by design. The work loop never reads them, no decision
-depends on them, and deleting the directory mid-shift changes nothing about
-what the supervisor does next — that is what keeps run data compatible with
-"all state lives in GitHub". Writes are best-effort: a failure warns once and
-polako carries on.
+Records are write-only by design, with exactly two readers — `polako stats`,
+and the one line `polako plan` prints after its label pass estimating what the
+batch it proposed will cost to implement. Both are human-facing rendering
+computed after a run has ended; no orchestration decision depends on either.
+The work loop never reads a record, and deleting the directory mid-shift
+changes nothing about what the supervisor does next — that is what keeps run
+data compatible with "all state lives in GitHub". Writes are best-effort: a
+failure warns once and polako carries on.
 
 ## Capping what a shift spends
 

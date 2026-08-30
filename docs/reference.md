@@ -293,6 +293,26 @@ plan run leaves the two traces every run leaves: one `kind:"plan"` line in the
 [notification](#being-told-when-it-needs-you--notify) naming what awaits
 curation. A run that proposed nothing notifies nothing.
 
+After the label pass, a run that proposed something prints one line pricing the
+batch from your own history — the median cost and median run time of a merged
+issue in this repository, times the number of proposals:
+
+```
+plan: your last 14 merged issues ran $2.70 and 38m median — 7 proposals ≈ $19 and 4½h of run time, before curation cuts
+```
+
+The projected totals are rounded coarse on purpose: a median times a count is
+an estimate, and it is curation fuel — which two proposals to approve first —
+not a quote. The model never states a dollar figure; this line is the only
+place `polako plan` does, and it only ever restates what the
+[run records](run-data.md) already hold. With no history, or none that was
+ever priced (`-metrics off`, or a repository whose only runs crashed before
+reporting a cost), it says so instead and guesses nothing:
+
+```
+plan: no run history to price against — work a few issues and future plans will estimate themselves
+```
+
 `-dry-run` prints the exact `claude` invocation a run would make and touches
 nothing — no label, no milestone, no process, no record, no notification.
 
@@ -376,9 +396,9 @@ view`, and the REST read of a thread's comments — so nothing here can move an
 issue, a label or a PR. A test asserts the list of calls, which is stronger than
 checking that nothing changed: a write GitHub refuses changes nothing either.
 
-It reads no run data. Those files are write-only outside `stats`, and a status
-that opened them would be wrong anyway about a shift running on somebody else's
-machine.
+It reads no run data. Those files are read only by `stats` and `polako plan`'s
+pricing line, and a status that opened them would be wrong anyway about a shift
+running on somebody else's machine.
 
 It prints no issue, PR or comment text — numbers, branches, labels and states
 only. That is what you need in order to decide where to go next, and it keeps
