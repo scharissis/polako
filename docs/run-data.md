@@ -292,6 +292,14 @@ per-model breakdown that also aggregates whatever subagents the run spawned. So
 a run that used subagents is billed for them and does not count their tokens,
 and dividing one figure by the other is not a price per token.
 
+A run with background subagents streams several `result` events — one per
+dequeued prompt, all at process exit — and the record's `turns`, `wall_ms`,
+`api_ms` and `tokens` are the sum across them, while `cost_usd` and
+`model_usage` are the last event's, since each already carries the whole
+invocation's cumulative figure. Before this was fixed (issue #227) every
+per-turn field was the last event's too, so `stats` under-reported turns and
+every token figure — roughly sixfold on a run that reached the review gate.
+
 **On approximated runs:** a run that crashed, stalled or was interrupted never
 emitted a `result` event. Its tokens are the tally seen streaming past, an
 undercount, and its dollars read as zero, because pricing belongs to the CLI
