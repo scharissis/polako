@@ -54,5 +54,8 @@ happened; if that is most of the batch, the comparison is not one.
 | `stall-30m` | The default `-stall` of 15m kills more healthy-but-quiet runs than it rescues hung ones, and the resume that follows pays to read the whole context again. Doubling it costs less than the resumes it avoids. | `-stall 30m` for a whole batch, against a batch at the default. | *pending* — compare the `stalled` status count and total cost per merged PR across the two tags. Watch wall clock too: a longer watchdog also means a genuinely hung run burns 30m before anyone notices. | *open* |
 | `poll-floor` | The one-turn wait had no polling floor, so a run polled `/code-review`'s fan-out once a second — 13% of one shift's tool calls on `sleep` and `ListAgents`, at full late-session context each. Telling the run the Skill call already blocks, and to space any real poll a minute or two apart, cuts tool calls and cost per merged PR without losing a stall rescue. | `skills/implement-issue/SKILL.md` (#217): polling floor in "This run gets one turn", plus a line in the review gate that the `/code-review` call blocks and its subagents are not polled. | *pending* — compare `tool_use` count and cost per merged PR against the pre-#217 batch, and check the `stalled` count did not rise. | *open* |
 
-Both rows come from `plans/continuous-improvement.md`, pillar 4, which chose
-them because the records can already answer them.
+The `remediation-sonnet` and `stall-30m` rows come from
+`plans/continuous-improvement.md`, pillar 4, which chose them because the
+records can already answer them. `poll-floor` came the other way — from one
+shift's tool-call breakdown on issue #217 — and is here under the same rule
+that fills this file: a `SKILL.md` change earns a row.
