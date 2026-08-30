@@ -99,6 +99,12 @@ var errAuth = errors.New("claude could not authenticate")
 // its issue instead of being retried.
 var errBudget = errors.New("the issue's budget is spent")
 
+// errPlanCap marks a `polako plan` run dispatchClaude killed for reaching
+// -max-issues. Not a crash: whatever the run created by then is real and stays,
+// and runPlan runs the label pass over it exactly as it would after a clean
+// exit — the cap bounds spend, it does not undo work.
+var errPlanCap = errors.New("the plan run hit its -max-issues ceiling")
+
 // errLimit marks a run the CLI refused over the account's usage limit. Neither
 // a dead end nor a crash: unlike a refused token this wall falls on its own —
 // the refusal names when the limit resets — so the run's issue is neither
@@ -627,8 +633,14 @@ type config struct {
 	// operator sets one.
 	maxSessionUsage int
 	maxWeekUsage    int
-	skip            map[int]bool
-	once            bool
+	// maxIssues is `polako plan`'s ceiling on the issues one run may create,
+	// epics included — plan-only, the way maxCost happens to be shared. Zero
+	// (the drain, always) disables the cap; dispatchClaude counts `gh issue
+	// create` tool calls and kills the run the way the stall watchdog does when
+	// the count reaches it. See errPlanCap and runReport.issueCreates.
+	maxIssues int
+	skip      map[int]bool
+	once      bool
 	// strictOrder keeps the queue in strict ascending order, so an issue
 	// waiting on a human answer holds up every issue behind it. Off by
 	// default: the no-conflict guarantee comes from one issue being in flight
@@ -844,7 +856,7 @@ func verbUsage(w io.Writer) {
 			"one issue at a time, with a human at every gate.\n\n"+
 			"Usage: polako <verb> [flags]\n\n"+
 			"  work    work the backlog: run the skill per issue, wait for each merge, unattended\n"+
-			"  plan    propose a backlog from a vision document, behind the `proposed` label (skeleton: -dry-run only)\n"+
+			"  plan    propose a backlog from a vision document, behind the `proposed` label, unattended\n"+
 			"  status  print where the backlog stands, from GitHub (read-only)\n"+
 			"  stats   report on the run data already recorded (local, read-only)\n"+
 			"  tidy    reclaim the worktrees and branches of finished issues (dry-run by default)\n\n"+
@@ -3066,6 +3078,10 @@ type runReport struct {
 	// stays zero because pricing belongs to the CLI, never to this binary.
 	observed      tokenCounts
 	observedTurns int
+	// issueCreates counts the `gh issue create` tool calls the run made — the
+	// one action `polako plan` caps. dispatchClaude kills the run the way it
+	// kills a stalled one once it reaches cfg.maxIssues; see capped below.
+	issueCreates int
 
 	// started says the session got going at all: the CLI announces itself with
 	// an init event before it does anything else, so a run that emitted none
@@ -3075,6 +3091,7 @@ type runReport struct {
 
 	exitCode     int
 	stalled      bool
+	capped       bool // `polako plan` hit -max-issues and dispatchClaude killed the run
 	interrupted  bool
 	skillMissing bool // the session's command list lacks the skill the prompt invokes
 	authFailed   bool // the result text is the CLI reporting refused credentials
@@ -3195,6 +3212,9 @@ func (r *runReport) observe(ev streamEvent) {
 			switch c.Type {
 			case "tool_use":
 				r.toolUses++
+				if isIssueCreate(c.Name, c.Input) {
+					r.issueCreates++
+				}
 				if c.ID != "" {
 					if r.pendingTools == nil {
 						r.pendingTools = make(map[string]pendingTool)
@@ -3278,6 +3298,29 @@ func (r *runReport) observe(ev streamEvent) {
 			}
 		}
 	}
+}
+
+// ghIssueCreate matches a shell command that files a GitHub issue — the one
+// tool call `polako plan` caps. Whitespace-flexible so `gh  issue create` and a
+// leading `cd x && gh issue create` both count, and anchored on `gh` at a word
+// boundary so a path ending in "gh" or a `gh issue create-foo` subcommand that
+// never existed does not. A compound command that files two issues in one
+// tool_use still counts once — the same "observe counts tool_use events"
+// coarseness every other counter here has.
+var ghIssueCreate = regexp.MustCompile(`(^|[^\w./-])gh\s+issue\s+create(\s|$)`)
+
+// isIssueCreate reports whether a tool_use is a Bash call that files an issue.
+func isIssueCreate(name string, input json.RawMessage) bool {
+	if name != "Bash" {
+		return false
+	}
+	var in struct {
+		Command string `json:"command"`
+	}
+	if json.Unmarshal(input, &in) != nil {
+		return false
+	}
+	return ghIssueCreate.MatchString(in.Command)
 }
 
 // lacksCommand reports whether an init event's command inventory is present
@@ -3743,6 +3786,17 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 			log.Printf("%s — stopping the run", missing)
 			_ = cmd.Process.Kill()
 		}
+		// `polako plan`'s issue cap. Killed here, in the reader, the same way a
+		// stall or a missing skill is: the run created everything it was allowed
+		// to, and paying for whatever it does next buys nothing the label pass
+		// would keep. The pass runs regardless — see runPlan — so what is on
+		// GitHub at the kill is normalised, not stranded.
+		if cfg.maxIssues > 0 && rep.issueCreates >= cfg.maxIssues && !rep.capped {
+			rep.capped = true
+			narrate(sevWarning, "the run has filed %s, the whole of -max-issues — killing it; "+
+				"the label pass still normalises what it created", plural(cfg.maxIssues, "issue"))
+			_ = cmd.Process.Kill()
+		}
 	}
 
 	// A read that failed leaves the child writing into a pipe nobody is
@@ -3789,6 +3843,12 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	if rep.overBudget {
 		return rep, fmt.Errorf("%w: the run used the %s of -max-issue-time this issue had left",
 			errBudget, dur(limit))
+	}
+	// Ahead of the stall report for the same reason overBudget is: the cap kill
+	// also ends the scan, and the caller has to see it as the deliberate stop it
+	// is rather than the stall it would otherwise be read as.
+	if rep.capped {
+		return rep, fmt.Errorf("%w of %d", errPlanCap, cfg.maxIssues)
 	}
 	if rep.stalled {
 		return rep, fmt.Errorf("run stalled: no output events for %s", cfg.stall)
