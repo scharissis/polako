@@ -262,6 +262,38 @@ this namespace: none of them is `POLAKO_<FLAG>` for any flag, so a
 notification cannot reconfigure a `polako` you run from inside your own
 hook. A test enforces it.
 
+## Planning a backlog unattended: `polako plan`
+
+`polako plan` runs the [`plan-backlog`](../README.md#planning-a-backlog) skill
+the way `polako work` runs `implement-issue`: point it at a vision document and
+it proposes a curated backlog — epics and one-PR issues — behind the `proposed`
+label a human lifts to queue the work.
+
+**This verb is a skeleton.** Dispatch, preflight, the `--parent` capability
+probe and the batch milestone are in place, and `-dry-run` prints the exact
+`claude` invocation a run would make. The run itself — spawning the skill,
+holding it to `-max-issues`, and the label pass that normalises what it created
+so the curation gate never depends on the model remembering — lands in a later
+release. Until then a real (non-`-dry-run`) invocation refuses, so at no point
+can `polako plan` start a run that the label pass does not police.
+
+```bash
+polako plan -vision docs/VISION.md -dry-run
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `-vision` | *(none)* | Path, resolved under `-dir`, to the vision or roadmap document to plan from. Exactly one of `-vision` / `-brief` is required — never a does-the-file-exist guess, so a typo fails loudly. |
+| `-brief` | *(none)* | Inline vision text in place of `-vision`, e.g. `-brief "a dating app for horses"` — the greenfield story, same trust tier as the document. Past ~2000 characters, put it in a file. |
+| `-focus` | *(none)* | Free-text steer for the run, e.g. `-focus "only the observability section"`. |
+| `-milestone` | *(derived)* | Batch milestone title, created idempotently at preflight and handed to the run. Defaults to the vision file's name, or the brief's first words. `-milestone off` skips the milestone entirely. |
+| `-max-issues` | `10` | Ceiling on the issues a run may create, epics included. A ceiling, not a target — fewer, sharper issues beat coverage. |
+| `-model` | `opus` | Passed to `claude --model`. An alias, not a pinned id: a plan run happens once per batch and steers every run downstream, so it defaults to the strongest tier. |
+| `-skill` | `polako:plan-backlog` | Slash command the run invokes. |
+| `-tools` / `-add-tools` | *(the plan allowlist)* | `--allowedTools` for the run. The default is a fraction of `work`'s: repo reads, `gh issue list` / `view` / `search`, `Write`, and `gh issue create` — nothing that commits, pushes, opens a PR, edits a thread, or reaches `gh api`. |
+| `-dir`, `-claude`, `-permission-mode`, `-dry-run` | | Same meaning as `polako work`'s flags above; live now — preflight uses `-dir` and `-claude`, and `-dry-run` prints the invocation `-claude` / `-permission-mode` shape. |
+| `-stall`, `-max-cost`, `-metrics`, `-run-tag`, `-notify` | | Accepted now with their `polako work` meanings, and inert until the run path lands — a skeleton `-dry-run` neither runs a process nor writes a record, so there is nothing yet for them to bound or capture. |
+
 ## Where the backlog stands: `polako status`
 
 While a shift runs, the only view of it is the terminal it runs in. Everything

@@ -185,7 +185,10 @@ your own history, via `polako stats`.
 
 This is a Claude Code skill you run yourself, with a second pair of eyes on it.
 An unattended `polako plan` verb — caps, milestones and a much narrower tool
-allowlist — is a later release.
+allowlist — is landing in stages: the skeleton (dispatch, preflight, the
+capability probe and a working `-dry-run`) ships now, and a real run stays
+refused until the label pass that enforces the curation gate lands with it. See
+[docs/reference.md](docs/reference.md#planning-a-backlog-unattended-polako-plan).
 
 ## The rules it follows
 

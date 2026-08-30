@@ -39,6 +39,13 @@ type ghState struct {
 	Issues     map[string]*fakeIssue `json:"issues"`
 	PRs        map[string]*fakePR    `json:"prs"`    // keyed by head branch
 	Labels     []string              `json:"labels"` // labels the repo has defined
+	// Milestones are the titles the repo has defined, which is all `plan`
+	// preflight's ensureMilestone reads or appends to.
+	Milestones []string `json:"milestones"`
+	// NoSubIssues is a gh too old for `gh issue create --parent`: the
+	// capability probe's --help output omits the flag, and a plan run works
+	// flat.
+	NoSubIssues bool `json:"no_sub_issues"`
 
 	// FailReads is a network that has not come back yet after the host woke:
 	// the next N calls of a kind ("issue list", "pr list") fail the way gh does
@@ -223,8 +230,12 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 	call := at(0) + " " + at(1)
 	// `gh api` names its target in a URL path, so the second word is no use as a
 	// call name. The drain makes exactly one api call; give it a readable name so
-	// a FailReads entry can be flaky about it like any other.
+	// a FailReads entry can be flaky about it like any other. `plan` preflight
+	// adds a second — the milestone find-or-create — routed on the path.
 	if at(0) == "api" {
+		if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "milestones") }) {
+			return answerMilestones(st, args)
+		}
 		call = "api comments"
 	}
 	// Ahead of everything, so a test can be flaky about a call whatever it would
@@ -303,6 +314,19 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 				id, author, is.CommentedAt, is.Bodies[id]))
 		}
 		return "[" + strings.Join(comments, ",") + "]", counting, 0
+
+	case "issue create":
+		// The only shape `plan` preflight makes: the `--parent` capability
+		// probe. A gh with sub-issue support lists the flag in its help.
+		if slices.Contains(args, "--help") {
+			help := "Create a new issue\n\nFLAGS\n  -b, --body string   Supply a body.\n"
+			if !st.NoSubIssues {
+				help += "  -p, --parent int    Create the issue as a sub-issue of an existing issue\n"
+			}
+			return help, false, 0
+		}
+		fmt.Fprintf(os.Stderr, "fake gh: unhandled `issue create` %q\n", strings.Join(args, " "))
+		return "", false, 1
 
 	case "issue edit":
 		is := issue()
@@ -400,6 +424,33 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 	}
 	fmt.Fprintf(os.Stderr, "fake gh: unhandled call %q\n", strings.Join(args, " "))
 	return "", false, 1
+}
+
+// answerMilestones stands in for `gh api repos/{owner}/{repo}/milestones`: a
+// GET listing, or a POST when a `-f title=` field is present. Titles live in
+// ghState.Milestones, which both the drain's writes and its reads can see.
+func answerMilestones(st *ghState, args []string) (out string, changed bool, code int) {
+	var title string
+	for i, a := range args {
+		if (a == "-f" || a == "-F" || a == "--raw-field" || a == "--field") && i+1 < len(args) {
+			if t, ok := strings.CutPrefix(args[i+1], "title="); ok {
+				title = t
+			}
+		}
+	}
+	if title != "" { // a POST
+		if slices.Contains(st.Milestones, title) {
+			fmt.Fprintf(os.Stderr, "milestone already exists: %s\n", title)
+			return "", false, 1
+		}
+		st.Milestones = append(st.Milestones, title)
+		return fmt.Sprintf(`{"number":%d,"title":%q,"state":"open"}`, len(st.Milestones), title), true, 0
+	}
+	rows := make([]string, 0, len(st.Milestones))
+	for i, m := range st.Milestones {
+		rows = append(rows, fmt.Sprintf(`{"number":%d,"title":%q,"state":"open"}`, i+1, m))
+	}
+	return "[" + strings.Join(rows, ",") + "]", false, 0
 }
 
 // prListJSON renders one row of `gh pr list --json number,state,url` — plus the
