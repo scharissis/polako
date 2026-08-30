@@ -497,20 +497,42 @@ func TestReviewGateNamesTheWorktree(t *testing.T) {
 	// fail a skill that is still correct — the same reason
 	// TestReviewGateDoesNotAutoApplyFixes moved off a line window.
 	flat := strings.Join(strings.Fields(skill), " ")
-	invoke := strings.Index(flat, "/code-review high issue-$issue")
-	if invoke < 0 {
-		t.Fatal("SKILL.md no longer invokes `/code-review high issue-$issue`;" +
+	// The level is no longer literal — issue #225 scales it to the diff size —
+	// so match `/code-review <level> issue-$issue` for any single level token.
+	loc := regexp.MustCompile(`/code-review \S+ issue-\$issue`).FindStringIndex(flat)
+	if loc == nil {
+		t.Fatal("SKILL.md no longer invokes `/code-review <level> issue-$issue`;" +
 			" the mandatory review gate before a PR is gone")
 	}
-	window := flat[invoke:]
-	if len(window) > 240 {
-		window = window[:240]
+	window := flat[loc[0]:]
+	if len(window) > 320 {
+		window = window[:320]
 	}
 	if !strings.Contains(window, "<worktree>") {
 		t.Errorf("the review gate invokes /code-review without naming <worktree> alongside the"+
 			" branch, so its forked agent and the finder subagents under it stay in the session"+
 			" cwd (the main checkout) and read the default-branch copy of the changed files"+
 			" rather than the branch's (issue #219):\n\t%s", window)
+	}
+}
+
+// Issue #225: the gate used to ask for `high` on every diff, so a one-line
+// docs fix bought the same broad, full-fan-out review sweep as a large
+// refactor. The level now scales to the change size, measured from the diff
+// that step d already has in hand. A regression back to a hardcoded level is
+// invisible except here — and it is the whole point of the issue.
+func TestReviewGateScalesLevelToDiffSize(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	if !strings.Contains(skill, "diff --stat") {
+		t.Error("the review gate no longer sizes the change with `git diff --stat` before" +
+			" choosing a review level — issue #225's fixed cost per PR is back")
+	}
+	for _, level := range []string{"`medium`", "`high`"} {
+		if !strings.Contains(skill, level) {
+			t.Errorf("the review gate no longer names %s as one of the levels it scales"+
+				" between — the scaling rule from issue #225 is gone or hardcoded again", level)
+		}
 	}
 }
 
@@ -568,8 +590,8 @@ func TestReviewGateDoesNotAutoApplyFixes(t *testing.T) {
 }
 
 // "Reviewed through" is the entire resumability contract issue #216 added —
-// the one thing a resumed run reads to decide whether the expensive 8-subagent
-// review needs repeating. Losing it silently turns every resume back into a
+// the one thing a resumed run reads to decide whether the expensive review
+// sweep needs repeating. Losing it silently turns every resume back into a
 // full re-review — the exact cost the issue was filed about — without any
 // test failing to say so.
 func TestReviewGateRecordsResumeMarkers(t *testing.T) {
