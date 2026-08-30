@@ -1202,6 +1202,110 @@ func TestInspectLeftWorkAgainstARealCheckout(t *testing.T) {
 	})
 }
 
+// cleanupWorktree runs after a merge. For years it built the path it was about
+// to remove, a guess that missed for over half the worktrees that existed and
+// discarded the removal without a word. It asks git now, forces only past a
+// dirty check, and reports a removal it cannot make.
+func TestCleanupWorktreeResolvesThePath(t *testing.T) {
+	cfgFor := func(checkout string) config {
+		return config{dir: checkout, branchPrefix: "issue-"}
+	}
+	listsBranch := func(t *testing.T, checkout, branch string) bool {
+		t.Helper()
+		return strings.Contains(gitAt(t, checkout, "worktree", "list", "--porcelain"), "branch refs/heads/"+branch+"\n")
+	}
+
+	t.Run("a worktree at the sibling path the old guess built is removed", func(t *testing.T) {
+		_, checkout := upstream(t)
+		wt := filepath.Join(filepath.Dir(checkout), filepath.Base(checkout)+"-issue-1")
+		t.Cleanup(func() { _ = os.RemoveAll(wt) })
+		gitAt(t, checkout, "worktree", "add", wt, "-b", "issue-1")
+
+		cleanupWorktree(context.Background(), cfgFor(checkout), 1)
+
+		if _, err := os.Stat(wt); !os.IsNotExist(err) {
+			t.Errorf("worktree %s still exists", wt)
+		}
+	})
+
+	t.Run("a worktree the old guess would never have found is removed", func(t *testing.T) {
+		_, checkout := upstream(t)
+		wt := filepath.Join(t.TempDir(), "desktop-app-put-it-here")
+		gitAt(t, checkout, "worktree", "add", wt, "-b", "issue-2")
+
+		cleanupWorktree(context.Background(), cfgFor(checkout), 2)
+
+		if _, err := os.Stat(wt); !os.IsNotExist(err) {
+			t.Errorf("worktree %s still exists — the old code only ever looked at the sibling path", wt)
+		}
+	})
+
+	t.Run("a leftover untracked PLAN.md alone does not keep the worktree", func(t *testing.T) {
+		_, checkout := upstream(t)
+		wt := filepath.Join(t.TempDir(), "checkout-issue-3")
+		gitAt(t, checkout, "worktree", "add", wt, "-b", "issue-3")
+		if err := os.WriteFile(filepath.Join(wt, planFile), []byte("## Approach\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		cleanupWorktree(context.Background(), cfgFor(checkout), 3)
+
+		if _, err := os.Stat(wt); !os.IsNotExist(err) {
+			t.Errorf("worktree %s still exists — the skill's own PLAN.md is not work left behind", wt)
+		}
+	})
+
+	t.Run("a worktree with real uncommitted work is left alone and reported", func(t *testing.T) {
+		buf := captureLog(t)
+		_, checkout := upstream(t)
+		wt := filepath.Join(t.TempDir(), "checkout-issue-4")
+		gitAt(t, checkout, "worktree", "add", wt, "-b", "issue-4")
+		if err := os.WriteFile(filepath.Join(wt, "half-the-change.go"), []byte("package x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		cleanupWorktree(context.Background(), cfgFor(checkout), 4)
+
+		if _, err := os.Stat(wt); err != nil {
+			t.Errorf("worktree %s was removed despite holding uncommitted work: %v", wt, err)
+		}
+		if got := buf.String(); !strings.Contains(got, "issue-4") || !strings.Contains(got, "uncommitted") {
+			t.Errorf("no report of the skipped worktree in the log: %q", got)
+		}
+	})
+
+	t.Run("a directory removed by hand is pruned, not reported as a failure", func(t *testing.T) {
+		buf := captureLog(t)
+		_, checkout := upstream(t)
+		wt := filepath.Join(t.TempDir(), "checkout-issue-5")
+		gitAt(t, checkout, "worktree", "add", wt, "-b", "issue-5")
+		if err := os.RemoveAll(wt); err != nil {
+			t.Fatal(err)
+		}
+
+		cleanupWorktree(context.Background(), cfgFor(checkout), 5)
+
+		if listsBranch(t, checkout, "issue-5") {
+			t.Errorf("git still lists the pruned worktree for issue-5")
+		}
+		if strings.Contains(buf.String(), "could not") {
+			t.Errorf("a prunable entry was reported as a failure: %q", buf.String())
+		}
+	})
+
+	t.Run("a branch with no worktree at all is a silent no-op", func(t *testing.T) {
+		buf := captureLog(t)
+		_, checkout := upstream(t)
+		gitAt(t, checkout, "branch", "issue-6")
+
+		cleanupWorktree(context.Background(), cfgFor(checkout), 6)
+
+		if got := strings.TrimSpace(buf.String()); got != "" {
+			t.Errorf("nothing to clean up should say nothing, got %q", got)
+		}
+	})
+}
+
 // The whole question round, end to end, under -strict-order: a run that asks
 // something flags the issue, the drain waits on that flag in place, and the
 // re-run that finds the answer clears it and ships. The claude invocation is
