@@ -26,8 +26,13 @@ Waiting is not the same as going quiet, though. A supervisor kills and resumes
 a run that emits nothing for `-stall` — fifteen minutes by default — so a wait
 longer than that is polled from here, in repeated calls that keep the run
 visibly alive, rather than spent inside one call a watchdog cannot tell from a
-hang. Backgrounding the slow thing is fine; what is not is the turn ending
-while it is still outstanding.
+hang. Poll it slowly, though: a check every minute or two is already an order
+of magnitude inside that fifteen, and each one is a fresh turn that reloads the
+whole late-session context — the most expensive turns in a run, not a free
+keepalive. A check every second or two buys nothing over that, and is how one
+run spent an eighth of its tool calls on `sleep` and status polls (issue #217).
+Backgrounding the slow thing is fine; what is not is the turn ending while it
+is still outstanding.
 
 Stopping on purpose is a different thing from stopping to wait. An unanswered
 question ends the run deliberately, flagged with `awaiting-answer` for a human
@@ -234,7 +239,11 @@ don't post again, and stop.
       session's cwd, which this skill never moves, so with no target it
       reviews whatever that cwd holds instead — the main checkout on a
       clean default branch under most invocations, meaning a change someone
-      already merged. Leaving `--fix` off is deliberate: applying fixes is
+      already merged. The Skill call blocks until the review hands back its
+      findings — the finder subagents it fans out are the review's own to
+      await, not something this run watches with `ListAgents` or a poll loop
+      beside it, and issue #217 is a run that did exactly that on this gate.
+      Leaving `--fix` off is deliberate: applying fixes is
       the slow part after the 8-subagent review itself returns, and a run
       that dies during it is exactly what left issue #216's gate with
       nothing to resume from. So write the `## Review` section in PLAN.md
