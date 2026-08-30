@@ -441,10 +441,17 @@ func usageGateOn(cfg config) bool {
 }
 
 // usageGateReason reports whether the plan's own usage has crossed a
-// configured threshold, and if so, the sentence to stop the shift with. A
-// probe that cannot answer never trips it — same direction every uncertainty
-// here resolves in, as with authFailure and lacksCommand — and neither does a
-// gated pool the probe's answer simply did not include.
+// configured threshold and, if so, how long to wait before looking again and
+// the line that explains the wait. A crossed threshold is waited out, never a
+// stop and never a park — the same doctrine as the mid-run refusal in
+// processIssue (behaviour.md, "A session limit is waited out, not retried
+// against"): the limit is a fact about the account, not about any one issue,
+// so the queue keeps and the shift resumes once the pool resets. Starting
+// already over the ceiling therefore waits rather than producing nothing
+// (issue #245). A probe that cannot answer never trips the gate — same
+// direction every uncertainty here resolves in, as with authFailure and
+// lacksCommand — and neither does a gated pool the probe's answer simply did
+// not include.
 //
 // This probes independently of sampleWeekUsage's own call inside processIssue
 // a few lines below, rather than sharing one snapshot for both: an issue
@@ -455,42 +462,56 @@ func usageGateOn(cfg config) bool {
 // meant to be called routinely (see probeUsage's own doc comment), so the
 // extra exec buys correctness rather than costing anything worth trading it
 // away for.
-func usageGateReason(ctx context.Context, cfg config) (string, bool) {
+func usageGateReason(ctx context.Context, cfg config) (time.Duration, string, bool) {
 	if !usageGateOn(cfg) {
-		return "", false
+		return 0, "", false
 	}
 	snap, ok := probeUsage(ctx, cfg)
 	if !ok {
 		log.Print("usage gate: could not read the plan's usage this pass " +
 			"(an older claude with no /usage, or an unparseable reply) — " +
 			"proceeding as if -max-session-usage and -max-week-usage were unset until the next check")
-		return "", false
+		return 0, "", false
 	}
 	if cfg.maxSessionUsage > 0 {
 		if pool, found := poolByLabel(snap.pools, "session"); found && pool.percent >= cfg.maxSessionUsage {
-			return usageGateStopReason("session", "-max-session-usage", cfg.maxSessionUsage, pool), true
+			wait, reason := usageGateWait("session", "-max-session-usage", cfg.maxSessionUsage, pool, cfg.poll)
+			return wait, reason, true
 		}
 	}
 	if cfg.maxWeekUsage > 0 {
 		if pool, found := poolByLabel(snap.pools, "week"); found && pool.percent >= cfg.maxWeekUsage {
-			return usageGateStopReason("week", "-max-week-usage", cfg.maxWeekUsage, pool), true
+			wait, reason := usageGateWait("week", "-max-week-usage", cfg.maxWeekUsage, pool, cfg.poll)
+			return wait, reason, true
 		}
 	}
-	return "", false
+	return 0, "", false
 }
 
-// usageGateStopReason is the sentence usageGateReason stops the shift with:
-// what it saw, the flag that tripped, and when that pool resets if the probe
-// could read a reset clause.
-func usageGateStopReason(label, flagName string, threshold int, pool usagePool) string {
-	reset := ""
+// usageGateWait turns a tripped pool into the pause before the next probe and
+// the line that explains it. A readable reset clause is waited out in one
+// sleep, with the same 90s slack behind the CLI's own clock the mid-run
+// refusal allows (limitReset's callers). A pool whose reset this cannot read,
+// or one whose named reset has already passed while the meter still reads
+// over, falls back to one -poll and another look — the mirror of limitReset's
+// own unreadable-clock fallback, and bounded in real time either way because
+// the pool resets on its own.
+func usageGateWait(label, flagName string, threshold int, pool usagePool, poll time.Duration) (time.Duration, string) {
 	if pool.hasReset {
-		reset = fmt.Sprintf("; it resets %s", formatUsageReset(pool.reset))
+		if until := time.Until(pool.reset); until > 0 {
+			wait := until + 90*time.Second
+			return wait, fmt.Sprintf(
+				"this shift's %s usage is at %d%%, at or over its %s of %d%% — waiting %s for it "+
+					"to reset (%s), then carrying on where this left off "+
+					"(Ctrl+C is safe: everything is on GitHub)",
+				label, pool.percent, flagName, threshold, dur(wait), formatUsageReset(pool.reset))
+		}
 	}
-	return fmt.Sprintf(
-		"this shift's %s usage is at %d%%, at or over its %s of %d%% — stopping here%s; "+
-			"everything is on GitHub, so starting again once it resets carries on where this left off",
-		label, pool.percent, flagName, threshold, reset)
+	return poll, fmt.Sprintf(
+		"this shift's %s usage is at %d%%, at or over its %s of %d%%, and no reset time this "+
+			"can read — re-checking every %s until it drops "+
+			"(Ctrl+C is safe: everything is on GitHub)",
+		label, pool.percent, flagName, threshold, dur(poll))
 }
 
 // sampleWeekUsage is the one-line "what does the plan's week usage read right
@@ -1336,11 +1357,18 @@ func drain(ctx context.Context, cfg config) error {
 		}
 		// Same placement and the same reasoning as the cost budget above: read
 		// between issues and never inside one, and never a park — the plan's own
-		// limit is a fact about the account, not about this issue.
-		if reason, stop := usageGateReason(ctx, cfg); stop {
+		// limit is a fact about the account, not about this issue. Unlike the
+		// cost budget it does not stop the shift: the pool resets on its own, so
+		// the gate waits it out and loops back to probe again, the fence
+		// matching the wall a mid-run refusal hits (behaviour.md). A Ctrl+C
+		// during the wait returns context.Canceled from sleep, which finish
+		// prints a summary for and reports without a notify.
+		if wait, reason, tripped := usageGateReason(ctx, cfg); tripped {
 			log.Print(reason)
-			notify(ctx, cfg, notification{event: notifyStopped, reason: reason})
-			return finish(nil)
+			if err := sleep(ctx, wait); err != nil {
+				return finish(err)
+			}
+			continue
 		}
 		ready, blocked, heldBack, containers, err := openIssues(ctx, cfg)
 		if err != nil {
