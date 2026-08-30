@@ -508,8 +508,8 @@ func usageGateWait(label, flagName string, threshold int, pool usagePool, poll t
 		}
 	}
 	return poll, fmt.Sprintf(
-		"this shift's %s usage is at %d%%, at or over its %s of %d%%, and no reset time this "+
-			"can read — re-checking every %s until it drops "+
+		"this shift's %s usage is at %d%%, at or over its %s of %d%%, and no upcoming reset this "+
+			"can wait out — re-checking every %s until it drops "+
 			"(Ctrl+C is safe: everything is on GitHub)",
 		label, pool.percent, flagName, threshold, dur(poll))
 }
@@ -928,9 +928,9 @@ func parseFlags() config {
 	flag.Float64Var(&cfg.maxSessionCost, "max-session-cost", 0,
 		"end the shift between issues once its runs have cost this many dollars (0 disables)")
 	flag.IntVar(&cfg.maxSessionUsage, "max-session-usage", 0,
-		"end the shift between issues once the plan's current-session usage reaches this percent (0 disables)")
+		"pause the shift between issues while the plan's current-session usage is at or over this percent, waiting the pool's own reset out then carrying on (0 disables)")
 	flag.IntVar(&cfg.maxWeekUsage, "max-week-usage", 0,
-		"end the shift between issues once the plan's current-week usage reaches this percent (0 disables)")
+		"pause the shift between issues while the plan's current-week usage is at or over this percent, waited out the same way — a weekly reset can be days off (0 disables)")
 	flag.StringVar(&skip, "skip", "", "comma-separated issue numbers to skip (head-of-line escape hatch)")
 	flag.BoolVar(&cfg.once, "once", false,
 		"process a single issue to a merge, a park or a question, then exit")
