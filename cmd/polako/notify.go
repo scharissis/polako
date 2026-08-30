@@ -26,8 +26,9 @@ import (
 	"unicode"
 )
 
-// The states that need a human. Three of them end an issue's turn and one ends
-// the drain; nothing else fires, because a hook that goes off on every ordinary
+// The states that need a human. Three of them end an issue's turn, one ends
+// the drain, and one is a `polako plan` run finishing with a backlog to
+// curate; nothing else fires, because a hook that goes off on every ordinary
 // event is one an operator mutes.
 const (
 	notifyParked = "parked"
@@ -40,6 +41,13 @@ const (
 	// case the flag exists for: a refused token stops everything, and without
 	// this nothing says so until somebody looks at the terminal.
 	notifyStopped = "stopped"
+	// notifyProposed fires once, at the end of a `polako plan` run that left
+	// proposals behind: the tool did the right thing — a curated backlog sits
+	// behind the `proposed` label — and on a repo nobody is watching that is
+	// the only trace. A plan run that proposed nothing fires nothing. Not on
+	// an issue's list because it is not a drain event at all; it is here
+	// because it is the same class of quiet moment the flag exists for.
+	notifyProposed = "proposed"
 	// notifyEpicDone fires once, the same occasion commentFinishedContainers
 	// earns its own log line: every child of a container closed, waiting only
 	// on a human to judge whether they added up to the design and close it.

@@ -73,6 +73,97 @@ func decode(t *testing.T, rec any) map[string]any {
 	return got
 }
 
+func samplePlanFacts() planFacts {
+	return planFacts{
+		vision: "docs/VISION.md", milestone: "VISION 2026-08",
+		issuesCreated: 7, epicsCreated: 1, cap: 10, labelsEnforced: 2,
+		started: time.Date(2026, 8, 24, 10, 15, 0, 0, time.UTC),
+		ended:   time.Date(2026, 8, 24, 10, 22, 2, 0, time.UTC),
+	}
+}
+
+// The plan record carries the same run-stream numbers and configuration
+// snapshot a run record does, plus what the run was planning from and what the
+// label pass had to enforce — and none of the per-issue fields, which mean
+// nothing for a run that works no issue.
+func TestPlanRecordIsSelfDescribing(t *testing.T) {
+	cfg := metricsConfig(t, metricsOff)
+	cfg.skill = defaultPlanSkill
+	got := decode(t, newPlanRecord(cfg, sampleReport(), samplePlanFacts()))
+
+	for key, want := range map[string]any{
+		"v":               float64(recordVersion),
+		"kind":            "plan",
+		"ts":              "2026-08-24T10:15:00Z",
+		"ended":           "2026-08-24T10:22:02Z",
+		"shift":           "d1d2d3d4",
+		"repo":            "scharissis/polako",
+		"status":          "ok",
+		"turns":           float64(74),
+		"tool_uses":       float64(63),
+		"api_ms":          float64(812000),
+		"cost_usd":        4.12,
+		"usage_source":    usageResult,
+		"model":           "claude-opus-5",
+		"skill":           defaultPlanSkill,
+		"permission_mode": "acceptEdits",
+		"tag":             "baseline",
+		"claude_version":  "2.1.34",
+		"plugin_version":  "0.3.0",
+		"vision":          "docs/VISION.md",
+		"milestone":       "VISION 2026-08",
+		"issues_created":  float64(7),
+		"epics_created":   float64(1),
+		"cap":             float64(10),
+		"labels_enforced": float64(2),
+	} {
+		if got[key] != want {
+			t.Errorf("record[%q] = %v, want %v", key, got[key], want)
+		}
+	}
+	if got["tools_hash"] != toolsHash("Read,Write") {
+		t.Errorf("tools_hash = %v, want the hash of the resolved list", got["tools_hash"])
+	}
+	if tokens, ok := got["tokens"].(map[string]any); !ok || tokens["cache_read"] != float64(8123400) {
+		t.Errorf("tokens = %v, want the four-way split", got["tokens"])
+	}
+	// A plan run works no issue: the fields a drained issue's record turns on
+	// would only be noise here, and reason/session in particular imply a
+	// per-issue attempt this run never made.
+	for _, forbidden := range []string{"issue", "pr", "reason", "attempt", "session", "outcome", "poll_s"} {
+		if _, ok := got[forbidden]; ok {
+			t.Errorf("plan record carries %q — that belongs to a drained issue's run", forbidden)
+		}
+	}
+}
+
+// A plan run the cap killed, or one that crashed, never emitted a result
+// event. Its record falls back to the streamed tally the same way a run
+// record does, because newPlanRecord shares that assembly rather than
+// re-deriving it.
+func TestPlanRecordFallsBackToObservedUsage(t *testing.T) {
+	cfg := metricsConfig(t, metricsOff)
+	rep := runReport{
+		sessionID: "sess-cap", exitCode: -1, turns: -1, stalled: false,
+		observed:      tokenCounts{In: 8, Out: 9, CacheRead: 10, CacheWrite: 11},
+		observedTurns: 5,
+	}
+	got := decode(t, newPlanRecord(cfg, rep, samplePlanFacts()))
+
+	if got["usage_source"] != usageObserved {
+		t.Errorf("usage_source = %v, want %q", got["usage_source"], usageObserved)
+	}
+	if tokens := got["tokens"].(map[string]any); tokens["out"] != float64(9) {
+		t.Errorf("tokens = %v, want the observed tally", tokens)
+	}
+	if got["turns"] != float64(5) {
+		t.Errorf("turns = %v, want the observed count, never -1", got["turns"])
+	}
+	if got["wall_ms"] != float64(422000) {
+		t.Errorf("wall_ms = %v, want it timed from the clock", got["wall_ms"])
+	}
+}
+
 func TestRunRecordIsSelfDescribing(t *testing.T) {
 	cfg := metricsConfig(t, metricsOff)
 	rc := runContext{
@@ -315,6 +406,7 @@ func TestRecorderOffWritesNothing(t *testing.T) {
 	}
 	cfg.rec.recordRun(cfg, runContext{issue: 1, started: time.Now(), ended: time.Now()}, sampleReport())
 	cfg.rec.recordIssue(cfg, 1, 2, issueMerged, "", prFacts{}, issueUsageSamples{})
+	cfg.rec.recordPlan(cfg, sampleReport(), samplePlanFacts())
 
 	entries, err := os.ReadDir(home)
 	if err != nil {
@@ -331,6 +423,7 @@ func TestNilRecorderIsSafe(t *testing.T) {
 	var cfg config
 	cfg.rec.recordRun(cfg, runContext{started: time.Now(), ended: time.Now()}, runReport{})
 	cfg.rec.recordIssue(cfg, 1, 2, issueMerged, "", prFacts{}, issueUsageSamples{})
+	cfg.rec.recordPlan(cfg, runReport{}, planFacts{})
 	if cfg.rec.enabled() {
 		t.Error("a nil recorder is disabled")
 	}

@@ -17,8 +17,11 @@ package main
 //     label, and attaches the batch milestone to any the skill missed. A
 //     failure to label is reported loudly, never swallowed.
 //
-// Run-data records and the notify event are not wired yet (issue #next); the
-// flags for them parse and are otherwise inert.
+// When it ends, whatever its status, it leaves the two traces every other run
+// leaves: one `kind:"plan"` run-data record (metrics.go), and — when it
+// created proposals — one `proposed` notification (notify.go), the same quiet
+// "the tool did the right thing and nobody is watching" moment `-notify`
+// exists for.
 
 import (
 	"context"
@@ -116,10 +119,10 @@ func runPlan(ctx context.Context, args []string, out io.Writer) error {
 	fs.StringVar(&opt.addTools, "add-tools", "", "extra --allowedTools entries, appended to -tools instead of replacing it")
 	fs.DurationVar(&opt.stall, "stall", 15*time.Minute, "kill a run with no output events for this long (0 disables)")
 	fs.Float64Var(&opt.maxCost, "max-cost", 0, "warn once the run has cost this many dollars (0 disables; advisory — a one-shot run has no next run to bound)")
-	fs.StringVar(&opt.metrics, "metrics", "", `directory for run-data records, or "off" (default ~/.polako/metrics) — inert until run-data lands`)
-	fs.StringVar(&opt.tag, "run-tag", "", "label recorded with the run, for comparing one batch against another — inert until run-data lands")
+	fs.StringVar(&opt.metrics, "metrics", "", `directory for the run-data record, or "off" (default ~/.polako/metrics)`)
+	fs.StringVar(&opt.tag, "run-tag", "", "label recorded with the run, for comparing one batch against another")
 	fs.StringVar(&opt.notifyCmd, "notify", "",
-		"command checked at preflight, for the human-needed hook — inert until the notify event lands (see docs/reference.md)")
+		"command run when a plan run finishes with proposals to curate (see docs/reference.md)")
 	fs.BoolVar(&opt.dryRun, "dry-run", false,
 		"resolve the document, print the claude invocation the run would get, and exit without running or writing anything")
 	fs.Usage = func() {
@@ -172,6 +175,7 @@ func planRun(ctx context.Context, cfg config, opt planOptions, milestone string,
 
 	prompt := planPrompt(cfg, opt)
 	log.Printf("running %s from %s — capped at %s", cfg.skill, planPromptLabel(opt), plural(opt.maxIssues, "issue"))
+	started := time.Now()
 	rep, runErr := execClaude(ctx, cfg, prompt, "", cfg.skill, 0)
 
 	// The label pass runs no matter how the run ended — a clean finish, the cap
@@ -188,6 +192,27 @@ func planRun(ctx context.Context, cfg config, opt planOptions, milestone string,
 	}
 	pass := planNormalise(passCtx, cfg, before, milestone)
 	pass.report(opt, rep)
+
+	// The two traces the run leaves, both after the label pass so they carry
+	// what it found: one record whatever the run's status, and — only when the
+	// run actually proposed something — one notification. Both detached from
+	// the parent context for the same reason the pass is: a Ctrl+C during the
+	// run must not be what swallows the record of it or the note that a backlog
+	// is now waiting to be curated.
+	cfg.rec.recordPlan(cfg, rep, planFacts{
+		vision:         planVisionField(opt),
+		milestone:      milestone,
+		issuesCreated:  pass.created,
+		epicsCreated:   pass.epics,
+		cap:            opt.maxIssues,
+		labelsEnforced: pass.labelsEnforced(),
+		started:        started,
+		ended:          time.Now(),
+	})
+	if pass.created > 0 {
+		notify(context.WithoutCancel(ctx), cfg, notification{
+			event: notifyProposed, reason: proposedNotifyReason(pass.created, pass.epics)})
+	}
 
 	// Order of the exit conditions: a failed label pass is the loudest, because
 	// it means a proposal may be sitting unguarded. Then an interrupt — the
@@ -230,6 +255,32 @@ func planPromptLabel(opt planOptions) string {
 	return "an inline brief"
 }
 
+// planVisionField is what the record's `vision` carries: the -vision path the
+// operator typed, or the literal "(brief)" for an inline one. A path is an
+// operator-chosen string and fair game; the brief's own text is vision-document
+// content and never enters a record, the standing recorder rule.
+func planVisionField(opt planOptions) string {
+	if opt.vision != "" {
+		return opt.vision
+	}
+	return "(brief)"
+}
+
+// proposedNotifyReason is the one line of English the `proposed` hook receives:
+// how many proposals await curation, how many are epics, and the one move that
+// queues them. Numbers only, like every notification reason.
+func proposedNotifyReason(created, epics int) string {
+	verb := "await"
+	if created == 1 {
+		verb = "awaits"
+	}
+	s := plural(created, "proposal")
+	if epics > 0 {
+		s += fmt.Sprintf(" (%s)", plural(epics, "epic"))
+	}
+	return fmt.Sprintf("%s %s curation — remove the %s label to queue them", s, verb, proposedLabel)
+}
+
 // planOpenIssues is the set of open issue numbers before the run — the baseline
 // the label pass diffs against, so an issue a person files by hand while the
 // run is going is told apart from one the skill created. Open issues only: a
@@ -259,12 +310,19 @@ func planOpenIssues(ctx context.Context, cfg config) (map[int]bool, error) {
 // collected here rather than swallowed and it makes `polako plan` exit nonzero.
 type planPassOutcome struct {
 	created   int      // new issues this account was found to have filed
+	epics     int      // of those, the ones that are containers (sub-issues > 0)
 	labelled  []int    // issues confirmed to carry exactly proposedLabel afterwards
+	added     int      // missing proposedLabel labels the pass applied
 	stripped  int      // stray labels removed, across all of them
 	milestone []int    // issues the batch milestone was newly attached to
 	failures  []string // one line per action that did not take — loud
 	listErr   error    // the after-listing itself failed: nothing could be checked
 }
+
+// labelsEnforced is how many label edits the pass had to make — adds plus
+// strips — which is the measure of how far the run fell short of self-applying
+// the curation gate, and the number the `plan` record carries for it.
+func (o planPassOutcome) labelsEnforced() int { return o.added + o.stripped }
 
 // planNormalise is the enforcing label pass. It lists the issues this gh
 // account has open, keeps the ones absent from `before` and numbered above
@@ -286,8 +344,19 @@ func planNormalise(ctx context.Context, cfg config, before map[int]bool, milesto
 			maxBefore = n
 		}
 	}
+	// subIssuesSummary rides along so the record can say how many of the run's
+	// own issues are epics. A gh too old for the field rejects the whole call
+	// before it asks GitHub anything, so fall back to the listing without it —
+	// epics_created then reads 0, the same degradation the drain's container
+	// skip takes, and a flat run has no epics to miss anyway.
+	fields := "number,labels,milestone,subIssuesSummary"
 	raw, err := gh(ctx, cfg, "issue", "list", "--author", "@me", "--state", "open",
-		"--limit", "1000", "--json", "number,labels,milestone")
+		"--limit", "1000", "--json", fields)
+	if unknownJSONField(err) {
+		fields = "number,labels,milestone"
+		raw, err = gh(ctx, cfg, "issue", "list", "--author", "@me", "--state", "open",
+			"--limit", "1000", "--json", fields)
+	}
 	if err != nil {
 		out.listErr = err
 		return out
@@ -300,6 +369,9 @@ func planNormalise(ctx context.Context, cfg config, before map[int]bool, milesto
 		Milestone *struct {
 			Title string `json:"title"`
 		} `json:"milestone"`
+		SubIssues struct {
+			Total int `json:"total"`
+		} `json:"subIssuesSummary"`
 	}
 	if err := json.Unmarshal(raw, &rows); err != nil {
 		out.listErr = fmt.Errorf("unreadable issue list: %w", err)
@@ -311,6 +383,9 @@ func planNormalise(ctx context.Context, cfg config, before map[int]bool, milesto
 			continue // there before the run — not ours to touch
 		}
 		out.created++
+		if r.SubIssues.Total > 0 {
+			out.epics++
+		}
 		n := strconv.Itoa(r.Number)
 		clean := true
 
@@ -336,6 +411,7 @@ func planNormalise(ctx context.Context, cfg config, before map[int]bool, milesto
 				clean = false
 			} else {
 				log.Printf("plan: labelled #%d %s", r.Number, proposedLabel)
+				out.added++
 			}
 		}
 		if clean {
@@ -454,6 +530,12 @@ func planConfig(opt *planOptions) (config, error) {
 		notifyCmd:      opt.notifyCmd,
 		dryRun:         opt.dryRun,
 		queue:          new(queueMemo),
+		// The run leaves the same two traces a drain run does. The shift id
+		// stamps the record so `stats -shift` can single this batch out; the
+		// recorder resolves -metrics exactly as the drain's does, and is a
+		// no-op under "off" or with no home directory.
+		shiftID: newShiftID(),
+		rec:     newRecorder(opt.metrics),
 	}
 	abs, err := filepath.Abs(opt.dir)
 	if err != nil {
@@ -513,6 +595,13 @@ func planPreflight(ctx context.Context, cfg *config, opt *planOptions) (mileston
 	milestone = planMilestoneTitle(opt)
 
 	if !opt.dryRun {
+		// The record pins which CLI and which installed skill produced the
+		// run's numbers, the same two the drain's preflight reads. Best-effort:
+		// a version that will not answer leaves the field empty rather than
+		// stopping a plan run over telemetry.
+		cfg.claudeVersion = claudeVersion(ctx, *cfg)
+		cfg.pluginVersion, cfg.pluginID = pluginVersion(ctx, *cfg)
+
 		// Best-effort like the drain's awaiting-answer declaration: an
 		// "already exists" is the healthy repeat case, not a failure.
 		_ = ensureLabel(ctx, *cfg, proposedLabel, planProposedColor, planProposedDesc)

@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -210,6 +211,13 @@ func TestPlanDryRunWritesNothingAndPrintsTheInvocation(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A recorder and a notify command are in the config, so this also pins
+	// that a dry run reaches neither: it prints the invocation and stops.
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+	cfg.shiftID = "planshift"
+	told := notifyLog(t, &cfg)
+
 	opt := planOptions{vision: "docs/VISION.md", focus: "the observability section", maxIssues: 7, dryRun: true}
 	buf := captureLog(t)
 	milestone, hierarchical, err := planPreflight(context.Background(), &cfg, &opt)
@@ -220,6 +228,13 @@ func TestPlanDryRunWritesNothingAndPrintsTheInvocation(t *testing.T) {
 	var out strings.Builder
 	if err := planDryRun(cfg, opt, milestone, hierarchical, &out); err != nil {
 		t.Fatalf("planDryRun: %v", err)
+	}
+
+	if entries, _ := os.ReadDir(records); len(entries) != 0 {
+		t.Errorf("a dry run wrote run data: %v", entries)
+	}
+	if got := told(); got != nil {
+		t.Errorf("a dry run fired a notification: %v", got)
 	}
 
 	after, err := os.ReadFile(statePath)
@@ -384,6 +399,59 @@ func TestPlanNormaliseReportsLabelFailuresLoudly(t *testing.T) {
 	}
 }
 
+// The record needs to know how far the run fell short of the curation gate
+// and how many of its issues are epics. planNormalise counts both: label
+// edits (adds plus strips), and created issues that turned out to be
+// containers.
+func TestPlanNormaliseCountsTheEnforcementAndTheEpics(t *testing.T) {
+	cfg, _, _ := planTestConfig(t, &ghState{
+		Labels:     []string{proposedLabel, "enhancement"},
+		Milestones: []string{"Batch 1"},
+		Issues: map[string]*fakeIssue{
+			"1":  {Open: true},                                                             // there before the run
+			"10": {Open: true, Mine: true, SubIssues: 3},                                   // an epic, the label missing
+			"11": {Open: true, Mine: true, Labels: []string{proposedLabel}},                // a child, already right
+			"12": {Open: true, Mine: true, Labels: []string{proposedLabel, "enhancement"}}, // a child, a stray label
+		},
+	})
+	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
+
+	out := planNormalise(context.Background(), cfg, map[int]bool{1: true}, "Batch 1")
+	if out.err() != nil {
+		t.Fatalf("healthy pass reported failures: %v", out.err())
+	}
+	if out.created != 3 || out.epics != 1 {
+		t.Errorf("created %d / epics %d, want 3 / 1", out.created, out.epics)
+	}
+	if out.added != 1 || out.stripped != 1 || out.labelsEnforced() != 2 {
+		t.Errorf("added %d / stripped %d / enforced %d, want 1 / 1 / 2",
+			out.added, out.stripped, out.labelsEnforced())
+	}
+}
+
+// A gh too old for subIssuesSummary rejects the whole listing rather than the
+// one field. The pass retries without it and still normalises — epics_created
+// then reads 0, the same degradation the drain's container skip takes.
+func TestPlanNormaliseFallsBackForAnOldGh(t *testing.T) {
+	cfg, _, _ := planTestConfig(t, &ghState{
+		OldGh:  true,
+		Labels: []string{proposedLabel},
+		Issues: map[string]*fakeIssue{
+			"1":  {Open: true},
+			"10": {Open: true, Mine: true, SubIssues: 3},
+		},
+	})
+	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
+
+	out := planNormalise(context.Background(), cfg, map[int]bool{1: true}, "")
+	if out.listErr != nil {
+		t.Fatalf("the old-gh listing was not retried without the field: %v", out.listErr)
+	}
+	if out.created != 1 || out.epics != 0 || out.added != 1 {
+		t.Errorf("outcome = %+v, want created 1 / epics 0 (unknowable) / added 1", out)
+	}
+}
+
 // End to end: a real run spawns the skill through execClaude and the pass
 // normalises what it filed. The fake skill creates three proposals, only one
 // of them labelled.
@@ -419,6 +487,87 @@ func TestPlanRunSpawnsTheSkillAndNormalisesWhatItCreated(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "3 issues created, 3 normalised to "+proposedLabel) {
 		t.Errorf("the pass summary is missing from the log:\n%s", buf.String())
+	}
+}
+
+// When it ends, a plan run leaves the two traces every run leaves: one
+// kind:"plan" record whatever its status, and — because it proposed
+// something — one `proposed` notification naming what awaits curation.
+func TestPlanRunRecordsAndNotifies(t *testing.T) {
+	captureLog(t)
+	cfg, _ := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plan")
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+	cfg.shiftID = "planshift"
+	cfg.tag = "terse"
+	told := notifyLog(t, &cfg)
+
+	opt := planOptions{vision: "VISION.md", maxIssues: 10}
+	cfg.maxIssues = opt.maxIssues
+	if err := planRun(context.Background(), cfg, opt, "VISION", io.Discard); err != nil {
+		t.Fatalf("planRun: %v", err)
+	}
+
+	lines := readRecords(t, records, cfg.repo)
+	if len(lines) != 1 {
+		t.Fatalf("wrote %d records, want exactly one plan record", len(lines))
+	}
+	var rec map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &rec); err != nil {
+		t.Fatalf("record is not JSON: %v", err)
+	}
+	for key, want := range map[string]any{
+		"kind": "plan", "shift": "planshift", "repo": "example/repo",
+		"status": "ok", "tag": "terse", "vision": "VISION.md", "milestone": "VISION",
+		"issues_created": float64(3), "epics_created": float64(0),
+		"cap": float64(10), "labels_enforced": float64(2),
+	} {
+		if rec[key] != want {
+			t.Errorf("record[%q] = %v, want %v", key, rec[key], want)
+		}
+	}
+
+	got := told()
+	if len(got) != 1 {
+		t.Fatalf("notifications = %v, want one for the proposals awaiting curation", got)
+	}
+	for _, want := range []string{
+		notifyPrefix + "EVENT=proposed",
+		notifyPrefix + "ISSUE= ", // the whole batch, not one issue
+		"3 proposals await curation",
+		"remove the " + proposedLabel + " label",
+	} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("the proposed notification is missing %q\ngot: %s", want, got[0])
+		}
+	}
+}
+
+// A plan run that proposed nothing fires no notification — nobody is waiting
+// on a backlog that does not exist — but still writes its record.
+func TestPlanRunWithNoProposalsRecordsButDoesNotNotify(t *testing.T) {
+	captureLog(t)
+	cfg, _ := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "planempty")
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+	cfg.shiftID = "planshift"
+	told := notifyLog(t, &cfg)
+
+	opt := planOptions{vision: "VISION.md", maxIssues: 10}
+	cfg.maxIssues = opt.maxIssues
+	if err := planRun(context.Background(), cfg, opt, "VISION", io.Discard); err != nil {
+		t.Fatalf("planRun: %v", err)
+	}
+
+	if got := told(); got != nil {
+		t.Errorf("a run that proposed nothing still notified: %v", got)
+	}
+	lines := readRecords(t, records, cfg.repo)
+	if len(lines) != 1 {
+		t.Fatalf("wrote %d records, want the one plan record regardless", len(lines))
+	}
+	if !strings.Contains(lines[0], `"issues_created":0`) {
+		t.Errorf("record does not show zero issues created:\n%s", lines[0])
 	}
 }
 
