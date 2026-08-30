@@ -13,6 +13,23 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.15.0]
+
+### What's Changed
+* fix: the review gate names the worktree, not just the branch by @scharissis in https://github.com/scharissis/polako/pull/231 (closes #219)
+* fix: narrate one session-started/finished per run, not per dequeued prompt by @scharissis in https://github.com/scharissis/polako/pull/232 (closes #224)
+* chore: SHA-pin the actions, add Dependabot, and turn on the free GitHub security checks by @scharissis in https://github.com/scharissis/polako/pull/233
+* fix: scale the review gate's level to the diff size by @scharissis in https://github.com/scharissis/polako/pull/234 (closes #225)
+* fix: sum the per-turn fields across a run's result events by @scharissis in https://github.com/scharissis/polako/pull/235 (closes #227)
+* fix: name the resumable session when a limit wait is interrupted by @scharissis in https://github.com/scharissis/polako/pull/236 (closes #218)
+* feat: polako plan skeleton — dispatch, flags, preflight, probes, -dry-run by @scharissis in https://github.com/scharissis/polako/pull/237 (closes #102)
+* feat: polako plan runs the skill, with the label pass and the issue cap by @scharissis in https://github.com/scharissis/polako/pull/238 (closes #103)
+* feat: the plan record and the proposed notify event by @scharissis in https://github.com/scharissis/polako/pull/240 (closes #104)
+* feat: the pricing line — history prices the plan report by @scharissis in https://github.com/scharissis/polako/pull/241 (closes #105)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.14.0...v0.15.0
+
 ## [0.14.0]
 
 ### What's Changed
