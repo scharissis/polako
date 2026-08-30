@@ -1,13 +1,13 @@
 package main
 
-// `polako plan` is a skeleton: it resolves a vision document, runs its
-// preflight probes, and either prints the invocation a run would make
-// (-dry-run) or refuses until #103 lands the run path. Every case here runs on
-// the same fake `gh` the drain loop does — no network, no real gh, no claude.
+// `polako plan` resolves a vision document, runs its preflight probes, then
+// either prints the invocation a run would make (-dry-run) or makes it: spawn
+// the skill, cap it at -max-issues, and normalise every issue it created to
+// carry exactly the `proposed` label. Every case here runs on the same fake
+// `gh` and fake `claude` the drain loop does — no network, no real gh, no claude.
 
 import (
 	"context"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -269,23 +269,160 @@ func TestPlanDryRunWritesNothingAndPrintsTheInvocation(t *testing.T) {
 	}
 }
 
-// The refusal a non-dry run gets is the operator's whole briefing: it names the
-// issue the run path arrives with, and the flag that works meanwhile.
-func TestPlanRefusalNamesTheFollowUp(t *testing.T) {
-	for _, want := range []string{"#103", "dry-run"} {
-		if !strings.Contains(planNotRunnableErr.Error(), want) {
-			t.Errorf("planNotRunnableErr does not mention %q: %v", want, planNotRunnableErr)
+// planRunConfig is planTestConfig plus what a real run needs the preflight
+// would otherwise fill in: the resolved repository, and a fake claude in the
+// mode the case wants.
+func planRunConfig(t *testing.T, st *ghState, claudeMode string) (config, string) {
+	t.Helper()
+	cfg, statePath, checkout := planTestConfig(t, st)
+	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
+	t.Setenv(fakeClaudeEnv, claudeMode)
+	writeVision(t, checkout, "VISION.md")
+	return cfg, statePath
+}
+
+// The label pass forces every issue the run created to carry *exactly*
+// proposedLabel — a missing one added, any other stripped — attaches the batch
+// milestone to the ones without it, and leaves another account's issue alone.
+func TestPlanNormaliseForcesExactlyProposed(t *testing.T) {
+	cfg, statePath, _ := planTestConfig(t, &ghState{
+		Labels:     []string{proposedLabel, "enhancement"},
+		Milestones: []string{"Batch 1"},
+		Issues: map[string]*fakeIssue{
+			"1":  {Open: true},                                                             // there before the run
+			"10": {Open: true, Mine: true},                                                 // new, the skill forgot the label
+			"11": {Open: true, Mine: true, Labels: []string{proposedLabel}},                // new, already right
+			"12": {Open: true, Mine: true, Labels: []string{proposedLabel, "enhancement"}}, // new, a label smuggled on
+			"13": {Open: true, Labels: []string{"enhancement"}},                            // new, another account's
+		},
+	})
+	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
+
+	out := planNormalise(context.Background(), cfg, map[int]bool{1: true}, "Batch 1")
+	if out.err() != nil {
+		t.Fatalf("planNormalise reported failures on a healthy pass: %v", out.err())
+	}
+	if out.created != 3 || len(out.labelled) != 3 || out.stripped != 1 || len(out.milestone) != 3 {
+		t.Errorf("outcome = %+v, want created 3 / labelled 3 / stripped 1 / milestone 3", out)
+	}
+
+	st, err := readGhState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"10", "11", "12"} {
+		is := st.Issues[n]
+		if !slices.Equal(is.Labels, []string{proposedLabel}) {
+			t.Errorf("#%s labels = %v, want exactly [%s]", n, is.Labels, proposedLabel)
 		}
+		if is.Milestone != "Batch 1" {
+			t.Errorf("#%s milestone = %q, want %q", n, is.Milestone, "Batch 1")
+		}
+	}
+	if is := st.Issues["13"]; !slices.Equal(is.Labels, []string{"enhancement"}) || is.Milestone != "" {
+		t.Errorf("#13 was touched: labels %v, milestone %q — another account's issue must be left alone",
+			is.Labels, is.Milestone)
 	}
 }
 
-// A real (non-dry) invocation refuses ahead of preflight, so a forgotten
-// -dry-run against an unfamiliar repo touches nothing there — no gh call is
-// made at all. The bare "gh" in the config would fail loudly if one were.
-func TestPlanRefusesARealRunBeforeTouchingGitHub(t *testing.T) {
-	err := runPlan(context.Background(), []string{"-vision", "docs/VISION.md"}, io.Discard)
-	if !errors.Is(err, planNotRunnableErr) {
-		t.Fatalf("a non-dry `polako plan` returned %v, want the #103 refusal", err)
+// A label edit that does not take is collected, surfaced, and turned into a
+// nonzero exit — never swallowed, because an unlabelled proposal a drain would
+// pick up is the worst thing a plan run can leave behind.
+func TestPlanNormaliseReportsLabelFailuresLoudly(t *testing.T) {
+	// The repository never declared proposedLabel, so `gh issue edit --add-label`
+	// fails exactly as GitHub's would.
+	cfg, _, _ := planTestConfig(t, &ghState{
+		Issues: map[string]*fakeIssue{"10": {Open: true, Mine: true}},
+	})
+	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
+
+	out := planNormalise(context.Background(), cfg, map[int]bool{}, "")
+	if len(out.failures) == 0 || out.err() == nil {
+		t.Fatalf("a failed label add was swallowed: %+v", out)
+	}
+	for _, want := range []string{"#10", "unguarded"} {
+		if !strings.Contains(out.err().Error(), want) {
+			t.Errorf("the loud error omits %q: %v", want, out.err())
+		}
+	}
+	if slices.Contains(out.labelled, 10) {
+		t.Error("#10 was counted as normalised despite the add failing")
+	}
+}
+
+// End to end: a real run spawns the skill through execClaude and the pass
+// normalises what it filed. The fake skill creates three proposals, only one
+// of them labelled.
+func TestPlanRunSpawnsTheSkillAndNormalisesWhatItCreated(t *testing.T) {
+	buf := captureLog(t)
+	cfg, statePath := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plan")
+
+	opt := planOptions{vision: "VISION.md", maxIssues: 10}
+	cfg.maxIssues = opt.maxIssues
+	if err := planRun(context.Background(), cfg, opt, "VISION", io.Discard); err != nil {
+		t.Fatalf("planRun: %v", err)
+	}
+
+	st, err := readGhState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine := 0
+	for _, is := range st.Issues {
+		if !is.Mine {
+			continue
+		}
+		mine++
+		if !slices.Equal(is.Labels, []string{proposedLabel}) {
+			t.Errorf("a created issue carries %v, want exactly [%s]", is.Labels, proposedLabel)
+		}
+		if is.Milestone != "VISION" {
+			t.Errorf("a created issue has milestone %q, want %q", is.Milestone, "VISION")
+		}
+	}
+	if mine != 3 {
+		t.Errorf("the run created %d issues, want 3", mine)
+	}
+	if !strings.Contains(buf.String(), "3 issues created, 3 normalised to "+proposedLabel) {
+		t.Errorf("the pass summary is missing from the log:\n%s", buf.String())
+	}
+}
+
+// The cap: dispatchClaude kills the run at -max-issues, planRun reports it
+// rather than raising it, and the label pass still normalises everything that
+// was filed. Nothing is closed.
+func TestPlanRunCapsIssueCreationAndStillNormalises(t *testing.T) {
+	buf := captureLog(t)
+	cfg, statePath := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plancap")
+
+	opt := planOptions{vision: "VISION.md", maxIssues: 3}
+	cfg.maxIssues = opt.maxIssues
+	if err := planRun(context.Background(), cfg, opt, "", io.Discard); err != nil {
+		t.Fatalf("a cap hit is reported, not raised: %v", err)
+	}
+
+	st, err := readGhState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := 0
+	for _, is := range st.Issues {
+		if !is.Mine {
+			continue
+		}
+		created++
+		if !is.Open {
+			t.Error("the cap closed an issue — it must be loud, never destructive")
+		}
+		if !slices.Contains(is.Labels, proposedLabel) {
+			t.Errorf("a capped run's issue is unlabelled: %v", is.Labels)
+		}
+	}
+	if created < opt.maxIssues {
+		t.Errorf("the fake skill filed %d issues, want at least the cap of %d", created, opt.maxIssues)
+	}
+	if !strings.Contains(buf.String(), "-max-issues") {
+		t.Errorf("the log does not mention the cap:\n%s", buf.String())
 	}
 }
 
