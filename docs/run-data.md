@@ -25,6 +25,19 @@ carries the plan's week-usage percent as this issue was picked up and again
 as it reached this terminal state — what a later report needs to say what the
 issue cost the plan.
 
+[`polako plan`](reference.md#planning-a-backlog-unattended-polako-plan) writes
+one more kind, `plan` — a single line per run, whatever its status. It carries
+the same run-stream numbers and configuration snapshot as a `claude`
+invocation's record (status, turns, tokens, dollars, skill, model, `-run-tag`,
+the tool-hash, the three versions, the shift id), and adds what the run was
+planning from and what it produced: `vision` (the `-vision` path you typed, or
+the literal `(brief)` — never the brief's own text), `milestone`,
+`issues_created`, `epics_created`, `cap` (`-max-issues`), and `labels_enforced`
+(how many label edits the supervisor's curation pass had to make — the measure
+of how far the run fell short of self-applying the gate). No issue or PR
+number, because a plan run works neither. `polako stats` has no section for it
+yet and skips it, the same way it skips any record kind newer than itself.
+
 **What is never written:** issue titles, issue bodies, PR titles, comment text,
 review text, diffs, or anything the model said. Reviews are counted, never
 quoted. Records hold numbers, identifiers and labels you chose. That is what

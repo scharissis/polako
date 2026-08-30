@@ -177,6 +177,13 @@ func fakeClaude(mode string) int {
 			`{"id":"polako@scharissis","version":"` + v + `","scope":"user","enabled":true}]`)
 		return 0
 	}
+	// `claude --version` is another argv-dispatched call any run's preflight can
+	// make — claudeVersion reads the first field of its output. Dispatched here
+	// for the same reason plugin list is.
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		emit("2.1.99 (Claude Code)")
+		return 0
+	}
 	// probeUsage's call — `claude -p "/usage" --output-format json` — is a
 	// different call on the same binary too, dispatched on argv for the same
 	// reason plugin list is: it never goes through execClaude, so no mode a
@@ -509,6 +516,15 @@ func fakeClaude(mode string) int {
 		if mode == "plancap" {
 			time.Sleep(500 * time.Millisecond)
 		}
+		return 0
+	case "planempty":
+		// A `polako plan` run that proposed nothing — the document held no
+		// one-PR work the backlog was missing, or the proposal gate cut every
+		// candidate. It files no issues and creates nothing for the label
+		// pass to normalise or the `proposed` hook to announce.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-plan","model":"claude-opus-5"}`)
+		emit(`{"type":"result","subtype":"success","session_id":"sess-plan","duration_ms":100,` +
+			`"num_turns":2,"total_cost_usd":0.1,"result":"Nothing worth proposing."}`)
 		return 0
 	case "asks", "noisy", "askscrash", "asksbot":
 		// A run that leaves something behind on the thread. Both then stream

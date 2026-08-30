@@ -466,6 +466,118 @@ func newRunRecord(cfg config, rc runContext, rep runReport) runRecord {
 	return rec
 }
 
+// planFacts is what `polako plan` knows about a run that the event stream
+// cannot: what it was planning from, the batch milestone, and what the
+// enforcing label pass found and corrected afterwards. Paths and titles the
+// operator chose or typed, and counts — never an issue's title or body, the
+// standing recorder rule. `vision` is the -vision path or the literal
+// "(brief)": a path the operator typed is fine, the brief's own text is not.
+type planFacts struct {
+	vision         string
+	milestone      string
+	issuesCreated  int
+	epicsCreated   int
+	cap            int
+	labelsEnforced int
+	started        time.Time
+	ended          time.Time
+}
+
+// planRecord is one `polako plan` run, written when it ends whatever its
+// status — a clean finish, the -max-issues cap, a crash, a Ctrl+C. It carries
+// the same self-describing run-stream numbers and configuration snapshot a
+// runRecord does, minus everything that only means something for a drained
+// issue (issue/pr/reason/attempt/session/the strategy knobs), plus the plan
+// run's own context. Additive: readers ignore unknown kinds, so `stats` skips
+// it until a later change teaches it to read one.
+type planRecord struct {
+	V     int    `json:"v"`
+	Kind  string `json:"kind"`
+	TS    string `json:"ts"`
+	Ended string `json:"ended"`
+	Shift string `json:"shift"`
+	Repo  string `json:"repo"`
+
+	Status   string `json:"status"`
+	ExitCode int    `json:"exit_code"`
+
+	Turns    int   `json:"turns"`
+	ToolUses int   `json:"tool_uses"`
+	WallMS   int64 `json:"wall_ms"`
+	APIMS    int64 `json:"api_ms"`
+
+	CostUSD     float64                `json:"cost_usd"`
+	UsageSource string                 `json:"usage_source"`
+	Tokens      tokenCounts            `json:"tokens"`
+	ModelUsage  map[string]modelTokens `json:"model_usage,omitempty"`
+
+	Model          string `json:"model"`
+	Skill          string `json:"skill"`
+	PermissionMode string `json:"permission_mode"`
+	Tag            string `json:"tag"`
+	ToolsHash      string `json:"tools_hash"`
+
+	// The plan run's own context: what it planned from, and what the label
+	// pass had to do to make the curation gate hold.
+	Vision         string `json:"vision"`
+	Milestone      string `json:"milestone"`
+	IssuesCreated  int    `json:"issues_created"`
+	EpicsCreated   int    `json:"epics_created"`
+	Cap            int    `json:"cap"`
+	LabelsEnforced int    `json:"labels_enforced"`
+
+	PolakoVersion string `json:"polako_version"`
+	ClaudeVersion string `json:"claude_version"`
+	PluginVersion string `json:"plugin_version"`
+}
+
+// newPlanRecord folds a plan run's report together with what `polako plan`
+// learned around it. The stream half is built through newRunRecord, so the
+// observed-usage fallback for a run the cap or a crash cut off before it
+// reported one is shared rather than written twice; only the plan context and
+// the fields a drained issue needs but a plan run does not differ.
+func newPlanRecord(cfg config, rep runReport, pf planFacts) planRecord {
+	base := newRunRecord(cfg, runContext{started: pf.started, ended: pf.ended}, rep)
+	return planRecord{
+		V:     recordVersion,
+		Kind:  "plan",
+		TS:    base.TS,
+		Ended: base.Ended,
+		Shift: base.Shift,
+		Repo:  base.Repo,
+
+		Status:   base.Status,
+		ExitCode: base.ExitCode,
+
+		Turns:    base.Turns,
+		ToolUses: base.ToolUses,
+		WallMS:   base.WallMS,
+		APIMS:    base.APIMS,
+
+		CostUSD:     base.CostUSD,
+		UsageSource: base.UsageSource,
+		Tokens:      base.Tokens,
+		ModelUsage:  base.ModelUsage,
+
+		Model:          base.Model,
+		Skill:          base.Skill,
+		PermissionMode: base.PermissionMode,
+		Tag:            base.Tag,
+		ToolsHash:      base.ToolsHash,
+
+		Vision:         pf.vision,
+		Milestone:      pf.milestone,
+		IssuesCreated:  pf.issuesCreated,
+		EpicsCreated:   pf.epicsCreated,
+		Cap:            pf.cap,
+		LabelsEnforced: pf.labelsEnforced,
+
+		PolakoVersion: base.PolakoVersion,
+		ClaudeVersion: base.ClaudeVersion,
+		PluginVersion: base.PluginVersion,
+	}
+}
+
 func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
 // seconds renders a flag duration for the record. Whole seconds: these are
@@ -580,6 +692,13 @@ func (r *recorder) recordRun(cfg config, rc runContext, rep runReport) runRecord
 	rec := newRunRecord(cfg, rc, rep)
 	r.append(cfg.repo, rec)
 	return rec
+}
+
+// recordPlan writes the one record a `polako plan` run leaves: a line of
+// numbers about the run and what the label pass did around it. Best-effort
+// like the rest — a nil or -metrics-off recorder writes nothing.
+func (r *recorder) recordPlan(cfg config, rep runReport, pf planFacts) {
+	r.append(cfg.repo, newPlanRecord(cfg, rep, pf))
 }
 
 // recordIssue writes the terminal record. why is the park reason, and this is

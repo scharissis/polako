@@ -183,11 +183,11 @@ of scope, and a size — `Estimate: M — likely 1–2 runs`. The size is the mo
 judgement of the work's shape, not a price; what a run actually costs comes from
 your own history, via `polako stats`.
 
-This is a Claude Code skill you run yourself, with a second pair of eyes on it.
-An unattended `polako plan` verb — caps, milestones and a much narrower tool
-allowlist — is landing in stages: the skeleton (dispatch, preflight, the
-capability probe and a working `-dry-run`) ships now, and a real run stays
-refused until the label pass that enforces the curation gate lands with it. See
+This is also a `polako plan` verb — the unattended half, with caps, milestones,
+a much narrower tool allowlist, and a supervisor-side pass that enforces the
+`proposed` gate rather than trusting the model to apply it. It records one line
+of numbers per run like every other verb, and `-notify` fires a `proposed`
+event when a run leaves a backlog to curate. See
 [docs/reference.md](docs/reference.md#planning-a-backlog-unattended-polako-plan).
 
 ## The rules it follows
