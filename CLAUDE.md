@@ -24,8 +24,13 @@ in the PR body rather than doing it quietly.
   way — two share it. The
   run-data recorder (`metrics.go`) appends JSONL under `~/.polako`; the
   drain loop never reads it, no decision depends on it, and deleting the
-  directory mid-drain changes no behavior. A read from those files anywhere
-  outside `stats` would turn telemetry back into state. Records hold numbers,
+  directory mid-drain changes no behavior. Telemetry has exactly two readers
+  — `stats`, and the plan report's pricing line (the batch cost estimate
+  `polako plan` prints after its label pass, `planPricingLine`). Both are
+  human-facing rendering, computed after the run has ended and influencing
+  nothing the supervisor does; delete the directory mid-run and the only
+  change is that line falling back to its no-history form. A read from those
+  files anywhere else would turn telemetry back into state. Records hold numbers,
   identifiers and operator-chosen labels only — never issue, comment or PR
   text. The per-shift log (`ui.go`, under `~/.polako/logs`) is the second
   write-only artifact, and the one that *does* hold transcript text — the

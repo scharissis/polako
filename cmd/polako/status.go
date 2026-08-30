@@ -14,9 +14,10 @@ package main
 //   - Reads only. Every call it makes is one of the read subcommands the drain
 //     itself re-derives state with at startup, so nothing here can move an
 //     issue, a label or a PR.
-//   - No run data. The metrics files are write-only outside `stats`, and a
-//     status that read them would be wrong anyway: the drain being asked about
-//     is quite possibly running on somebody else's machine.
+//   - No run data. The metrics files are read only by `stats` and `plan`'s
+//     pricing line, and a status that read them would be wrong anyway: the
+//     drain being asked about is quite possibly running on somebody else's
+//     machine.
 //   - State, not liveness. It never asks whether a drain is running, and says
 //     the same thing whether one is or not. What it prints is what a drain
 //     starting now would do next — which is the same thing a running drain is

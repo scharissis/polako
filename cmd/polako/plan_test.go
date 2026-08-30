@@ -682,3 +682,133 @@ func TestPlanSkillDefaultMatchesTheShippedSkill(t *testing.T) {
 		t.Errorf("-skill defaults to %q but skills/%s/SKILL.md is not there: %v", defaultPlanSkill, planSkillDir, err)
 	}
 }
+
+// The pricing-line fixture is deliberately mixed, the way stats's own is: two
+// merged issues that priced, a parked one and an in-flight one that must not
+// count, an issue for another repo the -repo filter drops, a torn tail line
+// and a record kind this reader has never seen. The medians are $3.00 (of
+// $2.00 and $4.00) and 40m (of 30m and 50m).
+const pricingFixture = `
+{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T09:30:00Z","repo":"scharissis/polako","issue":20,"reason":"implement","status":"ok","subtype":"success","outcome":"opened_pr","cost_usd":2.00,"usage_source":"result","wall_ms":1800000,"tokens":{"in":1,"out":1}}
+{"v":1,"kind":"issue","ts":"2026-08-20T10:00:00Z","repo":"scharissis/polako","issue":20,"pr":50,"outcome":"merged"}
+{"v":1,"kind":"run","ts":"2026-08-21T09:00:00Z","ended":"2026-08-21T09:50:00Z","repo":"scharissis/polako","issue":21,"reason":"implement","status":"ok","subtype":"success","outcome":"opened_pr","cost_usd":4.00,"usage_source":"result","wall_ms":3000000,"tokens":{"in":1,"out":1}}
+{"v":1,"kind":"issue","ts":"2026-08-21T11:00:00Z","repo":"scharissis/polako","issue":21,"pr":51,"outcome":"merged"}
+{"v":1,"kind":"run","ts":"2026-08-22T09:00:00Z","ended":"2026-08-22T09:40:00Z","repo":"scharissis/polako","issue":22,"reason":"implement","status":"ok","subtype":"success","outcome":"posted_questions","cost_usd":9.00,"usage_source":"result","wall_ms":9000000,"tokens":{"in":1,"out":1}}
+{"v":1,"kind":"issue","ts":"2026-08-22T10:00:00Z","repo":"scharissis/polako","issue":22,"pr":0,"outcome":"needs_human","park_reason":"produced_nothing"}
+{"v":1,"kind":"run","ts":"2026-08-23T09:00:00Z","ended":"2026-08-23T09:20:00Z","repo":"scharissis/polako","issue":23,"reason":"implement","status":"ok","subtype":"success","outcome":"opened_pr","cost_usd":7.00,"usage_source":"result","wall_ms":1200000,"tokens":{"in":1,"out":1}}
+{"v":1,"kind":"digest","ts":"2026-08-23T09:30:00Z","repo":"scharissis/polako","note":"a record kind a newer writer added"}
+{"v":1,"kind":"run","ts":"2026-08-24T09:00:00Z","ended":"2026-08-2`
+
+// pricingOtherRepo is a merged issue in a different repository: the -repo
+// filter has to leave it out, or the batch is priced against the wrong history.
+const pricingOtherRepo = `
+{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T10:00:00Z","repo":"scharissis/other","issue":9,"reason":"implement","status":"ok","subtype":"success","outcome":"opened_pr","cost_usd":99.00,"usage_source":"result","wall_ms":6000000,"tokens":{"in":1,"out":1}}
+{"v":1,"kind":"issue","ts":"2026-08-20T11:00:00Z","repo":"scharissis/other","issue":9,"pr":1,"outcome":"merged"}
+`
+
+func writePricingFixture(t *testing.T, bodies map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range bodies {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(strings.TrimPrefix(body, "\n")), 0o600); err != nil {
+			t.Fatalf("writing %s: %v", name, err)
+		}
+	}
+	return dir
+}
+
+func TestPlanPricingLineFromHistory(t *testing.T) {
+	dir := writePricingFixture(t, map[string]string{
+		"scharissis--polako.jsonl": pricingFixture,
+		"scharissis--other.jsonl":  pricingOtherRepo,
+	})
+	got := planPricingLine(dir, "scharissis/polako", 5, fixtureNow)
+	want := "your last 2 merged issues ran $3.00 and 40m median — 5 proposals ≈ $15 and 3½h of run time, before curation cuts"
+	if got != want {
+		t.Errorf("planPricingLine:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestPlanPricingLineWithNoHistory(t *testing.T) {
+	if got := planPricingLine(t.TempDir(), "scharissis/polako", 5, fixtureNow); got != planNoHistory {
+		t.Errorf("empty directory: got %q, want the no-history line", got)
+	}
+}
+
+func TestPlanPricingLineWithMetricsOff(t *testing.T) {
+	// -metrics off resolves to an empty dir string: no file is opened to find
+	// out there is nothing to read.
+	if got := planPricingLine("", "scharissis/polako", 5, fixtureNow); got != planNoHistory {
+		t.Errorf("-metrics off: got %q, want the no-history line", got)
+	}
+}
+
+func TestPlanPricingLineTreatsUnpricedCrashesAsNoHistory(t *testing.T) {
+	// The only merged issue's runs all died before reporting a cost: a real
+	// record, a useless estimate. Priced at nothing ⇒ no history to price
+	// against, said as such rather than "≈ $0".
+	crashOnly := `
+{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T09:05:00Z","repo":"scharissis/polako","issue":40,"reason":"implement","status":"crash","exit_code":7,"outcome":"nothing","cost_usd":0,"usage_source":"observed","wall_ms":300000,"tokens":{"in":1,"out":1}}
+{"v":1,"kind":"issue","ts":"2026-08-20T10:00:00Z","repo":"scharissis/polako","issue":40,"pr":0,"outcome":"merged"}
+`
+	dir := writePricingFixture(t, map[string]string{"scharissis--polako.jsonl": crashOnly})
+	if got := planPricingLine(dir, "scharissis/polako", 5, fixtureNow); got != planNoHistory {
+		t.Errorf("crash-only history: got %q, want the no-history line", got)
+	}
+}
+
+func TestPlanPricingLineSkipsUnpricedIssuesInAMixedHistory(t *testing.T) {
+	// One real merged issue ($6.00, 60m) and one merged issue whose only run
+	// crashed at $0 after 5m. The $0 issue must not be averaged in — the
+	// estimate is $6.00/60m, not the $3.00/32m a per-issue skip would avoid but
+	// an aggregate-only guard would not.
+	mixed := `
+{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T10:00:00Z","repo":"scharissis/polako","issue":60,"reason":"implement","status":"ok","subtype":"success","outcome":"opened_pr","cost_usd":6.00,"usage_source":"result","wall_ms":3600000,"tokens":{"in":1,"out":1}}
+{"v":1,"kind":"issue","ts":"2026-08-20T11:00:00Z","repo":"scharissis/polako","issue":60,"pr":70,"outcome":"merged"}
+{"v":1,"kind":"run","ts":"2026-08-21T09:00:00Z","ended":"2026-08-21T09:05:00Z","repo":"scharissis/polako","issue":61,"reason":"implement","status":"crash","exit_code":7,"outcome":"nothing","cost_usd":0,"usage_source":"observed","wall_ms":300000,"tokens":{"in":1,"out":1}}
+{"v":1,"kind":"issue","ts":"2026-08-21T10:00:00Z","repo":"scharissis/polako","issue":61,"pr":0,"outcome":"merged"}
+`
+	dir := writePricingFixture(t, map[string]string{"scharissis--polako.jsonl": mixed})
+	got := planPricingLine(dir, "scharissis/polako", 2, fixtureNow)
+	want := "your last 1 merged issue ran $6.00 and 1h median — 2 proposals ≈ $12 and 2h of run time, before curation cuts"
+	if got != want {
+		t.Errorf("mixed history:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestPlanPricingLineOnlyPrintsForABatch(t *testing.T) {
+	// Zero proposals never reaches planPricingLine in planRun, but the median
+	// half of the sentence should still read sanely if it ever did.
+	dir := writePricingFixture(t, map[string]string{"scharissis--polako.jsonl": pricingFixture})
+	got := planPricingLine(dir, "scharissis/polako", 1, fixtureNow)
+	want := "your last 2 merged issues ran $3.00 and 40m median — 1 proposal ≈ $3.00 and 40m of run time, before curation cuts"
+	if got != want {
+		t.Errorf("single proposal:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestApproxUSDAndDur(t *testing.T) {
+	for _, c := range []struct {
+		f    float64
+		want string
+	}{{3, "$3.00"}, {9.99, "$9.99"}, {15, "$15"}, {18.9, "$19"}, {250, "$250"}} {
+		if got := approxUSD(c.f); got != c.want {
+			t.Errorf("approxUSD(%v) = %q, want %q", c.f, got, c.want)
+		}
+	}
+	for _, c := range []struct {
+		d    time.Duration
+		want string
+	}{
+		{20 * time.Minute, "20m"},
+		{44 * time.Minute, "44m"},
+		{75 * time.Minute, "1½h"},
+		{200 * time.Minute, "3½h"},
+		{4 * time.Hour, "4h"},
+		{10 * time.Minute, "10m"},
+	} {
+		if got := approxDur(c.d); got != c.want {
+			t.Errorf("approxDur(%v) = %q, want %q", c.d, got, c.want)
+		}
+	}
+}

@@ -197,6 +197,14 @@ func planRun(ctx context.Context, cfg config, opt planOptions, milestone string,
 	pass := planNormalise(passCtx, cfg, before, milestone)
 	pass.report(opt, rep)
 
+	// The pricing line: what the operator's own history says this batch will
+	// cost to implement. After the label pass, because it prices the proposals
+	// the pass just counted; only when there are proposals, because a batch of
+	// nothing has nothing to price and nothing to curate.
+	if pass.created > 0 {
+		narrate(sevProgress, "plan: %s", planPricingLine(cfg.rec.metricsDir(), cfg.repo, pass.created, time.Now()))
+	}
+
 	// The two traces the run leaves, both after the label pass so they carry
 	// what it found: one record whatever the run's status, and — only when the
 	// run actually proposed something — one notification. Both detached from
@@ -761,4 +769,93 @@ func planSlashArg(s string) string {
 		return s
 	}
 	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+}
+
+// planNoHistory is what the pricing line prints when history cannot price the
+// batch — no records, or none that was ever priced. Fixed wording, never a
+// guessed number: the estimate is history's to state or nobody's.
+const planNoHistory = "no run history to price against — work a few issues and future plans will estimate themselves"
+
+// planPricingLine is the one line the plan report prints after the label pass:
+// what the operator's own run records say this batch will cost to implement —
+// the median cost and median run time of a merged issue in this repository,
+// times the number of proposals. It never invents a figure; with no usable
+// history it says exactly that and stops.
+//
+// This is the second of telemetry's two readers, the one named beside `stats`
+// in CLAUDE.md's write-only-telemetry invariant: human-facing rendering,
+// computed after the run has ended, deciding nothing the supervisor does.
+// Delete the metrics directory mid-run and the only change is this line
+// falling back to planNoHistory. It reuses loadRecords + rollUpIssues — the
+// torn-line, unknown-kind and latest-wins-dedupe rules `stats` already keeps
+// — rather than parsing the records a second way.
+func planPricingLine(metricsDir, repo string, proposals int, now time.Time) string {
+	if metricsDir == "" {
+		return planNoHistory // -metrics off, or no home directory: nothing to read, no file opened to find out
+	}
+	ds, err := loadRecords(metricsDir, statsOptions{repo: repo}, now)
+	if err != nil {
+		return planNoHistory
+	}
+	var costs []float64
+	var times []time.Duration
+	for _, is := range rollUpIssues(ds) {
+		if is.terminal == nil || is.terminal.Outcome != issueMerged || len(is.runs) == 0 {
+			continue
+		}
+		// A merged issue whose runs never reported a cost — a crash a human
+		// finished by hand, say. A real record and a useless price: its $0 and
+		// its handful of minutes would drag both medians down, so it is left
+		// out exactly as a wholly unpriced history is. Skipped per issue, not
+		// just in aggregate, so one such issue among several does not skew the
+		// estimate low.
+		if is.cost == 0 {
+			continue
+		}
+		costs = append(costs, is.cost)
+		times = append(times, time.Duration(is.wallMS)*time.Millisecond)
+	}
+	// No merged issue that was ever priced: no history to project from, said as
+	// such rather than as a batch that costs $0.
+	if len(costs) == 0 {
+		return planNoHistory
+	}
+	n := len(costs)
+	costMedian := median(costs)
+	timeMedian := median(times)
+	return fmt.Sprintf("your last %s ran %s and %s median — %s ≈ %s and %s of run time, before curation cuts",
+		plural(n, "merged issue"), usd(costMedian), dur(timeMedian),
+		plural(proposals, "proposal"),
+		approxUSD(float64(proposals)*costMedian),
+		approxDur(time.Duration(proposals)*timeMedian))
+}
+
+// approxUSD renders a projected batch cost — a median times a count — at the
+// resolution an estimate earns: whole dollars once it is worth more than a
+// few, so "≈ $19" is not dressed up as "$18.90".
+func approxUSD(f float64) string {
+	if f < 10 {
+		return usd(f)
+	}
+	return fmt.Sprintf("$%.0f", f)
+}
+
+// approxDur renders a projected batch run time in half-hour steps once it is
+// worth hours, for the same reason approxUSD rounds: "4½h" is honest about a
+// median-times-count projection where "4h26m" would feign precision. Under an
+// hour it falls back to dur rounded to the minute.
+func approxDur(d time.Duration) string {
+	if d < 0 {
+		d = -d
+	}
+	if d < time.Hour {
+		return dur(d.Round(time.Minute))
+	}
+	// Round to the nearest half hour. d >= 1h here, so halves >= 2 and the
+	// whole-hour count is always >= 1.
+	halves := (d + 15*time.Minute) / (30 * time.Minute)
+	if halves%2 == 1 {
+		return fmt.Sprintf("%d½h", halves/2)
+	}
+	return fmt.Sprintf("%dh", halves/2)
 }

@@ -684,6 +684,17 @@ func defaultMetricsDir() (string, error) {
 
 func (r *recorder) enabled() bool { return r != nil && r.dir != "" }
 
+// metricsDir is the directory the plan report's pricing line reads records
+// back from — the same one writes go to. Empty when writes are disabled
+// (-metrics off, or no home directory to fall back to), which the pricing
+// line takes as "nothing to read, and no file opened to find out".
+func (r *recorder) metricsDir() string {
+	if r == nil {
+		return ""
+	}
+	return r.dir
+}
+
 // recordRun returns the record it wrote, so a caller can tally the same
 // numbers it recorded. The record is built whether or not anything is written:
 // -post-summary works with -metrics off, which is the escape hatch for an
