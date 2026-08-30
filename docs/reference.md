@@ -291,7 +291,8 @@ polako plan -vision docs/VISION.md -dry-run
 | `-model` | `opus` | Passed to `claude --model`. An alias, not a pinned id: a plan run happens once per batch and steers every run downstream, so it defaults to the strongest tier. |
 | `-skill` | `polako:plan-backlog` | Slash command the run invokes. |
 | `-tools` / `-add-tools` | *(the plan allowlist)* | `--allowedTools` for the run. The default is a fraction of `work`'s: repo reads, `gh issue list` / `view` / `search`, `Write`, and `gh issue create` — nothing that commits, pushes, opens a PR, edits a thread, or reaches `gh api`. |
-| `-dir`, `-claude`, `-permission-mode`, `-stall`, `-max-cost`, `-metrics`, `-run-tag`, `-notify`, `-dry-run` | | Same meaning as `polako work`'s flags above. |
+| `-dir`, `-claude`, `-permission-mode`, `-dry-run` | | Same meaning as `polako work`'s flags above; live now — preflight uses `-dir` and `-claude`, and `-dry-run` prints the invocation `-claude` / `-permission-mode` shape. |
+| `-stall`, `-max-cost`, `-metrics`, `-run-tag`, `-notify` | | Accepted now with their `polako work` meanings, and inert until the run path lands — a skeleton `-dry-run` neither runs a process nor writes a record, so there is nothing yet for them to bound or capture. |
 
 ## Where the backlog stands: `polako status`
 

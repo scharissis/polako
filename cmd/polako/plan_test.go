@@ -7,6 +7,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -274,6 +276,16 @@ func TestPlanRefusalNamesTheFollowUp(t *testing.T) {
 		if !strings.Contains(planNotRunnableErr.Error(), want) {
 			t.Errorf("planNotRunnableErr does not mention %q: %v", want, planNotRunnableErr)
 		}
+	}
+}
+
+// A real (non-dry) invocation refuses ahead of preflight, so a forgotten
+// -dry-run against an unfamiliar repo touches nothing there — no gh call is
+// made at all. The bare "gh" in the config would fail loudly if one were.
+func TestPlanRefusesARealRunBeforeTouchingGitHub(t *testing.T) {
+	err := runPlan(context.Background(), []string{"-vision", "docs/VISION.md"}, io.Discard)
+	if !errors.Is(err, planNotRunnableErr) {
+		t.Fatalf("a non-dry `polako plan` returned %v, want the #103 refusal", err)
 	}
 }
 

@@ -148,12 +148,17 @@ func runPlan(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// Refuse before preflight, not after: a real run cannot start until #103, and
+	// preflight's gate declaration writes to GitHub (the `proposed` label, the
+	// batch milestone). Running it first would leave those behind as the side
+	// effect of a `polako plan` that then reports it did nothing — the trap a
+	// forgotten -dry-run falls into.
+	if !opt.dryRun {
+		return planNotRunnableErr
+	}
 	milestone, hierarchical, err := planPreflight(ctx, &cfg, &opt)
 	if err != nil {
 		return err
-	}
-	if !opt.dryRun {
-		return planNotRunnableErr
 	}
 	return planDryRun(cfg, opt, milestone, hierarchical, out)
 }
@@ -211,6 +216,10 @@ func planConfig(opt *planOptions) (config, error) {
 // before a permission prompt can, and — for a real run only — the `proposed`
 // label and the batch milestone are ensured. A dry run declares nothing: it
 // runs the probe (a read) but creates no label and no milestone.
+//
+// Until #103 lands the run path, runPlan only reaches this on a dry run — a
+// real run refuses ahead of it. The !opt.dryRun branch is here, and tested,
+// so #103 wires the spawn by moving that refusal rather than by writing this.
 func planPreflight(ctx context.Context, cfg *config, opt *planOptions) (milestone string, hierarchical bool, err error) {
 	for _, bin := range []string{cfg.claudeBin, cfg.ghBin, "git"} {
 		if _, err := exec.LookPath(bin); err != nil {
@@ -390,10 +399,15 @@ func planPromptSubject(opt planOptions) string {
 }
 
 // planSlashArg wraps a slash-command argument in double quotes when it carries
-// whitespace, so the skill sees one argument rather than several.
+// whitespace, so the skill sees one argument rather than several, escaping any
+// embedded quote so the wrapping is not closed early. The exact quoting the
+// Claude CLI's slash-argument tokenizer wants is #103's to pin down when it
+// wires the spawn — this is the dry-run preview's best guess until then, and a
+// vision path or focus steer carrying a literal quote is the rare case it is
+// hedging against.
 func planSlashArg(s string) string {
-	if strings.ContainsAny(s, " \t") {
-		return `"` + s + `"`
+	if !strings.ContainsAny(s, " \t\"") {
+		return s
 	}
-	return s
+	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
 }
