@@ -799,20 +799,25 @@ func planPricingLine(metricsDir, repo string, proposals int, now time.Time) stri
 	}
 	var costs []float64
 	var times []time.Duration
-	var priced float64
 	for _, is := range rollUpIssues(ds) {
 		if is.terminal == nil || is.terminal.Outcome != issueMerged || len(is.runs) == 0 {
 			continue
 		}
+		// A merged issue whose runs never reported a cost — a crash a human
+		// finished by hand, say. A real record and a useless price: its $0 and
+		// its handful of minutes would drag both medians down, so it is left
+		// out exactly as a wholly unpriced history is. Skipped per issue, not
+		// just in aggregate, so one such issue among several does not skew the
+		// estimate low.
+		if is.cost == 0 {
+			continue
+		}
 		costs = append(costs, is.cost)
 		times = append(times, time.Duration(is.wallMS)*time.Millisecond)
-		priced += is.cost
 	}
-	// priced == 0 covers both "no merged issue with runs" and "every merged
-	// issue's runs crashed before reporting a cost" — the second is a real
-	// record and a useless estimate, so it is treated as no history rather
-	// than projecting the batch at $0.
-	if priced == 0 {
+	// No merged issue that was ever priced: no history to project from, said as
+	// such rather than as a batch that costs $0.
+	if len(costs) == 0 {
 		return planNoHistory
 	}
 	n := len(costs)
@@ -846,14 +851,11 @@ func approxDur(d time.Duration) string {
 	if d < time.Hour {
 		return dur(d.Round(time.Minute))
 	}
+	// Round to the nearest half hour. d >= 1h here, so halves >= 2 and the
+	// whole-hour count is always >= 1.
 	halves := (d + 15*time.Minute) / (30 * time.Minute)
-	whole, half := halves/2, halves%2 == 1
-	switch {
-	case whole == 0:
-		return "½h"
-	case half:
-		return fmt.Sprintf("%d½h", whole)
-	default:
-		return fmt.Sprintf("%dh", whole)
+	if halves%2 == 1 {
+		return fmt.Sprintf("%d½h", halves/2)
 	}
+	return fmt.Sprintf("%dh", halves/2)
 }

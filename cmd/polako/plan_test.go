@@ -757,6 +757,25 @@ func TestPlanPricingLineTreatsUnpricedCrashesAsNoHistory(t *testing.T) {
 	}
 }
 
+func TestPlanPricingLineSkipsUnpricedIssuesInAMixedHistory(t *testing.T) {
+	// One real merged issue ($6.00, 60m) and one merged issue whose only run
+	// crashed at $0 after 5m. The $0 issue must not be averaged in — the
+	// estimate is $6.00/60m, not the $3.00/32m a per-issue skip would avoid but
+	// an aggregate-only guard would not.
+	mixed := `
+{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T10:00:00Z","repo":"scharissis/polako","issue":60,"reason":"implement","status":"ok","subtype":"success","outcome":"opened_pr","cost_usd":6.00,"usage_source":"result","wall_ms":3600000,"tokens":{"in":1,"out":1}}
+{"v":1,"kind":"issue","ts":"2026-08-20T11:00:00Z","repo":"scharissis/polako","issue":60,"pr":70,"outcome":"merged"}
+{"v":1,"kind":"run","ts":"2026-08-21T09:00:00Z","ended":"2026-08-21T09:05:00Z","repo":"scharissis/polako","issue":61,"reason":"implement","status":"crash","exit_code":7,"outcome":"nothing","cost_usd":0,"usage_source":"observed","wall_ms":300000,"tokens":{"in":1,"out":1}}
+{"v":1,"kind":"issue","ts":"2026-08-21T10:00:00Z","repo":"scharissis/polako","issue":61,"pr":0,"outcome":"merged"}
+`
+	dir := writePricingFixture(t, map[string]string{"scharissis--polako.jsonl": mixed})
+	got := planPricingLine(dir, "scharissis/polako", 2, fixtureNow)
+	want := "your last 1 merged issue ran $6.00 and 1h median — 2 proposals ≈ $12 and 2h of run time, before curation cuts"
+	if got != want {
+		t.Errorf("mixed history:\n got %q\nwant %q", got, want)
+	}
+}
+
 func TestPlanPricingLineOnlyPrintsForABatch(t *testing.T) {
 	// Zero proposals never reaches planPricingLine in planRun, but the median
 	// half of the sentence should still read sanely if it ever did.
