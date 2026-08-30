@@ -200,7 +200,7 @@ don't post again, and stop.
 2. MANDATORY GATE — do not create a PR until this step has run. It writes one
    marker into PLAN.md's `## Review` section — "Reviewed through: <sha>",
    written by c each time c actually runs — that b reads to decide whether
-   the expensive part (the 8-subagent review itself) needs repeating. Nothing
+   the expensive part (the review sweep itself) needs repeating. Nothing
    else in this step is checkpointed: a (a fetch and an `--ff-only` merge) and
    the retest/typecheck/lint/audit at the end of d are all cheap and
    idempotent next to c, so they simply run every time d is reached rather
@@ -234,9 +234,22 @@ don't post again, and stop.
       one whose sha is *not* an ancestor of current HEAD — nothing reviewed
       yet, or history moved in some way this shortcut can't account for —
       runs c and d in full.
-   c. Invoke `/code-review high issue-$issue`, and in the same request tell
-      the review its agent and every subagent under it must read and write
-      in `<worktree>` (its absolute path) — no `--fix`. Both halves aim the
+   c. Size the change first, then invoke the review at a level that matches
+      it. `git -C <worktree> diff --stat` against the `origin/…` ref Phase 1
+      resolved (`...HEAD`) — which a has just fast-forwarded the local default
+      branch to, and which d already works from — prints the changed-line
+      count for nothing. The rule: `medium` under 300 changed lines
+      (insertions plus deletions), `high` at 300 or more. `medium` asks the
+      review for "fewer, high-confidence findings" and a smaller subagent
+      fan-out; `high` asks for "broader coverage" and the full one. A one-line
+      `docs:` fix reaching this gate should not cost what a rewrite of
+      `main.go` does, and the level is the only lever this repo holds over
+      that (issue #225).
+      Then invoke `/code-review <level> issue-$issue`, and in the same request
+      tell the review its agent and every subagent under it must read and
+      write in `<worktree>` (its absolute path) — no `--fix`. State in your
+      turn which level you picked and the changed-line count behind it, so the
+      choice is auditable. Both halves aim the
       review and neither is optional: the branch aims what it diffs,
       `<worktree>` aims where it works. The review takes one branch or path
       as its target, so the worktree goes in as that instruction rather
@@ -253,7 +266,7 @@ don't post again, and stop.
       run watches with `ListAgents` or a poll loop beside it, and issue #217
       is a run that did exactly that on this gate.
       Leaving `--fix` off is deliberate: applying fixes is
-      the slow part after the 8-subagent review itself returns, and a run
+      the slow part after the review itself returns, and a run
       that dies during it is exactly what left issue #216's gate with
       nothing to resume from. So write the `## Review` section in PLAN.md
       immediately when this call returns and before fixing anything —

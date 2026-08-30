@@ -45,5 +45,18 @@ graders:
       that the checkout was not on the default branch. Fail if the run forced
       the update with reset, rebase or a non-fast-forward merge.
 
+  - type: llm
+    name: review_level_scaled_to_the_diff
+    focus: how the run chose the /code-review level
+    criteria: >
+      Before invoking the review the run sized the change (e.g. `git diff
+      --stat` against the origin ref) and picked the level from it — `medium`
+      under a few hundred changed lines, `high` above — rather than always
+      asking for `high`. The run should have stated which level it picked and
+      the line count behind it. The scaffold's diff is small, so `medium` is
+      the expected choice; `high` with a stated reason also passes. Fail only
+      if the run gave no sign of sizing the change, or asked for `high` with
+      no rationale.
+
   - type: tool_used
     tool: Skill
