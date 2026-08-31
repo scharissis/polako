@@ -162,7 +162,7 @@ func receiverType(e ast.Expr) string {
 func report(dir string, files []fileStat, funcs []funcStat) {
 	fmt.Printf("health: %s\n", dir)
 
-	sort.Slice(files, func(i, j int) bool { return files[i].lines > files[j].lines })
+	sort.SliceStable(files, func(i, j int) bool { return files[i].lines > files[j].lines })
 	fmt.Printf("\nnon-test files over %d lines, longest first\n", fileLineThreshold)
 	printed := false
 	for _, f := range files {
@@ -176,7 +176,7 @@ func report(dir string, files []fileStat, funcs []funcStat) {
 		fmt.Println("  (none)")
 	}
 
-	sort.Slice(funcs, func(i, j int) bool { return funcs[i].lines > funcs[j].lines })
+	sort.SliceStable(funcs, func(i, j int) bool { return funcs[i].lines > funcs[j].lines })
 	fmt.Printf("\nfunctions over %d lines, longest first\n", funcLineThreshold)
 	printed = false
 	for _, fn := range funcs {
@@ -191,7 +191,7 @@ func report(dir string, files []fileStat, funcs []funcStat) {
 	}
 
 	byComment := append([]fileStat(nil), files...)
-	sort.Slice(byComment, func(i, j int) bool {
+	sort.SliceStable(byComment, func(i, j int) bool {
 		return commentRatio(byComment[i]) > commentRatio(byComment[j])
 	})
 	fmt.Printf("\ncomment lines / total, non-test files, densest first\n")
