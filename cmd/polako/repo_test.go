@@ -632,6 +632,39 @@ func TestReviewGateFallbackStillRefreshesTheBase(t *testing.T) {
 	}
 }
 
+// Issue #154: diff-scoped review judges the change, never the file it lands in,
+// so a file accretes without bound one passing PR at a time. The gate's
+// accretion step is the one pass that looks. Its load-bearing part is the
+// "repo median OR an absolute ceiling, whichever is lower" rule — a
+// simplification to a relative-only check reads as harmless and silently
+// restores the bootstrapping flaw (on a young repo the machine wrote, the
+// median it measures against is the machine's own accreted norm). All three
+// measures matter: comment density is the one that otherwise goes unwatched.
+func TestReviewGateChecksForAccretion(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	// Flattened: these markers read across line wraps in SKILL.md's prose, and
+	// a reflow must not fail a check that is still correct.
+	flat := strings.Join(strings.Fields(skill), " ")
+	if !strings.Contains(flat, "Accretion check") {
+		t.Fatal("SKILL.md's review gate no longer has an accretion-check step — a file the" +
+			" branch touches can now grow past the repo's norm one passing PR at a time with" +
+			" nothing looking (issue #154)")
+	}
+	for _, measure := range []string{"File length", "Function/unit length", "Comment density"} {
+		if !strings.Contains(flat, measure) {
+			t.Errorf("the accretion check no longer names %q as one of its three measures —"+
+				" issue #154 asks for all three, and comment density is the one that otherwise"+
+				" goes unwatched", measure)
+		}
+	}
+	if !strings.Contains(flat, "absolute ceiling") || !strings.Contains(flat, "whichever is lower") {
+		t.Error("the accretion check no longer bounds each measure by `an absolute ceiling," +
+			" whichever is lower` — a relative-only check reads as a harmless simplification and" +
+			" silently restores issue #154's bootstrapping flaw, so pin the ceiling here")
+	}
+}
+
 // PLAN.md is the resume point: a run killed mid-implementation is restarted
 // from it, and a plan written afterwards resumes nothing. So the ordering is
 // the promise, not the file. Phase 3's own heading carries the gate because a
