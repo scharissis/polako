@@ -47,13 +47,14 @@ func moduleName(t *testing.T) string {
 
 // stringFlagDefault reads a flag's default out of its registration rather than
 // out of a copy kept in the test, so a test comparing the skill against the
-// binary's defaults cannot drift from what the binary actually ships.
+// binary's defaults cannot drift from what the binary actually ships. parseFlags
+// and its registrations live in flags.go.
 func stringFlagDefault(t *testing.T, name string) string {
 	t.Helper()
 	registration := regexp.MustCompile(`\.StringVar\(&\w+(?:\.\w+)?, "` + regexp.QuoteMeta(name) + `", "([^"]*)"`)
-	m := registration.FindStringSubmatch(readRepoFile(t, "cmd", "polako", "main.go"))
+	m := registration.FindStringSubmatch(readRepoFile(t, "cmd", "polako", "flags.go"))
 	if m == nil {
-		t.Fatalf("main.go registers no string flag named %q", name)
+		t.Fatalf("flags.go registers no string flag named %q", name)
 	}
 	return m[1]
 }
