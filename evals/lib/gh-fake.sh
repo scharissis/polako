@@ -59,11 +59,11 @@ body_of() {
 subcommand="${1-} ${2-}"
 
 case "$subcommand" in
-# Most cases fix the whole answer in issue.json. plan-vision has no single
-# subject issue — its fixtures are issues.json/issues-closed.json, the backlog
-# a dedup-minded run reads in Phase 0 — so a view of one of those numbers (a
-# call its own grader permits, even though no SKILL.md instructs it) falls
-# back to looking the number up there instead of crashing under set -e.
+# Most cases fix the whole answer in issue.json. plan-vision and review-health
+# have no single subject issue — their fixtures are issues.json/issues-closed.json,
+# the backlog a dedup-minded run reads in Phase 0 — so a view of one of those
+# numbers (a call its own grader permits, even though no SKILL.md instructs it)
+# falls back to looking the number up there instead of crashing under set -e.
 "issue view")
   if [ -f "$case_dir/issue.json" ]; then
     cat "$case_dir/issue.json"
