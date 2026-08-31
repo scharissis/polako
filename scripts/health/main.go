@@ -1,16 +1,17 @@
 // Command health prints the shape of a Go package tree: its longest files, its
 // longest functions, how much of each file is comment, and the line totals. It
 // reports and enforces nothing — there is no exit code beyond "the program
-// ran". A sibling change turns these numbers into a budget that fails; this one
-// only makes them visible, so a wrong number is printed rather than acted on.
+// ran". The budget that does fail is cmd/polako/sizebudget_test.go; this one
+// only makes the numbers visible, so a wrong number is printed rather than
+// acted on.
 //
 // Run it through scripts/health.sh (or health.ps1), which sets the working
 // directory to the repo root. By hand: `go run ./scripts/health [dir]`, dir
 // defaulting to cmd/polako.
 //
-// Function lengths come from go/ast, not from counting braces: the sibling
-// budget test measures the same way, and two disagreeing measures of one thing
-// is worse than none.
+// Function lengths come from go/ast, not from counting braces:
+// cmd/polako/sizebudget_test.go measures the same way, and two disagreeing
+// measures of one thing is worse than none.
 package main
 
 import (
@@ -25,8 +26,9 @@ import (
 )
 
 // What the report calls out. Deliberately loose: the point is to surface the
-// handful of outliers, not to reprint the whole tree. A sibling issue picks the
-// numbers a budget actually enforces — these only decide what shows here.
+// handful of outliers, not to reprint the whole tree. The numbers a budget
+// actually enforces live in cmd/polako/sizebudget_test.go — these only decide
+// what shows here.
 const (
 	fileLineThreshold = 500
 	funcLineThreshold = 60

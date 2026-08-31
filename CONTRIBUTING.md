@@ -58,6 +58,14 @@ is not part of `check.sh` or CI. It is the "did this get harder to work on"
 question that `gofmt`, `go vet` and the suite all pass identically at 400 lines
 and at 4,000.
 
+The part that *does* fail is `cmd/polako/sizebudget_test.go`, an ordinary test
+in the suite: a non-test source file over 1,000 lines, or a function over 130,
+breaks the build. Diff-scoped review never catches accretion — every PR can be
+fine and the file still grows — so the check looks at the result. It measures
+the same way the script does. Today's offenders sit in an allowlist whose
+entries only ever come off: as debt is paid an entry is removed, nothing new
+goes on, and a fresh violation is split rather than listed.
+
 ## Re-recording the demo
 
 The GIF at the top of the README is rendered from
