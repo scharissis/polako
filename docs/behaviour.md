@@ -15,6 +15,22 @@ else: if your default branch has a commit of its own, or work in the way, or you
 are sitting on another branch, polako says so in its log and leaves it
 exactly as it is.
 
+**A finished issue's worktree and branch are reclaimed, not left to pile up.**
+Once at shift start and again after each merge it observes, `polako` runs the
+same sweep [`polako tidy`](reference.md#reclaiming-finished-issues-polako-tidy)
+does: for every `issue-N` branch it can prove finished — closed, or merged into
+the default branch, worktree clean, nothing unpushed — it removes the worktree
+and deletes the branch. The shift-start pass is there because between two shifts
+you merge PRs by hand, and each of those leaves a worktree no merge-moment
+cleanup would ever revisit. For the one issue whose merge the shift just
+watched, GitHub's own merge event stands in for the ancestor check, so a squash
+merge is reclaimed too. A leftover branch that fails a check is named in the
+shift log and left exactly as it was; two things are said out loud — a sweep
+that cannot run at all, and the just-merged worktree failing to reclaim because
+it holds uncommitted work the merge did not take. Nothing here ends a shift — a
+tidy-up must not take a backlog down. A put-down issue is never finished, so its
+worktree is left alone (see `-strict-order` below).
+
 **All state lives in GitHub** — issues, comments, PRs, branches. The process
 itself is stateless and restart-safe: kill it at any point, rerun it later, and
 it re-derives where things stand. If a PR already exists for `issue-N`, it
@@ -228,9 +244,10 @@ not that they are worked in strict numeric order — and an issue nobody is
 working is not in flight.
 
 One thing does weaken, and it is the reason `-strict-order` exists. A put-down
-issue keeps the worktree and branch its first run created, so when work resumes
-it resumes from the base that run started on — not from the merges that landed
-while it waited. A textual clash with one of those shows up as a `CONFLICTING`
+issue keeps the worktree and branch its first run created — the sweep above
+only reclaims *finished* issues, and a parked one is still open — so when work
+resumes it resumes from the base that run started on, not from the merges that
+landed while it waited. A textual clash with one of those shows up as a `CONFLICTING`
 PR and is rebased automatically; a semantic one — a helper renamed by a merge in
 between — is not, and lands as a PR that passed its own tests and breaks the
 default branch.

@@ -514,9 +514,12 @@ and URLs.
 
 ## Reclaiming finished issues: `polako tidy`
 
-Cleanup today only runs from inside a shift that watched a merge itself.
-Every other run — and every interactive one — leaves its worktree and its
-branch behind. `tidy` is what an operator points at that backlog once:
+A shift runs this sweep itself — once at start, once after each merge it
+observes (see [How polako works](behaviour.md)) — so a drained backlog needs
+no follow-up. `tidy` is the same sweep as a verb you can point at a repository
+by hand: after an interactive `implement-issue` run, or a shift that was killed
+before it could clean up, or just to see what is reclaimable before letting a
+shift do it.
 
 ```bash
 polako tidy
@@ -539,14 +542,20 @@ skipped
 Before touching anything it proves the branch safe to remove — **all** of
 these, not any one:
 
+- no human has put `needs-human` or `proposed` on the issue — either label is
+  a hold, only a human takes it off, and it outranks even a merged PR:
+  someone who finishes a parked issue by hand still gets to clear the label
+  themselves;
 - the issue is closed, or its PR is merged — GitHub is the authority, as
   always;
 - the branch is merged into the default branch (an ancestor of
   `origin/HEAD`'s branch, after a fast-forward refresh exactly like the one a
   shift does before picking up an issue). A branch merged via a squash is not
-  literally an ancestor of anything, and this does not try to reason about
+  literally an ancestor of anything, and `tidy` does not try to reason about
   that — it reports "not merged into the default branch" and leaves the
-  branch alone;
+  branch alone. (A shift sweeping right after a merge it watched is the
+  exception: GitHub's merge event is proof enough for that one branch, squash
+  or not.);
 - its worktree, if it has one, has no uncommitted or untracked changes
   (`PLAN.md` — the skill's own planning note, which nothing ever commits —
   does not count against it, the same exception `-dry-run`'s park messages
