@@ -37,6 +37,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -624,15 +625,12 @@ func skewComparison(binary string, cfg config) (self, plugin string, behind, ok 
 	return self, plugin, semverLess(pluginParts, selfParts), true
 }
 
-// semverLess reports whether a names an earlier release than b, comparing
-// major, then minor, then patch.
+// semverLess reports whether a names an earlier release than b — a named
+// wrapper over slices.Compare, the same primitive TestShippingFixesDoNotSitUnreleased
+// (repo_test.go) already uses to compare two [3]int release triples, rather
+// than a second hand-rolled loop over the same shape.
 func semverLess(a, b [3]int) bool {
-	for i := range a {
-		if a[i] != b[i] {
-			return a[i] < b[i]
-		}
-	}
-	return false
+	return slices.Compare(a[:], b[:]) < 0
 }
 
 // skewRemedy is the command (or commands) an operator runs to bring the
