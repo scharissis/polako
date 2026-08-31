@@ -606,21 +606,13 @@ func skewComparison(binary string, cfg config) (self, plugin string, behind, ok 
 	if name, _, _ := strings.Cut(cfg.skill, ":"); name != pluginName {
 		return "", "", false, false
 	}
-	self, selfIsRelease := releaseVersion(binary)
-	plugin, pluginIsRelease := releaseVersion(cfg.pluginVersion)
+	self, selfParts, selfIsRelease := releaseVersion(binary)
+	plugin, pluginParts, pluginIsRelease := releaseVersion(cfg.pluginVersion)
 	// A binary built from a clone reports a revision, not a release. That is
 	// not skew, it is an unreleased build, and warning about it every time
 	// would train an operator to ignore the one message that matters.
 	if !selfIsRelease || !pluginIsRelease || self == plugin {
 		return self, plugin, false, false
-	}
-	selfParts, errSelf := parseSemver(self)
-	pluginParts, errPlugin := parseSemver(plugin)
-	// releaseVersion already ran parseSemver once to decide selfIsRelease and
-	// pluginIsRelease, so these cannot fail — checked anyway rather than
-	// trusting that at a distance.
-	if errSelf != nil || errPlugin != nil {
-		return self, plugin, false, true
 	}
 	return self, plugin, semverLess(pluginParts, selfParts), true
 }
@@ -688,13 +680,16 @@ func versionSkewGate(binary string, cfg config) error {
 // releaseVersion normalizes a version that names a release, and reports false
 // for anything that does not — an empty string, or the revision a build from a
 // clone carries. The `v` prefix is optional because the binary picks one up
-// from a module version and none from an -ldflags stamp.
-func releaseVersion(s string) (string, bool) {
+// from a module version and none from an -ldflags stamp. The parsed parts
+// come back alongside the string so a caller comparing two releases
+// (skewComparison) never has to parseSemver the same string twice.
+func releaseVersion(s string) (string, [3]int, bool) {
 	s = strings.TrimPrefix(s, "v")
-	if _, err := parseSemver(s); err != nil {
-		return "", false
+	parts, err := parseSemver(s)
+	if err != nil {
+		return "", [3]int{}, false
 	}
-	return s, true
+	return s, parts, true
 }
 
 // parseSemver reads the plain major.minor.patch this project releases under —

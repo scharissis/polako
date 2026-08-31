@@ -3094,11 +3094,13 @@ func TestParseSemverRejectsWhatIsNotARelease(t *testing.T) {
 // most likely to be mistaken for a release, and warning on it would fire on
 // every developer build.
 func TestReleaseVersionRejectsAPseudoVersion(t *testing.T) {
-	if v, ok := releaseVersion("v0.0.0-20260825064232-a0aabd243c60"); ok {
+	if v, _, ok := releaseVersion("v0.0.0-20260825064232-a0aabd243c60"); ok {
 		t.Errorf("releaseVersion accepted a pseudo-version as %q", v)
 	}
-	if v, ok := releaseVersion("v0.4.0"); !ok || v != "0.4.0" {
+	if v, parts, ok := releaseVersion("v0.4.0"); !ok || v != "0.4.0" {
 		t.Errorf("releaseVersion(v0.4.0) = %q, %v; want the bare version", v, ok)
+	} else if want := [3]int{0, 4, 0}; parts != want {
+		t.Errorf("releaseVersion(v0.4.0) parts = %v, want %v", parts, want)
 	}
 }
 
