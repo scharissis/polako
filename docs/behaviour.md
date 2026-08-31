@@ -31,6 +31,13 @@ it holds uncommitted work the merge did not take. Nothing here ends a shift — 
 tidy-up must not take a backlog down. A put-down issue is never finished, so its
 worktree is left alone (see `-strict-order` below).
 
+`implement-issue` puts that worktree at `.worktrees/issue-N`, inside the main
+checkout, which means it is gitignored rather than merely untracked — so
+**`git clean -xfd`, run in the main checkout, deletes it and everything
+in-flight underneath it**, worktree admin records included. That is a real
+hazard this layout creates: a command that used to only sweep build artifacts
+now also reaches every in-progress issue's uncommitted work.
+
 **All state lives in GitHub** — issues, comments, PRs, branches. The process
 itself is stateless and restart-safe: kill it at any point, rerun it later, and
 it re-derives where things stand. If a PR already exists for `issue-N`, it
