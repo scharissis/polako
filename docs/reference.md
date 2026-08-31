@@ -18,6 +18,7 @@ sets — see [`status`](#where-the-backlog-stands-polako-status) and
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how PRs are matched back to issues. |
 | `-label` | *(none)* | Only process issues carrying this label. Doubles as an access control — see [Security](security.md). |
 | `-ungated` | `false` | Work a public repository without a `-label` gate. Without one or the other, `polako work` refuses to start on a public repo, because anyone who can open an issue could feed its queue — see [Security](security.md). |
+| `-ignore-skew` | `false` | Start even when the installed skill is an older release than this binary. Without it, `polako work` refuses to start on that mismatch — a stale skill is the shape [issue #239](https://github.com/scharissis/polako/issues/239) ran, missing recent cost fixes as well as risking the branch-name contract the two halves share — see [Getting updates](install.md#getting-updates). |
 | `-tools` | *(see below)* | `--allowedTools` for unattended runs. **Replaces** the default set. |
 | `-add-tools` | *(none)* | Extra `--allowedTools` entries, **appended** to `-tools`. |
 | `-permission-mode` | `acceptEdits` | Passed to `claude --permission-mode`. |
