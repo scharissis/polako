@@ -1,0 +1,16 @@
+[
+  {
+    "number": 1,
+    "title": "handlers.sh does two unrelated jobs",
+    "state": "OPEN",
+    "labels": [],
+    "body": "## Problem\n\n`handlers.sh` has grown into the longest file in the repo by a wide margin, and\nit holds two responsibilities that never call each other: command-line parsing\nin the top half, output rendering in the bottom.\n\n## What to do\n\nSplit it: argument parsing into `args.sh`, rendering into `render.sh`. No\nbehaviour change.\n\n## Done when\n\n- `handlers.sh` is gone, replaced by the two focused files.\n- `./test.sh` still passes.\n"
+  },
+  {
+    "number": 2,
+    "title": "There is no LICENSE file",
+    "state": "OPEN",
+    "labels": [],
+    "body": "The repository ships shell scripts, a test runner and a README, and nothing\nsaying what terms any of it is offered under. Add a LICENSE file and link it\nfrom the README.\n"
+  }
+]
