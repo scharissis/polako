@@ -148,9 +148,13 @@ carrying the ratchet-allowlist pattern (today's outliers listed with the
 measurement taken that day; entries only ever come off as debt is paid, nothing
 new goes on, a fresh violation is split rather than listed). This is the
 self-propagating part and the deepest answer to the problem: a repo that gains
-its own gate stops needing this skill to notice. Prior art to point the issue
-at: `cmd/polako/sizebudget_test.go` and the "Measuring the codebase's shape"
-section of `CONTRIBUTING.md`.
+its own gate stops needing this skill to notice. Point the issue's `## Pointers`
+at prior art that actually exists in the repo you are auditing — a ratchet test
+already living in some other language's suite, a CI step that half-does it —
+and only at polako's own `cmd/polako/sizebudget_test.go` and the "Measuring the
+codebase's shape" section of `CONTRIBUTING.md` when polako *is* the repo in
+front of you. Citing a path from a repo you are not auditing is the same
+polako-specific leak this skill is built to avoid.
 
 Every issue gets a size line, exactly this shape:
 
