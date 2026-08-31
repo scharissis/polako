@@ -722,7 +722,7 @@ func TestPlanPricingLineFromHistory(t *testing.T) {
 		"scharissis--polako.jsonl": pricingFixture,
 		"scharissis--other.jsonl":  pricingOtherRepo,
 	})
-	got := planPricingLine(dir, "scharissis/polako", 5, fixtureNow)
+	got := proposalPricingLine(dir, "scharissis/polako", 5, fixtureNow)
 	want := "your last 2 merged issues ran $3.00 and 40m median — 5 proposals ≈ $15 and 3½h of run time, before curation cuts"
 	if got != want {
 		t.Errorf("planPricingLine:\n got %q\nwant %q", got, want)
@@ -730,7 +730,7 @@ func TestPlanPricingLineFromHistory(t *testing.T) {
 }
 
 func TestPlanPricingLineWithNoHistory(t *testing.T) {
-	if got := planPricingLine(t.TempDir(), "scharissis/polako", 5, fixtureNow); got != planNoHistory {
+	if got := proposalPricingLine(t.TempDir(), "scharissis/polako", 5, fixtureNow); got != noPricingHistory {
 		t.Errorf("empty directory: got %q, want the no-history line", got)
 	}
 }
@@ -738,7 +738,7 @@ func TestPlanPricingLineWithNoHistory(t *testing.T) {
 func TestPlanPricingLineWithMetricsOff(t *testing.T) {
 	// -metrics off resolves to an empty dir string: no file is opened to find
 	// out there is nothing to read.
-	if got := planPricingLine("", "scharissis/polako", 5, fixtureNow); got != planNoHistory {
+	if got := proposalPricingLine("", "scharissis/polako", 5, fixtureNow); got != noPricingHistory {
 		t.Errorf("-metrics off: got %q, want the no-history line", got)
 	}
 }
@@ -752,7 +752,7 @@ func TestPlanPricingLineTreatsUnpricedCrashesAsNoHistory(t *testing.T) {
 {"v":1,"kind":"issue","ts":"2026-08-20T10:00:00Z","repo":"scharissis/polako","issue":40,"pr":0,"outcome":"merged"}
 `
 	dir := writePricingFixture(t, map[string]string{"scharissis--polako.jsonl": crashOnly})
-	if got := planPricingLine(dir, "scharissis/polako", 5, fixtureNow); got != planNoHistory {
+	if got := proposalPricingLine(dir, "scharissis/polako", 5, fixtureNow); got != noPricingHistory {
 		t.Errorf("crash-only history: got %q, want the no-history line", got)
 	}
 }
@@ -769,7 +769,7 @@ func TestPlanPricingLineSkipsUnpricedIssuesInAMixedHistory(t *testing.T) {
 {"v":1,"kind":"issue","ts":"2026-08-21T10:00:00Z","repo":"scharissis/polako","issue":61,"pr":0,"outcome":"merged"}
 `
 	dir := writePricingFixture(t, map[string]string{"scharissis--polako.jsonl": mixed})
-	got := planPricingLine(dir, "scharissis/polako", 2, fixtureNow)
+	got := proposalPricingLine(dir, "scharissis/polako", 2, fixtureNow)
 	want := "your last 1 merged issue ran $6.00 and 1h median — 2 proposals ≈ $12 and 2h of run time, before curation cuts"
 	if got != want {
 		t.Errorf("mixed history:\n got %q\nwant %q", got, want)
@@ -780,7 +780,7 @@ func TestPlanPricingLineOnlyPrintsForABatch(t *testing.T) {
 	// Zero proposals never reaches planPricingLine in planRun, but the median
 	// half of the sentence should still read sanely if it ever did.
 	dir := writePricingFixture(t, map[string]string{"scharissis--polako.jsonl": pricingFixture})
-	got := planPricingLine(dir, "scharissis/polako", 1, fixtureNow)
+	got := proposalPricingLine(dir, "scharissis/polako", 1, fixtureNow)
 	want := "your last 2 merged issues ran $3.00 and 40m median — 1 proposal ≈ $3.00 and 40m of run time, before curation cuts"
 	if got != want {
 		t.Errorf("single proposal:\n got %q\nwant %q", got, want)
