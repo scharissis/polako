@@ -289,14 +289,13 @@ func preflight(ctx context.Context, cfg *config) error {
 			logPath = path
 		}
 	}
-	if err := queueGate(repoView.Visibility, cfg.label, cfg.ungated); err != nil {
-		// A dry run may still look: it runs nothing and writes nothing, and
-		// seeing what an ungated queue would work is how an operator decides
-		// what to label. It hears about the gate rather than hitting it.
-		if !cfg.dryRun {
-			return err
-		}
-		log.Printf("note: a real run would refuse to start here — %v", err)
+	// A dry run may still look past either gate below: it runs nothing and
+	// writes nothing, and seeing what a real run would refuse is how an
+	// operator decides what to change. refuseOrNote is that one carve-out,
+	// shared so a real refusal and its dry-run preview can never say it two
+	// different ways.
+	if err := refuseOrNote(queueGate(repoView.Visibility, cfg.label, cfg.ungated), cfg.dryRun); err != nil {
+		return err
 	}
 	if cfg.ungated && strings.EqualFold(repoView.Visibility, "PUBLIC") {
 		// Said out loud like -remote and -post-summary are, and for the same
@@ -322,12 +321,11 @@ func preflight(ctx context.Context, cfg *config) error {
 		cfg.usage = &snap
 	}
 	log.Printf("%s — running /%s per issue, polling every %s", cfg.repo, cfg.skill, cfg.poll)
-	if err := versionSkewGate(polakoVersion(), *cfg); err != nil {
-		if !cfg.dryRun {
-			return err
-		}
-		log.Printf("note: a real run would refuse to start here — %v", err)
-	} else {
+	skewErr := versionSkewGate(polakoVersion(), *cfg)
+	if err := refuseOrNote(skewErr, cfg.dryRun); err != nil {
+		return err
+	}
+	if skewErr == nil {
 		if self, plugin, behind, ok := skewComparison(polakoVersion(), *cfg); cfg.ignoreSkew && ok && behind {
 			// Said out loud, the same shape -ungated gets on a public repo:
 			// the gate itself already let this through (it reads
@@ -339,7 +337,11 @@ func preflight(ctx context.Context, cfg *config) error {
 		}
 		// Only the "behind" case above ever refuses; a newer or ambiguous
 		// mismatch — or a "behind" one -ignore-skew just let through — is
-		// still worth a line, same as before this gate existed.
+		// still worth a line, same as before this gate existed. Gated on
+		// skewErr rather than folded into the block above: refuseOrNote
+		// already turned a dry-run refusal into a logged note and a nil
+		// return, and that note must not also get this second, differently
+		// worded line about the same skew.
 		warnOnVersionSkew(polakoVersion(), *cfg)
 	}
 	settingsBlock(preflightPairs(*cfg, logPath))
@@ -461,6 +463,23 @@ func queueGate(visibility, label string, ungated bool) error {
 	return errors.New("this repository is public, so anyone who can open an issue can queue work for an unattended agent — " +
 		"pass -label <name> to work only issues a maintainer labelled (see docs/security.md), " +
 		"or -ungated to work every open issue anyway")
+}
+
+// refuseOrNote is the dry-run carve-out every preflight gate shares: nil
+// passes straight through, and anything else refuses a real run but only
+// narrates what a real run would have refused on -dry-run, which runs
+// nothing and writes nothing. queueGate and versionSkewGate both go through
+// this so a real refusal and its dry-run preview can never drift into saying
+// it two different ways.
+func refuseOrNote(err error, dryRun bool) error {
+	if err == nil {
+		return nil
+	}
+	if !dryRun {
+		return err
+	}
+	log.Printf("note: a real run would refuse to start here — %v", err)
+	return nil
 }
 
 // claudeVersion pins which CLI produced a run's numbers. Best-effort: a
