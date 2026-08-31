@@ -3808,13 +3808,22 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	// silence is also why it says nothing under -verbose, where every event
 	// reaches the terminal and the clock is reset before it can expire.
 	//
+	// It deliberately keeps speaking while the stream is quiet too. A stalled
+	// run is not silently killed at fifteen minutes: the heartbeats before the
+	// kill — a frozen tool count beside "running the review gate…" — are the
+	// run-up that makes it legible. -stall decides whether a quiet run is
+	// wedged; this only reports that the process has not exited, and with what
+	// context.
+	//
 	// hbTools and hbPhase are the scan loop's publish-only mirror of two
 	// values the goroutine may not read straight from rep/el without racing
 	// the loop that fills them. Nothing branches on any of this.
 	var hbTools, hbPhase atomic.Int64
 	hbDone := make(chan struct{})
+	hbStopped := make(chan struct{}) // closed once the heartbeat goroutine has returned
 	if cfg.heartbeat > 0 {
 		go func() {
+			defer close(hbStopped)
 			t := time.NewTicker(sampleTick(cfg.heartbeat))
 			defer t.Stop()
 			for {
@@ -3824,7 +3833,8 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 				case <-t.C:
 					// Closed-channel and tick can both be ready; a second,
 					// non-blocking check keeps a heartbeat from landing after
-					// the finish line, which is emitted just past the close.
+					// the finish line, which is emitted once this goroutine has
+					// joined (see the <-hbStopped below).
 					select {
 					case <-hbDone:
 						return
@@ -3845,6 +3855,8 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 				}
 			}
 		}()
+	} else {
+		close(hbStopped)
 	}
 
 	sc := bufio.NewScanner(stdout)
@@ -3897,10 +3909,11 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	}
 
 	// The stream is over, so the terminal is about to get the finish line and
-	// nothing more from this invocation — stop the heartbeat before that line
-	// rather than after, so it cannot print past "finished (…)". Kept ahead of
-	// cmd.Wait, which can block on an orphan holding the stderr pipe.
+	// nothing more from this invocation — stop the heartbeat and wait for it to
+	// return before that line, so it cannot print past "finished (…)". Kept
+	// ahead of cmd.Wait, which can block on an orphan holding the stderr pipe.
 	close(hbDone)
+	<-hbStopped
 
 	// A read that failed leaves the child writing into a pipe nobody is
 	// draining, so it blocks and cmd.Wait never returns — which is why the kill

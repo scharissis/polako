@@ -2067,6 +2067,27 @@ func TestExecClaudeHeartbeatIsSilentUnderVerbose(t *testing.T) {
 	}
 }
 
+// The heartbeat keeps speaking while the event stream is quiet, not just the
+// terminal: a stalled run's last heartbeats are the run-up that makes the
+// -stall kill legible rather than a first word at fifteen minutes.
+func TestExecClaudeHeartbeatIsTheRunUpToAStallKill(t *testing.T) {
+	buf := captureLog(t)
+	cfg := fakeClaudeConfig(t, "hang") // an init event, then total silence
+	cfg.heartbeat = 200 * time.Millisecond
+	cfg.stall = time.Second
+
+	if _, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0); err == nil {
+		t.Fatal("the hung run should still be killed as stalled")
+	}
+	got := buf.String()
+	if !strings.Contains(got, "still working") {
+		t.Fatalf("the stall kill had no heartbeat run-up\ngot:\n%s", got)
+	}
+	if i, j := strings.Index(got, "still working"), strings.Index(got, "killing the run"); i < 0 || j < 0 || i > j {
+		t.Errorf("the heartbeat should land before the stall kill, not after\ngot:\n%s", got)
+	}
+}
+
 // An event too large for the reader used to end the scan silently. The child
 // then blocked writing into a pipe nobody was draining, cmd.Wait never
 // returned, and the run died as a -stall kill a quarter of an hour later —
