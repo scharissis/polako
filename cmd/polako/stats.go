@@ -1209,7 +1209,7 @@ func issuePairs(s issuesSummary, plan planCostSummary) [][2]string {
 	terminal := fmt.Sprintf("%d — merged %d (%s)", s.done, merged, percent(merged, s.done))
 	rest := maps.Clone(s.terminal)
 	delete(rest, issueMerged)
-	if other := breakdown(rest, []string{issueClosed, issueNeedsHuman}); other != "none" {
+	if other := breakdown(rest, []string{issueClosedNoChange, issueClosed, issueNeedsHuman}); other != "none" {
 		terminal += ", " + other
 	}
 
@@ -1379,7 +1379,7 @@ func runPairs(s runsSummary) [][2]string {
 				"interrupted", "no-skill", "auth", "limit", "budget"}))},
 		{"reasons", breakdown(s.reasons, []string{reasonImplement, reasonResume, reasonUnfinished,
 			reasonAnswers, reasonRemediate, reasonChecks, reasonReview})},
-		{"outcomes", breakdown(s.outcomes, []string{outcomeOpenedPR, outcomeQuestions, outcomeNothing, outcomeUnknown})},
+		{"outcomes", breakdown(s.outcomes, []string{outcomeOpenedPR, outcomeClosedIssue, outcomeQuestions, outcomeNothing, outcomeUnknown})},
 		{"work", fmt.Sprintf("%s, %s", plural(s.turns, "turn"), plural(s.tools, "tool use"))},
 	}
 	if s.approximated > 0 {

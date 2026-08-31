@@ -24,8 +24,12 @@ import (
 type issueResult struct {
 	issue    int
 	parked   bool
-	awaiting bool   // put down waiting on a human answer, not finished
-	reason   string // why it parked; empty otherwise
+	awaiting bool // put down waiting on a human answer, not finished
+	// closedNoChange is the fourth ending (#210): closed directly on verified
+	// evidence rather than merged, finished all the same. Mutually exclusive
+	// with parked and awaiting — see issueState.closedNoChange.
+	closedNoChange bool
+	reason         string // why it parked; empty otherwise
 	// What this shift's runs on the issue cost, and how many of them reported
 	// no cost at all. Both come off the tally the issue was carrying, so an
 	// issue this process only waited on contributes an honest zero.
@@ -49,6 +53,13 @@ type issueState struct {
 	// once an answer lands, and then dying before it reports a session of its
 	// own, still has one to resume rather than starting over from nothing.
 	session string
+	// closedNoChange is set when this issue's run took the fourth ending
+	// (#210): verified evidence the issue needed no code change, and closed it
+	// directly rather than opening a PR. Read once processIssue returns nil, to
+	// tell that ending apart from a merge — both report success the same way,
+	// since neither needs a human, but the summary and the run-data record
+	// should not call a closed-no-PR issue "merged".
+	closedNoChange bool
 	// weekUsageAtPickup is the plan's week-usage percent sampled at the start
 	// of the processIssue call currently working this issue. Overwritten
 	// unconditionally on every call rather than once per issue, so an issue
@@ -256,7 +267,7 @@ func drain(ctx context.Context, cfg config) error {
 			resumeHint(cfg, issue, st)
 			return finish(fmt.Errorf("issue #%d: %w", issue, err))
 		default:
-			results = append(results, spend(st, issueResult{issue: issue}))
+			results = append(results, spend(st, issueResult{issue: issue, closedNoChange: st.closedNoChange}))
 			delete(states, issue)
 		}
 		if cfg.once {
@@ -578,6 +589,7 @@ func drainSummary(results []issueResult, containers, closed []containerInfo, ela
 		return " (" + usd(c) + ")"
 	}
 	var merged []string
+	var closedNoChange []string
 	var waiting []string
 	var parked []string
 	for _, r := range results {
@@ -586,12 +598,17 @@ func drainSummary(results []issueResult, containers, closed []containerInfo, ela
 			waiting = append(waiting, "#"+strconv.Itoa(r.issue)+price(r.cost))
 		case r.parked:
 			parked = append(parked, fmt.Sprintf("  parked  #%d%s — %s", r.issue, price(r.cost), r.reason))
+		case r.closedNoChange:
+			closedNoChange = append(closedNoChange, "#"+strconv.Itoa(r.issue)+price(r.cost))
 		default:
 			merged = append(merged, "#"+strconv.Itoa(r.issue)+price(r.cost))
 		}
 	}
 	head := fmt.Sprintf("summary: %s merged, %s parked",
 		plural(len(merged), "issue"), plural(len(parked), "issue"))
+	if len(closedNoChange) > 0 {
+		head += ", " + plural(len(closedNoChange), "issue") + " closed with no change needed"
+	}
 	if len(waiting) > 0 {
 		head += ", " + plural(len(waiting), "issue") + " awaiting an answer"
 	}
@@ -610,6 +627,9 @@ func drainSummary(results []issueResult, containers, closed []containerInfo, ela
 	lines := []string{head + ", " + dur(elapsed) + " of wall clock"}
 	if len(merged) > 0 {
 		lines = append(lines, "  merged  "+strings.Join(merged, ", "))
+	}
+	if len(closedNoChange) > 0 {
+		lines = append(lines, "  closed  "+strings.Join(closedNoChange, ", "))
 	}
 	if len(waiting) > 0 {
 		lines = append(lines, "  waiting "+strings.Join(waiting, ", ")+
@@ -657,21 +677,34 @@ func logHeldBack(heldBack []heldBackInfo, skip map[int]bool) {
 	}
 }
 
-func ensureIssueClosed(ctx context.Context, cfg config, issue, prNumber int) error {
-	// The read is retried; the close below is not. Reads only — see retryRead.
+// issueOpenState reads one issue's state ("OPEN" or "CLOSED") off GitHub,
+// retried the way every other read-only lookup on this loop is — see
+// retryRead. Shared by ensureIssueClosed (a PR merged, so "Closes #N" should
+// have already closed it — belt and braces) and dispatchRun's check for the
+// fourth ending (#210): a run that closed its own issue directly, verifying
+// the code needed no change, rather than opening a PR.
+func issueOpenState(ctx context.Context, cfg config, issue int) (string, error) {
 	out, err := retryRead(ctx, cfg, fmt.Sprintf("reading #%d's state", issue), func() ([]byte, error) {
 		return gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "state")
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	var v struct {
 		State string `json:"state"`
 	}
 	if err := json.Unmarshal(out, &v); err != nil {
-		return fmt.Errorf("parsing issue state: %w", err)
+		return "", fmt.Errorf("parsing issue state: %w", err)
 	}
-	if v.State == "OPEN" { // "Closes #N" normally handles this; belt and braces
+	return v.State, nil
+}
+
+func ensureIssueClosed(ctx context.Context, cfg config, issue, prNumber int) error {
+	state, err := issueOpenState(ctx, cfg, issue)
+	if err != nil {
+		return err
+	}
+	if state == "OPEN" { // "Closes #N" normally handles this; belt and braces
 		_, err = gh(ctx, cfg, "issue", "close", strconv.Itoa(issue),
 			"--comment", fmt.Sprintf("Shipped in #%d.", prNumber))
 		return err
