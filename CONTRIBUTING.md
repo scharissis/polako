@@ -41,6 +41,23 @@ which covers the streaming, session-capture, crash and stall-watchdog paths for
 real. A second group of tests keeps the repository honest — the plugin manifest,
 the shipped skill and the documented flags all have to agree with the code.
 
+## Measuring the codebase's shape
+
+```bash
+./scripts/health.sh
+```
+
+```powershell
+.\scripts\health.ps1
+```
+
+Prints `cmd/polako`'s longest files, its longest functions (measured from
+`go/ast`, not brace counting), the comment ratio per file, and the line totals.
+It reports and enforces nothing — no exit code beyond "the script ran" — so it
+is not part of `check.sh` or CI. It is the "did this get harder to work on"
+question that `gofmt`, `go vet` and the suite all pass identically at 400 lines
+and at 4,000.
+
 ## Re-recording the demo
 
 The GIF at the top of the README is rendered from
