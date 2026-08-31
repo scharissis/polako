@@ -80,7 +80,8 @@ stopping to ask.)
    them too — re-run once the thread has a reply.
 
 Once there's a reply, fold it into PLAN.md (writing one first if none exists
-yet), mark it FINAL if that closes out planning, and clear the flag:
+yet — test with Read the same way Phase 2 does, never a Bash existence
+check), mark it FINAL if that closes out planning, and clear the flag:
 
     gh issue edit $issue --remove-label awaiting-answer
 
@@ -221,6 +222,11 @@ issue assumes exists — turns out not to have landed, that's a finding for the
 thread, not a reason to end the run quietly: see "Asking a question" above.
 
 ## Phase 2 — Plan
+Test whether PLAN.md exists by Read-ing `<worktree>/PLAN.md` directly — a
+missing file is a normal, handleable Read error, and Read is already granted
+for the absolute-path reading Phase 1 sets up. Never a Bash existence check
+like `ls`, `test -f` or `[ -f ]`: none of those are in the allowlist, and a
+run that reaches for one has no way to recover within its turn (issue #275).
 If PLAN.md doesn't exist in the worktree, or new answers have appeared:
 1. Study the issue and relevant code. If that study turns up verified
    evidence the issue needs no code change at all, see "Closing an issue

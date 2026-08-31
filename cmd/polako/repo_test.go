@@ -696,6 +696,29 @@ func TestPlanIsWrittenBeforeImplementation(t *testing.T) {
 	}
 }
 
+// issue #275: a run testing whether PLAN.md existed reached for a bare `ls` —
+// a Bash command outside the allowlist — because SKILL.md said "If PLAN.md
+// doesn't exist" without ever saying how to test that, and the run had no way
+// to recover from the resulting permission prompt. Read already answers the
+// question (a missing file is a normal, handleable error) and needs no new
+// grant, so this pins that the skill names the tool explicitly rather than
+// leaving the model to improvise one.
+func TestPlanExistenceCheckUsesReadNotBash(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	if !strings.Contains(skill, "Read-ing `<worktree>/"+planFile+"`") {
+		t.Errorf("SKILL.md no longer tells the run to test %s's existence by Read-ing it directly —"+
+			" without that, \"if PLAN.md doesn't exist\" names no tool and a run can reach for an"+
+			" unlisted Bash existence check instead (issue #275)", planFile)
+	}
+	for _, forbidden := range []string{"`ls`", "`test -f`", "`[ -f ]`"} {
+		if !strings.Contains(skill, forbidden) {
+			t.Errorf("SKILL.md no longer names %s as an example of the Bash existence check to avoid"+
+				" when testing whether PLAN.md exists", forbidden)
+		}
+	}
+}
+
 // Under headless `claude -p` — the only way the supervisor invokes the skill —
 // the model ending its turn is the process exiting. So a run that stops to wait
 // on something does not pause, it terminates: exit 0, no error, work left
