@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -127,6 +128,12 @@ type leftWork struct {
 	commits int
 	counted bool
 	dirty   int // paths that worktree reports as changed or untracked
+	// a worktree is listed for this branch and its directory is on disk, but
+	// `git status` there would not run — an index lock, a half-broken checkout.
+	// Distinct from "no worktree" (path ""), which the blanked path reads as
+	// once this is set: reclaim must leave the first for a human rather than
+	// force past a state it could not inspect.
+	unreadable bool
 }
 
 // salvageable reports whether a run got far enough that a person should start
@@ -210,7 +217,14 @@ func inspectLeftWork(ctx context.Context, cfg config, issue int) leftWork {
 			// hand until the next prune, and sending a person to a path that is
 			// not there is worse than sending them nowhere. A worktree that
 			// cannot be read is reported as no worktree at all — the branch
-			// clause still says what is there.
+			// clause still says what is there. When the directory is still on
+			// disk, though, `git status` failing means a lock or a half-broken
+			// checkout rather than a stale admin entry: reclaim records that
+			// separately, because a worktree it cannot vet is not one it may
+			// force past.
+			if _, statErr := os.Stat(w.path); statErr == nil {
+				w.unreadable = true
+			}
 			w.path = ""
 		}
 		for _, line := range strings.Split(string(out), "\n") {

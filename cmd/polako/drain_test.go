@@ -283,18 +283,26 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			fmt.Fprintf(os.Stderr, "no issue #%s\n", at(2))
 			return "", false, 1
 		}
-		if strings.Contains(flagVal("--json"), "labels") {
+		// Compose only the fields --json asked for, the way real gh does — tidy
+		// reads state and labels together, the park-label check reads labels
+		// alone, the merge check reads state alone.
+		want := flagVal("--json")
+		var fields []string
+		if strings.Contains(want, "state") {
+			state := "CLOSED"
+			if is.Open {
+				state = "OPEN"
+			}
+			fields = append(fields, `"state":"`+state+`"`)
+		}
+		if strings.Contains(want, "labels") {
 			var labels []string
 			for _, l := range is.Labels {
 				labels = append(labels, fmt.Sprintf(`{"name":%q}`, l))
 			}
-			return `{"labels":[` + strings.Join(labels, ",") + `]}`, false, 0
+			fields = append(fields, `"labels":[`+strings.Join(labels, ",")+`]`)
 		}
-		state := "CLOSED"
-		if is.Open {
-			state = "OPEN"
-		}
-		return `{"state":"` + state + `"}`, false, 0
+		return "{" + strings.Join(fields, ",") + "}", false, 0
 
 	case "api comments":
 		is := st.Issues[apiIssue(at(1))]
@@ -1207,108 +1215,120 @@ func TestInspectLeftWorkAgainstARealCheckout(t *testing.T) {
 	})
 }
 
-// cleanupWorktree runs after a merge. For years it built the path it was about
-// to remove, a guess that missed for over half the worktrees that existed and
-// discarded the removal without a word. It asks git now, forces only past a
-// dirty check, and reports a removal it cannot make.
-func TestCleanupWorktreeResolvesThePath(t *testing.T) {
-	cfgFor := func(checkout string) config {
-		return config{dir: checkout, branchPrefix: "issue-"}
+// Between two shifts a human merges PRs by hand, and every one leaves a
+// worktree and branch no merge-moment cleanup will ever revisit. The next
+// shift reclaims them before it picks up an issue.
+func TestDrainReclaimsALeftoverWorktreeAtShiftStart(t *testing.T) {
+	buf := captureLog(t)
+	_, checkout := upstream(t)
+	mergeIssueBranch(t, checkout, "issue-1", "feature-1")
+	wt := filepath.Join(t.TempDir(), "issue-1-worktree")
+	gitAt(t, checkout, "worktree", "add", wt, "issue-1")
+	// The skill never commits this, so a real worktree always carries one.
+	if err := os.WriteFile(filepath.Join(wt, "PLAN.md"), []byte("## Approach\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	listsBranch := func(t *testing.T, checkout, branch string) bool {
-		t.Helper()
-		return strings.Contains(gitAt(t, checkout, "worktree", "list", "--porcelain"), "branch refs/heads/"+branch+"\n")
+
+	cfg, _ := drainConfig(t, "stream", &ghState{Issues: map[string]*fakeIssue{"1": {Open: false}}})
+	cfg.dir = checkout
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
 	}
 
-	t.Run("a worktree at the sibling path the old guess built is removed", func(t *testing.T) {
-		_, checkout := upstream(t)
-		wt := filepath.Join(filepath.Dir(checkout), filepath.Base(checkout)+"-issue-1")
-		t.Cleanup(func() { _ = os.RemoveAll(wt) })
-		gitAt(t, checkout, "worktree", "add", wt, "-b", "issue-1")
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Errorf("the worktree a hand-merge left behind is still there: %s", wt)
+	}
+	if got := gitAt(t, checkout, "branch", "--list", "issue-1"); got != "" {
+		t.Errorf("branch issue-1 still exists: %q", got)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "reclaimed 1 finished issue: issue-1") {
+		t.Errorf("no reclaim line in the log:\n%s", out)
+	}
+}
 
-		cleanupWorktree(context.Background(), cfgFor(checkout), 1)
+// A parked issue's worktree is a human's to look at — an issue put down five
+// minutes ago is exactly the case. needs-human outranks even a merged PR: if a
+// human finished a parked issue by hand, clearing the label is still theirs.
+func TestDrainLeavesAParkedIssuesWorktreeAlone(t *testing.T) {
+	_, checkout := upstream(t)
+	mergeIssueBranch(t, checkout, "issue-1", "feature-1")
+	wt := filepath.Join(t.TempDir(), "issue-1-worktree")
+	gitAt(t, checkout, "worktree", "add", wt, "issue-1")
 
-		if _, err := os.Stat(wt); !os.IsNotExist(err) {
-			t.Errorf("worktree %s still exists", wt)
-		}
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true, Labels: []string{needsHumanLabel}}},
+		PRs:    map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
 	})
+	cfg.dir = checkout
 
-	t.Run("a worktree the old guess would never have found is removed", func(t *testing.T) {
-		_, checkout := upstream(t)
-		wt := filepath.Join(t.TempDir(), "desktop-app-put-it-here")
-		gitAt(t, checkout, "worktree", "add", wt, "-b", "issue-2")
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
 
-		cleanupWorktree(context.Background(), cfgFor(checkout), 2)
+	if _, err := os.Stat(wt); err != nil {
+		t.Errorf("a parked issue's worktree was disturbed: %v", err)
+	}
+	if got := gitAt(t, checkout, "branch", "--list", "issue-1"); got == "" {
+		t.Error("a parked issue's branch was deleted")
+	}
+}
 
-		if _, err := os.Stat(wt); !os.IsNotExist(err) {
-			t.Errorf("worktree %s still exists — the old code only ever looked at the sibling path", wt)
-		}
+// The just-merged issue's own worktree failing to reclaim — uncommitted work
+// the merge did not take — is the operator's to deal with now, so it is said
+// out loud rather than left at detail level like an old leftover branch.
+func TestDrainWarnsWhenTheMergedWorktreeHoldsUncommittedWork(t *testing.T) {
+	buf := captureLog(t)
+	_, checkout := upstream(t)
+	mergeIssueBranch(t, checkout, "issue-1", "feature-1")
+	wt := filepath.Join(t.TempDir(), "issue-1-worktree")
+	gitAt(t, checkout, "worktree", "add", wt, "issue-1")
+	if err := os.WriteFile(filepath.Join(wt, "half-a-change.go"), []byte("package x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		PRs:    map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
 	})
+	cfg.dir = checkout
 
-	t.Run("a leftover untracked PLAN.md alone does not keep the worktree", func(t *testing.T) {
-		_, checkout := upstream(t)
-		wt := filepath.Join(t.TempDir(), "checkout-issue-3")
-		gitAt(t, checkout, "worktree", "add", wt, "-b", "issue-3")
-		if err := os.WriteFile(filepath.Join(wt, planFile), []byte("## Approach\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if st := finalGhState(t, path); st.Issues["1"].Open {
+		t.Error("issue 1 should have been closed after its merged PR")
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Errorf("the worktree with uncommitted work must be left in place: %v", err)
+	}
+	if out := buf.String(); !strings.Contains(out, "could not be reclaimed") || !strings.Contains(out, "uncommitted file") {
+		t.Errorf("the merged worktree's uncommitted work was not surfaced:\n%s", out)
+	}
+}
 
-		cleanupWorktree(context.Background(), cfgFor(checkout), 3)
-
-		if _, err := os.Stat(wt); !os.IsNotExist(err) {
-			t.Errorf("worktree %s still exists — the skill's own PLAN.md is not work left behind", wt)
-		}
+// A sweep that cannot even run — pointed at a directory that is not a checkout
+// — is narrated and stepped over. Nothing here is fatal: a tidy-up must not
+// take a backlog down.
+func TestDrainSurvivesASweepThatCannotRun(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		PRs:    map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
 	})
+	// cfg.dir is a bare temp dir, so the sweep's `git for-each-ref` fails at
+	// both call sites — shift start and the merge arm.
 
-	t.Run("a worktree with real uncommitted work is left alone and reported", func(t *testing.T) {
-		buf := captureLog(t)
-		_, checkout := upstream(t)
-		wt := filepath.Join(t.TempDir(), "checkout-issue-4")
-		gitAt(t, checkout, "worktree", "add", wt, "-b", "issue-4")
-		if err := os.WriteFile(filepath.Join(wt, "half-the-change.go"), []byte("package x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-
-		cleanupWorktree(context.Background(), cfgFor(checkout), 4)
-
-		if _, err := os.Stat(wt); err != nil {
-			t.Errorf("worktree %s was removed despite holding uncommitted work: %v", wt, err)
-		}
-		if got := buf.String(); !strings.Contains(got, "issue-4") || !strings.Contains(got, "uncommitted") {
-			t.Errorf("no report of the skipped worktree in the log: %q", got)
-		}
-	})
-
-	t.Run("a directory removed by hand is pruned, not reported as a failure", func(t *testing.T) {
-		buf := captureLog(t)
-		_, checkout := upstream(t)
-		wt := filepath.Join(t.TempDir(), "checkout-issue-5")
-		gitAt(t, checkout, "worktree", "add", wt, "-b", "issue-5")
-		if err := os.RemoveAll(wt); err != nil {
-			t.Fatal(err)
-		}
-
-		cleanupWorktree(context.Background(), cfgFor(checkout), 5)
-
-		if listsBranch(t, checkout, "issue-5") {
-			t.Errorf("git still lists the pruned worktree for issue-5")
-		}
-		if strings.Contains(buf.String(), "could not") {
-			t.Errorf("a prunable entry was reported as a failure: %q", buf.String())
-		}
-	})
-
-	t.Run("a branch with no worktree at all is a silent no-op", func(t *testing.T) {
-		buf := captureLog(t)
-		_, checkout := upstream(t)
-		gitAt(t, checkout, "branch", "issue-6")
-
-		cleanupWorktree(context.Background(), cfgFor(checkout), 6)
-
-		if got := strings.TrimSpace(buf.String()); got != "" {
-			t.Errorf("nothing to clean up should say nothing, got %q", got)
-		}
-	})
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a sweep that cannot run must not end the shift: %v", err)
+	}
+	if st := finalGhState(t, path); st.Issues["1"].Open {
+		t.Error("issue 1 should have been closed after its merged PR")
+	}
+	if !strings.Contains(buf.String(), "could not sweep finished worktrees") {
+		t.Errorf("the sweep failure was not narrated:\n%s", buf.String())
+	}
 }
 
 // The whole question round, end to end, under -strict-order: a run that asks

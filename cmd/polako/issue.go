@@ -700,11 +700,13 @@ func (r *issueLoop) superviseToClose(pr *pullRequest) error {
 	case "MERGED", "CLOSED":
 		if pr.State == "MERGED" {
 			narrate(sevSuccess, "PR #%d merged — cleaning up and advancing", pr.Number)
-			cleanupWorktree(ctx, cfg, issue)
-			// The merge just made the local default branch stale. The next issue
-			// would sync anyway; doing it here too is what leaves the operator a
-			// current checkout when this was the last issue in the backlog.
-			syncDefaultBranch(ctx, cfg)
+			// Reclaims this issue's worktree and branch, plus anything else a
+			// hand-merge between shifts left finished. The sweep fast-forwards
+			// the mirror before it judges anything, which is also the sync this
+			// arm used to make by hand — the merge just made the local default
+			// branch stale, and doing it here leaves the operator a current
+			// checkout when this was the last issue in the backlog.
+			tidySweep(ctx, cfg, issue)
 			r.terminal(pr.Number, issueMerged, "")
 			postSummary(ctx, cfg, pr.Number, *r.tally)
 			return ensureIssueClosed(ctx, cfg, issue, pr.Number)

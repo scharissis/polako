@@ -151,6 +151,12 @@ func drain(ctx context.Context, cfg config) error {
 		return err
 	}
 
+	// Once, before the first issue is picked up: between two shifts a human
+	// merges PRs by hand, and every one of those leaves a worktree and branch no
+	// merge-moment cleanup will ever revisit. The per-merge sweep below keeps it
+	// from accumulating again.
+	tidySweep(ctx, cfg, 0)
+
 	for {
 		// Read between issues and never inside one: ending a drain cleanly means
 		// declining to take on more work, not killing a run part-way through an
@@ -241,20 +247,7 @@ func drain(ctx context.Context, cfg config) error {
 			skip[issue] = true
 			results = append(results, spend(st, issueResult{issue: issue, parked: true, reason: reason}))
 			delete(states, issue)
-			narrate(sevWarning, "issue #%d needs a human: %s — parking it and moving on", issue, reason)
-			// Whatever the park had to say that the issue thread must not carry.
-			// Today that is where on this disk the work it left is sitting.
-			if aside := parkAsideOf(err); aside != "" {
-				log.Printf("issue #%d: %s", issue, aside)
-			}
-			// A park is exactly when somebody wants to read what the run
-			// actually did, and the session is the whole transcript of it.
-			resumeHint(cfg, issue, st)
-			parkIssue(ctx, cfg, issue, reason)
-			// After the park, not before: by now the label and the comment
-			// saying why are on the issue, so somebody following the
-			// notification finds the whole story there.
-			notify(ctx, cfg, notification{event: notifyParked, issue: issue, reason: reason})
+			parkAndMoveOn(ctx, cfg, issue, st, reason, err)
 		case err != nil:
 			// Ctrl+C mid-issue, or a fatal error: neither prints the park's
 			// resume hint, yet both leave a run's transcript on disk that
@@ -391,6 +384,27 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string) {
 		narrate(sevWarning, "could not comment on issue #%d (%v) — the reason is in this log and in the exit summary",
 			issue, cerr)
 	}
+}
+
+// parkAndMoveOn is the GitHub-facing half of a park: the narration, the label
+// and comment, and the notify. The drain loop has already dropped the issue
+// from this shift's queue by the time this runs — split out so the loop body
+// reads as one step per line.
+func parkAndMoveOn(ctx context.Context, cfg config, issue int, st *issueState, reason string, err error) {
+	narrate(sevWarning, "issue #%d needs a human: %s — parking it and moving on", issue, reason)
+	// Whatever the park had to say that the issue thread must not carry. Today
+	// that is where on this disk the work it left is sitting.
+	if aside := parkAsideOf(err); aside != "" {
+		log.Printf("issue #%d: %s", issue, aside)
+	}
+	// A park is exactly when somebody wants to read what the run actually did,
+	// and the session is the whole transcript of it.
+	resumeHint(cfg, issue, st)
+	parkIssue(ctx, cfg, issue, reason)
+	// After the park, not before: by now the label and the comment saying why
+	// are on the issue, so somebody following the notification finds the whole
+	// story there.
+	notify(ctx, cfg, notification{event: notifyParked, issue: issue, reason: reason})
 }
 
 // finishedContainerMarker tags the comment polako leaves on a container before
