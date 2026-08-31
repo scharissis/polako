@@ -317,7 +317,7 @@ func TestPlanNormaliseForcesExactlyProposed(t *testing.T) {
 
 	out := normaliseProposals(context.Background(), cfg, map[int]bool{1: true}, "Batch 1", "plan")
 	if out.err() != nil {
-		t.Fatalf("planNormalise reported failures on a healthy pass: %v", out.err())
+		t.Fatalf("normaliseProposals reported failures on a healthy pass: %v", out.err())
 	}
 	if out.created != 3 || len(out.labelled) != 3 || out.stripped != 1 || len(out.milestone) != 3 {
 		t.Errorf("outcome = %+v, want created 3 / labelled 3 / stripped 1 / milestone 3", out)
@@ -400,7 +400,7 @@ func TestPlanNormaliseReportsLabelFailuresLoudly(t *testing.T) {
 }
 
 // The record needs to know how far the run fell short of the curation gate
-// and how many of its issues are epics. planNormalise counts both: label
+// and how many of its issues are epics. normaliseProposals counts both: label
 // edits (adds plus strips), and created issues that turned out to be
 // containers.
 func TestPlanNormaliseCountsTheEnforcementAndTheEpics(t *testing.T) {
@@ -725,7 +725,7 @@ func TestPlanPricingLineFromHistory(t *testing.T) {
 	got := proposalPricingLine(dir, "scharissis/polako", 5, fixtureNow)
 	want := "your last 2 merged issues ran $3.00 and 40m median — 5 proposals ≈ $15 and 3½h of run time, before curation cuts"
 	if got != want {
-		t.Errorf("planPricingLine:\n got %q\nwant %q", got, want)
+		t.Errorf("proposalPricingLine:\n got %q\nwant %q", got, want)
 	}
 }
 
@@ -777,7 +777,7 @@ func TestPlanPricingLineSkipsUnpricedIssuesInAMixedHistory(t *testing.T) {
 }
 
 func TestPlanPricingLineOnlyPrintsForABatch(t *testing.T) {
-	// Zero proposals never reaches planPricingLine in planRun, but the median
+	// Zero proposals never reaches proposalPricingLine in planRun, but the median
 	// half of the sentence should still read sanely if it ever did.
 	dir := writePricingFixture(t, map[string]string{"scharissis--polako.jsonl": pricingFixture})
 	got := proposalPricingLine(dir, "scharissis/polako", 1, fixtureNow)
