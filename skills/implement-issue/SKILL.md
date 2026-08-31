@@ -359,6 +359,11 @@ don't post again, and stop.
       naming the file and which measure. It never blocks: over the bound and
       awkward to split is a `## Scope` note, not a park. This is a nudge with
       an audit trail; the run's job is the issue.
+      If this step extracts anything, re-run the test suite, typecheck and
+      lint one more time — the same tools step 1 and d's tail use — before
+      step 3. d's green run was taken before the extraction existed, and a
+      moved function that no longer compiles has otherwise nothing between it
+      and the PR.
    Leave PLAN.md itself uncommitted throughout, same as every other section
    in it — it resumes because the worktree persists across runs of this
    issue, not because it is on a commit.
