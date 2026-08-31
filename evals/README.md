@@ -1,6 +1,6 @@
 # Eval suite for the shipped skills
 
-Six cases that grade what a run *does*, not what a `SKILL.md` says. Each one
+Seven cases that grade what a run *does*, not what a `SKILL.md` says. Each one
 scaffolds a scratch git repo, points a stand-in `gh` at fixtures, runs a real
 skill invocation, and scores the artifacts left behind.
 
@@ -12,17 +12,20 @@ skill invocation, and scores the artifacts left behind.
 | `resume-existing-plan` | implement-issue | an existing worktree and PLAN.md are resumed, not rewritten |
 | `one-turn` | implement-issue | a slow verification step is waited out in the turn, not deferred to one that never comes |
 | `plan-vision` | plan-backlog | a vision document becomes labelled, sized, parented proposals — and the gap the backlog already covers is not re-proposed |
+| `review-health` | review-health | a repo's planted structural problems become labelled, sized proposals, each resting on a measurement or a named location, the missing size gate proposed as its own issue, and the overlap the backlog already covers left alone |
 
 `one-turn` is the slow one, and knowingly so: its issue asks for before and
 after numbers from a benchmark that takes a minute and a quarter each time, and
 waiting those out is the behaviour under test. `seed.sh` puts that benchmark in
 the scratch repo for this case alone, so the other cases stay quick.
 
-`plan-vision` is the odd shape: it is the only case whose subject writes no
-code. It seeds a `VISION.md` and an open backlog that already covers one of the
-document's four gaps, and grades what got created — labels, parenting, body
-sections, sizes — plus the one thing a plan run must never do, which is write
-anything but issues.
+`plan-vision` and `review-health` are the odd shape: their subjects write no
+code at all. `plan-vision` seeds a `VISION.md` and an open backlog that already
+covers one of the document's four gaps; `review-health` seeds structural
+problems into the repo itself — three near-duplicate functions, an oversized
+file, no size gate — and an open issue already covering one of them. Both grade
+what got created — labels, parenting, body sections, sizes — plus the one thing
+these runs must never do, which is write anything but issues.
 
 ## Running it
 

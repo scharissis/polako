@@ -190,6 +190,21 @@ of numbers per run like every other verb, and `-notify` fires a `proposed`
 event when a run leaves a backlog to curate. See
 [docs/reference.md](docs/reference.md#planning-a-backlog-unattended-polako-plan).
 
+A companion skill, `/review-health`, fills the same backlog from a different
+input: instead of a vision document it reads the codebase itself. Point it at
+any repository and it derives what "normal" looks like there — file and
+function sizes, duplicated helpers, abstractions nothing uses — and files the
+outliers as `proposed` issues, the same curation gate and the same sizing
+contract as `/plan-backlog`. Diff-scoped review cannot see accretion; this is
+the whole-repo pass that can. It measures the repo in front of it, so it is not
+polako-specific:
+
+```
+/polako:review-health .
+```
+
+It has no `polako` verb yet — the skill is the manual form, and works first.
+
 ## The rules it follows
 
 - **One issue at a time.** Never two. That is what makes the runs unable to

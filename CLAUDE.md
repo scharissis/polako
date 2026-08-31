@@ -4,8 +4,11 @@ Two halves that ship and version together: the `implement-issue` skill takes a
 single GitHub issue from plan to PR, and the `polako` binary supervises a
 whole backlog of them unattended, never putting two issues in flight at once.
 A second skill, `plan-backlog`, fills the backlog the first one works — it
-turns a vision document into proposals behind the `proposed` gate, and has no
-supervisor verb yet.
+turns a vision document into proposals behind the `proposed` gate. A third,
+`review-health`, fills that same backlog from the codebase itself: pointed at
+any repository it measures that repo's shape and files the outliers as
+`proposed` issues — the whole-repo pass that diff-scoped review cannot do.
+Neither planning skill has a supervisor verb yet.
 
 ## Invariants
 
@@ -73,8 +76,9 @@ in the PR body rather than doing it quietly.
   comes to create issues applies it to everything it creates, and the supervisor
   is what enforces that — the gate must not depend on a model remembering. The
   `-label` gate label is applied by humans alone, and exclusion beats inclusion:
-  an issue carrying both stays out. `plan-backlog` is the skill that applies it
-  today; the supervisor's enforcing label pass arrives with the `plan` verb.
+  an issue carrying both stays out. `plan-backlog` and `review-health` are the
+  skills that apply it today; the supervisor's enforcing label pass arrives with
+  the `plan` verb.
 - **A plan run creates issues and does nothing else.** No commits, no pushes,
   no PRs, no edits to threads that already exist — an edit that can add the
   `proposed` label can strip one, which is self-approval. The whole write

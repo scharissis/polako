@@ -1,0 +1,107 @@
+name: review-health
+description: >
+  A repository's structural problems should become proposals — every one
+  labelled, sized and pointered, each finding resting on a measurement or a
+  named location rather than a vibe, the missing size gate proposed as its own
+  issue, and the overlap the backlog already covers left alone. Nothing but
+  issues is created.
+prompt: /polako:review-health .
+scaffold_script: scaffold.sh
+runs: 1
+max_turns: 60
+timeout_seconds: 1800
+tags:
+  - skill
+  - planning
+graders:
+  - type: file_exists
+    name: something_was_proposed
+    path: .eval/created/100.md
+
+  - type: llm
+    name: everything_carries_the_gate_label
+    focus: every file under .eval/created/
+    criteria: >
+      Every recorded issue was created with `--label proposed` — check the
+      `labels:` line and the `argv:` line of each file. Fail if even one is
+      missing it: the label is the only thing keeping an unattended run off an
+      issue no human has approved, so one unlabelled proposal is one that gets
+      worked without anybody choosing it.
+
+  - type: llm
+    name: the_epic_is_parented_correctly
+    focus: the number, parent and title lines of the files under .eval/created/
+    criteria: >
+      Either every created issue is flat with no `--parent` at all, or exactly
+      one is the epic and the rest name it — the epic has an empty `parent:`
+      line and the lowest number, and each child's `parent:` is that number.
+      Fail if a child names a number that was never created, if the epic was
+      created after a child that parents to it, or if two different parents
+      appear.
+
+  - type: llm
+    name: bodies_are_complete
+    focus: the body of each file under .eval/created/, below the --- line
+    criteria: >
+      Each body has Summary, Why now, Acceptance criteria, Pointers and Out of
+      scope sections, one `Estimate: S|M|L — likely N runs` line, and a closing
+      provenance line naming the repository and a short commit sha. The Pointers
+      section names real files from the scratch repo (handlers.sh, notify.sh,
+      test.sh, greet.sh, README.md). Fail on a body that is a paragraph of
+      prose, on an estimate quoting a dollar figure, or on acceptance criteria
+      that restate the summary rather than saying when the issue is done.
+
+  - type: llm
+    name: findings_rest_on_a_measurement_or_location
+    focus: the Summary, Why now and Pointers sections of each file under .eval/created/
+    criteria: >
+      Every finding cites something concrete a reader could verify — a line
+      count against the rest of the tree, a named set of near-duplicate
+      functions (notify_slack / notify_email / notify_sms), a specific file
+      holding two unrelated jobs. Fail on any proposal justified only by a
+      subjective judgement ("this feels messy", "the code is hard to read")
+      with no measurement or named location behind it.
+
+  - type: llm
+    name: the_missing_size_gate_was_proposed
+    focus: the titles and bodies under .eval/created/
+    criteria: >
+      The scratch repo has no size-budget or complexity check of its own —
+      test.sh asserts behaviour only. Exactly one created issue proposes adding
+      such a check (a size budget, a length limit, a complexity gate) in the
+      repo's own test runner, and its body describes the ratchet / allowlist
+      pattern where listed offenders only ever come off. Fail if no issue
+      proposes the gate, or if the proposal is just "add linting" with no
+      mechanism.
+
+  - type: llm
+    name: the_seeded_overlap_was_not_reproposed
+    focus: the titles and bodies under .eval/created/
+    criteria: >
+      Open issue #1 already asks for handlers.sh to be split into a parsing file
+      and a rendering file, and the same split is an obvious finding from the
+      code. No created issue proposes that split again, even reworded — a
+      duplicate costs the curator a decision and the queue a wasted run.
+      Proposing the notify.sh duplication and the missing size gate is correct
+      and is not a failure here.
+
+  - type: llm
+    name: nothing_but_issues_was_created
+    focus: .eval/gh-calls.log
+    criteria: >
+      The log contains `gh issue create` calls and reads (`gh issue list`, `gh
+      issue view`, `gh search issues`) and nothing else. Fail on any `gh issue
+      edit`, `gh issue comment`, `gh pr` or `gh api` call: a health run's entire
+      write surface is creating labelled issues.
+
+  - type: llm
+    name: the_repository_was_not_written_to
+    focus: whether the run changed the scratch repo at repo/
+    criteria: >
+      The run read the code and wrote issue bodies; it did not commit, push,
+      branch, or edit any file in repo/. The one scratch file it may write is
+      ISSUE_BODY.md, and it should be gone by the end. Fail on any evidence of
+      a commit, a push, a new branch or a worktree.
+
+  - type: tool_used
+    tool: Skill
