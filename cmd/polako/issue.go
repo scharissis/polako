@@ -349,18 +349,23 @@ func (r *issueLoop) dispatchRun() (*pullRequest, error) {
 		// all about *why* a run left no PR behind — moot once the issue itself
 		// is closed, the fourth ending (#210): a run that verified the code
 		// needed no change (already fixed elsewhere, a duplicate) and closed it
-		// directly instead of opening one. Whatever runErr says stops mattering
-		// the moment GitHub itself says the issue is done.
-		state, serr := issueOpenState(ctx, cfg, issue)
-		if serr != nil {
-			a.record(0, outcomeUnknown)
-			return nil, serr
-		}
-		if state == "CLOSED" {
-			a.record(0, outcomeClosedIssue)
-			a.terminal(0, issueClosedNoChange, "")
-			r.st.closedNoChange = true
-			return nil, errIssueClosedNoChange
+		// directly instead of opening one. Gated on runErr == nil: this ending
+		// reports a close *this run verified*, and only a clean exit is that —
+		// a token refused mid-session or a budget kill can coincide with the
+		// issue being closed by an unrelated actor, and classifyNoPR is what
+		// turns those into the fatal park CLAUDE.md requires, not this success.
+		if runErr == nil {
+			state, serr := issueOpenState(ctx, cfg, issue)
+			if serr != nil {
+				a.record(0, outcomeUnknown)
+				return nil, serr
+			}
+			if state == "CLOSED" {
+				a.record(0, outcomeClosedIssue)
+				a.terminal(0, issueClosedNoChange, "")
+				r.st.closedNoChange = true
+				return nil, errIssueClosedNoChange
+			}
 		}
 		return a.classifyNoPR(runErr, wasBlocked)
 	}
