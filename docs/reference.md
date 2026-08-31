@@ -360,6 +360,51 @@ polako plan -vision docs/VISION.md            # the real thing
 | `-run-tag` | *(none)* | Label recorded with the `plan` record, so one batch's plan run can be compared against another in `polako stats`. |
 | `-notify` | *(none)* | Command run when the plan run finishes with proposals to curate — the `proposed` event above. Checked at preflight like `polako work`'s. |
 
+## Auditing repository health unattended: `polako health`
+
+`polako health` runs the [`review-health`](../README.md#planning-a-backlog)
+skill the way `polako plan` runs `plan-backlog`: point it at a repository via
+`-dir` — the flag every verb takes — and it measures that repository's own
+shape (file and function sizes, duplicated helpers, abstractions nothing
+uses) and files what it finds as **proposals**, the same `proposed`-label
+curation gate and sizing contract `plan` uses.
+
+It differs from `plan` only in what it plans from and what it attaches:
+
+- No `-vision` / `-brief` / `-milestone` — review-health reads the
+  repository `-dir` already names rather than a document, and attaches no
+  milestone to what it creates. `-focus` is the only free-text steer.
+- The default `-tools` allowlist is narrower still: review-health's own
+  SKILL.md bounds its entire `gh` surface to three call shapes — the two
+  `issue list` reads and the one `issue create` — so the default grants only
+  those, plus repo reads and the scratch body file.
+
+Otherwise the shape is identical to [`polako
+plan`](#planning-a-backlog-unattended-polako-plan)'s, cap and label pass
+included: dispatchClaude counts `gh issue create` tool calls and kills the
+run at `-max-issues`, and the same enforcing label pass runs after the run
+ends, whatever its status, and normalises everything the run created to
+carry exactly the `proposed` label.
+
+```bash
+polako health -dir ~/code/some-repo -dry-run
+polako health -dir ~/code/some-repo            # the real thing
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `-focus` | *(none)* | Free-text steer for the run, e.g. `-focus "only cmd/polako"`. |
+| `-max-issues` | `10` | Ceiling on the issues a run may create, epics included. |
+| `-model` | `opus` | Passed to `claude --model` — a health run happens periodically and steers every run downstream, so it defaults to the strongest tier, the same reasoning `plan` uses. |
+| `-skill` | `polako:review-health` | Slash command the run invokes. |
+| `-tools` / `-add-tools` | *(the health allowlist)* | `--allowedTools` for the run — see above. |
+| `-stall` | `15m` | Kill a run with no output events for this long. `0` disables it. |
+| `-max-cost` | `0` | Warn once the run has cost this many dollars. Advisory only, the same reasoning `plan`'s carries. |
+| `-dir`, `-claude`, `-permission-mode`, `-dry-run` | | Same meaning as `polako work`'s flags above. |
+| `-metrics` | `~/.polako/metrics` | Directory for the one `kind:"health"` record the run writes, or `off`. |
+| `-run-tag` | *(none)* | Label recorded with the `health` record, so one run can be compared against another in `polako stats`. |
+| `-notify` | *(none)* | Command run when the health run finishes with proposals to curate — the `proposed` event. Checked at preflight like `polako work`'s. |
+
 ## Where the backlog stands: `polako status`
 
 While a shift runs, the only view of it is the terminal it runs in. Everything

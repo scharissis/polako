@@ -203,7 +203,12 @@ polako-specific:
 /polako:review-health .
 ```
 
-It has no `polako` verb yet — the skill is the manual form, and works first.
+This is also a `polako health` verb — the unattended half, run the same way
+`polako plan` runs `/plan-backlog`: capped, with the same supervisor-side pass
+that enforces the `proposed` gate. It records one line of numbers per run like
+every other verb, and `-notify` fires the same `proposed` event `polako plan`
+does when a run leaves a backlog to curate. See
+[docs/reference.md](docs/reference.md#auditing-repository-health-unattended-polako-health).
 
 ## The rules it follows
 

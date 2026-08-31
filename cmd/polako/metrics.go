@@ -578,6 +578,101 @@ func newPlanRecord(cfg config, rep runReport, pf planFacts) planRecord {
 	}
 }
 
+// healthFacts is planFacts' twin for `polako health`: what the run created
+// and what the label pass found and corrected afterwards. No vision or
+// milestone — review-health plans from the repository itself, not a document,
+// and attaches no milestone — and, like planFacts omits -focus's free text,
+// this omits it too: never document content, the standing recorder rule.
+type healthFacts struct {
+	issuesCreated  int
+	epicsCreated   int
+	cap            int
+	labelsEnforced int
+	started        time.Time
+	ended          time.Time
+}
+
+// healthRecord is one `polako health` run, written when it ends whatever its
+// status. planRecord's twin, minus Vision/Milestone.
+type healthRecord struct {
+	V     int    `json:"v"`
+	Kind  string `json:"kind"`
+	TS    string `json:"ts"`
+	Ended string `json:"ended"`
+	Shift string `json:"shift"`
+	Repo  string `json:"repo"`
+
+	Status   string `json:"status"`
+	ExitCode int    `json:"exit_code"`
+
+	Turns    int   `json:"turns"`
+	ToolUses int   `json:"tool_uses"`
+	WallMS   int64 `json:"wall_ms"`
+	APIMS    int64 `json:"api_ms"`
+
+	CostUSD     float64                `json:"cost_usd"`
+	UsageSource string                 `json:"usage_source"`
+	Tokens      tokenCounts            `json:"tokens"`
+	ModelUsage  map[string]modelTokens `json:"model_usage,omitempty"`
+
+	Model          string `json:"model"`
+	Skill          string `json:"skill"`
+	PermissionMode string `json:"permission_mode"`
+	Tag            string `json:"tag"`
+	ToolsHash      string `json:"tools_hash"`
+
+	IssuesCreated  int `json:"issues_created"`
+	EpicsCreated   int `json:"epics_created"`
+	Cap            int `json:"cap"`
+	LabelsEnforced int `json:"labels_enforced"`
+
+	PolakoVersion string `json:"polako_version"`
+	ClaudeVersion string `json:"claude_version"`
+	PluginVersion string `json:"plugin_version"`
+}
+
+// newHealthRecord folds a health run's report together with what `polako
+// health` learned around it, the same way newPlanRecord does for plan.
+func newHealthRecord(cfg config, rep runReport, hf healthFacts) healthRecord {
+	base := newRunRecord(cfg, runContext{started: hf.started, ended: hf.ended}, rep)
+	return healthRecord{
+		V:     recordVersion,
+		Kind:  "health",
+		TS:    base.TS,
+		Ended: base.Ended,
+		Shift: base.Shift,
+		Repo:  base.Repo,
+
+		Status:   base.Status,
+		ExitCode: base.ExitCode,
+
+		Turns:    base.Turns,
+		ToolUses: base.ToolUses,
+		WallMS:   base.WallMS,
+		APIMS:    base.APIMS,
+
+		CostUSD:     base.CostUSD,
+		UsageSource: base.UsageSource,
+		Tokens:      base.Tokens,
+		ModelUsage:  base.ModelUsage,
+
+		Model:          base.Model,
+		Skill:          base.Skill,
+		PermissionMode: base.PermissionMode,
+		Tag:            base.Tag,
+		ToolsHash:      base.ToolsHash,
+
+		IssuesCreated:  hf.issuesCreated,
+		EpicsCreated:   hf.epicsCreated,
+		Cap:            hf.cap,
+		LabelsEnforced: hf.labelsEnforced,
+
+		PolakoVersion: base.PolakoVersion,
+		ClaudeVersion: base.ClaudeVersion,
+		PluginVersion: base.PluginVersion,
+	}
+}
+
 func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
 // seconds renders a flag duration for the record. Whole seconds: these are
@@ -710,6 +805,11 @@ func (r *recorder) recordRun(cfg config, rc runContext, rep runReport) runRecord
 // like the rest — a nil or -metrics-off recorder writes nothing.
 func (r *recorder) recordPlan(cfg config, rep runReport, pf planFacts) {
 	r.append(cfg.repo, newPlanRecord(cfg, rep, pf))
+}
+
+// recordHealth writes the one record a `polako health` run leaves. recordPlan's twin.
+func (r *recorder) recordHealth(cfg config, rep runReport, hf healthFacts) {
+	r.append(cfg.repo, newHealthRecord(cfg, rep, hf))
 }
 
 // recordIssue writes the terminal record. why is the park reason, and this is

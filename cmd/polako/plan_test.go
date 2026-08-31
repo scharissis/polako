@@ -315,9 +315,9 @@ func TestPlanNormaliseForcesExactlyProposed(t *testing.T) {
 	})
 	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
 
-	out := planNormalise(context.Background(), cfg, map[int]bool{1: true}, "Batch 1")
+	out := normaliseProposals(context.Background(), cfg, map[int]bool{1: true}, "Batch 1", "plan")
 	if out.err() != nil {
-		t.Fatalf("planNormalise reported failures on a healthy pass: %v", out.err())
+		t.Fatalf("normaliseProposals reported failures on a healthy pass: %v", out.err())
 	}
 	if out.created != 3 || len(out.labelled) != 3 || out.stripped != 1 || len(out.milestone) != 3 {
 		t.Errorf("outcome = %+v, want created 3 / labelled 3 / stripped 1 / milestone 3", out)
@@ -358,7 +358,7 @@ func TestPlanNormaliseLeavesPreRunIssuesBelowTheHighWaterMark(t *testing.T) {
 	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
 
 	// `before` is missing #5, as a 1000-row cap would drop it.
-	out := planNormalise(context.Background(), cfg, map[int]bool{900: true}, "")
+	out := normaliseProposals(context.Background(), cfg, map[int]bool{900: true}, "", "plan")
 	if out.created != 1 || len(out.labelled) != 1 {
 		t.Errorf("outcome = %+v, want only #901 treated as created", out)
 	}
@@ -385,7 +385,7 @@ func TestPlanNormaliseReportsLabelFailuresLoudly(t *testing.T) {
 	})
 	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
 
-	out := planNormalise(context.Background(), cfg, map[int]bool{}, "")
+	out := normaliseProposals(context.Background(), cfg, map[int]bool{}, "", "plan")
 	if len(out.failures) == 0 || out.err() == nil {
 		t.Fatalf("a failed label add was swallowed: %+v", out)
 	}
@@ -400,7 +400,7 @@ func TestPlanNormaliseReportsLabelFailuresLoudly(t *testing.T) {
 }
 
 // The record needs to know how far the run fell short of the curation gate
-// and how many of its issues are epics. planNormalise counts both: label
+// and how many of its issues are epics. normaliseProposals counts both: label
 // edits (adds plus strips), and created issues that turned out to be
 // containers.
 func TestPlanNormaliseCountsTheEnforcementAndTheEpics(t *testing.T) {
@@ -416,7 +416,7 @@ func TestPlanNormaliseCountsTheEnforcementAndTheEpics(t *testing.T) {
 	})
 	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
 
-	out := planNormalise(context.Background(), cfg, map[int]bool{1: true}, "Batch 1")
+	out := normaliseProposals(context.Background(), cfg, map[int]bool{1: true}, "Batch 1", "plan")
 	if out.err() != nil {
 		t.Fatalf("healthy pass reported failures: %v", out.err())
 	}
@@ -443,7 +443,7 @@ func TestPlanNormaliseFallsBackForAnOldGh(t *testing.T) {
 	})
 	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
 
-	out := planNormalise(context.Background(), cfg, map[int]bool{1: true}, "")
+	out := normaliseProposals(context.Background(), cfg, map[int]bool{1: true}, "", "plan")
 	if out.listErr != nil {
 		t.Fatalf("the old-gh listing was not retried without the field: %v", out.listErr)
 	}
@@ -722,15 +722,15 @@ func TestPlanPricingLineFromHistory(t *testing.T) {
 		"scharissis--polako.jsonl": pricingFixture,
 		"scharissis--other.jsonl":  pricingOtherRepo,
 	})
-	got := planPricingLine(dir, "scharissis/polako", 5, fixtureNow)
+	got := proposalPricingLine(dir, "scharissis/polako", 5, fixtureNow)
 	want := "your last 2 merged issues ran $3.00 and 40m median — 5 proposals ≈ $15 and 3½h of run time, before curation cuts"
 	if got != want {
-		t.Errorf("planPricingLine:\n got %q\nwant %q", got, want)
+		t.Errorf("proposalPricingLine:\n got %q\nwant %q", got, want)
 	}
 }
 
 func TestPlanPricingLineWithNoHistory(t *testing.T) {
-	if got := planPricingLine(t.TempDir(), "scharissis/polako", 5, fixtureNow); got != planNoHistory {
+	if got := proposalPricingLine(t.TempDir(), "scharissis/polako", 5, fixtureNow); got != noPricingHistory {
 		t.Errorf("empty directory: got %q, want the no-history line", got)
 	}
 }
@@ -738,7 +738,7 @@ func TestPlanPricingLineWithNoHistory(t *testing.T) {
 func TestPlanPricingLineWithMetricsOff(t *testing.T) {
 	// -metrics off resolves to an empty dir string: no file is opened to find
 	// out there is nothing to read.
-	if got := planPricingLine("", "scharissis/polako", 5, fixtureNow); got != planNoHistory {
+	if got := proposalPricingLine("", "scharissis/polako", 5, fixtureNow); got != noPricingHistory {
 		t.Errorf("-metrics off: got %q, want the no-history line", got)
 	}
 }
@@ -752,7 +752,7 @@ func TestPlanPricingLineTreatsUnpricedCrashesAsNoHistory(t *testing.T) {
 {"v":1,"kind":"issue","ts":"2026-08-20T10:00:00Z","repo":"scharissis/polako","issue":40,"pr":0,"outcome":"merged"}
 `
 	dir := writePricingFixture(t, map[string]string{"scharissis--polako.jsonl": crashOnly})
-	if got := planPricingLine(dir, "scharissis/polako", 5, fixtureNow); got != planNoHistory {
+	if got := proposalPricingLine(dir, "scharissis/polako", 5, fixtureNow); got != noPricingHistory {
 		t.Errorf("crash-only history: got %q, want the no-history line", got)
 	}
 }
@@ -769,7 +769,7 @@ func TestPlanPricingLineSkipsUnpricedIssuesInAMixedHistory(t *testing.T) {
 {"v":1,"kind":"issue","ts":"2026-08-21T10:00:00Z","repo":"scharissis/polako","issue":61,"pr":0,"outcome":"merged"}
 `
 	dir := writePricingFixture(t, map[string]string{"scharissis--polako.jsonl": mixed})
-	got := planPricingLine(dir, "scharissis/polako", 2, fixtureNow)
+	got := proposalPricingLine(dir, "scharissis/polako", 2, fixtureNow)
 	want := "your last 1 merged issue ran $6.00 and 1h median — 2 proposals ≈ $12 and 2h of run time, before curation cuts"
 	if got != want {
 		t.Errorf("mixed history:\n got %q\nwant %q", got, want)
@@ -777,10 +777,10 @@ func TestPlanPricingLineSkipsUnpricedIssuesInAMixedHistory(t *testing.T) {
 }
 
 func TestPlanPricingLineOnlyPrintsForABatch(t *testing.T) {
-	// Zero proposals never reaches planPricingLine in planRun, but the median
+	// Zero proposals never reaches proposalPricingLine in planRun, but the median
 	// half of the sentence should still read sanely if it ever did.
 	dir := writePricingFixture(t, map[string]string{"scharissis--polako.jsonl": pricingFixture})
-	got := planPricingLine(dir, "scharissis/polako", 1, fixtureNow)
+	got := proposalPricingLine(dir, "scharissis/polako", 1, fixtureNow)
 	want := "your last 2 merged issues ran $3.00 and 40m median — 1 proposal ≈ $3.00 and 40m of run time, before curation cuts"
 	if got != want {
 		t.Errorf("single proposal:\n got %q\nwant %q", got, want)
