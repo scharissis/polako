@@ -13,6 +13,12 @@
 /PLAN.md
 /PR_BODY.md
 
+# Where `implement-issue` puts the worktree it creates per issue — anchored
+# inside the checkout so `git worktree add` needs no `cd`, and dot-prefixed so
+# `go vet ./...`/`go test ./...` skip it. Tracked here rather than left to
+# `.git/info/exclude`, which a fresh clone does not have.
+/.worktrees/
+
 # Go
 *.test
 *.out
