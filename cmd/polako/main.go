@@ -3927,9 +3927,11 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 // operator's glance. Per invocation, not per process: a genuine --resume is a
 // new dispatchClaude call with a new eventLog, so it still announces itself,
 // and the drain_test.go assertions counting "session started" per run stay
-// exact.
+// exact. The stage narrator lives here for the same per-invocation reason —
+// see stages.go.
 type eventLog struct {
 	started bool
+	stages  stageNarrator
 }
 
 // event renders one stream-json event as a single progress line. A run's start
@@ -3937,9 +3939,11 @@ type eventLog struct {
 // dispatchClaude from the whole run's standing (finishLine), because the CLI
 // sends a result event per dequeued prompt and observe sums their per-turn
 // fields into the one run total. The turns between start and finish — every
-// tool call and assistant message — are detail, so a watching terminal sees a
-// run as a pair of lines and the shift log keeps the whole conversation.
+// tool call and assistant message — are detail, save for the stage narrator's
+// one milestone per phase (stages.go): a watching terminal sees a run as its
+// phases, and the shift log keeps the whole conversation.
 func (el *eventLog) event(ev streamEvent) {
+	el.stages.observe(ev)
 	switch ev.Type {
 	case "system":
 		if ev.Subtype == "init" {

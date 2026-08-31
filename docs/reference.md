@@ -196,8 +196,26 @@ The file holds everything the shift narrates, timestamped: every terminal
 line, plus the full `[claude]` event stream — one line per assistant message
 and tool call — and anything the `claude` process printed to its own stderr.
 The terminal, by contrast, shows milestones alone: issue started, run started
-and finished with its cost, PR opened and merged, parks, warnings, the exit
-summary. A healthy run is two lines there and its whole conversation here.
+and finished with its cost, the phase an `implement-issue` run has reached, PR
+opened and merged, parks, warnings, the exit summary. A healthy run narrates
+its phase once as it enters each one —
+
+```
+15:32:18 [claude] session started (model claude-sonnet-5, session b0f87c49-…)
+15:32:19 [claude] reading the issue…
+15:32:35 [claude] preparing the branch…
+15:33:00 [claude] reading the code…
+15:38:54 [claude] writing the plan…
+15:39:04 [claude] implementing…
+15:48:04 [claude] running the review gate…
+16:00:47 [claude] opening the PR…
+16:01:12 [claude] finished (ok) — 223 turns, 28m57s, $14.03
+```
+
+— a run that ends in a question instead says `asking on the issue thread…`
+somewhere in place of the later phases. Each phase is said at most once and
+only when the run reaches it; a resumed run legitimately re-reads the issue and
+says so again. The whole conversation between those lines is here in the file.
 The file is the record to read when a run did something surprising, and
 `tail -f` on it — or `-verbose`, which mirrors the stream to the terminal —
 is how to watch a shift work rather than glance at it.
