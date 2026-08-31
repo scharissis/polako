@@ -70,7 +70,7 @@ var fileDebt = map[string]int{
 var funcDebt = map[string]int{
 	"main.go:processIssue":   543, // one run's phases; pull them into named helpers
 	"main.go:dispatchClaude": 273, // arg assembly, spawn, and stream handling are three functions
-	"main.go:drain":          179, // the per-issue loop body wants to be its own function
+	"drain.go:drain":         179, // the per-issue loop body wants to be its own function
 }
 
 // splitFileHint and splitFuncHint turn a budget failure into an instruction,
