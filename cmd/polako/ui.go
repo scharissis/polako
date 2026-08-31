@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -54,6 +55,12 @@ type ui struct {
 	file     io.Writer // the shift log; nil when -log is off or preflight has not opened it yet
 	verbose  bool      // -verbose: detail lines reach the terminal too
 	warned   bool      // one warning per process: a full disk must not fill the terminal too
+	// lastTerm is when a line last reached the terminal sink — a milestone, or
+	// under -verbose any line at all. The heartbeat (see dispatchClaude)
+	// samples it to tell a quiet terminal from a quiet run; nothing else reads
+	// it, and nothing branches on it. Atomic so that reader never has to take
+	// mu, which emit holds while it writes.
+	lastTerm atomic.Int64 // UnixNano, 0 until the first terminal write
 }
 
 // sinks is the process's one ui. Package-level for the same reason the stdlib
@@ -107,6 +114,17 @@ const (
 	sevSection
 )
 
+// activeUI is the *ui the narration loggers currently point at: the real
+// sinks in production, a test's own ui while wireSinks is in effect. It is
+// the same resolution narrate does to pick its target — the heartbeat uses
+// it to read lastTerm off whichever ui its own narrate calls will write to.
+func activeUI() *ui {
+	if mw, ok := log.Writer().(milestoneWriter); ok {
+		return mw.u
+	}
+	return sinks
+}
+
 // narrate emits one milestone line at the severity its caller declares. It
 // resolves its target the same way the default logger's Write does — through
 // whatever log.SetOutput currently points at — so a test that redirects the
@@ -147,6 +165,10 @@ func (u *ui) emit(p []byte, milestone bool, sev severity) {
 			io.WriteString(u.terminal, s)
 		}
 		io.WriteString(u.terminal, u.style.render(string(p), milestone, sev))
+		// The heartbeat keys off this: any line the terminal was actually
+		// given resets its clock, which is also why a -verbose run — where
+		// every line lands here — never sees a heartbeat.
+		u.lastTerm.Store(now.UnixNano())
 	}
 	if u.file == nil {
 		return
