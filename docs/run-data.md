@@ -38,6 +38,14 @@ of how far the run fell short of self-applying the gate). No issue or PR
 number, because a plan run works neither. `polako stats` has no section for it
 yet and skips it, the same way it skips any record kind newer than itself.
 
+[`polako health`](reference.md#auditing-repository-health-unattended-polako-health)
+writes a `health` kind alongside it — the same run-stream numbers and
+configuration snapshot, and the same `issues_created`, `epics_created`, `cap`
+and `labels_enforced` fields a `plan` record carries. No `vision` or
+`milestone`: review-health plans from the repository itself rather than a
+document, and attaches no milestone. `polako stats` skips it too, for the same
+reason it skips `plan`.
+
 **What is never written:** issue titles, issue bodies, PR titles, comment text,
 review text, diffs, or anything the model said. Reviews are counted, never
 quoted. Records hold numbers, identifiers and labels you chose. That is what
