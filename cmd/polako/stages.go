@@ -116,7 +116,10 @@ func recognizeStage(name string, in map[string]any) stage {
 	case "Read", "Grep", "Glob":
 		return stageStudy
 	case "Write", "Edit":
-		if fp := strOf(in, "file_path"); fp == "PLAN.md" || strings.HasSuffix(fp, "/PLAN.md") {
+		// planFile is the package's one name for this file; match it whichever
+		// separator the run's platform hands the model in an absolute path.
+		if fp := strOf(in, "file_path"); fp == planFile ||
+			strings.HasSuffix(fp, "/"+planFile) || strings.HasSuffix(fp, `\`+planFile) {
 			return stagePlan
 		}
 		return stageImplement
@@ -132,9 +135,11 @@ func recognizeStage(name string, in map[string]any) stage {
 }
 
 // bashStage recognises the shell commands that mark a phase boundary. The git
-// verbs are matched without pinning the branch name: -branch-prefix changes it,
-// and nothing else in the skill's flow runs `git branch`/`checkout`/`switch`
-// before the workspace is prepared, so the verb alone is enough.
+// verbs are matched without pinning the branch name: -branch-prefix changes it.
+// The verb alone is enough because the only earlier git-branch calls in the
+// skill's flow are Phase 1's own `git branch --list` existence checks — already
+// the workspace phase, so narrating it there is right, not premature — and
+// monotonicity covers every `git branch`/`checkout`/`switch` that comes after.
 func bashStage(cmd string) stage {
 	switch {
 	case cmdHasWords(cmd, "gh issue view"):

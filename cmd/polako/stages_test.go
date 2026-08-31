@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -66,7 +67,7 @@ func TestStageNarrationHappyPath(t *testing.T) {
 		"running the review gate…",
 		"opening the PR…",
 	}
-	if !equalStrings(got, want) {
+	if !slices.Equal(got, want) {
 		t.Errorf("stage lines =\n%v\nwant\n%v", got, want)
 	}
 }
@@ -81,7 +82,7 @@ func TestStageNarrationNeverBackfills(t *testing.T) {
 		toolUse("Edit", `{"file_path":"main.go","old_string":"a","new_string":"b"}`),
 	)
 	want := []string{"writing the plan…", "implementing…"}
-	if !equalStrings(got, want) {
+	if !slices.Equal(got, want) {
 		t.Errorf("stage lines = %v, want %v", got, want)
 	}
 }
@@ -95,7 +96,7 @@ func TestStageNarrationEmitsEachPhaseAtMostOnce(t *testing.T) {
 		toolUse("Glob", `{"pattern":"**/*.go"}`),
 	)
 	want := []string{"reading the issue…", "reading the code…"}
-	if !equalStrings(got, want) {
+	if !slices.Equal(got, want) {
 		t.Errorf("stage lines = %v, want %v", got, want)
 	}
 }
@@ -128,7 +129,7 @@ func TestStageNarrationIgnoresThePostReviewWorktree(t *testing.T) {
 		bash(`gh pr create --head issue-139 --title "x" --body-file PR_BODY.md`),
 	)
 	want := []string{"running the review gate…", "opening the PR…"}
-	if !equalStrings(got, want) {
+	if !slices.Equal(got, want) {
 		t.Errorf("stage lines = %v, want %v", got, want)
 	}
 }
@@ -143,14 +144,14 @@ func TestStageNarrationAskingLine(t *testing.T) {
 		toolUse("Read", `{"file_path":"a.go"}`),  // chain still advances
 	)
 	want := []string{"reading the issue…", "asking on the issue thread…", "reading the code…"}
-	if !equalStrings(got, want) {
+	if !slices.Equal(got, want) {
 		t.Errorf("stage lines = %v, want %v", got, want)
 	}
 }
 
 func TestStageNarrationAskingFromFirstPosition(t *testing.T) {
 	got := narratedStages(t, bash("gh issue comment 214 --body-file q.md"))
-	if !equalStrings(got, []string{"asking on the issue thread…"}) {
+	if !slices.Equal(got, []string{"asking on the issue thread…"}) {
 		t.Errorf("stage lines = %v", got)
 	}
 }
@@ -165,7 +166,7 @@ func TestStageNarrationHandlesParallelToolCalls(t *testing.T) {
 			`{"type":"tool_use","name":"Read","input":{"file_path":"main.go"}}]}}`,
 	)
 	want := []string{"reading the issue…", "reading the code…"}
-	if !equalStrings(got, want) {
+	if !slices.Equal(got, want) {
 		t.Errorf("stage lines = %v, want %v", got, want)
 	}
 }
@@ -195,16 +196,4 @@ func TestStageNarrationIsAMilestoneOnBothSinks(t *testing.T) {
 			t.Errorf("%s missing the stage milestone\ngot:\n%s", sink.name, sink.got)
 		}
 	}
-}
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
