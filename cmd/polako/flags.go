@@ -87,11 +87,12 @@ type config struct {
 	// operator sets one.
 	maxSessionUsage int
 	maxWeekUsage    int
-	// maxIssues is `polako plan`'s ceiling on the issues one run may create,
-	// epics included — plan-only, the way maxCost happens to be shared. Zero
-	// (the drain, always) disables the cap; dispatchClaude counts `gh issue
-	// create` tool calls and kills the run the way the stall watchdog does when
-	// the count reaches it. See errPlanCap and runReport.issueCreates.
+	// maxIssues is `polako plan`'s and `polako health`'s ceiling on the issues
+	// one run may create, epics included — shared by both the way maxCost
+	// happens to be. Zero (the drain, always) disables the cap; dispatchClaude
+	// counts `gh issue create` tool calls and kills the run the way the stall
+	// watchdog does when the count reaches it. See errIssueCap and
+	// runReport.issueCreates.
 	maxIssues int
 	skip      map[int]bool
 	once      bool
@@ -223,6 +224,7 @@ func verbUsage(w io.Writer) {
 			"Usage: polako <verb> [flags]\n\n"+
 			"  work    work the backlog: run the skill per issue, wait for each merge, unattended\n"+
 			"  plan    propose a backlog from a vision document, behind the `proposed` label, unattended\n"+
+			"  health  propose a backlog from the repository's own shape, behind the `proposed` label, unattended\n"+
 			"  status  print where the backlog stands, from GitHub (read-only)\n"+
 			"  stats   report on the run data already recorded (local, read-only)\n"+
 			"  tidy    reclaim the worktrees and branches of finished issues (dry-run by default)\n\n"+

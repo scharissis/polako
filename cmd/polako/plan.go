@@ -7,7 +7,8 @@ package main
 //
 // The run is one claude invocation through execClaude — the same entry `work`
 // uses — bracketed by two enforcement mechanisms that make the curation gate
-// structural rather than a thing the model has to remember:
+// structural rather than a thing the model has to remember, both shared with
+// `polako health` and defined in labelpass.go:
 //
 //   - the cap. dispatchClaude counts `gh issue create` tool calls and kills the
 //     run at -max-issues, the way it kills a stalled one.
@@ -34,7 +35,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -47,15 +47,6 @@ const planSkillDir = "plan-backlog"
 // defaultPlanSkill is the -skill default: the plugin-namespaced slash command,
 // the same shape defaultSkill has for the drain.
 const defaultPlanSkill = "polako:" + planSkillDir
-
-// The `proposed` label is declared at plan preflight and nowhere else — the
-// drain only ever excludes it. GitHub refuses to apply a label the repository
-// never defined, and the headless plan run holds no grant that could create
-// one, so the supervisor mints it up front exactly as it mints awaiting-answer.
-const (
-	planProposedColor = "1D76DB"
-	planProposedDesc  = "proposed by polako plan — a human removes this label to queue it"
-)
 
 // planTools is the --allowedTools for an unattended plan run: a fraction of the
 // drain's defaultTools. A plan run reads a vision document and an entire open
@@ -164,10 +155,11 @@ func runPlan(ctx context.Context, args []string, out io.Writer) error {
 // planRun is a real `polako plan`: snapshot the open backlog, spawn the skill
 // through execClaude, then — whatever the run's own outcome — normalise every
 // issue this account created since. The snapshot has to be taken here rather
-// than inside planNormalise, before the run rather than after, so an issue a
-// person files by hand mid-run is told apart from one the skill created.
+// than inside normaliseProposals, before the run rather than after, so an
+// issue a person files by hand mid-run is told apart from one the skill
+// created.
 func planRun(ctx context.Context, cfg config, opt planOptions, milestone string, out io.Writer) error {
-	before, err := planOpenIssues(ctx, cfg)
+	before, err := openIssuesBefore(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("could not read the backlog before the run (is gh authenticated for %s?): %w",
 			cfg.repo, err)
@@ -194,8 +186,8 @@ func planRun(ctx context.Context, cfg config, opt planOptions, milestone string,
 	if ctx.Err() != nil {
 		narrate(sevWarning, "the run was interrupted — still normalising anything it created before exiting")
 	}
-	pass := planNormalise(passCtx, cfg, before, milestone)
-	pass.report(opt, rep)
+	pass := normaliseProposals(passCtx, cfg, before, milestone, "plan")
+	pass.report("plan", opt.maxCost, rep)
 
 	// The pricing line: what the operator's own history says this batch will
 	// cost to implement. After the label pass, because it prices the proposals
@@ -242,7 +234,7 @@ func planRun(ctx context.Context, cfg config, opt planOptions, milestone string,
 	switch {
 	case runErr == nil:
 		return nil
-	case errors.Is(runErr, errPlanCap):
+	case errors.Is(runErr, errIssueCap):
 		// Not an error to the operator: the cap is a setting they chose, the
 		// run did what it was told, and the pass above already normalised
 		// everything. Reported, not raised.
@@ -294,216 +286,6 @@ func proposedNotifyReason(created, epics int) string {
 		s += fmt.Sprintf(" (%s)", plural(epics, "epic"))
 	}
 	return fmt.Sprintf("%s %s curation — remove the %s label to queue them", s, verb, proposedLabel)
-}
-
-// planOpenIssues is the set of open issue numbers before the run — the baseline
-// the label pass diffs against, so an issue a person files by hand while the
-// run is going is told apart from one the skill created. Open issues only: a
-// proposal is created open, and a closed one is nothing an unattended drain
-// would ever pick up.
-func planOpenIssues(ctx context.Context, cfg config) (map[int]bool, error) {
-	raw, err := gh(ctx, cfg, "issue", "list", "--state", "open", "--limit", "1000", "--json", "number")
-	if err != nil {
-		return nil, err
-	}
-	var rows []struct {
-		Number int `json:"number"`
-	}
-	if err := json.Unmarshal(raw, &rows); err != nil {
-		return nil, fmt.Errorf("unreadable issue list: %w", err)
-	}
-	seen := make(map[int]bool, len(rows))
-	for _, r := range rows {
-		seen[r.Number] = true
-	}
-	return seen, nil
-}
-
-// planPassOutcome is what the enforcing label pass did — reported once, and
-// turned into planRun's exit status. failures is the load-bearing field: an
-// action that did not take means a proposal may be sitting unguarded, so it is
-// collected here rather than swallowed and it makes `polako plan` exit nonzero.
-type planPassOutcome struct {
-	created   int      // new issues this account was found to have filed
-	epics     int      // of those, the ones that are containers (sub-issues > 0)
-	labelled  []int    // issues confirmed to carry exactly proposedLabel afterwards
-	added     int      // missing proposedLabel labels the pass applied
-	stripped  int      // stray labels removed, across all of them
-	milestone []int    // issues the batch milestone was newly attached to
-	failures  []string // one line per action that did not take — loud
-	listErr   error    // the after-listing itself failed: nothing could be checked
-}
-
-// labelsEnforced is how many label edits the pass had to make — adds plus
-// strips — which is the measure of how far the run fell short of self-applying
-// the curation gate, and the number the `plan` record carries for it.
-func (o planPassOutcome) labelsEnforced() int { return o.added + o.stripped }
-
-// planNormalise is the enforcing label pass. It lists the issues this gh
-// account has open, keeps the ones absent from `before` and numbered above
-// everything that was there — the run's own output — and forces each to carry
-// *exactly* proposedLabel, attaching the batch milestone to any that has none.
-// This is what keeps the `-label` queue-gate humans-only: `Bash(gh issue
-// create:*)` is a prefix and no prefix can say "create, but not with that
-// flag", so the create stays wide and the cleanup happens here.
-//
-// The `> maxBefore` guard is what makes the truncation of either listing safe:
-// GitHub issue numbers only ever climb, so anything the run filed outnumbers
-// everything open before it, and an old issue this account filed that fell off
-// the end of the `before` page is never mistaken for the run's own.
-func planNormalise(ctx context.Context, cfg config, before map[int]bool, milestone string) planPassOutcome {
-	var out planPassOutcome
-	maxBefore := 0
-	for n := range before {
-		if n > maxBefore {
-			maxBefore = n
-		}
-	}
-	// subIssuesSummary rides along so the record can say how many of the run's
-	// own issues are epics. A gh too old for the field rejects the whole call
-	// before it asks GitHub anything, so fall back to the listing without it —
-	// epics_created then reads 0, the same degradation the drain's container
-	// skip takes, and a flat run has no epics to miss anyway.
-	fields := "number,labels,milestone,subIssuesSummary"
-	raw, err := gh(ctx, cfg, "issue", "list", "--author", "@me", "--state", "open",
-		"--limit", "1000", "--json", fields)
-	if unknownJSONField(err) {
-		fields = "number,labels,milestone"
-		raw, err = gh(ctx, cfg, "issue", "list", "--author", "@me", "--state", "open",
-			"--limit", "1000", "--json", fields)
-	}
-	if err != nil {
-		out.listErr = err
-		return out
-	}
-	var rows []struct {
-		Number int `json:"number"`
-		Labels []struct {
-			Name string `json:"name"`
-		} `json:"labels"`
-		Milestone *struct {
-			Title string `json:"title"`
-		} `json:"milestone"`
-		SubIssues struct {
-			Total int `json:"total"`
-		} `json:"subIssuesSummary"`
-	}
-	if err := json.Unmarshal(raw, &rows); err != nil {
-		out.listErr = fmt.Errorf("unreadable issue list: %w", err)
-		return out
-	}
-
-	for _, r := range rows {
-		if before[r.Number] || r.Number <= maxBefore {
-			continue // there before the run — not ours to touch
-		}
-		out.created++
-		if r.SubIssues.Total > 0 {
-			out.epics++
-		}
-		n := strconv.Itoa(r.Number)
-		clean := true
-
-		hasProposed := false
-		for _, l := range r.Labels {
-			if l.Name == proposedLabel {
-				hasProposed = true
-				continue
-			}
-			if _, err := gh(ctx, cfg, "issue", "edit", n, "--remove-label", l.Name); err != nil {
-				out.failures = append(out.failures,
-					fmt.Sprintf("could not strip %q from #%d: %v", l.Name, r.Number, err))
-				clean = false
-				continue
-			}
-			log.Printf("plan: stripped %q from #%d — a proposal carries only %s", l.Name, r.Number, proposedLabel)
-			out.stripped++
-		}
-		if !hasProposed {
-			if _, err := gh(ctx, cfg, "issue", "edit", n, "--add-label", proposedLabel); err != nil {
-				out.failures = append(out.failures,
-					fmt.Sprintf("could not add %s to #%d: %v", proposedLabel, r.Number, err))
-				clean = false
-			} else {
-				log.Printf("plan: labelled #%d %s", r.Number, proposedLabel)
-				out.added++
-			}
-		}
-		if clean {
-			out.labelled = append(out.labelled, r.Number)
-		}
-
-		if milestone != "" && (r.Milestone == nil || strings.TrimSpace(r.Milestone.Title) == "") {
-			if _, err := gh(ctx, cfg, "issue", "edit", n, "--milestone", milestone); err != nil {
-				out.failures = append(out.failures,
-					fmt.Sprintf("could not attach the %q milestone to #%d: %v", milestone, r.Number, err))
-			} else {
-				log.Printf("plan: attached the %q milestone to #%d", milestone, r.Number)
-				out.milestone = append(out.milestone, r.Number)
-			}
-		}
-	}
-	return out
-}
-
-// report says what the pass did, at the severity the outcome earns: an error
-// when it could not even list what to check, a warning when the run was capped
-// or overspent, success otherwise. The -max-cost check lives here because a
-// one-shot run has no next run for it to bound — unlike `work`, where the same
-// flag stops the drain dispatching another — so all it can do is say so.
-func (o planPassOutcome) report(opt planOptions, rep runReport) {
-	if o.listErr != nil {
-		narrate(sevError, "plan: could not list what the run created to normalise it (%v) — "+
-			"check the backlog for issues missing the %s label", o.listErr, proposedLabel)
-		return
-	}
-	if opt.maxCost > 0 && rep.costUSD >= opt.maxCost {
-		narrate(sevWarning, "plan: the run cost $%.2f, at or past the -max-cost of $%.2f", rep.costUSD, opt.maxCost)
-	}
-	sev := sevSuccess
-	if rep.capped || len(o.failures) > 0 {
-		sev = sevWarning
-	}
-	narrate(sev, "plan: %s", o.summary(rep))
-}
-
-func (o planPassOutcome) summary(rep runReport) string {
-	if o.created == 0 {
-		if rep.capped {
-			return "the run was capped before it created anything"
-		}
-		return "the run created no issues"
-	}
-	s := fmt.Sprintf("%s created, %d normalised to %s",
-		plural(o.created, "issue"), len(o.labelled), proposedLabel)
-	if o.stripped > 0 {
-		s += fmt.Sprintf(" (%s stripped)", plural(o.stripped, "stray label"))
-	}
-	if len(o.milestone) > 0 {
-		s += fmt.Sprintf(", milestone attached to %d", len(o.milestone))
-	}
-	if rep.capped {
-		s += " — stopped at the -max-issues cap"
-	}
-	if len(o.failures) > 0 {
-		s += fmt.Sprintf(" — %s FAILED, see above", plural(len(o.failures), "action"))
-	}
-	return s
-}
-
-// err is the pass's verdict as planRun's exit status: nil unless something did
-// not take, loud otherwise. A failed pass outranks a failed run in planRun,
-// because an unguarded proposal is the worse outcome to leave unsaid.
-func (o planPassOutcome) err() error {
-	if o.listErr != nil {
-		return fmt.Errorf("the label pass could not run (%w) — issues the run created may be unlabelled; "+
-			"list the backlog and add the %s label to any proposal missing it", o.listErr, proposedLabel)
-	}
-	if len(o.failures) == 0 {
-		return nil
-	}
-	return fmt.Errorf("the label pass left %s unapplied, so a proposal may be unguarded — "+
-		"fix by hand:\n  %s", plural(len(o.failures), "issue action"), strings.Join(o.failures, "\n  "))
 }
 
 // planConfig validates the vision/brief pair and builds the config the gh
@@ -619,7 +401,7 @@ func planPreflight(ctx context.Context, cfg *config, opt *planOptions) (mileston
 
 		// Best-effort like the drain's awaiting-answer declaration: an
 		// "already exists" is the healthy repeat case, not a failure.
-		_ = ensureLabel(ctx, *cfg, proposedLabel, planProposedColor, planProposedDesc)
+		_ = ensureLabel(ctx, *cfg, proposedLabel, proposedLabelColor, proposedLabelDesc)
 		if milestone != "" {
 			if err := ensureMilestone(ctx, *cfg, milestone); err != nil {
 				return "", false, fmt.Errorf("could not ensure the %q milestone: %w — "+

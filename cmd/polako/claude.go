@@ -40,11 +40,12 @@ var errAuth = errors.New("claude could not authenticate")
 // its issue instead of being retried.
 var errBudget = errors.New("the issue's budget is spent")
 
-// errPlanCap marks a `polako plan` run dispatchClaude killed for reaching
-// -max-issues. Not a crash: whatever the run created by then is real and stays,
-// and runPlan runs the label pass over it exactly as it would after a clean
-// exit — the cap bounds spend, it does not undo work.
-var errPlanCap = errors.New("the plan run hit its -max-issues ceiling")
+// errIssueCap marks a `polako plan` or `polako health` run dispatchClaude
+// killed for reaching -max-issues. Not a crash: whatever the run created by
+// then is real and stays, and the caller runs the label pass over it exactly
+// as it would after a clean exit — the cap bounds spend, it does not undo
+// work.
+var errIssueCap = errors.New("the run hit its -max-issues ceiling")
 
 // errLimit marks a run the CLI refused over the account's usage limit. Neither
 // a dead end nor a crash: unlike a refused token this wall falls on its own —
@@ -440,11 +441,10 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 			log.Printf("%s — stopping the run", missing)
 			_ = cmd.Process.Kill()
 		}
-		// `polako plan`'s issue cap. Killed here, in the reader, the same way a
-		// stall or a missing skill is: the run created everything it was allowed
-		// to, and paying for whatever it does next buys nothing the label pass
-		// would keep. The pass runs regardless — see runPlan — so what is on
-		// GitHub at the kill is normalised, not stranded.
+		// The issue cap, plan's and health's alike. Killed here, in the reader,
+		// the same way a stall or a missing skill is: the run created everything
+		// it was allowed to, and paying for whatever it does next buys nothing
+		// the label pass (runPlan, runHealth) would keep. Normalised, not stranded.
 		if cfg.maxIssues > 0 && rep.issueCreates >= cfg.maxIssues && !rep.capped {
 			rep.capped = true
 			narrate(sevWarning, "the run has filed %s, the whole of -max-issues — killing it; "+
@@ -509,7 +509,7 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	// also ends the scan, and the caller has to see it as the deliberate stop it
 	// is rather than the stall it would otherwise be read as.
 	if rep.capped {
-		return rep, fmt.Errorf("%w of %d", errPlanCap, cfg.maxIssues)
+		return rep, fmt.Errorf("%w of %d", errIssueCap, cfg.maxIssues)
 	}
 	if rep.stalled {
 		return rep, fmt.Errorf("run stalled: no output events for %s", cfg.stall)

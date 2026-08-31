@@ -315,7 +315,7 @@ func TestPlanNormaliseForcesExactlyProposed(t *testing.T) {
 	})
 	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
 
-	out := planNormalise(context.Background(), cfg, map[int]bool{1: true}, "Batch 1")
+	out := normaliseProposals(context.Background(), cfg, map[int]bool{1: true}, "Batch 1", "plan")
 	if out.err() != nil {
 		t.Fatalf("planNormalise reported failures on a healthy pass: %v", out.err())
 	}
@@ -358,7 +358,7 @@ func TestPlanNormaliseLeavesPreRunIssuesBelowTheHighWaterMark(t *testing.T) {
 	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
 
 	// `before` is missing #5, as a 1000-row cap would drop it.
-	out := planNormalise(context.Background(), cfg, map[int]bool{900: true}, "")
+	out := normaliseProposals(context.Background(), cfg, map[int]bool{900: true}, "", "plan")
 	if out.created != 1 || len(out.labelled) != 1 {
 		t.Errorf("outcome = %+v, want only #901 treated as created", out)
 	}
@@ -385,7 +385,7 @@ func TestPlanNormaliseReportsLabelFailuresLoudly(t *testing.T) {
 	})
 	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
 
-	out := planNormalise(context.Background(), cfg, map[int]bool{}, "")
+	out := normaliseProposals(context.Background(), cfg, map[int]bool{}, "", "plan")
 	if len(out.failures) == 0 || out.err() == nil {
 		t.Fatalf("a failed label add was swallowed: %+v", out)
 	}
@@ -416,7 +416,7 @@ func TestPlanNormaliseCountsTheEnforcementAndTheEpics(t *testing.T) {
 	})
 	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
 
-	out := planNormalise(context.Background(), cfg, map[int]bool{1: true}, "Batch 1")
+	out := normaliseProposals(context.Background(), cfg, map[int]bool{1: true}, "Batch 1", "plan")
 	if out.err() != nil {
 		t.Fatalf("healthy pass reported failures: %v", out.err())
 	}
@@ -443,7 +443,7 @@ func TestPlanNormaliseFallsBackForAnOldGh(t *testing.T) {
 	})
 	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
 
-	out := planNormalise(context.Background(), cfg, map[int]bool{1: true}, "")
+	out := normaliseProposals(context.Background(), cfg, map[int]bool{1: true}, "", "plan")
 	if out.listErr != nil {
 		t.Fatalf("the old-gh listing was not retried without the field: %v", out.listErr)
 	}
