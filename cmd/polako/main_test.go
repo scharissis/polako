@@ -1105,6 +1105,10 @@ func TestToolDetailPrefersTheMostUsefulField(t *testing.T) {
 		{`{"content":"nothing addressable"}`, ""},
 		{`not json`, ""},
 		{`{"command":""}`, ""},
+		{`{"skill":"code-review","args":"high --fix issue-77"}`, ": code-review high --fix issue-77"},
+		{`{"skill":"code-review"}`, ": code-review"},
+		{`{"skill":"code-review","args":""}`, ": code-review"},
+		{`{"skill":42}`, ""},
 	}
 	for _, c := range cases {
 		if got := toolDetail([]byte(c.in)); got != c.want {
