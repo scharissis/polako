@@ -13,6 +13,19 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.16.0]
+
+### What's Changed
+* fix: worktree cleanup resolves the path instead of guessing it by @scharissis in https://github.com/scharissis/polako/pull/243 (closes #159)
+* docs: investigate suspected token overspending, draft the tickets by @scharissis in https://github.com/scharissis/polako/pull/246 (closes #239)
+* feat: wait out the usage gate instead of stopping the shift by @scharissis in https://github.com/scharissis/polako/pull/247 (closes #245)
+* fix: name the skill and args in a Skill tool-detail line by @scharissis in https://github.com/scharissis/polako/pull/248 (closes #213)
+* feat: stage narration — a run says which phase it is in by @scharissis in https://github.com/scharissis/polako/pull/249 (closes #214)
+* feat: the heartbeat — a quiet "still working" line so a long phase is not silence by @scharissis in https://github.com/scharissis/polako/pull/250 (closes #215)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.15.0...v0.16.0
+
 ## [0.15.0]
 
 ### What's Changed
