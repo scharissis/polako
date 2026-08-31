@@ -13,6 +13,23 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.17.0]
+
+### What's Changed
+* feat: scripts/health.sh — measure the shape of the codebase before gating it by @scharissis in https://github.com/scharissis/polako/pull/253 (closes #148)
+* test: size budgets that fail CI, with an allowlist that only shrinks by @scharissis in https://github.com/scharissis/polako/pull/259 (closes #149)
+* refactor: split main.go along the seams the test files already name by @scharissis in https://github.com/scharissis/polako/pull/260 (closes #150)
+* refactor: extract processIssue's phases into named helpers by @scharissis in https://github.com/scharissis/polako/pull/261 (closes #151)
+* docs: comments have an expiry — the convention, and a pass over the densest regions by @scharissis in https://github.com/scharissis/polako/pull/262 (closes #152)
+* feat: review-health — a skill that audits any repo and files proposed issues by @scharissis in https://github.com/scharissis/polako/pull/263 (closes #153)
+* feat: accretion check at the implement-issue review gate by @scharissis in https://github.com/scharissis/polako/pull/264 (closes #154)
+* feat: the drain reclaims as it goes — the sweep at shift start and after each merge by @scharissis in https://github.com/scharissis/polako/pull/265 (closes #162)
+* feat: worktrees live in the checkout, at .worktrees/issue-N by @scharissis in https://github.com/scharissis/polako/pull/266 (closes #163)
+* feat: polako health — the periodic remediation pass, on any repo it works by @scharissis in https://github.com/scharissis/polako/pull/267 (closes #164)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.16.0...v0.17.0
+
 ## [0.16.0]
 
 ### What's Changed
