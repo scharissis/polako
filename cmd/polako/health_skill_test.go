@@ -2,11 +2,10 @@ package main
 
 // Contract tests for the review-health skill, the whole-repo twin of
 // plan-backlog: pointed at any repository it measures that repo's shape and
-// files what it finds as `proposed` issues. It has no supervisor verb — the
-// skill is the manual form and ships first, exactly as plan-backlog did before
-// `polako plan` — so its directory constant lives here, beside the tests that
-// are its only enforcement today, the way planSkillDir lived in repo_test.go
-// before plan.go had a verb to hold it.
+// files what it finds as `proposed` issues. `polako health` (health.go) is
+// its supervisor verb, the way `polako plan` is plan-backlog's — so
+// healthSkillDir now lives in health.go, beside the verb that runs it, the
+// way planSkillDir lives in plan.go.
 //
 // Every assertion below mirrors one plan-backlog already carries in
 // repo_test.go, because the two skills share a write surface, a curation gate
@@ -18,8 +17,6 @@ import (
 	"strings"
 	"testing"
 )
-
-const healthSkillDir = "review-health"
 
 func healthSkill(t *testing.T) string {
 	t.Helper()

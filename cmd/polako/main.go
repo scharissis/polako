@@ -138,6 +138,14 @@ func main() {
 		defer stop()
 		runReport("plan", func() error { return runPlan(ctx, os.Args[2:], os.Stdout) })
 		return
+	case "health":
+		// Its own context for the same reason plan's is: preflight makes a
+		// handful of gh calls, and Ctrl+C partway through should end them
+		// rather than be ignored.
+		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
+		defer stop()
+		runReport("health", func() error { return runHealth(ctx, os.Args[2:], os.Stdout) })
+		return
 	case "stats":
 		rpt := newReport(isTerminal(os.Stdout))
 		runReport("stats", func() error { return runStats(os.Args[2:], os.Stdout, os.Stderr, time.Now(), rpt) })
