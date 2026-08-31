@@ -89,10 +89,10 @@ graders:
     name: nothing_but_issues_was_created
     focus: .eval/gh-calls.log
     criteria: >
-      The log contains `gh issue create` calls and reads (`gh issue list`)
-      and nothing else. Fail on any `gh issue edit`, `gh issue comment`, `gh
-      pr` or `gh api` call: a health run's entire write surface is creating
-      labelled issues.
+      The log contains `gh issue create` calls and reads (`gh issue list`, `gh
+      issue view`, `gh search issues`) and nothing else. Fail on any `gh issue
+      edit`, `gh issue comment`, `gh pr` or `gh api` call: a health run's entire
+      write surface is creating labelled issues.
 
   - type: llm
     name: the_repository_was_not_written_to
