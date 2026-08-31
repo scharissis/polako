@@ -364,6 +364,13 @@ don't post again, and stop.
       step 3. d's green run was taken before the extraction existed, and a
       moved function that no longer compiles has otherwise nothing between it
       and the PR.
+      An extraction commit here lands after c's "Reviewed through" sha, so c
+      never sees it and a resumed run skips c — that is deliberate, not a gap
+      to close with a re-review loop this step's no-loop bound forbids. It
+      holds only because the extraction is a verbatim lift: a contiguous block
+      moved unchanged, call sites untouched beyond a new import, verifiable at
+      a glance in the PR diff by the human who merges. Anything larger than
+      that clean lift is a `## Scope` note, not an extraction.
    Leave PLAN.md itself uncommitted throughout, same as every other section
    in it — it resumes because the worktree persists across runs of this
    issue, not because it is on a commit.
