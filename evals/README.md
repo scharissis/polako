@@ -180,8 +180,8 @@ run in the same workspace, or a run pointed at a real project, stops with a
 sentence about it rather than half-building on top.
 
 Graders then read fixed paths (`.eval/pr-body.md`, `.eval/labels.log`,
-`.eval/comments/0.md`, `.eval/created/*.md`, `repo-issue-1/PLAN.md`) rather than
-having to work out where the run put its worktree.
+`.eval/comments/0.md`, `.eval/created/*.md`, `repo/.worktrees/issue-1/PLAN.md`)
+rather than having to work out where the run put its worktree.
 
 ## What a hand-run settled, and what only the CLI can
 

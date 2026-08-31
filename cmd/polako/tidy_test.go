@@ -106,6 +106,39 @@ func TestReclaimRemovesAMergedAndCleanIssue(t *testing.T) {
 	}
 }
 
+// reclaim matches a branch's worktree by asking git which branch it holds,
+// never by directory name or location (see worktreeFor in sync.go) — so a
+// worktree from the old sibling-folder convention and one at the current
+// `.worktrees/issue-N` layout the skill creates today are reclaimed
+// identically, in the same sweep.
+func TestReclaimWorksAtOldAndNewWorktreeLocations(t *testing.T) {
+	_, checkout := upstream(t)
+	mergeIssueBranch(t, checkout, "issue-2", "feature-2")
+	mergeIssueBranch(t, checkout, "issue-3", "feature-3")
+
+	oldStyle := filepath.Join(t.TempDir(), "repo-issue-2")
+	gitAt(t, checkout, "worktree", "add", oldStyle, "issue-2")
+	newStyle := filepath.Join(checkout, ".worktrees", "issue-3")
+	gitAt(t, checkout, "worktree", "add", newStyle, "issue-3")
+
+	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"2": {Open: false}, "3": {Open: false}}})
+	cfg := tidyCfg(t, checkout)
+
+	results, err := reclaim(context.Background(), cfg, true, 0)
+	if err != nil {
+		t.Fatalf("reclaim: %v", err)
+	}
+	for issue, path := range map[int]string{2: oldStyle, 3: newStyle} {
+		r := findTidyResult(t, results, issue)
+		if !r.reclaimed {
+			t.Errorf("issue #%d (worktree at %s) was not reclaimed: %+v", issue, path, r)
+		}
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("worktree %s still exists", path)
+		}
+	}
+}
+
 // The skill leaves an untracked PLAN.md in every worktree it creates and never
 // cleans it up, so "clean" for reclaim's purposes means "clean but for that".
 // A plain `git worktree remove` would refuse the untracked file; the sweep

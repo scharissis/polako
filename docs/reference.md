@@ -578,11 +578,12 @@ every other verb's do. `-apply` deliberately does not: a `POLAKO_APPLY=1`
 left in a shell profile would turn every future preview into a live deletion
 run, which is exactly the mistake defaulting to dry-run exists to prevent.
 
-A `.claude/worktrees/<slug>-<hash>` entry is matched the same way any other
-worktree is — by the branch it has checked out, not by its directory name —
-so one of those is reclaimed exactly when it carries a finished `issue-N`
-branch, and left alone otherwise, including a detached one, which carries no
-branch at all.
+`implement-issue` creates its worktree at `<main-checkout>/.worktrees/issue-N`.
+That is matched the same way any other worktree is — by the branch it has
+checked out, not by its directory name — so an older sibling-folder worktree,
+or a `.claude/worktrees/<slug>-<hash>` one from a desktop session, is
+reclaimed exactly when it carries a finished `issue-N` branch, and left alone
+otherwise, including a detached one, which carries no branch at all.
 
 A repository with nothing to reclaim prints one line and exits 0.
 

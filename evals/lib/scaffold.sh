@@ -95,7 +95,7 @@ cat > "$workspace/CLAUDE.md" <<EOF
 
 The project to work on is the git checkout at \`$repo\`. Change into it before
 doing anything else: the directory you start in is not a repository and is not
-the project. Worktrees this run creates belong beside it, in \`$workspace\`.
+the project. Worktrees this run creates belong inside it, at \`$repo/.worktrees/\`.
 EOF
 
 # --- per-case extras -------------------------------------------------------

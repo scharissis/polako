@@ -35,7 +35,8 @@ func porcelainPath(line string) string {
 // --porcelain` output. Asked rather than assumed, by every caller: a park that
 // names the wrong directory sends a person to an empty one, cleanup that guesses
 // wrong discards its own removal silently, and a run driven from the desktop app
-// puts its worktree somewhere the sibling convention would never look.
+// puts its worktree somewhere no fixed convention — old sibling folder or
+// current `.worktrees/issue-N` — would look.
 func worktreeFor(list, branch string) string {
 	var path string
 	for _, line := range strings.Split(list, "\n") {

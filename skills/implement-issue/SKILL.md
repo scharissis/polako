@@ -162,12 +162,13 @@ branch, which would discard them. Then, by case:
   `<worktree>` for every later step — `git -C <worktree> ...`, `go -C
   <worktree> ...` and the like, and absolute paths for reading and writing
   files in it (PLAN.md, PR_BODY.md). Never `cd` there.
-- Else: take the repo name from the main checkout (first line of
-  `git worktree list`) and `git worktree add` a sibling folder
-  `<repo>-issue-$issue` for branch issue-$issue — taking an existing branch
-  as-is (`git worktree add <path> issue-$issue`), and only using `-b` off the
-  remote default branch when there is no such branch anywhere. That path is
-  `<worktree>`, carried forward the same way.
+- Else: anchor against the main checkout (first line of `git worktree list`)
+  and `git worktree add` `<main-checkout>/.worktrees/issue-$issue` — taking an
+  existing branch as-is (`git worktree add <path> issue-$issue`), and only
+  using `-b` off the remote default branch when there is no such branch
+  anywhere. Dot-prefixed so `go vet ./...` and `go test ./...` run from the
+  main checkout never descend into it. That path is `<worktree>`, carried
+  forward the same way.
 
 If a prerequisite this issue depends on — a branch, an earlier PR, a file the
 issue assumes exists — turns out not to have landed, that's a finding for the

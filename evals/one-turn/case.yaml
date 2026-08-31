@@ -22,7 +22,7 @@ graders:
 
   - type: file_exists
     name: plan_written
-    path: repo-issue-1/PLAN.md
+    path: repo/.worktrees/issue-1/PLAN.md
 
   - type: llm
     name: the_run_never_deferred_to_a_later_turn
