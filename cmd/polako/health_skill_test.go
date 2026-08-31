@@ -195,3 +195,51 @@ func TestHealthSkillMeasuresTheRepoItself(t *testing.T) {
 		}
 	}
 }
+
+// Mirrors TestPlanSkillEstimateLineKeepsItsShape: every proposal carries a
+// fixed-shape size line so a curator can scan the cheap wins from the big bets,
+// and it never quotes money — costs come from run history, and a figure
+// invented in a skill body is a guess wearing a number's clothes.
+func TestHealthSkillEstimateLineKeepsItsShape(t *testing.T) {
+	skill := healthSkill(t)
+
+	shape := regexp.MustCompile(`(?m)^[ \t]*Estimate: [SML] — likely \S+ runs[ \t]*$`)
+	lines := shape.FindAllString(skill, -1)
+	if lines == nil {
+		t.Fatalf("SKILL.md spells no `Estimate: <S|M|L> — likely <n> runs` line, so proposals" +
+			" carry no size and a curator cannot tell the cheap wins from the big bets")
+	}
+	for _, line := range lines {
+		if strings.Contains(line, "$") {
+			t.Errorf("the estimate line quotes money:\n\t%s\nsizes are the model's judgement;"+
+				" costs come from run history via `%s stats` and nowhere else", strings.TrimSpace(line), moduleName(t))
+		}
+	}
+}
+
+// Mirrors TestPlanSkillDeclaresDependencyOrder (issue #178): a run that works
+// out the child dependency order must declare it, not throw it away as prose
+// naming children by ordinal. The contract is three lines: `--blocked-by` on
+// the child create, a fixed-shape `Depends on:` body line, and the ordinal form
+// retired by name.
+func TestHealthSkillDeclaresDependencyOrder(t *testing.T) {
+	skill := healthSkill(t)
+
+	if !strings.Contains(skill, "--blocked-by") {
+		t.Error("SKILL.md never spells `--blocked-by`, so a child's blockers are declared" +
+			" nowhere on GitHub and the dependency order is prose the drain cannot read")
+	}
+
+	shape := regexp.MustCompile(`(?m)^[ \t]*Depends on: #\d+(, #\d+)* — .+$`)
+	if !shape.MatchString(skill) {
+		t.Error("SKILL.md spells no `Depends on: #N[, #N] — <what each supplies>` line, so the" +
+			" body's dependency line has no fixed shape to hold proposals to")
+	}
+
+	for _, marker := range []string{"never an ordinal", "the first child of this epic"} {
+		if !strings.Contains(skill, marker) {
+			t.Errorf("SKILL.md no longer retires the ordinal form by naming it (%q); without that"+
+				" a run falls back to 'the first child of this epic', the silent lookup #178 was about", marker)
+		}
+	}
+}
