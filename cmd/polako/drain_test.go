@@ -62,6 +62,11 @@ type ghState struct {
 	// ClaudeRuns counts the invocations a fake CLI has made, for the modes whose
 	// answer depends on how far the supervisor has got. See countClaudeRun.
 	ClaudeRuns int `json:"claude_runs"`
+
+	// UsageProbes counts the `claude -p /usage` calls a fake has answered, for
+	// the fixture whose pool drops below the ceiling once the gate has waited
+	// one reset out. See countUsageProbe.
+	UsageProbes int `json:"usage_probes"`
 }
 
 type fakeIssue struct {
@@ -3198,63 +3203,114 @@ func TestDrainStopsCleanlyOnTheSessionBudget(t *testing.T) {
 	}
 }
 
-// The plan's own usage limit ends the drain exactly the way the session
-// budget above does — cleanly, between issues, parking nothing — because it
-// too is a fact about the account rather than about any one issue.
-func TestDrainStopsCleanlyOnTheWeekUsageGate(t *testing.T) {
-	buf := captureLog(t)
-	cfg, path := drainConfig(t, "stream", &ghState{
-		Issues: map[string]*fakeIssue{
-			"1": {Open: true},
-			"2": {Open: true},
-		},
-	})
-	t.Setenv(fakeUsageEnv, "sub") // week (all models): 52% used
-	cfg.maxWeekUsage = 50
-
-	if err := drain(context.Background(), cfg); err != nil {
-		t.Fatalf("an exhausted usage gate is a clean exit: %v", err)
-	}
-
-	st := finalGhState(t, path)
-	for _, n := range []string{"1", "2"} {
-		if got := st.Issues[n]; slices.Contains(got.Labels, needsHumanLabel) || got.Comments != 0 {
-			t.Errorf("issue %s = %+v, want it left untouched rather than parked", n, got)
-		}
-		if !st.Issues[n].Open {
-			t.Errorf("issue %s should still be open — the gate must not close anything", n)
-		}
-	}
-
-	out := buf.String()
-	if want := "this shift's week usage is at 52%, at or over its -max-week-usage of 50% — stopping here; it resets Sep 2"; !strings.Contains(out, want) {
-		t.Errorf("log is missing %q\ngot:\n%s", want, out)
-	}
-	if strings.Contains(out, "=== issue #1 ===") {
-		t.Errorf("an issue was picked up after the gate tripped\ngot:\n%s", out)
-	}
-}
-
-// -max-session-usage is the sibling pool, gated and reported the same way.
-func TestDrainStopsCleanlyOnTheSessionUsageGate(t *testing.T) {
+// The plan's own usage limit does not end the drain — it is a fact about the
+// account, not about any one issue, and the pool resets on its own. So the
+// gate waits it out and carries on once the pool drops, the fence matching the
+// wall a mid-run refusal hits. Nothing is parked or closed while it waits.
+func TestDrainWaitsOutTheWeekUsageGateThenCarriesOn(t *testing.T) {
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		// Already merged, so the drain closes issue 1 without a claude run once
+		// it gets past the gate — the fixture's later probes report the pool
+		// back under the ceiling, as if the block had reset during the wait.
+		PRs: map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
 	})
-	t.Setenv(fakeUsageEnv, "sub") // session: 42% used
+	t.Setenv(fakeUsageEnv, "over-then-under")
+	cfg.maxWeekUsage = 50
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("the usage gate must not end the drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if got := st.Issues["1"]; slices.Contains(got.Labels, needsHumanLabel) {
+		t.Errorf("issue 1 = %+v, want the gate wait not to park it", got)
+	}
+	if st.Issues["1"].Open {
+		t.Error("issue 1 should have closed once the pool dropped and the drain carried on")
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"this shift's week usage is at 95%, at or over its -max-week-usage of 50%",
+		"re-checking every", // no reset clause in the fixture, so it polls rather than sleeping
+		"=== issue #1 ===",  // and then it actually works the queue
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "stopping here") {
+		t.Errorf("the gate stopped the shift instead of waiting\ngot:\n%s", out)
+	}
+}
+
+// -max-session-usage is the sibling pool, gated and waited out the same way.
+func TestDrainWaitsOutTheSessionUsageGate(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		PRs:    map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
+	})
+	t.Setenv(fakeUsageEnv, "over-then-under")
 	cfg.maxSessionUsage = 40
 
 	if err := drain(context.Background(), cfg); err != nil {
-		t.Fatalf("an exhausted usage gate is a clean exit: %v", err)
+		t.Fatalf("the usage gate must not end the drain: %v", err)
 	}
 
 	if got := finalGhState(t, path).Issues["1"]; slices.Contains(got.Labels, needsHumanLabel) {
 		t.Errorf("issue 1 = %+v, want it left untouched rather than parked", got)
 	}
+	if finalGhState(t, path).Issues["1"].Open {
+		t.Error("issue 1 should have closed once the drain carried on past the gate")
+	}
 
 	out := buf.String()
-	if want := "this shift's session usage is at 42%, at or over its -max-session-usage of 40% — stopping here"; !strings.Contains(out, want) {
+	if want := "this shift's session usage is at 95%, at or over its -max-session-usage of 40%"; !strings.Contains(out, want) {
 		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+	if strings.Contains(out, "stopping here") {
+		t.Errorf("the gate stopped the shift instead of waiting\ngot:\n%s", out)
+	}
+}
+
+// usageGateWait decides how long the gate waits: a readable, still-future
+// reset is slept off in one go with slack; anything else — no clause, or a
+// clause already in the past while the meter still reads over — falls back to
+// one poll and another look. The parsed-clock branch is exercised here rather
+// than end to end for the same reason limitReset's is (see
+// TestDrainWaitsOutASessionLimitThenShips): a real sleep would drag the suite
+// into wall time.
+func TestUsageGateWait(t *testing.T) {
+	const poll = 5 * time.Minute
+
+	future := time.Now().Add(2 * time.Hour)
+	wait, reason := usageGateWait("session", "-max-session-usage", 85,
+		usagePool{name: "session", percent: 95, reset: future, hasReset: true}, poll)
+	if wait < 2*time.Hour || wait > 2*time.Hour+2*time.Minute {
+		t.Errorf("wait = %s, want ~2h plus a little slack", wait)
+	}
+	for _, want := range []string{"waiting", "then carrying on where this left off"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("reason = %q, missing %q", reason, want)
+		}
+	}
+
+	wait, reason = usageGateWait("week", "-max-week-usage", 70,
+		usagePool{name: "week", percent: 80}, poll)
+	if wait != poll {
+		t.Errorf("wait = %s, want one poll %s when there is no reset clause", wait, poll)
+	}
+	if !strings.Contains(reason, "re-checking every") {
+		t.Errorf("reason = %q, want the re-check wording", reason)
+	}
+
+	past := time.Now().Add(-time.Hour)
+	if wait, _ := usageGateWait("session", "-max-session-usage", 85,
+		usagePool{name: "session", percent: 90, reset: past, hasReset: true}, poll); wait != poll {
+		t.Errorf("wait = %s, want one poll when the named reset has already passed", wait)
 	}
 }
 

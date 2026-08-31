@@ -559,7 +559,9 @@ func fakeClaude(mode string) int {
 // verbatim in issue #138's own body (usage_test.go reuses the same constant
 // so the fixture and the parser tests can never drift apart), and "timeout"
 // sleeps well past any sane usageTimeout so it is the caller's own bound
-// that ends the call rather than this. Unset exits 1 — a CLI too old to have
+// that ends the call rather than this. "over-then-under" answers over any
+// ceiling on the first probe and well under on every one after it, for the
+// usage gate's wait-then-carry-on path. Unset exits 1 — a CLI too old to have
 // /usage — which is also why every stream-mode test is unaffected by this
 // dispatch existing at all. The other shapes parseUsage has to tolerate
 // (no-subscription prose, a wording change, a partially-readable payload)
@@ -575,6 +577,21 @@ func fakeUsageProbe() int {
 	case "timeout":
 		time.Sleep(5 * time.Second)
 		result = usageSample
+	case "over-then-under":
+		// The gate's wait-and-resume path. The first probe reports both pools
+		// over any ceiling a test would set and names no reset clause — so the
+		// drain re-checks every -poll rather than sleeping the suite into real
+		// wall time, the same limitation TestDrainWaitsOutASessionLimitThenShips
+		// works around. Every probe after it reports the pools well under, as
+		// if the block had reset while the gate waited.
+		if n, err := countUsageProbe(); err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		} else if n <= 1 {
+			result = "Current session: 95% used\nCurrent week (all models): 95% used\n"
+		} else {
+			result = "Current session: 3% used\nCurrent week (all models): 4% used\n"
+		}
 	}
 	out, err := json.Marshal(map[string]any{"result": result, "is_error": false})
 	if err != nil {
@@ -732,6 +749,20 @@ func countClaudeRun() (int, error) {
 	}
 	st.ClaudeRuns++
 	return st.ClaudeRuns, writeGhState(path, st)
+}
+
+// countUsageProbe records another `claude -p /usage` call and reports which
+// one this is — the same scratchpad and the same reason as countClaudeRun,
+// for the fixture whose pool drops below the ceiling once the gate has waited
+// one reset out.
+func countUsageProbe() (int, error) {
+	path := os.Getenv(fakeGhEnv)
+	st, err := readGhState(path)
+	if err != nil {
+		return 0, err
+	}
+	st.UsageProbes++
+	return st.UsageProbes, writeGhState(path, st)
 }
 
 // plantPR is the same against the state file, for a fake CLI that is not
