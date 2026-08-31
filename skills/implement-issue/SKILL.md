@@ -201,12 +201,12 @@ don't post again, and stop.
    marker into PLAN.md's `## Review` section — "Reviewed through: <sha>",
    written by c each time c actually runs — that b reads to decide whether
    the expensive part (the review sweep itself) needs repeating. Nothing
-   else in this step is checkpointed: a (a fetch and an `--ff-only` merge) and
-   the retest/typecheck/lint/audit at the end of d are all cheap and
-   idempotent next to c, so they simply run every time d is reached rather
-   than needing their own resume state to skip. a runs first and
-   unconditionally, before the decision in b, so there is no branch of this
-   step that can reach c or d without it having run.
+   else in this step is checkpointed: a (a fetch and an `--ff-only` merge),
+   the retest/typecheck/lint/audit at the end of d, and the accretion check in
+   e are all cheap and idempotent next to c, so they simply run every time the
+   gate reaches them rather than needing their own resume state to skip. a runs
+   first and unconditionally, before the decision in b, so there is no branch
+   of this step that can reach c, d or e without it having run.
    a. Bring the local default branch up to date: `git -C <main-checkout>
       merge --ff-only` against the `origin/…` ref Phase 1 resolved, where
       `<main-checkout>` is the first line of `git worktree list` — a
@@ -322,6 +322,55 @@ don't post again, and stop.
         undo later findings' legitimate fixes too), set its line back to
         "pending", correct the
         base, and invoke c again.
+   e. Accretion check — leave every file this run touched no worse
+      structurally than it found it. c judged the change; nothing in c judges
+      the file the change lands in, so a file grows without bound one passing
+      PR at a time (this repo's own `main.go` reached 4,234 lines that way, no
+      single PR ever looking abnormal). This is the one pass that looks, and it
+      is deliberately small: the files this run's own commits changed
+      substantially — a new function, a new block, not a one-line edit — and no
+      others. Not the tree, not a whole package, one pass and no loop. A run
+      that refactors a package while fixing a typo is a bad trade, and an
+      unattended one nobody watched it make.
+      Measure three things about each such file, and for each, compare against
+      **this repository's own median or an absolute ceiling, whichever is
+      lower** — never the relative median alone. On a young repo a machine
+      largely wrote, "the repo's norm" is that machine's own accreted norm: the
+      median climbs with every PR, and a check against a climbing median
+      ratchets the wrong way while reporting success. The absolute ceiling is
+      the floor under that failure, and it is generous on purpose — high enough
+      to be uncontroversial in any language, so it only bites the bootstrap
+      case and the repo's own median does the rest.
+      - File length: the repo's median source-file line count (sample a spread
+        of files with `git -C <worktree> ls-files` and Read; no `wc` needed and
+        none is granted), or an absolute ceiling of 1,000 lines.
+      - Function/unit length: the repo's median function/method/class length,
+        or an absolute ceiling of 150 lines.
+      - Comment density: the repo's median ratio of comment lines to code lines
+        in a file, or an absolute ceiling of 40%. This is the measure that
+        would otherwise go unwatched — every run adds justification for its own
+        change and none removes the justification a later run's reversal left
+        stranded, so without this comments drift from explanation into a second
+        untested codebase.
+      For each touched file the change pushed past its lower bound: either
+      extract the excess into a new file or unit in this same PR — extraction
+      only, never a redesign the issue did not ask for — or, if splitting it
+      cleanly is awkward, leave it and say so under `## Scope` in the PR body,
+      naming the file and which measure. It never blocks: over the bound and
+      awkward to split is a `## Scope` note, not a park. This is a nudge with
+      an audit trail; the run's job is the issue.
+      If this step extracts anything, re-run the test suite, typecheck and
+      lint one more time — the same tools step 1 and d's tail use — before
+      step 3. d's green run was taken before the extraction existed, and a
+      moved function that no longer compiles has otherwise nothing between it
+      and the PR.
+      An extraction commit here lands after c's "Reviewed through" sha, so c
+      never sees it and a resumed run skips c — that is deliberate, not a gap
+      to close with a re-review loop this step's no-loop bound forbids. It
+      holds only because the extraction is a verbatim lift: a contiguous block
+      moved unchanged, call sites untouched beyond a new import, verifiable at
+      a glance in the PR diff by the human who merges. Anything larger than
+      that clean lift is a `## Scope` note, not an extraction.
    Leave PLAN.md itself uncommitted throughout, same as every other section
    in it — it resumes because the worktree persists across runs of this
    issue, not because it is on a commit.
