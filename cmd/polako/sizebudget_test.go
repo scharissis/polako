@@ -202,7 +202,11 @@ func surveyBudget(t *testing.T, dir string) ([]budgetFile, []budgetFunc) {
 			})
 		}
 	}
-	sort.Slice(funcs, func(i, j int) bool { return funcs[i].lines > funcs[j].lines })
+	// SliceStable, matching report() in scripts/health/main.go (commit a2aeeba):
+	// functions at the same length hold os.ReadDir's name order rather than
+	// reshuffling arbitrarily, so a budget failure names the same function run
+	// to run.
+	sort.SliceStable(funcs, func(i, j int) bool { return funcs[i].lines > funcs[j].lines })
 	return files, funcs
 }
 
