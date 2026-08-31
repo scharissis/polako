@@ -37,7 +37,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -288,14 +287,13 @@ func preflight(ctx context.Context, cfg *config) error {
 			logPath = path
 		}
 	}
-	if err := queueGate(repoView.Visibility, cfg.label, cfg.ungated); err != nil {
-		// A dry run may still look: it runs nothing and writes nothing, and
-		// seeing what an ungated queue would work is how an operator decides
-		// what to label. It hears about the gate rather than hitting it.
-		if !cfg.dryRun {
-			return err
-		}
-		log.Printf("note: a real run would refuse to start here — %v", err)
+	// A dry run may still look past either gate below: it runs nothing and
+	// writes nothing, and seeing what a real run would refuse is how an
+	// operator decides what to change. refuseOrNote is that one carve-out,
+	// shared so a real refusal and its dry-run preview can never say it two
+	// different ways.
+	if err := refuseOrNote(queueGate(repoView.Visibility, cfg.label, cfg.ungated), cfg.dryRun); err != nil {
+		return err
 	}
 	if cfg.ungated && strings.EqualFold(repoView.Visibility, "PUBLIC") {
 		// Said out loud like -remote and -post-summary are, and for the same
@@ -321,7 +319,29 @@ func preflight(ctx context.Context, cfg *config) error {
 		cfg.usage = &snap
 	}
 	log.Printf("%s — running /%s per issue, polling every %s", cfg.repo, cfg.skill, cfg.poll)
-	warnOnVersionSkew(polakoVersion(), *cfg)
+	skewErr := versionSkewGate(polakoVersion(), *cfg)
+	if err := refuseOrNote(skewErr, cfg.dryRun); err != nil {
+		return err
+	}
+	if skewErr == nil {
+		if self, plugin, behind, ok := skewComparison(polakoVersion(), *cfg); cfg.ignoreSkew && ok && behind {
+			// Said out loud, the same shape -ungated gets on a public repo:
+			// the gate itself already let this through (it reads
+			// cfg.ignoreSkew, same as queueGate reads cfg.ungated), so this
+			// is the operator's own line recording that an override actually
+			// fired, not silent normal operation.
+			log.Printf("-ignore-skew: the installed %s plugin (%s) is behind this binary (%s) — running anyway",
+				pluginName, plugin, self)
+		}
+		// Only the "behind" case above ever refuses; a newer or ambiguous
+		// mismatch — or a "behind" one -ignore-skew just let through — is
+		// still worth a line, same as before this gate existed. Gated on
+		// skewErr rather than folded into the block above: refuseOrNote
+		// already turned a dry-run refusal into a logged note and a nil
+		// return, and that note must not also get this second, differently
+		// worded line about the same skew.
+		warnOnVersionSkew(polakoVersion(), *cfg)
+	}
 	settingsBlock(preflightPairs(*cfg, logPath))
 	return nil
 }
@@ -420,232 +440,4 @@ func settingsBlock(pairs [][2]string) {
 	for _, p := range pairs {
 		narrate(sevSettings, "  %-*s  %s", width, p[0], p[1])
 	}
-}
-
-// queueGate refuses to work a public repository's backlog unfiltered. On a
-// public repo anyone can open an issue, an open issue is exactly what a drain
-// picks up, and issue text is attacker-controllable input to an unattended
-// agent. Applying a label takes triage permission or better, so a -label gate
-// turns "anyone can queue work" into "a maintainer chose this one" — the
-// docs/security.md has always advised it, and on the one repository
-// shape where the risk is structural, advice is not enough. -ungated is the
-// operator overruling this on purpose, out loud.
-//
-// Anything but PUBLIC passes: on a private or internal repo, everyone who can
-// open an issue was let in by name, and an unknown visibility from a future gh
-// should not strand an operator whose repo the gate was never about.
-func queueGate(visibility, label string, ungated bool) error {
-	if !strings.EqualFold(visibility, "PUBLIC") || label != "" || ungated {
-		return nil
-	}
-	return errors.New("this repository is public, so anyone who can open an issue can queue work for an unattended agent — " +
-		"pass -label <name> to work only issues a maintainer labelled (see docs/security.md), " +
-		"or -ungated to work every open issue anyway")
-}
-
-// claudeVersion pins which CLI produced a run's numbers. Best-effort: a
-// version it cannot read leaves the field empty rather than stopping a drain
-// over telemetry.
-func claudeVersion(ctx context.Context, cfg config) string {
-	out, err := capture(ctx, cfg.dir, cfg.claudeBin, "--version")
-	if err != nil {
-		return ""
-	}
-	if fields := strings.Fields(string(out)); len(fields) > 0 {
-		return fields[0]
-	}
-	return ""
-}
-
-// pluginVersion reports which release of the skill this run will drive, by
-// asking the CLI what it has installed, along with that copy's
-// `<plugin>@<marketplace>` id where there is an unambiguous one. Best-effort in
-// the same way as claudeVersion, and empty rather than wrong in every case
-// where there is no honest answer: a -skill with no plugin prefix names a
-// hand-installed skill, which carries no version at all, a CLI too old for
-// `plugin list --json` fails the call, and a list that holds the plugin more
-// than once may not say which copy wins.
-func pluginVersion(ctx context.Context, cfg config) (version, id string) {
-	plugin, _, ok := strings.Cut(cfg.skill, ":")
-	if !ok || plugin == "" {
-		return "", ""
-	}
-	out, err := capture(ctx, cfg.dir, cfg.claudeBin, "plugin", "list", "--json")
-	if err != nil {
-		return "", ""
-	}
-	return installedVersion(out, plugin)
-}
-
-// installedPlugin is the part of a `plugin list --json` entry this reads.
-// Enabled is a pointer because the list holds disabled plugins too, and a CLI
-// that omits the field must not be read as "everything is off" — absent means
-// enabled, which is what every CLI without the field meant.
-type installedPlugin struct {
-	ID      string `json:"id"`
-	Version string `json:"version"`
-	Scope   string `json:"scope"`
-	Enabled *bool  `json:"enabled"`
-}
-
-// loadable reports whether a session would pick this copy up at all.
-func (p installedPlugin) loadable() bool { return p.Enabled == nil || *p.Enabled }
-
-// installedVersion picks the copy of plugin a session started now would load,
-// out of `plugin list --json` output. The list can hold the same plugin twice,
-// and the first entry is not the one that drives the run. It returns that
-// copy's version and its `<plugin>@<marketplace>` id — the id only when one
-// copy is unambiguously in the running, because the marketplace half is
-// operator-chosen and the skew warning builds a `plugin update` command out of
-// it (see warnOnVersionSkew).
-func installedVersion(list []byte, plugin string) (version, id string) {
-	var installed []installedPlugin
-	if err := json.Unmarshal(list, &installed); err != nil {
-		return "", ""
-	}
-	// The id is <plugin>@<marketplace>; the marketplace is whatever the
-	// operator named it when they added it, so only the plugin half is ours to
-	// match on. A disabled copy is listed but never loaded, so it is not a
-	// candidate — counting it would both report a version no session ran and
-	// let a stale disabled duplicate wash out an otherwise unambiguous answer.
-	var matches []installedPlugin
-	for _, p := range installed {
-		if name, _, _ := strings.Cut(p.ID, "@"); name == plugin && p.loadable() {
-			matches = append(matches, p)
-		}
-	}
-	// A --plugin-dir copy is loaded for that session alone and replaces the
-	// installed one outright — the way anyone testing a tip skill against a tip
-	// binary runs. Nothing else has a precedence this can be sure of, so a tie
-	// between any other pair of scopes stays a tie.
-	if len(matches) > 1 {
-		var session []installedPlugin
-		for _, p := range matches {
-			if p.Scope == "session" {
-				session = append(session, p)
-			}
-		}
-		if len(session) > 0 {
-			matches = session
-		}
-	}
-	if len(matches) == 0 {
-		return "", ""
-	}
-	// Several copies still in the running. Report a version only if they agree
-	// on one, because picking between them would be a guess, and a wrong
-	// identifier in the run data is worse than an absent one: nothing reading it
-	// later can tell that it is wrong.
-	for _, p := range matches[1:] {
-		if p.Version != matches[0].Version {
-			return "", ""
-		}
-	}
-	// The id goes back only when a single copy is left: two marketplaces that
-	// happen to agree on a version still have no one right `plugin update`
-	// target, so the warning drops the command rather than guess between them —
-	// the same "wrong identifier is worse than none" rule the version follows.
-	if len(matches) == 1 {
-		return matches[0].Version, matches[0].ID
-	}
-	return matches[0].Version, ""
-}
-
-// warnOnVersionSkew reports a binary and a skill that did not ship together.
-// The two halves share one version number by design — the supervisor finds a
-// PR by the head branch the skill names, so a mismatched pair fails later and
-// far less legibly than this. It stays a warning: an operator testing a new
-// binary against an installed release is doing something deliberate, and
-// nothing here is safe to guess about.
-func warnOnVersionSkew(binary string, cfg config) {
-	// Only this repo's own plugin shares a version line with this binary.
-	// -skill is documented as pointing anywhere, and another plugin's versions
-	// mean nothing here — comparing them would warn on every run of a
-	// deliberate configuration, and name the wrong plugin while doing it.
-	if name, _, _ := strings.Cut(cfg.skill, ":"); name != pluginName {
-		return
-	}
-	self, selfIsRelease := releaseVersion(binary)
-	plugin, pluginIsRelease := releaseVersion(cfg.pluginVersion)
-	// A binary built from a clone reports a revision, not a release. That is
-	// not skew, it is an unreleased build, and warning about it every time
-	// would train an operator to ignore the one message that matters.
-	if !selfIsRelease || !pluginIsRelease || self == plugin {
-		return
-	}
-	// `claude plugin update` wants the full `<plugin>@<marketplace>` id and
-	// reports the bare name as not found even when it is installed
-	// (docs/install.md) — so the remedy prints the id preflight carried from
-	// the `plugin list` read, never one rebuilt from pluginName here, because
-	// the marketplace half is operator-chosen and unguessable. When there was
-	// no unambiguous id — copies from more than one marketplace — the skew is
-	// still worth saying, so the message fires without the exact command and
-	// sends the operator to the docs instead.
-	remedy := "bring both to the current release — update the plugin (its update " +
-		"command needs the full `plugin@marketplace` id, and more than one copy is " +
-		"installed here) and run " +
-		"`go install github.com/scharissis/polako/cmd/polako@latest`; see docs/install.md"
-	if cfg.pluginID != "" {
-		// `claude plugin marketplace update` wants the marketplace name, which is
-		// the `@` half of the id — the same one docs/install.md names. Deriving it
-		// keeps the two commands in step and matches the canonical wording there.
-		_, marketplace, _ := strings.Cut(cfg.pluginID, "@")
-		remedy = fmt.Sprintf("bring both to the current release: "+
-			"`claude plugin marketplace update %s && claude plugin update %s`, then "+
-			"`go install github.com/scharissis/polako/cmd/polako@latest` (see docs/install.md)",
-			marketplace, cfg.pluginID)
-	}
-	log.Printf("version skew: this binary is %s but the installed %s plugin is %s — "+
-		"they are meant to ship together, and the supervisor finds a PR by the "+
-		"branch name the skill chooses. To fix, %s", self, pluginName, plugin, remedy)
-}
-
-// releaseVersion normalizes a version that names a release, and reports false
-// for anything that does not — an empty string, or the revision a build from a
-// clone carries. The `v` prefix is optional because the binary picks one up
-// from a module version and none from an -ldflags stamp.
-func releaseVersion(s string) (string, bool) {
-	s = strings.TrimPrefix(s, "v")
-	if _, err := parseSemver(s); err != nil {
-		return "", false
-	}
-	return s, true
-}
-
-// parseSemver reads the plain major.minor.patch this project releases under —
-// no pre-release or build metadata, which is what the manifest test already
-// holds plugin.json to. The parts come back in order so two versions can be
-// compared without pulling in a module to do it.
-func parseSemver(s string) ([3]int, error) {
-	var out [3]int
-	parts := strings.Split(s, ".")
-	if len(parts) != 3 {
-		return out, fmt.Errorf("%q is not major.minor.patch", s)
-	}
-	for i, p := range parts {
-		// Digits only: Atoi alone would accept the sign in "-1" and the "+1"
-		// that a build-metadata suffix leaves behind, and a leading zero is
-		// not a version this project ever tags.
-		if p == "" || (len(p) > 1 && p[0] == '0') || strings.ContainsFunc(p, func(r rune) bool {
-			return r < '0' || r > '9'
-		}) {
-			return out, fmt.Errorf("%q is not major.minor.patch", s)
-		}
-		n, err := strconv.Atoi(p)
-		if err != nil {
-			return out, fmt.Errorf("%q is not major.minor.patch", s)
-		}
-		out[i] = n
-	}
-	return out, nil
-}
-
-// describeVersion answers -version: which release this binary is, or an honest
-// account of why it is not one.
-func describeVersion() string {
-	v := polakoVersion()
-	if v == "" {
-		return pluginName + " (unknown version: built without module or VCS information)"
-	}
-	return pluginName + " " + v
 }

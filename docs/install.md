@@ -117,9 +117,17 @@ go install github.com/scharissis/polako/cmd/polako@latest
 ```
 
 If they end up mismatched anyway, the supervisor says so at startup and names
-both versions. It is a warning, not a refusal — but the supervisor finds a PR by
-the branch name the skill chooses, so a mismatched pair is a bug waiting for a
-confusing moment.
+both versions. A skill *newer* than the binary — testing a tip binary against
+an installed release, say — is only a warning: that direction is deliberate
+often enough that refusing would be more annoying than useful, and the
+supervisor still finds a PR by the branch name the skill chooses either way.
+
+A skill *older* than the binary is the direction that actually costs money —
+[issue #239](https://github.com/scharissis/polako/issues/239) is a shift that
+ran a plugin three releases stale and paid for the pre-#225 review gate on
+every issue, with neither #216's resume point nor #217's polling floor — so
+`polako work` refuses to start on it. `-ignore-skew` overrules that, out loud,
+the same way `-ungated` overrules the public-repo label gate.
 
 To let it happen automatically instead: `/plugin` → **Marketplaces** →
 `scharissis` → **Enable auto-update**. Claude Code then checks after a session

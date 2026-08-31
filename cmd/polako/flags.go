@@ -44,6 +44,13 @@ type config struct {
 	skill         string
 	branchPrefix  string
 	label         string
+	// ignoreSkew is consent to what versionSkewGate otherwise refuses:
+	// starting a drain whose installed skill is an older release than this
+	// binary, which is the #239 shape — a shift on a skill missing recent
+	// cost fixes. The same override shape as ungated, for the same reason:
+	// an operator testing a tip binary against an installed release is doing
+	// something deliberate.
+	ignoreSkew bool
 	// ungated is consent to what queueGate otherwise refuses: working a public
 	// repository's backlog with no label between "anyone opened an issue" and
 	// "an unattended agent implements it".
@@ -243,6 +250,8 @@ func parseFlags() config {
 	flag.StringVar(&cfg.label, "label", "", "only process issues carrying this label (empty = all)")
 	flag.BoolVar(&cfg.ungated, "ungated", false,
 		"work a public repository without a -label gate (anyone who can open an issue can feed the queue)")
+	flag.BoolVar(&cfg.ignoreSkew, "ignore-skew", false,
+		"start even when the installed skill is an older release than this binary (default: refuse — see docs/install.md)")
 	flag.StringVar(&cfg.tools, "tools", defaultTools,
 		"comma-separated --allowedTools for unattended runs")
 	flag.StringVar(&cfg.addTools, "add-tools", "",
