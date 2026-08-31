@@ -4021,6 +4021,15 @@ func toolDetail(raw json.RawMessage) string {
 			return ": " + clip(v, 120)
 		}
 	}
+	// Skill carries none of those keys, so without this the review gate — the
+	// most consequential tool call in an implement-issue run — reads as a bare
+	// "→ Skill". Name the skill, and the arguments beside it when there are any.
+	if v, ok := in["skill"].(string); ok && v != "" {
+		if args, _ := in["args"].(string); args != "" {
+			v += " " + args
+		}
+		return ": " + clip(v, 120)
+	}
 	return ""
 }
 
