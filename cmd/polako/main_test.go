@@ -472,6 +472,23 @@ func fakeClaude(mode string) int {
 		emit(`{"type":"system","subtype":"init","session_id":"sess-hang","model":"claude-opus-5"}`)
 		time.Sleep(30 * time.Second) // the stall watchdog is expected to kill this
 		return 0
+	case "heartbeat":
+		// A stream that is busy the whole way through — a tool call every
+		// 100ms — but whose calls are all detail the default terminal filters
+		// out. So the terminal is quiet for ~600ms while the stream is not,
+		// which is exactly the gap the heartbeat exists to fill and -stall
+		// (watching the stream) never sees. The first Read parks the stage
+		// recognizer at "reading the code…". Under -verbose every one of these
+		// calls reaches the terminal, so the heartbeat clock never expires.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-hb","model":"claude-opus-5"}`)
+		for i := 0; i < 10; i++ {
+			emit(`{"type":"assistant","session_id":"sess-hb","message":{"content":[` +
+				`{"type":"tool_use","name":"Read","input":{"file_path":"main.go"}}]}}`)
+			time.Sleep(100 * time.Millisecond)
+		}
+		emit(`{"type":"result","subtype":"success","session_id":"sess-hb","duration_ms":600,` +
+			`"num_turns":2,"total_cost_usd":0.1,"result":"Opened a PR."}`)
+		return 0
 	case "asksthenauth":
 		// Asks on the first run, and is refused credentials on the run
 		// dispatched once the answer lands. That second run is the one exit
@@ -1550,17 +1567,37 @@ func TestBuildArgsAppliesAddTools(t *testing.T) {
 	}
 }
 
-func TestWatchTickScalesWithStall(t *testing.T) {
+func TestSampleTickScalesWithInterval(t *testing.T) {
 	cases := []struct {
-		stall, want time.Duration
+		interval, want time.Duration
 	}{
 		{15 * time.Minute, 30 * time.Second}, // capped, so long runs stay quiet
 		{40 * time.Second, 10 * time.Second},
 		{time.Millisecond, 50 * time.Millisecond}, // floored, so tests can't spin
 	}
 	for _, c := range cases {
-		if got := watchTick(c.stall); got != c.want {
-			t.Errorf("watchTick(%s) = %s, want %s", c.stall, got, c.want)
+		if got := sampleTick(c.interval); got != c.want {
+			t.Errorf("sampleTick(%s) = %s, want %s", c.interval, got, c.want)
+		}
+	}
+}
+
+func TestHeartbeatLine(t *testing.T) {
+	cases := []struct {
+		elapsed  time.Duration
+		toolUses int
+		phase    stage
+		want     string
+	}{
+		{6 * time.Minute, 59, stageStudy, "still working — 6m in, 59 tool calls, reading the code"},
+		{12*time.Minute + 20*time.Second, 118, stageImplement, "still working — 12m in, 118 tool calls, implementing"},
+		{5 * time.Minute, 1, stageReview, "still working — 5m in, 1 tool call, running the review gate"},
+		// No stage recognised yet: no clause, not an empty one.
+		{5 * time.Minute, 3, stageNone, "still working — 5m in, 3 tool calls"},
+	}
+	for _, c := range cases {
+		if got := heartbeatLine(c.elapsed, c.toolUses, c.phase); got != c.want {
+			t.Errorf("heartbeatLine(%s, %d, %v) = %q, want %q", c.elapsed, c.toolUses, c.phase, got, c.want)
 		}
 	}
 }
@@ -1984,6 +2021,49 @@ func TestExecClaudeKillsAStalledRun(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 10*time.Second {
 		t.Errorf("watchdog took %s to fire", elapsed)
+	}
+}
+
+// While the terminal is quiet but the run is not — a stream of tool calls the
+// default terminal filters out — the heartbeat says one "still working" line
+// per -heartbeat, naming the stage and counting the tool calls, and never
+// after the finish line.
+func TestExecClaudeHeartbeatSpeaksWhileTheTerminalIsQuiet(t *testing.T) {
+	buf := captureLog(t)
+	cfg := fakeClaudeConfig(t, "heartbeat")
+	cfg.heartbeat = 300 * time.Millisecond
+
+	if _, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0); err != nil {
+		t.Fatalf("execClaude: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "still working") {
+		t.Fatalf("no heartbeat in a run quiet on the terminal for ~1s\ngot:\n%s", got)
+	}
+	for _, want := range []string{"reading the code", "tool call"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("heartbeat missing %q\ngot:\n%s", want, got)
+		}
+	}
+	if i, j := strings.LastIndex(got, "still working"), strings.Index(got, "finished ("); j >= 0 && i > j {
+		t.Errorf("a heartbeat landed after the finish line\ngot:\n%s", got)
+	}
+}
+
+// -verbose puts every event on the terminal, so its clock never expires and
+// the heartbeat stays silent — a consequence of measuring terminal silence,
+// not a special case.
+func TestExecClaudeHeartbeatIsSilentUnderVerbose(t *testing.T) {
+	var buf bytes.Buffer
+	wireSinks(t, &ui{terminal: &buf, verbose: true})
+	cfg := fakeClaudeConfig(t, "heartbeat")
+	cfg.heartbeat = 300 * time.Millisecond
+
+	if _, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0); err != nil {
+		t.Fatalf("execClaude: %v", err)
+	}
+	if strings.Contains(buf.String(), "still working") {
+		t.Errorf("the heartbeat fired under -verbose, where the terminal is never quiet\ngot:\n%s", buf.String())
 	}
 }
 

@@ -79,6 +79,13 @@ type stageNarrator struct {
 	asked   bool  // the off-chain "asking" line has fired
 }
 
+// phase is the furthest chain stage the narrator has reached — what the
+// heartbeat line names to say where a quiet run is. stageNone until the first
+// recognised signal, which the caller renders as no stage clause. The
+// off-chain "asking" line does not move it: a run that asked a question is
+// about to stop, not sit quietly in a phase.
+func (n *stageNarrator) phase() stage { return n.reached }
+
 // observe folds one stream event into the narrator, emitting a milestone when —
 // and only when — it advances the run past a phase it had not yet reported.
 func (n *stageNarrator) observe(ev streamEvent) {

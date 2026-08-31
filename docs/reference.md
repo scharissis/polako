@@ -26,6 +26,7 @@ sets — see [`status`](#where-the-backlog-stands-polako-status) and
 | `-retries` | `3` | Consecutive *fruitless* resume attempts after a crashed run — a crash that got real work done first resets the count rather than spending it — and the bound on remediation runs against an open PR that is conflicting, red, or carrying a request for changes. A run the API refused to authenticate is never one of them, and neither is one refused over the account's session limit, which is waited out instead — see below. |
 | `-retry-wait` | `30s` | Wait before each resume attempt after a *crash*. A clean exit that left work behind is resumed straight away: nothing about it is transient, so there is nothing to wait for. |
 | `-stall` | `15m` | Kill and resume a run that has emitted no events for this long (`0` disables). |
+| `-heartbeat` | `5m` | Say a one-line `still working` note while a run is quiet *on the terminal* — repeated every interval of continued silence, `0` disables. It watches the terminal, not the event stream `-stall` watches: a run can be busy for many minutes with nothing the default terminal shows. Chosen against `-stall`'s `15m` so a healthy but quiet run speaks two or three times before the watchdog would worry. Silent under `-verbose`, where the terminal is never quiet. |
 | `-max-cost` | *(no limit)* | Park an issue once this shift's runs on it have cost this many dollars — see [Capping what a shift spends](run-data.md#capping-what-a-shift-spends). |
 | `-max-issue-time` | *(no limit)* | Park an issue once this shift's runs on it have taken this much *run time*, e.g. `-max-issue-time 90m`. Unlike `-stall`, it does not care whether events are arriving. |
 | `-max-session-cost` | *(no limit)* | End the shift cleanly, between issues, once its runs have cost this many dollars. |
@@ -215,10 +216,13 @@ its phase once as it enters each one —
 — a run that ends in a question instead says `asking on the issue thread…`
 somewhere in place of the later phases. Each phase is said at most once and
 only when the run reaches it; a resumed run legitimately re-reads the issue and
-says so again. The whole conversation between those lines is here in the file.
-The file is the record to read when a run did something surprising, and
-`tail -f` on it — or `-verbose`, which mirrors the stream to the terminal —
-is how to watch a shift work rather than glance at it.
+says so again. Between those milestones, while a long phase runs, `-heartbeat`
+adds a periodic `still working — 12m in, 118 tool calls, implementing` so the
+gap is not silence — the third answer between the default terminal's
+milestones-only and `-verbose`'s everything. The whole conversation between
+those lines is here in the file. The file is the record to read when a run did
+something surprising, and `tail -f` on it — or `-verbose`, which mirrors the
+stream to the terminal — is how to watch a shift work rather than glance at it.
 
 Like the run-data records it is write-only and stays put: nothing in `polako`
 ever reads it back, deleting it mid-shift changes no behaviour, and it never

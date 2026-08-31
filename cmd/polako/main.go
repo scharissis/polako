@@ -630,6 +630,14 @@ type config struct {
 	retries        int
 	retryWait      time.Duration
 	stall          time.Duration
+	// heartbeat is how long the terminal may stay quiet before a run says one
+	// "still working" line, repeated every heartbeat of continued silence (0
+	// disables). It watches the terminal, not the event stream: -stall samples
+	// the stream and kills, this samples the terminal and speaks. For most of a
+	// run the stream is busy and the terminal is quiet only because the sinks
+	// filtered its events out. `polako plan` leaves it unset — the stage
+	// recognizer the line names is an implement-issue thing.
+	heartbeat time.Duration
 	// The spend caps, all zero — off — unless an operator asks for them.
 	// maxCost and maxIssueTime bound one issue and park it when it breaches;
 	// maxSessionCost bounds the whole drain and ends it cleanly instead. They
@@ -921,6 +929,8 @@ func parseFlags() config {
 	flag.IntVar(&cfg.retries, "retries", 3, "resume attempts after a crashed claude run (nonzero exit)")
 	flag.DurationVar(&cfg.retryWait, "retry-wait", 30*time.Second, "wait before each resume attempt")
 	flag.DurationVar(&cfg.stall, "stall", 15*time.Minute, "kill and resume a run with no output events for this long (0 disables)")
+	flag.DurationVar(&cfg.heartbeat, "heartbeat", 5*time.Minute,
+		"say a one-line note while a run is quiet on the terminal, repeated every interval of continued silence (0 disables)")
 	flag.Float64Var(&cfg.maxCost, "max-cost", 0,
 		"park an issue once this shift's runs on it have cost this many dollars (0 disables)")
 	flag.DurationVar(&cfg.maxIssueTime, "max-issue-time", 0,
@@ -2983,10 +2993,12 @@ func buildArgs(cfg config, prompt, resumeID string) []string {
 // block on a pipe that stopped being drained.
 const maxEventBytes = 32 * 1024 * 1024
 
-// watchTick is how often the stall watchdog samples: often enough to honour a
-// short -stall promptly, capped so long production runs stay quiet.
-func watchTick(stall time.Duration) time.Duration {
-	tick := stall / 4
+// sampleTick is how often a watchdog checks its clock, given the interval it
+// is enforcing: often enough to honour a short one promptly, capped so a long
+// production interval still samples cheaply, floored so a tiny one (a test's)
+// does not spin. Shared by the stall watchdog and the heartbeat.
+func sampleTick(interval time.Duration) time.Duration {
+	tick := interval / 4
 	if tick > 30*time.Second {
 		tick = 30 * time.Second
 	}
@@ -3744,14 +3756,15 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 
 	// Stall watchdog: if no events arrive for cfg.stall, kill the run.
 	// The caller's retry logic then resumes the session, context intact.
+	invokeStart := time.Now()
 	var lastEvent atomic.Int64
-	lastEvent.Store(time.Now().UnixNano())
+	lastEvent.Store(invokeStart.UnixNano())
 	var stalled atomic.Bool
 	watchDone := make(chan struct{})
 	defer close(watchDone)
 	if cfg.stall > 0 {
 		go func() {
-			t := time.NewTicker(watchTick(cfg.stall))
+			t := time.NewTicker(sampleTick(cfg.stall))
 			defer t.Stop()
 			for {
 				select {
@@ -3787,6 +3800,53 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 		defer budget.Stop()
 	}
 
+	// Heartbeat: while the terminal itself has been quiet for cfg.heartbeat,
+	// say one "still working" line, and again every cfg.heartbeat it stays
+	// quiet. It samples the terminal, not the stream the two watchdogs above
+	// watch: for most of a run the stream is busy and the terminal is quiet
+	// only because the sinks filtered its events out. Keying on terminal
+	// silence is also why it says nothing under -verbose, where every event
+	// reaches the terminal and the clock is reset before it can expire.
+	//
+	// hbTools and hbPhase are the scan loop's publish-only mirror of two
+	// values the goroutine may not read straight from rep/el without racing
+	// the loop that fills them. Nothing branches on any of this.
+	var hbTools, hbPhase atomic.Int64
+	hbDone := make(chan struct{})
+	if cfg.heartbeat > 0 {
+		go func() {
+			t := time.NewTicker(sampleTick(cfg.heartbeat))
+			defer t.Stop()
+			for {
+				select {
+				case <-hbDone:
+					return
+				case <-t.C:
+					// Closed-channel and tick can both be ready; a second,
+					// non-blocking check keeps a heartbeat from landing after
+					// the finish line, which is emitted just past the close.
+					select {
+					case <-hbDone:
+						return
+					default:
+					}
+					// max(lastTerm, invokeStart): sinks outlives one
+					// invocation, so a previous issue's last line must not
+					// read as this run's silence.
+					since := invokeStart
+					if lt := time.Unix(0, activeUI().lastTerm.Load()); lt.After(since) {
+						since = lt
+					}
+					if time.Since(since) < cfg.heartbeat {
+						continue
+					}
+					narrate(sevProgress, "[claude] %s", heartbeatLine(
+						time.Since(invokeStart), int(hbTools.Load()), stage(hbPhase.Load())))
+				}
+			}
+		}()
+	}
+
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 64*1024), maxEventBytes)
 	missing := "" // the diagnosis, once the inventory rules the prompt's command out
@@ -3807,6 +3867,8 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 		}
 		rep.observe(ev)
 		el.event(ev)
+		hbTools.Store(int64(rep.toolUses))
+		hbPhase.Store(int64(el.stages.phase()))
 		// An unknown slash command no longer shows up as a zero-turn exit:
 		// the CLI (2.1.85) answers it with an ordinary-looking success
 		// result. The init event's command inventory is the early tell, and
@@ -3833,6 +3895,12 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 			_ = cmd.Process.Kill()
 		}
 	}
+
+	// The stream is over, so the terminal is about to get the finish line and
+	// nothing more from this invocation — stop the heartbeat before that line
+	// rather than after, so it cannot print past "finished (…)". Kept ahead of
+	// cmd.Wait, which can block on an orphan holding the stderr pipe.
+	close(hbDone)
 
 	// A read that failed leaves the child writing into a pipe nobody is
 	// draining, so it blocks and cmd.Wait never returns — which is why the kill
@@ -4012,6 +4080,22 @@ func finishLine(rep *runReport) (severity, string) {
 	}
 	return sev, fmt.Sprintf("[claude] finished (%s) — %d turns, %s, $%.2f", status, rep.turns,
 		(time.Duration(rep.wallMS) * time.Millisecond).Round(time.Second), rep.costUSD)
+}
+
+// heartbeatLine is the "still working" note the heartbeat emits while the
+// terminal is quiet: how long this claude invocation has run, how many tool
+// calls it has made, and the phase the stage recognizer last named (dropped
+// until one is recognised). Elapsed is rounded to the minute — this line is a
+// reassurance, not a measurement, and the issue that asked for it renders it
+// that way. Not cost and not tokens: both read zero until the result event,
+// and a number that is always $0.00 mid-run is worse than no number.
+func heartbeatLine(elapsed time.Duration, toolUses int, phase stage) string {
+	line := fmt.Sprintf("still working — %s in, %s",
+		dur(elapsed.Round(time.Minute)), plural(toolUses, "tool call"))
+	if s := strings.TrimSuffix(stageLine(phase), "…"); s != "" {
+		line += ", " + s
+	}
+	return line
 }
 
 // toolDetail extracts the most human-useful field from a tool's input.
