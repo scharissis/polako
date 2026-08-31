@@ -136,7 +136,15 @@ in the PR body rather than doing it quietly.
 ## Conventions
 
 - Comments explain *why*, not *what*. The existing code is written that way;
-  match it rather than narrating the next line.
+  match it rather than narrating the next line. A comment describes why the
+  code is the way it is *now*; git holds how it got there. One narrating a
+  decision the code no longer reflects is deleted, not updated around — with
+  nothing testing them, a stale comment does not turn confusing, it turns
+  silently false, and the next session trusts it. When code moves, its comment
+  moves with it. A comment recording an invariant, a why-not, a measured
+  finding or a rejected alternative is the exception worth keeping even when it
+  reads as stale: a wrong comment costs one confused session, a deleted
+  invariant costs the invariant.
 - Errors say what a human should do about it — "needs a human decision", "check
   that -skill names a skill this installation has" — not merely what failed.
   This process runs unattended; its output is often the only diagnostic.

@@ -16,8 +16,10 @@
 // re-derives where things stand. The only human touchpoints are answering
 // clarification comments and merging PRs — both on GitHub.
 //
-// The one thing it writes locally is run data: a line of numbers per run,
-// under ~/.polako, which nothing here ever reads back. See metrics.go.
+// What it writes locally is two write-only artifacts under ~/.polako, neither
+// of which the drain ever reads back: run data — a line of numbers per run,
+// see metrics.go — and the per-shift log, the full claude event stream, see
+// ui.go.
 //
 // Nothing here is tied to one repository or language: point -dir at any GitHub
 // checkout, and use -tools/-add-tools to match that project's ecosystem.
