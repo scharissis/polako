@@ -183,3 +183,24 @@ func splitCommand(s string) []string {
 	}
 	return fields
 }
+
+// checkNotifyCommand fails a misconfigured -notify at startup rather than at
+// the first notification, which on a healthy backlog can be hours later. A hook
+// that cannot run is a night of notifications nobody receives — and since the
+// whole point of the flag is finding out promptly, discovering it late is the
+// one failure it must not have.
+func checkNotifyCommand(command string) error {
+	// Split rather than trimmed, so "is there a hook at all?" is decided by the
+	// same function notify itself decides it with: two spellings of empty would
+	// eventually disagree, and the one that stays silent is this one.
+	fields := splitCommand(command)
+	if len(fields) == 0 {
+		return nil
+	}
+	if _, err := exec.LookPath(fields[0]); err != nil {
+		return fmt.Errorf("-notify names %q, which is not on PATH (%w) — fix the command or drop the "+
+			"flag; note that it is run directly rather than through a shell, so a pipeline or a "+
+			"$VARIABLE has to live in a script", fields[0], err)
+	}
+	return nil
+}
