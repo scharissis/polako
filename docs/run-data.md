@@ -5,14 +5,15 @@ actually cost — and which settings are worth changing.
 
 **What is written, in full:** for each `claude` invocation, one JSON object
 holding the repository and issue number, a random id for the shift that wrote
-it, why the run happened and what it left behind (a PR, questions, or neither),
+it, why the run happened and what it left behind (a PR, questions, a closed
+issue, or neither),
 its status and exit code, turns, tool-use count, wall and API duration, tokens
 (in / out / cache read / cache write, plus the per-model split), dollars, and
 the configuration under test — skill, model, permission mode, `-run-tag`, a
 hash of the tool allowlist, the strategy knobs, and the three versions in play
 (this binary, the installed skill, and the
 Claude CLI). One more object per issue records how it ended —
-`merged`, `closed_unmerged` or `needs_human` — and, when it was handed back, why
+`merged`, `closed_no_change`, `closed_unmerged` or `needs_human` — and, when it was handed back, why
 (`park_reason`: `budget`, `retries_exhausted`, `produced_nothing`,
 `permission_refused`, `no_skill`, `auth`, `conflict_remediation`,
 `checks_remediation`, `review_remediation`, `pr_state`, or `unknown` when the

@@ -258,7 +258,7 @@ func planCostCard(p planCostSummary) (htmlCard, bool) {
 // guessed at: a record kind from a newer writer is not automatically bad news.
 func tone(key string) string {
 	switch key {
-	case issueMerged, "ok":
+	case issueMerged, issueClosedNoChange, "ok":
 		return "good"
 	case issueNeedsHuman, issueClosed, "crash", "error", "auth", "no-skill":
 		return "bad"
@@ -324,7 +324,7 @@ func issueBreakdown(issues []*issueStats) htmlBreakdown {
 		Caption: "of " + plural(len(issues), "issue"),
 		// The same order issuePairs lists them in, so the bars and the "terminal"
 		// line further down the page never name them differently.
-		Bars: proportionBars(counts, []string{issueMerged, issueClosed, issueNeedsHuman, inFlight}),
+		Bars: proportionBars(counts, []string{issueMerged, issueClosedNoChange, issueClosed, issueNeedsHuman, inFlight}),
 	}
 }
 

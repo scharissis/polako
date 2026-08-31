@@ -814,6 +814,34 @@ func TestLabelCommandsInTheSkillMatchTheGrantedPrefixes(t *testing.T) {
 	}
 }
 
+// The close command (#210's fourth ending) is allowlisted per run by
+// issueCloseTool, the same shape issueLabelTools already is: a prefix pinned
+// to the issue number. SKILL.md is where the command is actually spelled, so
+// as with the label commands, the grant and the spelling are one contract
+// with two halves — a reordering here raises a permission prompt nobody is
+// there to answer, and the run hangs rather than closing or falling back to
+// a park.
+func TestCloseCommandInTheSkillMatchesTheGrantedPrefix(t *testing.T) {
+	const issue = 42
+	skill := strings.ReplaceAll(readRepoFile(t, "skills", skillDir, "SKILL.md"), "$issue", strconv.Itoa(issue))
+
+	prefix := strings.TrimSuffix(strings.TrimPrefix(issueCloseTool(issue), "Bash("), ":*)")
+
+	var seen []string
+	for _, cmd := range regexp.MustCompile("gh issue close [^`\n]*").FindAllString(skill, -1) {
+		cmd = strings.TrimRight(cmd, " .`")
+		seen = append(seen, cmd)
+		if !strings.HasPrefix(cmd, prefix) {
+			t.Errorf("SKILL.md spells a close command the run is not granted:\n\t%s\n"+
+				"issueCloseTool grants only this prefix: %q\n"+
+				"any other form raises a permission prompt nobody is there to answer", cmd, prefix)
+		}
+	}
+	if len(seen) == 0 {
+		t.Errorf("SKILL.md never spells %q — without it the fourth ending has no way to act", prefix)
+	}
+}
+
 // The skill names the branch and the supervisor finds the PR by that head
 // branch, never asking the skill what it chose. Rename either half alone and
 // every PR the other half goes looking for is simply absent — which reads as

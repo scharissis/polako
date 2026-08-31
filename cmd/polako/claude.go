@@ -144,7 +144,7 @@ func resumePrompt(skill string, issue int, reason string) string {
 // -tools/-add-tools, which is the thing worth grouping runs by, rather than
 // changing with every issue number.
 func issueRun(cfg config, issue int) (config, string, string) {
-	cfg.addTools = resolveTools(cfg.addTools, issueLabelTools(issue))
+	cfg.addTools = resolveTools(cfg.addTools, issueLabelTools(issue)+","+issueCloseTool(issue))
 	return cfg, fmt.Sprintf("/%s %d", cfg.skill, issue), cfg.skill
 }
 
@@ -167,6 +167,20 @@ func issueRun(cfg config, issue int) (config, string, string) {
 func issueLabelTools(issue int) string {
 	return fmt.Sprintf("Bash(gh issue edit %d --add-label:*),Bash(gh issue edit %d --remove-label:*)",
 		issue, issue)
+}
+
+// issueCloseTool grants a run the one command its fourth ending needs: an
+// issue it verified needs no code change — already fixed elsewhere, a
+// duplicate — closed rather than parked for a human to close by hand (#210).
+// Pinned to the issue the run was dispatched for, for the same reason
+// issueLabelTools is: a blanket `Bash(gh issue close:*)` would let
+// attacker-supplied issue text close some *other* issue, and closing one is
+// not an escalation an unattended run should be able to reach for outside its
+// own dispatch. The worst case here is narrower than the label grant already
+// accepted — a wrongly closed issue is one `gh issue reopen` away, the same
+// one-click undo #197 already leans on for a container close.
+func issueCloseTool(issue int) string {
+	return fmt.Sprintf("Bash(gh issue close %d:*)", issue)
 }
 
 // buildArgs assembles one headless claude invocation.

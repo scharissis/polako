@@ -103,6 +103,14 @@ type fakeIssue struct {
 	// from now, and the wait must not end because of it.
 	BotOnRead int `json:"bot_on_read"`
 
+	// CloseOnRead is the fourth ending (#210), standing in for the skill's own
+	// `gh issue close`: this issue closes on the Nth `issue view` read from
+	// now, counted the same way ReplyOnRead is. Distinct from CloseOnList,
+	// which closes it on a *listing* — this is for a run that stays in the
+	// open queue's first listing (so dispatchRun gets a turn) and only closes
+	// once the state read after that turn asks.
+	CloseOnRead int `json:"close_on_read"`
+
 	// CloseOnList is a human dealing with the issue themselves while the
 	// supervisor is off working another one: it disappears from the Nth
 	// `issue list` from now. Counted the same way and for the same reason.
@@ -283,6 +291,13 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			fmt.Fprintf(os.Stderr, "no issue #%s\n", at(2))
 			return "", false, 1
 		}
+		if is.CloseOnRead > 0 {
+			is.CloseOnRead--
+			if is.CloseOnRead == 0 {
+				is.Open = false // the run's own `gh issue close` lands on this read
+			}
+			changed = true
+		}
 		// Compose only the fields --json asked for, the way real gh does — tidy
 		// reads state and labels together, the park-label check reads labels
 		// alone, the merge check reads state alone.
@@ -302,7 +317,7 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			}
 			fields = append(fields, `"labels":[`+strings.Join(labels, ",")+`]`)
 		}
-		return "{" + strings.Join(fields, ",") + "}", false, 0
+		return "{" + strings.Join(fields, ",") + "}", changed, 0
 
 	case "api comments":
 		is := st.Issues[apiIssue(at(1))]
@@ -772,6 +787,55 @@ func TestDrainParksADeadIssueAndKeepsGoing(t *testing.T) {
 		"summary: 1 issue merged, 1 issue parked, $0.50 spent",
 		"merged  #2 ($0.00)",
 		"parked  #1 ($0.50) — the run completed without opening a PR",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
+	}
+}
+
+// Issue #210: a run that verifies an issue needs no code change closes it
+// directly instead of opening a PR. The supervisor has to read that as
+// finished, not as "produced nothing" — no needs-human label, no park
+// comment, and the summary calls it out by name rather than folding it into
+// "merged".
+func TestDrainClosesAnIssueThatNeedsNoCodeChange(t *testing.T) {
+	buf := captureLog(t)
+	// Two "issue view" reads happen before dispatchRun's own close check would
+	// see anything: the pre-run awaiting-answer check, then the post-run
+	// state check this ending hinges on — CloseOnRead: 2 lands the close on
+	// the second one, standing in for the skill's own `gh issue close`
+	// landing sometime during the run this fake CLI mode never actually runs.
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true, CloseOnRead: 2}},
+	})
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	st := finalGhState(t, path)
+	if st.Issues["1"].Open {
+		t.Error("issue 1 should still be closed")
+	}
+	if slices.Contains(st.Issues["1"].Labels, needsHumanLabel) {
+		t.Errorf("issue 1 labels = %v — closed on verified evidence is not a park, so needs-human"+
+			" must never land on it", st.Issues["1"].Labels)
+	}
+
+	recs := terminalRecords(t, records, cfg.repo)
+	if len(recs) != 1 || recs[0].Outcome != issueClosedNoChange {
+		t.Fatalf("terminal records = %+v, want exactly one %q record", recs, issueClosedNoChange)
+	}
+	if recs[0].ParkReason != "" {
+		t.Errorf("park_reason = %q, want empty — this ending is not a park", recs[0].ParkReason)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"summary: 0 issues merged, 0 issues parked, 1 issue closed with no change needed",
+		"closed  #1",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log is missing %q\ngot:\n%s", want, out)
@@ -2969,11 +3033,13 @@ func TestDrainSummaryReportsEveryOutcome(t *testing.T) {
 		{issue: 2},
 		{issue: 5},
 		{issue: 3, awaiting: true},
+		{issue: 4, closedNoChange: true},
 	}, nil, nil, 90*time.Minute), "\n")
 
 	for _, want := range []string{
-		"summary: 2 issues merged, 1 issue parked, 1 issue awaiting an answer, 1h30m of wall clock",
+		"summary: 2 issues merged, 1 issue parked, 1 issue closed with no change needed, 1 issue awaiting an answer, 1h30m of wall clock",
 		"merged  #2, #5",
+		"closed  #4",
 		"waiting #3 — reply on the thread",
 		"parked  #1 — no PR and no questions",
 	} {

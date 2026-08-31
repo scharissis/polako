@@ -71,14 +71,25 @@ const (
 	outcomeQuestions = "posted_questions"
 	outcomeNothing   = "nothing"
 	outcomeUnknown   = "unknown"
+	// outcomeClosedIssue is the fourth ending (#210): a run that verified the
+	// issue needed no code change and closed it directly rather than opening a
+	// PR. Distinct from outcomeNothing, which would bias every "did a run
+	// produce something" rate this feeds — this run did produce something, it
+	// just was not a PR.
+	outcomeClosedIssue = "closed_issue"
 )
 
 // How an issue ended. Failures are the most valuable rows in the dataset, so
 // the "needs a human" exits record one too.
 const (
-	issueMerged     = "merged"
-	issueClosed     = "closed_unmerged"
-	issueNeedsHuman = "needs_human"
+	issueMerged = "merged"
+	issueClosed = "closed_unmerged"
+	// issueClosedNoChange is the fourth ending's issue-level outcome: closed
+	// with no PR at all, on evidence the run verified itself, and not a park —
+	// nothing is left for a human. Not the same bucket as issueClosed, which is
+	// a *park* category for a PR closed without merging, a human's decision.
+	issueClosedNoChange = "closed_no_change"
+	issueNeedsHuman     = "needs_human"
 )
 
 // Why an issue was handed back. issueNeedsHuman is one bucket, and "what parks

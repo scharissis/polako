@@ -78,6 +78,27 @@ Dollars appear only this shift spent some: one that merely waited on a PR
 an earlier process opened prints the line without them rather than claiming a
 free backlog.
 
+**An issue that needs no code change is closed, not parked.** Some issues
+describe a change that already happened — the fix shipped in another PR,
+it's a duplicate, the premise turns out to be false — and a run that
+verifies that closes the issue directly instead of opening a PR. The bar is
+narrow: only a merged PR or commit this run itself read, or a human's own
+reply on the thread saying to close it, qualifies — never the issue's own
+text merely asserting the work is done, which is exactly the self-serving
+evidence a run looking to skip its own work would produce. Doubt still goes
+to a park or a question, same as ever; this is not a park's quieter cousin,
+it's a distinct, narrower ending that needs positive evidence, and it counts
+as finished in the summary rather than needing a human to close it by hand.
+The evidence itself is on the issue thread, in the comment the run leaves
+before closing — the summary only says how many issues ended this way, the
+same way it only counts a merge rather than repeating the PR:
+
+```
+summary: 2 issues merged, 0 issues parked, 1 issue closed with no change needed, $12.10 spent, 4h02m of wall clock
+  merged  #14 ($4.90), #15 ($6.12)
+  closed  #18 ($1.10)
+```
+
 **A run that ends cleanly without a PR is not automatically a failure.** Four
 different runs end that way: one that was stuck or confused and decided nothing,
 one that finished the change and then ended its turn believing something would

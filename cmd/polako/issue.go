@@ -227,6 +227,9 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 			// again, and (pr, nil) means a PR is open now and superviseToClose
 			// takes it from here.
 			pr, err = r.dispatchRun()
+			if errors.Is(err, errIssueClosedNoChange) {
+				return nil
+			}
 			if err != nil {
 				return err
 			}
@@ -342,12 +345,40 @@ func (r *issueLoop) dispatchRun() (*pullRequest, error) {
 		return nil, err
 	}
 	if pr == nil {
+		// Checked ahead of classifyNoPR's crash/budget/question logic, which is
+		// all about *why* a run left no PR behind — moot once the issue itself
+		// is closed, the fourth ending (#210): a run that verified the code
+		// needed no change (already fixed elsewhere, a duplicate) and closed it
+		// directly instead of opening one. Gated on runErr == nil: this ending
+		// reports a close *this run verified*, and only a clean exit is that —
+		// a token refused mid-session or a budget kill can coincide with the
+		// issue being closed by an unrelated actor, and classifyNoPR is what
+		// turns those into the fatal park CLAUDE.md requires, not this success.
+		if runErr == nil {
+			state, serr := issueOpenState(ctx, cfg, issue)
+			if serr != nil {
+				a.record(0, outcomeUnknown)
+				return nil, serr
+			}
+			if state == "CLOSED" {
+				a.record(0, outcomeClosedIssue)
+				a.terminal(0, issueClosedNoChange, "")
+				r.st.closedNoChange = true
+				return nil, errIssueClosedNoChange
+			}
+		}
 		return a.classifyNoPR(runErr, wasBlocked)
 	}
 	a.record(pr.Number, outcomeOpenedPR)
 	r.ledger.clearRetries()
 	return pr, nil
 }
+
+// errIssueClosedNoChange marks dispatchRun's fourth-ending exit: the run
+// closed its own issue directly rather than opening a PR, and GitHub confirms
+// it. Not a park — processIssue's loop reads it as success, the same as a
+// merge, because there is nothing left for a human to do.
+var errIssueClosedNoChange = errors.New("issue closed with no code change needed")
 
 // classifyNoPR decides what a run that opened no PR means: a dead end to park
 // for a human, a usage limit to wait out, a question handed back, a crash to
