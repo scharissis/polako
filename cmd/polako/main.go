@@ -321,7 +321,23 @@ func preflight(ctx context.Context, cfg *config) error {
 		cfg.usage = &snap
 	}
 	log.Printf("%s — running /%s per issue, polling every %s", cfg.repo, cfg.skill, cfg.poll)
-	warnOnVersionSkew(polakoVersion(), *cfg)
+	if err := versionSkewGate(polakoVersion(), *cfg); err != nil {
+		switch {
+		case cfg.ignoreSkew:
+			// Said out loud, the same shape -ungated gives queueGate: the
+			// operator is overruling a gate that would otherwise have stopped
+			// the shift, not merely triggering an informational line.
+			log.Printf("-ignore-skew: proceeding anyway — %v", err)
+		case cfg.dryRun:
+			log.Printf("note: a real run would refuse to start here — %v", err)
+		default:
+			return err
+		}
+	} else {
+		// Only the "behind" case above refuses; a newer or ambiguous mismatch
+		// is still worth a line, same as before this gate existed.
+		warnOnVersionSkew(polakoVersion(), *cfg)
+	}
 	settingsBlock(preflightPairs(*cfg, logPath))
 	return nil
 }
@@ -555,15 +571,36 @@ func installedVersion(list []byte, plugin string) (version, id string) {
 // The two halves share one version number by design — the supervisor finds a
 // PR by the head branch the skill names, so a mismatched pair fails later and
 // far less legibly than this. It stays a warning: an operator testing a new
-// binary against an installed release is doing something deliberate, and
-// nothing here is safe to guess about.
+// binary against an installed release, or running a skill newer than the
+// binary, is doing something deliberate, and nothing here is safe to guess
+// about. The one direction that is not a deliberate developer setup — the
+// skill *behind* the binary, the #239 shape — is escalated separately by
+// versionSkewGate, called ahead of this at the one call site preflight has;
+// this still fires for every other skew shape exactly as before that gate
+// existed.
 func warnOnVersionSkew(binary string, cfg config) {
+	self, plugin, _, ok := skewComparison(binary, cfg)
+	if !ok {
+		return
+	}
+	log.Printf("version skew: this binary is %s but the installed %s plugin is %s — "+
+		"they are meant to ship together, and the supervisor finds a PR by the "+
+		"branch name the skill chooses. To fix, %s", self, pluginName, plugin, skewRemedy(cfg))
+}
+
+// skewComparison is the one place that decides whether a binary and an
+// installed skill are a comparable, differing pair of releases — shared by
+// warnOnVersionSkew (any direction) and versionSkewGate (behind only), so the
+// two can never disagree about what counts as skew. ok is false whenever
+// there is nothing safe to compare: another plugin's skill, a build that
+// carries no release version on either side, or two releases that agree.
+func skewComparison(binary string, cfg config) (self, plugin string, behind, ok bool) {
 	// Only this repo's own plugin shares a version line with this binary.
 	// -skill is documented as pointing anywhere, and another plugin's versions
 	// mean nothing here — comparing them would warn on every run of a
 	// deliberate configuration, and name the wrong plugin while doing it.
 	if name, _, _ := strings.Cut(cfg.skill, ":"); name != pluginName {
-		return
+		return "", "", false, false
 	}
 	self, selfIsRelease := releaseVersion(binary)
 	plugin, pluginIsRelease := releaseVersion(cfg.pluginVersion)
@@ -571,8 +608,35 @@ func warnOnVersionSkew(binary string, cfg config) {
 	// not skew, it is an unreleased build, and warning about it every time
 	// would train an operator to ignore the one message that matters.
 	if !selfIsRelease || !pluginIsRelease || self == plugin {
-		return
+		return self, plugin, false, false
 	}
+	selfParts, errSelf := parseSemver(self)
+	pluginParts, errPlugin := parseSemver(plugin)
+	// releaseVersion already ran parseSemver once to decide selfIsRelease and
+	// pluginIsRelease, so these cannot fail — checked anyway rather than
+	// trusting that at a distance.
+	if errSelf != nil || errPlugin != nil {
+		return self, plugin, false, true
+	}
+	return self, plugin, semverLess(pluginParts, selfParts), true
+}
+
+// semverLess reports whether a names an earlier release than b, comparing
+// major, then minor, then patch.
+func semverLess(a, b [3]int) bool {
+	for i := range a {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return false
+}
+
+// skewRemedy is the command (or commands) an operator runs to bring the
+// binary and the plugin back to the same release, shared by
+// warnOnVersionSkew and versionSkewGate so the two never drift apart in what
+// they tell an operator to do about it.
+func skewRemedy(cfg config) string {
 	// `claude plugin update` wants the full `<plugin>@<marketplace>` id and
 	// reports the bare name as not found even when it is installed
 	// (docs/install.md) — so the remedy prints the id preflight carried from
@@ -581,23 +645,42 @@ func warnOnVersionSkew(binary string, cfg config) {
 	// no unambiguous id — copies from more than one marketplace — the skew is
 	// still worth saying, so the message fires without the exact command and
 	// sends the operator to the docs instead.
-	remedy := "bring both to the current release — update the plugin (its update " +
-		"command needs the full `plugin@marketplace` id, and more than one copy is " +
-		"installed here) and run " +
-		"`go install github.com/scharissis/polako/cmd/polako@latest`; see docs/install.md"
-	if cfg.pluginID != "" {
-		// `claude plugin marketplace update` wants the marketplace name, which is
-		// the `@` half of the id — the same one docs/install.md names. Deriving it
-		// keeps the two commands in step and matches the canonical wording there.
-		_, marketplace, _ := strings.Cut(cfg.pluginID, "@")
-		remedy = fmt.Sprintf("bring both to the current release: "+
-			"`claude plugin marketplace update %s && claude plugin update %s`, then "+
-			"`go install github.com/scharissis/polako/cmd/polako@latest` (see docs/install.md)",
-			marketplace, cfg.pluginID)
+	if cfg.pluginID == "" {
+		return "bring both to the current release — update the plugin (its update " +
+			"command needs the full `plugin@marketplace` id, and more than one copy is " +
+			"installed here) and run " +
+			"`go install github.com/scharissis/polako/cmd/polako@latest`; see docs/install.md"
 	}
-	log.Printf("version skew: this binary is %s but the installed %s plugin is %s — "+
-		"they are meant to ship together, and the supervisor finds a PR by the "+
-		"branch name the skill chooses. To fix, %s", self, pluginName, plugin, remedy)
+	// `claude plugin marketplace update` wants the marketplace name, which is
+	// the `@` half of the id — the same one docs/install.md names. Deriving it
+	// keeps the two commands in step and matches the canonical wording there.
+	_, marketplace, _ := strings.Cut(cfg.pluginID, "@")
+	return fmt.Sprintf("bring both to the current release: "+
+		"`claude plugin marketplace update %s && claude plugin update %s`, then "+
+		"`go install github.com/scharissis/polako/cmd/polako@latest` (see docs/install.md)",
+		marketplace, cfg.pluginID)
+}
+
+// versionSkewGate refuses to start a drain whose installed skill is a
+// strictly older release than this binary — not merely different, which a
+// newer or hand-installed skill can be on purpose (see warnOnVersionSkew).
+// #239 is what that direction costs in practice: a shift ran a plugin three
+// releases stale and paid for the pre-#225 review gate on every issue, with
+// neither #216's resume point nor #217's polling floor, so the branch-name
+// contract alone understates the risk. cfg.ignoreSkew is deliberately not
+// read here — the gate always reports what it found, and preflight is what
+// decides whether that is a refusal, a dry-run note, or an operator's
+// override said out loud, the same split queueGate has with cfg.ungated.
+func versionSkewGate(binary string, cfg config) error {
+	self, plugin, behind, ok := skewComparison(binary, cfg)
+	if !ok || !behind {
+		return nil
+	}
+	return fmt.Errorf("the installed %s plugin (%s) is behind this binary (%s) — they are meant to ship "+
+		"together, and a shift on a stale skill is not only a branch-naming risk: it is the shift #239 ran, "+
+		"missing the polling floor (#217), the review-gate resume point (#216) and the diff-scaled review "+
+		"level (#225), and spending well more per issue for it. Pass -ignore-skew to run anyway, or %s",
+		pluginName, plugin, self, skewRemedy(cfg))
 }
 
 // releaseVersion normalizes a version that names a release, and reports false

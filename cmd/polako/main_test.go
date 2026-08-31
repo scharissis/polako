@@ -2985,6 +2985,84 @@ func TestWarnOnVersionSkew(t *testing.T) {
 	}
 }
 
+// versionSkewGate is the escalation #254 adds: only the installed skill
+// being strictly *behind* the binary refuses, because that is the direction
+// #239 showed a real cost regression in — a newer or ambiguous mismatch stays
+// warnOnVersionSkew's business alone, unchanged by this gate.
+func TestVersionSkewGateRefusesOnlyWhenTheSkillIsBehind(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		skill          string
+		binary, plugin string
+		id             string
+		refused        bool
+	}{
+		{name: "matched release", binary: "0.4.0", plugin: "0.4.0"},
+		{name: "plugin one patch behind", binary: "0.4.1", plugin: "0.4.0", refused: true},
+		{name: "plugin a minor version behind", binary: "0.5.0", plugin: "0.4.0", refused: true},
+		{name: "plugin a major version behind", binary: "1.0.0", plugin: "0.9.9", refused: true},
+		{name: "plugin ahead of the binary — a deliberate dev setup", binary: "0.4.0", plugin: "0.5.0"},
+		{name: "unreleased binary", binary: "a1b2c3d4e5f6", plugin: "0.3.0"},
+		{name: "dirty clone build", binary: "a1b2c3d4e5f6+dirty", plugin: "0.3.0"},
+		{name: "no plugin installed", binary: "0.4.0", plugin: ""},
+		{name: "another plugin's skill", skill: "my-fork:implement-issue", binary: "0.4.0", plugin: "0.3.0"},
+		{name: "hand-installed skill", skill: skillDir, binary: "0.4.0", plugin: "0.3.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			skill := tc.skill
+			if skill == "" {
+				skill = defaultSkill
+			}
+			err := versionSkewGate(tc.binary, config{skill: skill, pluginVersion: tc.plugin, pluginID: tc.id})
+			if tc.refused && err == nil {
+				t.Fatalf("gate let a behind-the-binary skill (%s behind %s) through", tc.plugin, tc.binary)
+			}
+			if !tc.refused && err != nil {
+				t.Fatalf("gate refused a pair it is not about: %v", err)
+			}
+			if err == nil {
+				return
+			}
+			for _, want := range []string{tc.binary, tc.plugin, "-ignore-skew", "#239", "#217", "#216", "#225"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("refusal does not mention %q, want the cost regression named alongside the versions: %v", want, err)
+				}
+			}
+		})
+	}
+}
+
+// The gate itself never reads cfg.ignoreSkew — preflight is what decides
+// whether the gate's error refuses the run, gets logged as a dry-run note, or
+// gets logged as an operator's override, the same split queueGate has with
+// cfg.ungated. A gate that silenced itself on the flag would leave preflight
+// unable to tell "nothing was wrong" from "something was wrong and ignored",
+// which is exactly the distinction the three-way switch in preflight needs.
+func TestVersionSkewGateIgnoresCfgIgnoreSkew(t *testing.T) {
+	cfg := config{skill: defaultSkill, pluginVersion: "0.3.0", ignoreSkew: true}
+	if err := versionSkewGate("0.4.0", cfg); err == nil {
+		t.Fatal("versionSkewGate must keep reporting the skew regardless of cfg.ignoreSkew — the call site decides what to do with it")
+	}
+}
+
+func TestSemverLess(t *testing.T) {
+	for _, tc := range []struct {
+		a, b [3]int
+		want bool
+	}{
+		{[3]int{0, 4, 0}, [3]int{0, 4, 1}, true},
+		{[3]int{0, 4, 1}, [3]int{0, 4, 0}, false},
+		{[3]int{0, 4, 0}, [3]int{0, 4, 0}, false},
+		{[3]int{0, 4, 9}, [3]int{0, 5, 0}, true},
+		{[3]int{0, 9, 9}, [3]int{1, 0, 0}, true},
+		{[3]int{1, 0, 0}, [3]int{0, 9, 9}, false},
+	} {
+		if got := semverLess(tc.a, tc.b); got != tc.want {
+			t.Errorf("semverLess(%v, %v) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
 // The skew warning's remedy and the update command in docs/install.md must not
 // drift: install.md is the canonical wording of the `claude plugin update`
 // trap (issue #190), so if the two can disagree, one is wrong the next time the
