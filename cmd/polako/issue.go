@@ -1,0 +1,590 @@
+package main
+
+// processIssue advances one issue as far as it will go: to merged, to a park,
+// or to a question a human owes an answer to. It owns the resume policy — the
+// two ceilings below, one for crash loops and one for the pricier clean-exit
+// resumes — and dispatches each run through runClaude.
+
+import (
+	"cmp"
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"strings"
+	"time"
+)
+
+// defaultResumeCeiling bounds how many times one issue may be resumed in total,
+// however much each of those runs got done. -retries bounds the consecutive
+// fruitless ones, which is the loop worth giving up on quickly; this is the
+// backstop for the other shape, a run that gets a little further every time,
+// dies again, and so keeps resetting the counter that was supposed to stop it.
+//
+// Crude and generous on purpose. What one issue may really consume is -max-cost
+// and -max-issue-time, and #7 is where a proper ceiling belongs; this only has
+// to guarantee the loop ends.
+const defaultResumeCeiling = 20
+
+// cleanExitResumeCeiling bounds the other flavour of resume: a run that ended
+// cleanly, opened no PR, and left work on disk anyway. Small on purpose, and
+// not an operator knob.
+//
+// Every attempt of this kind burns a *complete* run rather than failing fast in
+// seconds the way a crash loop does — the run this exists for cost $3.61 and
+// eight minutes — and -max-cost and -max-issue-time are both off by default, so
+// nothing else is standing between a run that keeps deciding to wait and a
+// three-figure bill. Two buys the case worth buying, a run that was one commit
+// from done, and refuses to fund the other one.
+const cleanExitResumeCeiling = 2
+
+// processIssue advances one issue as far as it will go: to merged, to a park,
+// or — the one way back out that is neither — to a question a human owes an
+// answer to, returned as a *deferredError for the caller to put down.
+//
+// st carries what the drain already knows about this issue, and collects what
+// this call learns. Everything durable is on GitHub; st only saves re-deriving
+// it within one process.
+func processIssue(ctx context.Context, cfg config, issue int, st *issueState) error {
+	branch := fmt.Sprintf("%s%d", cfg.branchPrefix, issue)
+	// fruitless counts consecutive crashes that got nothing done, and is what
+	// -retries bounds. resumes counts every retry this issue has had, fruitful
+	// ones included, and is what resumeCeiling bounds. Two counters because they
+	// guard two different failures: a session that dies straight back on every
+	// resume, and a run that inches a little further each time and never
+	// arrives.
+	//
+	// cleanResumes counts only the resumes of the second kind — a run that ended
+	// cleanly with no PR and work on disk — and is bounded separately, because
+	// those are the expensive ones. They spend the shared budget too: an issue
+	// alternating crashes and clean exits must not farm two ceilings.
+	//
+	// resumeKind is a different thing again: which sort of resume the next trip
+	// round this loop is, "" for none. It decides both that the session is worth
+	// resuming and what the resumed run is told, and neither counter can answer
+	// it — fruitless is zeroed by a crash that got work done, and reading the
+	// resume off it would silently turn every such retry into a fresh run that
+	// threw the crashed session away. One variable rather than a bool per
+	// flavour: the kinds are exclusive, and a second bool is one more thing every
+	// place that clears the first has to remember.
+	fruitless, resumes, cleanResumes, resumeKind := 0, 0, 0, ""
+	// everProgressed tracks, across every resume counted by resumes, whether
+	// any of them ever produced real work — unlike fruitless, it is never
+	// reset. Why that matters is at its one read site below.
+	everProgressed := false
+
+	// Before the run, not only after the last merge: the gap this closes is also
+	// opened by a teammate's push and by a drain restarted days later, and the
+	// moment that matters is the one just before a branch is cut and a review
+	// resolves its base.
+	syncDefaultBranch(ctx, cfg)
+
+	// The pickup half of the two samples the ledger reads a terminal record
+	// for — see issueState.weekUsageAtPickup. Sampled here rather than at the
+	// call site that dispatched into processIssue, so it covers every way in
+	// (a fresh pickup, a resume after a crash, a resume once an answer
+	// landed) with the one line. Unconditional so a second or third leg's
+	// failed probe overwrites an earlier leg's reading with "not sampled"
+	// rather than leaving it in place — st outlives a single call for an
+	// issue put down for an answer, and a stale pickup from before the wait
+	// is worse than none. Skipped when nothing would read it: -metrics off
+	// (or no recorder at all) makes recordIssue's own write a no-op, so
+	// sampling for it would be a probe call spent on a value nobody keeps.
+	if cfg.rec.enabled() {
+		st.weekUsageAtPickup, st.hasWeekUsageAtPickup = sampleWeekUsage(ctx, cfg)
+	}
+
+	// tally is what -post-summary reports. It lives on the state rather than
+	// here so an issue put down for an answer and picked up later still reports
+	// every run behind it. Nothing reads it back once the process ends, so it
+	// stays telemetry rather than state: a supervisor restarted mid-issue starts
+	// a fresh one, and the comment it feeds says it covers this drain.
+	tally := &st.tally
+
+	// terminal marks how the issue ended, failures included — they are the
+	// most informative rows in the dataset, and every one of them ends this
+	// issue: merged, or parked for a human and left behind. Transient GitHub
+	// errors and Ctrl+C are deliberately not outcomes: the issue is still open
+	// and unparked, and the next drain resumes it.
+	terminal := func(prNumber int, outcome, why string) {
+		usage := issueUsageSamples{atPickup: st.weekUsageAtPickup, hasPickup: st.hasWeekUsageAtPickup}
+		if cfg.rec.enabled() {
+			usage.atTerminal, usage.hasTerminal = sampleWeekUsage(ctx, cfg)
+		}
+		cfg.rec.recordIssue(cfg, issue, prNumber, outcome, why, lookupPRFacts(ctx, cfg, prNumber), usage)
+	}
+
+	// parked is terminal for the hand-backs, and the reason it files them under
+	// is the one the park itself named. Classifying the error here rather than
+	// at each callsite is what keeps the record and the sentence on the issue
+	// thread describing the same thing: a park raised inside supervisePR is
+	// several calls away from the record that reports it.
+	parked := func(prNumber int, err error) error {
+		terminal(prNumber, issueNeedsHuman, parkCategoryOf(err))
+		return err
+	}
+
+	for {
+		// Restart safety: if a PR already exists for this branch, never
+		// re-run Claude — go straight to waiting on it.
+		pr, err := prForBranch(ctx, cfg, branch)
+		if err != nil {
+			return err
+		}
+
+		if pr == nil {
+			// Asked before another run is dispatched rather than after one
+			// returns, which is the only place a cost cap can be enforced at
+			// all: cost arrives on the result event, so it can bound the next
+			// run and never the one that spent it.
+			if reason := overBudget(cfg, *tally); reason != "" {
+				return parked(0, park(parkBudget, "%s", reason))
+			}
+
+			// The label is durable, so "it is up after the run" does not by
+			// itself mean this run raised it. Read it before the run too, and
+			// the two readings tell a question apart from an earlier one's
+			// flag that this run died before clearing.
+			wasBlocked, err := issueHasLabel(ctx, cfg, issue, awaitingAnswerLabel)
+			if err != nil {
+				return err
+			}
+
+			resumeTarget, reason := "", reasonImplement
+			switch {
+			// A retry with no session to resume — the crashed run never got
+			// one, or the one it got turned out to be unresumable — is a fresh
+			// skill run in everything but name, so it is recorded as one. The
+			// skill re-derives where it got to from the worktree.
+			case resumeKind != "" && st.session != "":
+				resumeTarget = st.session
+				reason = resumeKind
+			case st.answered:
+				reason = reasonAnswers
+			}
+			st.answered = false
+
+			started := time.Now()
+			rep, runErr := runClaude(ctx, cfg, issue, resumeTarget, reason, runLimit(cfg, *tally))
+			rc := runContext{
+				issue: issue, reason: reason, attempt: resumes,
+				resumedFrom: resumeTarget, started: started, ended: time.Now(),
+			}
+			if rep.sessionID != "" {
+				st.session = rep.sessionID
+			}
+			// A resume that never started is a dead session, not a crashed run:
+			// its JSONL was truncated by a hard kill mid-append, or it has aged
+			// out of the CLI's retention. execClaude seeds the report's session
+			// from the one it was asked to resume, so the id survives a run that
+			// emitted nothing at all — and every later attempt then fails the
+			// same way in seconds, parking a workable issue as "claude crashed
+			// and 3 resume attempts failed". Forget the session instead and let
+			// the next attempt go fresh, which is the run that would have worked.
+			//
+			// Only when the run also failed on its own: a resume that answered
+			// cleanly without an init event is not a shape any CLI produces, and
+			// as with lacksCommand every uncertainty here resolves toward
+			// carrying on. A shutdown signal is the other exclusion — it kills
+			// the child through the context, so a resume interrupted before its
+			// first event looks exactly like a dead session and is not one.
+			if resumeTarget != "" && runErr != nil && ctx.Err() == nil && !rep.started {
+				narrate(sevWarning, "session %s could not be resumed — the next attempt starts a fresh run, "+
+					"which re-derives where the last one got to from the worktree", resumeTarget)
+				st.session = ""
+			}
+			// record closes over the run; the outcome is whatever the checks
+			// below turn out to find, so every exit from here on passes one.
+			record := func(prNumber int, outcome string) {
+				rc.pr, rc.outcome = prNumber, outcome
+				tally.add(cfg.rec.recordRun(cfg, rc, rep))
+			}
+
+			if runErr != nil {
+				if ctx.Err() != nil {
+					record(0, outcomeUnknown)
+					return ctx.Err()
+				}
+				// A prompt that never resolved will never resolve on a retry,
+				// and the generic "no PR and no questions" report buries the
+				// cause. Say what is actually wrong and stop.
+				if errors.Is(runErr, errNoWork) {
+					record(0, outcomeNothing)
+					return parked(0, fmt.Errorf("%w — check that -skill %q names a skill this "+
+						"installation has; plugin skills are namespaced <plugin>:<skill>, "+
+						"a skill copied into ~/.claude/skills is not",
+						runErr, cfg.skill))
+				}
+				log.Printf("claude run ended with error (%v) — checking what it left behind", runErr)
+			}
+
+			pr, err = prForBranch(ctx, cfg, branch)
+			if err != nil {
+				record(0, outcomeUnknown)
+				return err
+			}
+			if pr == nil {
+				// The token does not come back on its own, so every resume
+				// spends minutes reaching the same 401 and buries the cause
+				// under a report about crashes. Stop the drain: every later
+				// issue would hit the same wall.
+				//
+				// Checked here rather than beside errNoWork, which stops
+				// before the PR lookup: a token can die after the run opened
+				// its PR, and that case belongs on the waiting path above,
+				// which needs no token at all. Checked before the label, too:
+				// a run refused at the door cannot have raised one, so a label
+				// found here is an older run's, and crediting it to this one
+				// would bias every questions rate stats computes.
+				if errors.Is(runErr, errAuth) {
+					record(0, outcomeNothing)
+					return parked(0, authAdvice(runErr))
+				}
+				// A cap killed this run, so it is a dead end for the same reason
+				// a refused token is: a resume would spend the same budget over
+				// again on the same issue and be killed at the same point. The
+				// record comes first, because this run's own numbers are what
+				// carried the issue over the line and the reason quotes them.
+				if errors.Is(runErr, errBudget) {
+					record(0, outcomeNothing)
+					return parked(0, park(parkBudget, "%s",
+						cmp.Or(overBudget(cfg, *tally), runErr.Error())))
+				}
+				// A usage limit is neither this issue's fault nor a crash a
+				// resume can route around: every attempt before the reset is
+				// refused the same way in seconds, and each one used to spend
+				// the retry budgets that exist for real crashes — twenty
+				// refusals thirty seconds apart, and a healthy issue was
+				// parked (#67). Wait for the reset the refusal names instead,
+				// then resume. The wait is charged to neither -retries nor the
+				// resume ceiling, because those bound evidence that the issue
+				// cannot be finished and this run is evidence about the
+				// account; what bounds the wait is the clock — a readable
+				// reset is at most a day away, and a refusal with no clock
+				// this can read falls back to one attempt per -poll rather
+				// than a tight loop.
+				if errors.Is(runErr, errLimit) {
+					// outcomeUnknown, not outcomeNothing: the account cut this
+					// run off — mid-session, after a commit and a finished
+					// review gate on the shift #218 was filed from — so it never
+					// decided to produce nothing, and reading it as a run that
+					// did would bias every rate stats computes. The sibling
+					// Ctrl+C branch above records the same for the same reason.
+					record(0, outcomeUnknown)
+					wait := cfg.poll
+					if reset, ok := limitReset(rep.limitMsg, time.Now()); ok {
+						// Slack behind the CLI's own clock: a resume
+						// dispatched on the named minute can still be refused
+						// by it.
+						wait = time.Until(reset) + 90*time.Second
+						log.Printf("claude is over its usage limit until %s — waiting %s, then resuming "+
+							"(Ctrl+C is safe: state is on GitHub, and rerunning after the reset "+
+							"picks this issue back up)", reset.Format("15:04 MST"), dur(wait))
+					} else {
+						log.Printf("claude is over its usage limit, and the refusal names no reset time "+
+							"this supervisor can read (%q) — retrying every %s until it lifts "+
+							"(Ctrl+C is safe: state is on GitHub, and rerunning later picks this "+
+							"issue back up)", clip(rep.limitMsg, 120), dur(cfg.poll))
+					}
+					if err := sleep(ctx, wait); err != nil {
+						return err
+					}
+					resumeKind = reasonResume
+					continue
+				}
+				blocked, err := issueHasLabel(ctx, cfg, issue, awaitingAnswerLabel)
+				if err != nil {
+					record(0, outcomeUnknown)
+					return err
+				}
+				// A flag this run raised means it asked something, crash or
+				// not. A flag that was already up and is still up after a
+				// crash proves nothing: the run is far likelier to have died
+				// before clearing it, and the reply that flag waits for is the
+				// one that dispatched this very run — so waiting on it waits
+				// forever, while a resume is exactly what unsticks it.
+				asked := blocked && (!wasBlocked || runErr == nil)
+				switch {
+				case asked:
+					// Questions were posted and flagged (even if the run then
+					// crashed). The baseline for "a reply arrived" is read now,
+					// so the question itself is the newest thing on the thread
+					// and can never be mistaken for its own answer.
+					record(0, outcomeQuestions)
+					comments, err := issueComments(ctx, cfg, issue)
+					if err != nil {
+						return err
+					}
+					baseline := commentBaseline(comments)
+					// Fired here rather than in either fork below, because both
+					// of them leave the issue waiting on the same person: this
+					// is the state the flag exists for, and -strict-order only
+					// changes what the supervisor does in the meantime.
+					notify(ctx, cfg, notification{event: notifyAwaiting, issue: issue,
+						reason: "a run stopped to ask something on the issue thread — " +
+							"reply there and the next shift folds the answer in"})
+					if !cfg.strictOrder {
+						// The question is flagged on GitHub, which is durable
+						// and is all a later drain needs. Hand the issue back
+						// so the queue behind it can be worked: an issue
+						// nobody is working is not one in flight, so the
+						// no-conflict guarantee is untouched.
+						return &deferredError{baseline: baseline}
+					}
+					log.Printf("issue #%d is labelled %q — waiting for a reply on the thread",
+						issue, awaitingAnswerLabel)
+					if err := waitForReply(ctx, cfg, issue, baseline); err != nil {
+						return err
+					}
+					log.Printf("somebody replied on #%d — re-running to fold the answers in", issue)
+					fruitless, resumeKind, st.answered = 0, "", true
+					continue
+				case runErr != nil && fruitless < cfg.retries && resumes < cfg.resumeCeiling:
+					// Crash (API drop, stall, tool failure): resume the exact
+					// session by ID, keeping its research context. If no
+					// session was ever created, retry as a fresh run instead.
+					record(0, outcomeNothing)
+					// The run that just died is what carried the issue over, so
+					// the resume this branch is about to announce would be
+					// refused by the gate at the top of the loop anyway. Say so
+					// here: an unattended log that promises a resume it never
+					// makes, after sleeping -retry-wait for it, is a worse
+					// diagnosis than the park it is really doing.
+					if reason := overBudget(cfg, *tally); reason != "" {
+						return parked(0, park(parkBudget, "%s", reason))
+					}
+					resumes++
+					resumeKind = reasonResume
+					mode := "restarting fresh"
+					if st.session != "" {
+						mode = "resuming session " + st.session
+					}
+					if rep.progressed() {
+						// This run did real work before it died — an hour of it,
+						// for all anyone here knows — so it was not the crash
+						// loop -retries exists to stop. A host that sleeps four
+						// times across one long issue must not park it.
+						fruitless = 0
+						everProgressed = true
+						log.Printf("%s (retry %d/%d; the last run got work done before it "+
+							"ended, so the -retries budget starts over) in %s",
+							mode, resumes, cfg.resumeCeiling, cfg.retryWait)
+					} else {
+						fruitless++
+						log.Printf("%s (attempt %d/%d) in %s",
+							mode, fruitless, cfg.retries, cfg.retryWait)
+					}
+					if err := sleep(ctx, cfg.retryWait); err != nil {
+						return err
+					}
+					continue
+				case runErr != nil:
+					record(0, outcomeNothing)
+					if resumes >= cfg.resumeCeiling {
+						// "retried" rather than "resumed": most of these are
+						// resumes, but a dead session turns one into a fresh
+						// restart, and the count covers both. everProgressed
+						// picks the clause: -retries has no enforced ceiling
+						// of its own, so a value set above resumeCeiling can
+						// still reach here on a run of pure death-rattle
+						// crashes, and claiming one of them got somewhere
+						// would be exactly the false diagnosis this issue is
+						// about.
+						clause := "every attempt has died before doing any observable work"
+						if everProgressed {
+							clause = "each run gets somewhere and then dies"
+						}
+						return parked(0, park(parkRetries,
+							"claude has been retried %d times on this issue and still has "+
+								"not finished it — %s, which needs a human", resumes, clause))
+					}
+					return parked(0, park(parkRetries,
+						"claude crashed and %d resume attempts failed", cfg.retries))
+				default:
+					// Clean exit, yet no PR and no questions flagged through the
+					// proper channel. Four different runs end this way and only
+					// one of them is the "Claude decided nothing" this used to
+					// assume: two believed they had paused for something that
+					// will never come back, or ran out of road mid-task, and both
+					// have the change sitting on disk, finished or nearly —
+					// exactly what resume exists for. The fourth asked the
+					// operator to approve a tool this allowlist never granted and
+					// ended its turn unheard — see rep.permissionRefused below,
+					// whose fix (-add-tools) is not something resuming the same
+					// session can reach.
+					//
+					// The first three (decided nothing, paused forever, ran out of
+					// road) are told apart by that work on disk, not
+					// rep.progressed(): every clean exit progressed — the run this
+					// was written for scored 59 turns and 58 tool uses — so
+					// progress cannot separate them. Whether the branch has
+					// commits, or the worktree is dirty, can. The fourth is told
+					// apart by the run's own final words instead, classified by
+					// permissionRefusal, and checked first: no amount of
+					// salvageable work changes what fixes it.
+					record(0, outcomeNothing)
+					// One probe, feeding both the decision and, if it turns out
+					// to be a park after all, the message.
+					left := inspectLeftWork(ctx, cfg, issue)
+					// What is there for the person picking it up, appended to
+					// whichever reason a branch below settles on, then handed to
+					// the same park call — one tail shared by every way this
+					// clean exit can end, rather than each branch repeating it.
+					// refusedCmd is the refused command, when the permission park is
+					// the one telling — every other category has nothing to add
+					// here, which the empty string at their one call site below
+					// says outright rather than leaving to rep's own invariant
+					// that permissionRefusedDetail is empty whenever
+					// permissionRefused is false. Named to avoid shadowing the
+					// package-level detail logger (ui.go) inside this closure.
+					finishPark := func(category, reason, refusedCmd string) error {
+						if d := left.describe(); d != "" {
+							reason += "; " + d
+						}
+						// The refused command can carry a local absolute path
+						// (a worktree path inside a Bash command) exactly the
+						// way a worktree's own path can — see leftWork.where()
+						// — so it travels beside it in aside, never in reason,
+						// which is posted to the issue thread verbatim. Joined
+						// the same way leftWork.describe() joins its own
+						// optional clauses.
+						var asideParts []string
+						if w := left.where(); w != "" {
+							asideParts = append(asideParts, w)
+						}
+						if refusedCmd != "" {
+							asideParts = append(asideParts, "the refused command was: "+clip(refusedCmd, 200))
+						}
+						return parked(0, parkAside(category, strings.Join(asideParts, " — "), "%s", reason))
+					}
+					if rep.permissionRefused {
+						// Resuming replays the identical session against the
+						// identical allowlist, so it hits the same wall again —
+						// only the operator can grant the tool, so park straight
+						// away rather than spending the clean-exit resume budget
+						// finding that out the slow way.
+						return finishPark(parkPermission, permissionParkReason, rep.permissionRefusedDetail)
+					}
+					// Which bound stopped a resume that was otherwise warranted,
+					// so the park says that rather than the generic sentence
+					// about producing nothing — the run produced plenty. The
+					// category follows the bound for the same reason: filing a
+					// cap or an exhausted resume budget under "produced
+					// nothing" would point the report's ranking at the skill
+					// when the lever is the operator's own flag, and the crash
+					// arm above files those two identical causes correctly.
+					bound, boundWhy := "", parkNothing
+					if left.salvageable() {
+						switch over := overBudget(cfg, *tally); {
+						case over != "":
+							// As in the crash arm: the gate at the top of the
+							// loop would refuse this dispatch anyway, and a log
+							// promising a resume it never makes is a worse
+							// diagnosis than the park it is really doing.
+							bound, boundWhy = over, parkBudget
+						case cleanResumes >= cleanExitResumeCeiling:
+							bound, boundWhy = fmt.Sprintf("it has been resumed %s after ending a turn "+
+								"without opening a PR and has still not opened one, which needs a human",
+								plural(cleanResumes, "time")), parkRetries
+						case resumes >= cfg.resumeCeiling:
+							// "retried" rather than "resumed", as in the crash arm
+							// and for the same reason: a dead session turns one of
+							// these into a fresh restart, and the count covers both.
+							bound, boundWhy = fmt.Sprintf("claude has been retried %s on this issue and "+
+								"still has not finished it, which needs a human",
+								plural(resumes, "time")), parkRetries
+						default:
+							resumes++
+							cleanResumes++
+							// Salvageable work on disk is itself the evidence
+							// progressed() is a proxy for — stronger, since it is
+							// what a human would check by hand. The same counter
+							// (resumes) the crash arm's ceiling message reads,
+							// so it has to carry the same signal.
+							everProgressed = true
+							resumeKind = reasonUnfinished
+							// No -retry-wait. A crash sleeps because a crash is
+							// often transient — an API drop, a rate limit, a host
+							// that woke mid-run — and this is not: the process
+							// ended because the model ended its turn, and waiting
+							// changes nothing about what the next attempt finds.
+							log.Printf("the run ended its turn without opening a PR but left work "+
+								"behind — resuming it to finish (%d/%d)", cleanResumes, cleanExitResumeCeiling)
+							continue
+						}
+					}
+					// What happened and why we stopped trying; finishPark appends
+					// what is there for the person picking it up. With nothing on
+					// disk that extra clause is empty. No longer claims the run
+					// asked nothing — only a question flagged through the proper
+					// channel is ruled out by the time this runs, and the
+					// permission case above is proof that prose the model never
+					// flagged can still be one.
+					reason, category := "the run completed without opening a PR", boundWhy
+					if rep.permissionAsked {
+						// An earlier turn asked for a tool this run was not
+						// granted (the result text did not, or permissionRefused
+						// above would have parked without resuming). Whether that
+						// ask is why nothing shipped or a detour it recovered
+						// from, it is the first thing for an operator to rule
+						// out — and the generic sentence sends them to the shift
+						// log to learn it was even asked. Naming it here changes
+						// neither that we park nor that a resume was tried first:
+						// control reaches this line only once resuming is done.
+						//
+						// The category still follows a bound when one stopped the
+						// resume: a cap or an exhausted resume budget is a
+						// parkBudget/parkRetries in the report whether or not the
+						// run also asked for a tool, for the same reason the crash
+						// arm files those causes that way — otherwise clearing
+						// needs-human after -add-tools just burns back into the
+						// same ceiling.
+						reason = permissionParkReason
+						if bound == "" {
+							category = parkPermission
+						}
+					}
+					if bound != "" {
+						reason += "; " + bound
+					}
+					return finishPark(category, reason, "")
+				}
+			}
+			record(pr.Number, outcomeOpenedPR)
+			fruitless, resumeKind = 0, ""
+		}
+
+		switch pr.State {
+		case "OPEN":
+			log.Printf("PR #%d open — waiting for merge (%s)", pr.Number, pr.URL)
+			state, err := supervisePR(ctx, cfg, issue, pr.Number, tally)
+			if err != nil {
+				if ctx.Err() == nil { // not Ctrl+C: remediation ran out of attempts
+					return parked(pr.Number, err)
+				}
+				return err
+			}
+			pr.State = state
+			fallthrough
+		case "MERGED", "CLOSED":
+			if pr.State == "MERGED" {
+				narrate(sevSuccess, "PR #%d merged — cleaning up and advancing", pr.Number)
+				cleanupWorktree(ctx, cfg, issue)
+				// The merge just made the local default branch stale. The next issue
+				// would sync anyway; doing it here too is what leaves the operator a
+				// current checkout when this was the last issue in the backlog.
+				syncDefaultBranch(ctx, cfg)
+				terminal(pr.Number, issueMerged, "")
+				postSummary(ctx, cfg, pr.Number, *tally)
+				return ensureIssueClosed(ctx, cfg, issue, pr.Number)
+			}
+			terminal(pr.Number, issueClosed, "")
+			return park(parkPRClosed,
+				"PR #%d was closed without merging, which is a decision only a human can make",
+				pr.Number)
+		default:
+			return parked(pr.Number,
+				park(parkPRState, "PR #%d is in the unexpected state %q", pr.Number, pr.State))
+		}
+	}
+}
