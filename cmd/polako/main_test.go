@@ -2995,6 +2995,7 @@ func TestVersionSkewGateRefusesOnlyWhenTheSkillIsBehind(t *testing.T) {
 		skill          string
 		binary, plugin string
 		id             string
+		ignoreSkew     bool
 		refused        bool
 	}{
 		{name: "matched release", binary: "0.4.0", plugin: "0.4.0"},
@@ -3007,13 +3008,17 @@ func TestVersionSkewGateRefusesOnlyWhenTheSkillIsBehind(t *testing.T) {
 		{name: "no plugin installed", binary: "0.4.0", plugin: ""},
 		{name: "another plugin's skill", skill: "my-fork:implement-issue", binary: "0.4.0", plugin: "0.3.0"},
 		{name: "hand-installed skill", skill: skillDir, binary: "0.4.0", plugin: "0.3.0"},
+		// The override: the same "-ignore-skew consented to it" shape
+		// -ungated has with queueGate, resolved inside the gate itself rather
+		// than left for the call site to reconstruct.
+		{name: "behind, but -ignore-skew consented to it", binary: "0.4.1", plugin: "0.4.0", ignoreSkew: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			skill := tc.skill
 			if skill == "" {
 				skill = defaultSkill
 			}
-			err := versionSkewGate(tc.binary, config{skill: skill, pluginVersion: tc.plugin, pluginID: tc.id})
+			err := versionSkewGate(tc.binary, config{skill: skill, pluginVersion: tc.plugin, pluginID: tc.id, ignoreSkew: tc.ignoreSkew})
 			if tc.refused && err == nil {
 				t.Fatalf("gate let a behind-the-binary skill (%s behind %s) through", tc.plugin, tc.binary)
 			}
@@ -3029,19 +3034,6 @@ func TestVersionSkewGateRefusesOnlyWhenTheSkillIsBehind(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// The gate itself never reads cfg.ignoreSkew — preflight is what decides
-// whether the gate's error refuses the run, gets logged as a dry-run note, or
-// gets logged as an operator's override, the same split queueGate has with
-// cfg.ungated. A gate that silenced itself on the flag would leave preflight
-// unable to tell "nothing was wrong" from "something was wrong and ignored",
-// which is exactly the distinction the three-way switch in preflight needs.
-func TestVersionSkewGateIgnoresCfgIgnoreSkew(t *testing.T) {
-	cfg := config{skill: defaultSkill, pluginVersion: "0.3.0", ignoreSkew: true}
-	if err := versionSkewGate("0.4.0", cfg); err == nil {
-		t.Fatal("versionSkewGate must keep reporting the skew regardless of cfg.ignoreSkew — the call site decides what to do with it")
 	}
 }
 

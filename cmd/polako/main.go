@@ -322,20 +322,23 @@ func preflight(ctx context.Context, cfg *config) error {
 	}
 	log.Printf("%s — running /%s per issue, polling every %s", cfg.repo, cfg.skill, cfg.poll)
 	if err := versionSkewGate(polakoVersion(), *cfg); err != nil {
-		switch {
-		case cfg.ignoreSkew:
-			// Said out loud, the same shape -ungated gives queueGate: the
-			// operator is overruling a gate that would otherwise have stopped
-			// the shift, not merely triggering an informational line.
-			log.Printf("-ignore-skew: proceeding anyway — %v", err)
-		case cfg.dryRun:
-			log.Printf("note: a real run would refuse to start here — %v", err)
-		default:
+		if !cfg.dryRun {
 			return err
 		}
+		log.Printf("note: a real run would refuse to start here — %v", err)
 	} else {
-		// Only the "behind" case above refuses; a newer or ambiguous mismatch
-		// is still worth a line, same as before this gate existed.
+		if self, plugin, behind, ok := skewComparison(polakoVersion(), *cfg); cfg.ignoreSkew && ok && behind {
+			// Said out loud, the same shape -ungated gets on a public repo:
+			// the gate itself already let this through (it reads
+			// cfg.ignoreSkew, same as queueGate reads cfg.ungated), so this
+			// is the operator's own line recording that an override actually
+			// fired, not silent normal operation.
+			log.Printf("-ignore-skew: the installed %s plugin (%s) is behind this binary (%s) — running anyway",
+				pluginName, plugin, self)
+		}
+		// Only the "behind" case above ever refuses; a newer or ambiguous
+		// mismatch — or a "behind" one -ignore-skew just let through — is
+		// still worth a line, same as before this gate existed.
 		warnOnVersionSkew(polakoVersion(), *cfg)
 	}
 	settingsBlock(preflightPairs(*cfg, logPath))
@@ -667,13 +670,14 @@ func skewRemedy(cfg config) string {
 // #239 is what that direction costs in practice: a shift ran a plugin three
 // releases stale and paid for the pre-#225 review gate on every issue, with
 // neither #216's resume point nor #217's polling floor, so the branch-name
-// contract alone understates the risk. cfg.ignoreSkew is deliberately not
-// read here — the gate always reports what it found, and preflight is what
-// decides whether that is a refusal, a dry-run note, or an operator's
-// override said out loud, the same split queueGate has with cfg.ungated.
+// contract alone understates the risk. cfg.ignoreSkew is the operator
+// overruling this, exactly the shape queueGate already has with
+// cfg.ungated: the override is a parameter the gate itself resolves, not a
+// second thing the call site has to reconstruct — preflight only adds its
+// own "said out loud" line on top when the override actually fired.
 func versionSkewGate(binary string, cfg config) error {
 	self, plugin, behind, ok := skewComparison(binary, cfg)
-	if !ok || !behind {
+	if !ok || !behind || cfg.ignoreSkew {
 		return nil
 	}
 	return fmt.Errorf("the installed %s plugin (%s) is behind this binary (%s) — they are meant to ship "+
