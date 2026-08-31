@@ -8,7 +8,7 @@ turns a vision document into proposals behind the `proposed` gate. A third,
 `review-health`, fills that same backlog from the codebase itself: pointed at
 any repository it measures that repo's shape and files the outliers as
 `proposed` issues — the whole-repo pass that diff-scoped review cannot do.
-Neither planning skill has a supervisor verb yet.
+Both have a supervisor verb: `plan` and `health`.
 
 ## Invariants
 
@@ -77,13 +77,13 @@ in the PR body rather than doing it quietly.
   is what enforces that — the gate must not depend on a model remembering. The
   `-label` gate label is applied by humans alone, and exclusion beats inclusion:
   an issue carrying both stays out. `plan-backlog` and `review-health` are the
-  skills that apply it today; the supervisor's enforcing label pass arrives with
-  the `plan` verb.
-- **A plan run creates issues and does nothing else.** No commits, no pushes,
-  no PRs, no edits to threads that already exist — an edit that can add the
-  `proposed` label can strip one, which is self-approval. The whole write
-  surface is `gh issue create` plus a scratch body file it deletes, and the
-  blast radius of a fully subverted plan run is spam sitting behind a label.
+  skills that apply it today; the supervisor's enforcing label pass — shared
+  code, `labelpass.go` — runs behind both the `plan` and `health` verbs.
+- **A plan or health run creates issues and does nothing else.** No commits,
+  no pushes, no PRs, no edits to threads that already exist — an edit that can
+  add the `proposed` label can strip one, which is self-approval. The whole
+  write surface is `gh issue create` plus a scratch body file it deletes, and
+  the blast radius of a fully subverted run is spam sitting behind a label.
 - **An issue with sub-issues is a container.** It is never worked, whatever its
   labels — so a parent made by hand is protected too. That detection is
   structural rather than labelled on purpose: a label says what something is
