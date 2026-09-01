@@ -59,14 +59,14 @@ in the PR body rather than doing it quietly.
   argue for out loud, not slip in.
 - **Restart safety.** If a PR already exists for an issue's branch, never
   re-run the skill for that issue — go straight to waiting on the PR.
-- **`needs-human` is orchestration state.** It's the only durable trace of a
+- **The `needs-human` label is orchestration state.** It's the only durable trace of a
   parked issue; the queue excludes it. A park whose label write fails is
   reported, not swallowed — otherwise the next drain just works that issue
   again. One unfinishable issue parks; it never ends the session, since every
   later issue is still workable. Fatal is reserved for conditions nothing can
   succeed at: a bad `-dir`, a `gh` that can't answer, a `-skill` this install
   lacks, a token the API refuses.
-- **`proposed` is orchestration state**, intake's twin of `needs-human`: it
+- **The `proposed` label is orchestration state**, intake's twin of `needs-human`: it
   marks an issue a machine proposed and nobody approved yet, the queue
   excludes it, and only a human removes it. Whatever creates issues applies it
   to everything it creates, and the supervisor enforces that too — the gate
