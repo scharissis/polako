@@ -69,6 +69,16 @@ behind, and findings you decided on but never created leave no trace at all.
 So anything whose result you need is waited for inside this turn, however long
 it takes. Never end a turn intending to resume.
 
+## House style
+This skill runs in repos where polako's CLAUDE.md is not loaded, so its writing
+rule is copied here. Everything you write for a human to read — an issue body,
+an epic body — is terse, plain, informal English. Short sentences, plain words,
+active voice, no rhetorical flourish. Write it the way you would a code-review
+comment, not a memo. A child issue fits one screen; an epic body may run
+longer, because it is the design record for its children, not a screen-bound
+proposal itself. Phase 5's per-section budgets are this rule made specific;
+where they are silent, this is still the rule.
+
 ## Phase 0 — Context and posture (every run, before anything else)
 
 1. Resolve $repo and confirm it is a git checkout. If it is empty, use the
@@ -230,13 +240,14 @@ easily as set one, which is the same reason this run never touches a thread it
 did not just open. Delete `ISSUE_BODY.md` when you are done; it is a scratch
 file and never belongs in a commit.
 
-Every body, in this order:
+Every body, in this order — a child issue fits one screen; an epic body may
+run longer, because it is the design record for its children:
 
-    ## Summary
-    ## Why now              — the measurement or accretion this serves
-    ## Acceptance criteria
-    ## Pointers             — files, units, measurements, prior art
-    ## Out of scope
+    ## Summary — what this proposes and why, 2–4 sentences
+    ## Why now — the measurement or accretion this serves, one to three sentences
+    ## Acceptance criteria — no more than five bullets, each one a checkable outcome
+    ## Pointers — files, units, measurements, prior art, a line each
+    ## Out of scope — a sentence or two per item, omit the section if there is nothing to exclude
 
     Depends on: #124, #126 — the split of stats.go, and the new records.go.
     Estimate: M — likely 1–2 runs

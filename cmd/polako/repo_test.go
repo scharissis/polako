@@ -403,6 +403,70 @@ func TestPlanSkillEstimateLineKeepsItsShape(t *testing.T) {
 	}
 }
 
+// issue #273: a plan run writes in another repo's voice unless told
+// otherwise, because CLAUDE.md's house-style rule is not loaded there. Mirrors
+// TestSkillCarriesTheHouseStyle, the implement-issue copy #272 added — same
+// markers, adapted for a skill that writes issue bodies rather than PR bodies
+// and thread questions.
+func TestPlanSkillCarriesTheHouseStyle(t *testing.T) {
+	skill := planSkill(t)
+
+	flat := strings.Join(strings.Fields(skill), " ")
+	for _, marker := range []string{
+		"CLAUDE.md is not loaded",
+		"terse, plain, informal English",
+		"active voice, no rhetorical flourish",
+		"fits one screen",
+	} {
+		if !strings.Contains(flat, marker) {
+			t.Errorf("SKILL.md's house-style copy no longer says %q — the skill runs where"+
+				" polako's CLAUDE.md is not loaded, so this is the only copy of the rule", marker)
+		}
+	}
+}
+
+// issue #273: the proposed-issue body template named five sections and bounded
+// none of them, so a curator deciding whether to lift the `proposed` label had
+// to read however much the run felt like writing. Mirrors
+// TestPRBodySectionsAllHaveBudgets. Every section now carries a length budget
+// on or under its heading; drop one and that section is open-ended again.
+func TestPlanSkillBodySectionsAllHaveBudgets(t *testing.T) {
+	skill := planSkill(t)
+
+	start := strings.Index(skill, "## Summary — what this proposes and why")
+	if start < 0 {
+		t.Fatal("SKILL.md's issue body template no longer starts with `## Summary`")
+	}
+	// The footer line is the anchor, not `Depends on:` — that line's issue
+	// numbers also appear earlier as a worked example in Phase 2's prose, so
+	// anchoring there would break on an editor changing the example alone.
+	n := strings.Index(skill[start:], "Proposed by polako plan from docs/VISION.md @ 1a2b3c4")
+	if n < 0 {
+		t.Fatal("SKILL.md's issue body template no longer ends with the `Proposed by polako plan` footer")
+	}
+	template := skill[start : start+n]
+
+	sections := []string{"## Summary", "## Why now", "## Acceptance criteria", "## Pointers", "## Out of scope"}
+	budget := regexp.MustCompile(`sentence|line each|one to|screen|paragraph|at most|no more than`)
+	for i, h := range sections {
+		from := strings.Index(template, h)
+		if from < 0 {
+			t.Errorf("the issue body template no longer names the %q section", h)
+			continue
+		}
+		to := len(template)
+		if i+1 < len(sections) {
+			if n := strings.Index(template[from:], sections[i+1]); n >= 0 {
+				to = from + n
+			}
+		}
+		if !budget.MatchString(template[from:to]) {
+			t.Errorf("the %q section of the issue body template carries no length budget:\n\t%s",
+				h, strings.TrimSpace(template[from:to]))
+		}
+	}
+}
+
 // The one guarantee that makes proposals safe to file unattended: this run
 // creates labelled issues and does nothing else. No commits, no pushes, no pull
 // requests, and no touching threads that already exist — an edit could strip a

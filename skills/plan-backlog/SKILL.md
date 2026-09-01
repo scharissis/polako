@@ -51,6 +51,16 @@ So anything whose result you need is waited for inside this turn, however long
 it takes. Never end a turn intending to resume. Stopping to ask for the missing
 document is a different thing: that is a result, not a pause.
 
+## House style
+This skill runs in repos where polako's CLAUDE.md is not loaded, so its writing
+rule is copied here. Everything you write for a human to read — an issue body,
+an epic body — is terse, plain, informal English. Short sentences, plain words,
+active voice, no rhetorical flourish. Write it the way you would a code-review
+comment, not a memo. A child issue fits one screen; an epic body may run
+longer, because it is the design record for its children, not a screen-bound
+proposal itself. Phase 4's per-section budgets are this rule made specific;
+where they are silent, this is still the rule.
+
 ## Phase 0 — Context and posture (every run, before anything else)
 1. Read $vision, resolved inside the repository.
 2. Read the backlog, **including proposals already filed**:
@@ -175,13 +185,14 @@ the same reason a plan run never edits a thread it did not just open. Delete
 `ISSUE_BODY.md` when you are done; it is a scratch file and never belongs in a
 commit.
 
-Every body, in this order:
+Every body, in this order — a child issue fits one screen; an epic body may
+run longer, because it is the design record for its children:
 
-    ## Summary
-    ## Why now              — the line(s) of the document this serves
-    ## Acceptance criteria
-    ## Pointers             — files, functions, prior art
-    ## Out of scope
+    ## Summary — what this proposes and why, 2–4 sentences
+    ## Why now — the line(s) of the document this serves, one to three sentences
+    ## Acceptance criteria — no more than five bullets, each one a checkable outcome
+    ## Pointers — files, functions, prior art, a line each
+    ## Out of scope — a sentence or two per item, omit the section if there is nothing to exclude
 
     Depends on: #168, #170 — the completion count, and the once-ever comment gate.
     Estimate: M — likely 1–2 runs
