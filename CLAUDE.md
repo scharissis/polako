@@ -165,7 +165,7 @@ in the PR body rather than doing it quietly.
 - Conventional-commit subjects: `fix:`, `docs:`, `feat:`, `test:`. A version
   bump is its own `chore(release): X.Y.Z` commit touching only `plugin.json`
   and `CHANGELOG.md` — folded into a feature commit, it would leave no commit
-  meaning "this is X.Y.Z."
+  meaning "this is X.Y.Z".
 
 ## Checking your work
 
