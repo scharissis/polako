@@ -907,6 +907,91 @@ func TestPRBodyKeepsItsSectionsAndClosingLine(t *testing.T) {
 	}
 }
 
+// issue #272: the skill writes two things a human reads before acting — the PR
+// body at the merge gate, and a blocked run's question on the thread — and the
+// house style for both is stated once in polako's CLAUDE.md, which is not
+// loaded in the repos this skill runs in. So the skill carries its own copy,
+// the same requirement CLAUDE.md now puts on every shipped skill. Lose it and
+// the next edit drifts the tone back toward the memo voice with nothing to
+// catch it.
+func TestSkillCarriesTheHouseStyle(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	flat := strings.Join(strings.Fields(skill), " ")
+	for _, marker := range []string{
+		"CLAUDE.md is not loaded",
+		"terse, plain, informal English",
+		"active voice, no rhetorical flourish",
+		"reads in a minute",
+	} {
+		if !strings.Contains(flat, marker) {
+			t.Errorf("SKILL.md's house-style copy no longer says %q — the skill runs where"+
+				" polako's CLAUDE.md is not loaded, so this is the only copy of the rule", marker)
+		}
+	}
+}
+
+// issue #272: the PR body spec named five sections but bounded only ## Summary
+// ("2–4 sentences"). The other four were unbounded, so the reviewer at the
+// merge gate read whatever the run felt like writing. Every section now
+// carries a length budget on or under its heading; drop one and that section
+// is open-ended again.
+func TestPRBodySectionsAllHaveBudgets(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	start := strings.Index(skill, "## Summary — what changed and why")
+	end := strings.Index(skill, "End the body with `Closes #$issue`")
+	if start < 0 || end < 0 || end < start {
+		t.Fatal("SKILL.md's PR body spec no longer runs from `## Summary` to the `Closes #$issue` line")
+	}
+	spec := skill[start:end]
+
+	// A budget is a length word: a sentence/line count, "one screen", "a
+	// minute". Each section needs one before the next heading starts.
+	sections := []string{"## Summary", "## Evidence", "## Design decisions", "## Scope", "## Verification"}
+	budget := regexp.MustCompile(`sentence|line each|one to|screen|minute|paragraph|at most|no more than`)
+	for i, h := range sections {
+		from := strings.Index(spec, h)
+		if from < 0 {
+			t.Errorf("the PR body spec no longer names the %q section", h)
+			continue
+		}
+		to := len(spec)
+		if i+1 < len(sections) {
+			if n := strings.Index(spec[from:], sections[i+1]); n >= 0 {
+				to = from + n
+			}
+		}
+		if !budget.MatchString(spec[from:to]) {
+			t.Errorf("the %q section of the PR body spec carries no length budget — it was"+
+				" unbounded before issue #272 and the reviewer read whatever the run wrote:\n\t%s",
+				h, strings.TrimSpace(spec[from:to]))
+		}
+	}
+}
+
+// issue #272: the question path said "terse, simple English" and stopped
+// there. With no shape a blocked run could post several paragraphs when the
+// human needs three things and a cap: what is blocked, what the run needs to
+// know, and what each answer would change — capped at one screen. This pins
+// that shape in the "Asking a question" section.
+func TestQuestionPathHasAShape(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	ask := strings.Index(skill, "## Asking a question")
+	phase0 := strings.Index(skill, "## Phase 0")
+	if ask < 0 || phase0 < 0 || phase0 < ask {
+		t.Fatal("SKILL.md no longer has an `## Asking a question` section before Phase 0")
+	}
+	flat := strings.Join(strings.Fields(skill[ask:phase0]), " ")
+	for _, marker := range []string{"what is blocked", "what you need to know", "what each answer would change", "one screen"} {
+		if !strings.Contains(flat, marker) {
+			t.Errorf("the question path no longer tells a blocked run to shape its question"+
+				" around %q — without the shape it posts several paragraphs for a one-line answer", marker)
+		}
+	}
+}
+
 // The release pipeline is workflows coupled by filename: cut-release.yml
 // watches plugin.json for the version changing and dispatches release.yml on
 // the tag it pushes; release.yml dispatches smoke.yml and ci.yml;
