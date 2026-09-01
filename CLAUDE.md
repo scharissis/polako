@@ -215,5 +215,6 @@ its body, "say what was verified" in stricter form. A wobbling case gets run
 three times (`--runs 3` on the CLI, three `run.sh` invocations by hand): a
 flaky grader is worse than no grader, since it teaches the habit of ignoring
 red. Skill wording is a tagged change too, so the next batch runs under a
-fresh `-run-tag` and earns a row in `plans/experiments.md` — the README's
-"Improving polako" is the full ritual.
+fresh `-run-tag` and earns a row in `plans/experiments.md` — see
+`plans/continuous-improvement.md` for the full ritual, linked from the
+README's "Improving polako" section.

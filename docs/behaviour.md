@@ -382,3 +382,19 @@ Neither one is on a clock: an unanswered question or an unmerged PR simply
 waits. Both wait out of the queue rather than in it, as a parked issue does, so
 none of them holds anything else up.
 
+## Questions
+
+**Can I use the skill without the binary?** Yes. Run
+`/polako:implement-issue 48` in Claude Code and it takes that one issue to a
+PR. The binary exists to run it over a whole backlog while you are asleep.
+
+**Does it work with my language?** Yes — `-dir` points anywhere. The one
+thing worth tuning per project is the tool allowlist, so a build command it
+needs never stops on a permission prompt.
+
+**How is this different from a hosted coding agent?** Those run on someone
+else's machine and keep their own state. polako runs on yours, under the
+Claude Code login you already have, and keeps every piece of orchestration
+state in GitHub itself. There is no database and no dashboard: kill it
+whenever, restart whenever, and read the whole picture off the issue tracker.
+

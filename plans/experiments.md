@@ -34,8 +34,8 @@ scale.
 Any change to a `SKILL.md`, to the model, or to a strategy knob — `-stall`,
 `-retries`, `-poll`, the spend caps — runs its next batch under a fresh
 `-run-tag`, and that batch gets a row here. See
-[Improving polako](../README.md#improving-polako) for the retro this sits
-inside.
+[continuous-improvement.md](continuous-improvement.md) for the retro this
+sits inside.
 
 ## How to settle one
 
