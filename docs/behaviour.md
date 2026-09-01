@@ -78,7 +78,8 @@ opening a PR. The bar is narrow: only a merged PR or commit this run itself
 read, or a human's own reply saying to close it — never the issue's own
 text claiming the work is done, exactly the self-serving evidence a run
 ducking its own work would produce. Doubt still goes to a park or a
-question. It counts as finished in the summary:
+question. The evidence is on the issue thread, in the comment the run
+leaves before closing, and it counts as finished in the summary:
 
 ```
 summary: 2 issues merged, 0 issues parked, 1 issue closed with no change needed, $12.10 spent, 4h02m of wall clock
