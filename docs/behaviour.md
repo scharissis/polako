@@ -304,13 +304,15 @@ makes the changes, gets the suite passing, and pushes, then waits again: a
 re-review is yours to give, and the run may not dismiss, resolve, or merge
 it.
 
-Whether a review's answered is read off GitHub, not remembered: a review
-counts as outstanding until the branch carries a commit newer than it. A
-rebase gives every commit a fresh date, so it reads as an answer, and a
-conflicting PR with an open review comes back to you for a fresh look. The
-same treadmill rule applies: a run that finishes without moving the branch
-parks rather than re-reading the same comments every poll. This works with
-no branch-protection review requirement too, since it reads the reviews
+Whether a review's answered is read off GitHub, not remembered, so a
+restarted shift reaches the same conclusion: a review counts as outstanding
+until the branch carries a commit newer than it. A rebase gives every
+commit a fresh date, so it reads as an answer — deliberate, since the
+review then points at a diff that no longer exists — and a conflicting PR
+with an open review comes back to you for a fresh look. The same treadmill
+rule applies: a run that finishes without moving the branch parks rather
+than re-reading the same comments every poll. This works with no
+branch-protection review requirement too, since it reads the reviews
 themselves rather than GitHub's summary `reviewDecision`, empty in that
 case.
 
