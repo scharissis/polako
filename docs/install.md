@@ -1,12 +1,13 @@
 # Installing polako
 
 Both halves install separately: the skill as a Claude Code plugin, the binary
-with `go install` or a prebuilt release. The [README](../README.md#install) has
-the short version of the first two.
+with `go install` or a prebuilt release. The binary is one install for all
+three verbs — `work`, `plan`, `health` — nothing here repeats per verb. The
+[README](../README.md#install) has the short version of the first two.
 
 ## The skill, as a plugin (recommended)
 
-The repo doubles as its own marketplace, so there is no clone step. Register
+The repo doubles as its own marketplace, so there's no clone step. Register
 the marketplace once:
 
 ```bash
@@ -19,12 +20,12 @@ Then install the plugin from it:
 claude plugin install polako@scharissis
 ```
 
-`polako` is the plugin, `scharissis` is the marketplace it came from —
-the name declared in [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json),
+`polako` is the plugin, `scharissis` the marketplace it came from — the name
+declared in [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json),
 not the GitHub username, though here they happen to match. The plugin ships
-three skills — `implement-issue`, `plan-backlog` and `review-health` — and costs
-a few dozen tokens of always-on context; a skill body is only loaded when that
-skill fires.
+three skills — `implement-issue`, `plan-backlog` and `review-health` — for a
+few dozen tokens of always-on context; a skill's body loads only when it
+fires.
 
 Restart Claude Code, and `/polako:implement-issue 48`,
 `/polako:plan-backlog docs/VISION.md` and `/polako:review-health .` are
@@ -59,9 +60,9 @@ claude plugin uninstall polako && claude plugin marketplace remove scharissis
 
 ## The skill, by hand
 
-If you would rather not involve the plugin system, copy the skill directories
-in. They behave identically; they just will not update themselves. Take all
-three, or only `implement-issue` if you do not want the planning half.
+If you'd rather not involve the plugin system, copy the skill directories in.
+They behave identically; they just won't update themselves. Take all three,
+or only `implement-issue` if you don't want the planning half.
 
 ```bash
 cp -r skills/implement-issue skills/plan-backlog skills/review-health ~/.claude/skills/
@@ -72,7 +73,7 @@ Copy-Item -Recurse skills\implement-issue,skills\plan-backlog,skills\review-heal
 ```
 
 A skill installed this way is invoked bare, with no plugin prefix — so
-`/plan-backlog`, not `/polako:plan-backlog`, and the supervisor needs telling:
+`/plan-backlog`, not `/polako:plan-backlog` — and the supervisor needs telling:
 
 ```bash
 polako work -skill implement-issue
@@ -94,8 +95,8 @@ go build -o polako ./cmd/polako
 ```
 
 Prebuilt binaries for Linux, macOS and Windows are attached to each tagged
-release, and are the easiest option on a machine without Go. They are stamped
-with their tag, so `polako -version` tells you what you are running.
+release, and are the easiest option on a machine without Go. They're stamped
+with their tag, so `polako -version` tells you what you're running.
 
 ## Getting updates
 
@@ -110,7 +111,7 @@ claude plugin marketplace update scharissis && claude plugin update polako@schar
 not found, even installed.)
 
 Then `/reload-plugins`, or restart. **Upgrade the binary in the same breath** —
-the two halves are one release, and mixing them is not a supported combination:
+the two halves are one release, and mixing them isn't a supported combination:
 
 ```bash
 go install github.com/scharissis/polako/cmd/polako@latest
@@ -132,8 +133,8 @@ the same way `-ungated` overrules the public-repo label gate.
 To let it happen automatically instead: `/plugin` → **Marketplaces** →
 `scharissis` → **Enable auto-update**. Claude Code then checks after a session
 starts, with a random delay of up to ten minutes, and the new version loads on
-`/reload-plugins` or at the next launch — never mid-session. The binary is not
-covered; that is still yours to run.
+`/reload-plugins` or at the next launch — never mid-session. The binary isn't
+covered; that's still yours to run.
 
 To hold a machine at one release, pin the marketplace itself and it stops
 moving — but mind *what* you pin it to. **A release tag is the wrong target:**
@@ -165,7 +166,7 @@ default branch, which is the opposite of holding still.
 
 The `publish-X.Y.Z` branch has the same content, but it may be deleted once the
 PR merges, so the SHA is the handle that keeps working. To stop holding, remove
-the marketplace and add it back bare — a pinned marketplace does not move when
+the marketplace and add it back bare — a pinned marketplace doesn't move when
 the next release ships, and says nothing about it.
 
 
@@ -180,7 +181,7 @@ uses (`gh issue view`/`comment`, `gh pr create`, plus read-only `gh pr
 view`/`list`/`diff`), the tools the skill itself needs (`Read`, `Write`,
 `Edit`, `Glob`, `Grep`, `Skill`, `TodoWrite`), and the usual entry points for
 npm/pnpm/yarn, Go, Cargo, Make, Python/uv/pytest, dotnet, Maven and Gradle.
-One more entry is added per run and is not in `-tools`: the run may add and
+One more entry is added per run and isn't in `-tools`: the run may add and
 remove labels on the single issue it was dispatched for, which is how it raises
 `awaiting-answer`. For anything else, widen it rather than replacing it:
 
@@ -190,7 +191,6 @@ polako work -add-tools "Bash(bazel:*),Bash(just:*)"
 
 Two other knobs matter when moving between repos:
 
-- `-branch-prefix` must match what the skill names its branches, since that is
+- `-branch-prefix` must match what the skill names its branches, since that's
   how a PR is matched back to its issue.
 - `-label` is the cleanest way to opt individual issues in on a busy repo.
-
