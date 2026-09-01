@@ -33,13 +33,15 @@ in the PR body rather than doing it quietly.
   line to its no-history form. Records hold numbers, identifiers and
   operator-chosen labels only — never issue, comment or PR text. A read from
   these files anywhere else turns telemetry back into state.
+  No run-data record leaves the machine except by explicit request:
+  `-post-summary`, default off, comments those same numbers on the
+  operator's own merged PR.
   The per-shift log (`ui.go`, under `~/.polako/logs`) is the second write-only
   artifact — the one that *does* hold transcript text, the full claude event
   stream, which is why it gets the recorder's 0700/0600 permissions. Same
   rules apply: nothing reads it back, deleting it mid-drain changes nothing,
-  it never leaves the machine.
-  Nothing here leaves the machine except by explicit request: `-post-summary`,
-  default off, comments these numbers on the operator's own merged PR.
+  it never leaves the machine, no exception — and a read from it anywhere in
+  the binary is the same design error as a read from the records.
 - **One thing leaves the machine, and it is named here.** `-post-summary`
   above. `-remote` was meant to be the second but isn't one today: no `claude`
   CLI registers headless runs with Remote Control — the current one takes
