@@ -214,6 +214,66 @@ func TestHealthSkillEstimateLineKeepsItsShape(t *testing.T) {
 	}
 }
 
+// Mirrors TestPlanSkillCarriesTheHouseStyle (issue #273): a health run writes
+// in another repo's voice unless told otherwise, because CLAUDE.md's
+// house-style rule is not loaded there.
+func TestHealthSkillCarriesTheHouseStyle(t *testing.T) {
+	skill := healthSkill(t)
+
+	flat := strings.Join(strings.Fields(skill), " ")
+	for _, marker := range []string{
+		"CLAUDE.md is not loaded",
+		"terse, plain, informal English",
+		"active voice, no rhetorical flourish",
+		"fits one screen",
+	} {
+		if !strings.Contains(flat, marker) {
+			t.Errorf("SKILL.md's house-style copy no longer says %q — the skill runs where"+
+				" polako's CLAUDE.md is not loaded, so this is the only copy of the rule", marker)
+		}
+	}
+}
+
+// Mirrors TestPlanSkillBodySectionsAllHaveBudgets (issue #273): the
+// proposed-issue body template named five sections and bounded none of them,
+// so a curator deciding whether to lift the `proposed` label had to read
+// however much the run felt like writing.
+func TestHealthSkillBodySectionsAllHaveBudgets(t *testing.T) {
+	skill := healthSkill(t)
+
+	start := strings.Index(skill, "## Summary — what this proposes and why")
+	end := -1
+	if start >= 0 {
+		if n := strings.Index(skill[start:], "Depends on: #124, #126"); n >= 0 {
+			end = start + n
+		}
+	}
+	if start < 0 || end < 0 {
+		t.Fatal("SKILL.md's issue body template no longer runs from `## Summary` to the `Depends on:` line")
+	}
+	template := skill[start:end]
+
+	sections := []string{"## Summary", "## Why now", "## Acceptance criteria", "## Pointers", "## Out of scope"}
+	budget := regexp.MustCompile(`sentence|line each|one to|screen|paragraph|at most|no more than`)
+	for i, h := range sections {
+		from := strings.Index(template, h)
+		if from < 0 {
+			t.Errorf("the issue body template no longer names the %q section", h)
+			continue
+		}
+		to := len(template)
+		if i+1 < len(sections) {
+			if n := strings.Index(template[from:], sections[i+1]); n >= 0 {
+				to = from + n
+			}
+		}
+		if !budget.MatchString(template[from:to]) {
+			t.Errorf("the %q section of the issue body template carries no length budget:\n\t%s",
+				h, strings.TrimSpace(template[from:to]))
+		}
+	}
+}
+
 // Mirrors TestPlanSkillDeclaresDependencyOrder (issue #178): a run that works
 // out the child dependency order must declare it, not throw it away as prose
 // naming children by ordinal. The contract is three lines: `--blocked-by` on
