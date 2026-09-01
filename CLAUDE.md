@@ -70,7 +70,8 @@ in the PR body rather than doing it quietly.
   marks an issue a machine proposed and nobody approved yet, the queue
   excludes it, and only a human removes it. Whatever creates issues applies it
   to everything it creates, and the supervisor enforces that too — the gate
-  can't depend on a model remembering. `-label` is applied by humans only, and
+  can't depend on a model remembering. The `-label` gate label is applied by
+  humans only, and
   exclusion beats inclusion: an issue carrying both labels stays out.
   `plan-backlog` and `review-health` apply `proposed` today; the shared
   enforcing pass (`labelpass.go`) runs behind both `plan` and `health`.
