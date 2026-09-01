@@ -156,9 +156,9 @@ in the PR body rather than doing it quietly.
 - Everything polako writes for a human — PR and issue bodies, thread questions,
   CLI output, errors, these docs — is terse, plain, informal English. Short
   sentences, plain words, active voice, no rhetorical flourish. Budget: a PR
-  body a reviewer reads in a minute, a proposed issue that fits one screen. The
-  shipped skills each carry their own copy of this rule, because they run in
-  other repos where this file is not loaded.
+  body a reviewer reads in a minute, a proposed issue that fits one screen. Each
+  shipped skill must carry its own copy of this rule, because it runs in other
+  repos where this file is not loaded.
 - Every flag is part of the interface, so every flag is documented under
   `docs/` — `work`'s and `status`'s in `docs/reference.md`, `stats`'s beside
   the report it describes in `docs/run-data.md`. A test enforces it. The README
