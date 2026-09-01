@@ -88,7 +88,7 @@ in the PR body rather than doing it quietly.
   saying so; reopening it is the human's call, one click. The machine isn't
   judging whether the work is done — the children did, each normally behind a
   merged PR — only that "every child closed" almost always means "the epic is
-  finished," and is wrong reversibly the rest of the time. A container a human
+  finished", which is wrong reversibly the rest of the time. A container a human
   has held (`needs-human`, or still `proposed`) is never auto-closed, and is
   named in the exit summary as theirs to close. None of this touches *nothing
   merges itself*: no PR is merged, opened or closed by it, and nothing is
