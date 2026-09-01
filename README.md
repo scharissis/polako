@@ -215,10 +215,7 @@ down, you'll get there — a good way to ship code, too: one pull request at a
 time is one you'll actually read. "Wouldn't ten agents be faster?" They'd
 open ten pull requests that all branched from a version of the code that
 stopped being true the moment the first one merged; polako does one, and the
-next starts from what you just merged. And unlike a hosted agent on someone
-else's machine, it runs on yours, under the login you already have, with
-every piece of state in GitHub — kill it whenever, restart whenever, read the
-whole picture off the issue tracker.
+next starts from what you just merged.
 
 ## What it costs
 
