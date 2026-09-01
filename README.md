@@ -16,15 +16,23 @@ anything itself.
 
 ![polako status printing the state of a backlog, then polako work -dry-run resolving the next issue and printing the exact claude invocation it would run](docs/demo.gif)
 
-There are two halves, and they ship as one release:
+## What it does
 
-- **The `/implement-issue` skill** takes one issue from research to a plan to a
-  pull request. You can use it on its own, in any Claude Code session. Its
-  companion `/plan-backlog` writes the issues in the first place, from a vision
-  document — see [Planning a backlog](#planning-a-backlog).
-- **The `polako` binary** supervises the whole queue. It runs the skill on the
-  next issue, watches the pull request, repairs it when CI goes red, and
-  advances when you merge. One stdlib-only Go binary, no dependencies.
+Two halves, one release: the **`/implement-issue` skill** takes one issue
+from research to a plan to a pull request, on its own or driven by the
+**`polako` binary**, which supervises the queue — runs the skill, watches the
+PR, repairs it when CI goes red, advances when you merge. Stdlib-only Go, no
+dependencies.
+
+Three verbs:
+
+- **`work`** — works the backlog to zero, one issue at a time, never merging.
+- **`plan`** — turns a vision document into a curated backlog of proposals.
+- **`health`** — reads the repository itself and files what looks off as
+  proposals.
+
+`plan` and `health` file everything behind a `proposed` label a human has to
+lift — see [Planning a backlog](#planning-a-backlog).
 
 ## How it works
 
@@ -47,18 +55,13 @@ wait for merge (-poll)               ← rebases if GitHub reports CONFLICTING,
 close the issue, remove the worktree, advance to the next
 ```
 
-Only one issue is ever in flight. polako moves on when the issue it is working
-on has merged, or when it has given up on it and left it for you. So every run
-starts from a branch that already contains the previous merge, and two runs
-cannot conflict with each other.
+That is `work`'s loop. `plan` and `health` are simpler: one `claude` run,
+filing proposals, then done — no PR, no polling.
 
-You have two jobs, both on GitHub. Answer a question when a run asks one on an
-issue thread, and merge the pull requests. Neither is on a clock. Nothing else
-needs you.
-
-[docs/behaviour.md](docs/behaviour.md) is the long version: what happens when a
-run crashes, when an issue cannot be finished, when a PR goes red, and when
-polako needs you.
+You have two jobs, both on GitHub: answer a question when a run asks one on an
+issue thread, and merge the pull requests. Neither is on a clock, and nothing
+else needs you — see [The rules it follows](#the-rules-it-follows) and
+[docs/behaviour.md](docs/behaviour.md) for the long version.
 
 ## Requirements
 
@@ -99,28 +102,27 @@ up for your team are all in [docs/install.md](docs/install.md).
 
 ## Try it
 
-Start by looking. `-dry-run` resolves the next issue and prints the command it
-would run, and does nothing else:
+Look first — `-dry-run` resolves the next issue and prints the command it
+would run, nothing else:
 
 ```bash
 polako work -dir ../my-project -dry-run
 ```
 
-Then work a single issue and stop:
+Work one issue and stop:
 
 ```bash
 polako work -dir ../my-project -once
 ```
 
-When you trust it, let it work the whole backlog and tell you when it needs
-you:
+Trust it, and let it work the whole backlog, telling you when it needs you:
 
 ```bash
 polako work -notify ~/bin/tell-me
 ```
 
-You can ask where things stand at any time, from any machine, including about a
-shift running somewhere else:
+Ask where things stand, from any machine, including about a shift running
+somewhere else:
 
 ```bash
 polako status -repo scharissis/polako
@@ -132,41 +134,48 @@ scharissis/polako
   awaiting you  1 issue — #9 (quiet 26h)
   parked        1 issue — #5, labelled needs-human
   proposed      2 issues — #27, #28, labelled proposed
-  containers    1 issue — #12 (2/5 closed)
   next          #14 — its branch already has PR #61, so it would wait on that rather than run the skill again
 
 open prs on issue branches
-  pr   branch    issue  mergeable  checks              review                       url
-  #61  issue-14  #14    mergeable  failing (test-mac)  clear                        https://github.com/scharissis/polako/pull/61
-  #58  issue-19  #19    mergeable  passing             answered, awaiting re-review  https://github.com/scharissis/polako/pull/58
+  pr   branch    issue  mergeable  checks   review  url
+  #61  issue-14  #14    mergeable  passing  clear   https://github.com/scharissis/polako/pull/61
 
-needs you: reply on #9; review and merge PR #58; decide what to do about #5 (drop needs-human to requeue); curate #27, #28 (drop proposed to queue them)
+needs you: reply on #9; review and merge PR #61; decide what to do about #5 (drop needs-human to requeue); curate #27, #28 (drop proposed to queue them)
 ```
 
-A shift ends by telling you what it did:
-
-```
-summary: 3 issues merged, 1 issue parked, $35.00 spent, 6h12m of wall clock
-  merged  #14 ($9.80), #15 ($12.40), #17 ($8.60)
-  parked  #16 ($4.20) — the run completed without opening a PR
-```
+A shift ends the same way — merged, parked and why, dollars spent — see
+[docs/behaviour.md](docs/behaviour.md) for a worked example.
 
 ## Planning a backlog
 
-Somebody still has to write the issues polako works. The `/plan-backlog` skill
-does the clerical half: point it at a vision or roadmap document and it reads
-that against the code as it stands, decomposes the gap into issues sized to one
-pull request each, groups anything cross-cutting under an epic whose body holds
-the design, and files the lot as **proposals**.
+Somebody still has to write the issues polako works. `plan` runs
+`/plan-backlog`: point it at a vision or roadmap document and it decomposes
+the gap into issues sized to one PR each, groups anything cross-cutting under
+an epic, and files the lot as **proposals**:
 
 ```
 /polako:plan-backlog docs/VISION.md
 ```
 
-A proposal is an ordinary issue carrying a `proposed` label, and that label is
-the point: `polako work` skips every issue that has one, so nothing a machine
-proposed can reach an unattended run until you have looked at it. Curation is
-ordinary GitHub triage, and there are three moves:
+`health` runs `/review-health` the same way, but reads the codebase itself
+instead of a document — file and function sizes, duplicated helpers,
+abstractions nothing uses — and proposes the outliers. Point it at any
+repository; it is not polako-specific:
+
+```
+/polako:review-health .
+```
+
+Both are documented alongside `work`'s own flags: [`plan`](docs/reference.md#planning-a-backlog-unattended-polako-plan),
+[`health`](docs/reference.md#auditing-repository-health-unattended-polako-health).
+
+Every proposal carries a `proposed` label, and that label is the point:
+`polako work` skips every issue that has one, so nothing a machine proposed
+can reach an unattended run until you have looked at it. Each proposal
+carries acceptance criteria, pointers into the code, what's out of scope, and
+a size (`Estimate: M`) — the model's judgement of the work's shape, not a
+price; what a run actually costs comes from your own history, via `polako
+stats`. Curation is ordinary GitHub triage, and there are three moves:
 
 - **Approve** — remove the `proposed` label. On a `-label`-gated repository, add
   the gate label in the same command:
@@ -177,38 +186,6 @@ ordinary GitHub triage, and there are three moves:
 
 `polako status` lists what is waiting on you, proposals included, so a forgotten
 batch surfaces rather than rots.
-
-Each proposal carries acceptance criteria, pointers into the code, what is out
-of scope, and a size — `Estimate: M — likely 1–2 runs`. The size is the model's
-judgement of the work's shape, not a price; what a run actually costs comes from
-your own history, via `polako stats`.
-
-This is also a `polako plan` verb — the unattended half, with caps, milestones,
-a much narrower tool allowlist, and a supervisor-side pass that enforces the
-`proposed` gate rather than trusting the model to apply it. It records one line
-of numbers per run like every other verb, and `-notify` fires a `proposed`
-event when a run leaves a backlog to curate. See
-[docs/reference.md](docs/reference.md#planning-a-backlog-unattended-polako-plan).
-
-A companion skill, `/review-health`, fills the same backlog from a different
-input: instead of a vision document it reads the codebase itself. Point it at
-any repository and it derives what "normal" looks like there — file and
-function sizes, duplicated helpers, abstractions nothing uses — and files the
-outliers as `proposed` issues, the same curation gate and the same sizing
-contract as `/plan-backlog`. Diff-scoped review cannot see accretion; this is
-the whole-repo pass that can. It measures the repo in front of it, so it is not
-polako-specific:
-
-```
-/polako:review-health .
-```
-
-This is also a `polako health` verb — the unattended half, run the same way
-`polako plan` runs `/plan-backlog`: capped, with the same supervisor-side pass
-that enforces the `proposed` gate. It records one line of numbers per run like
-every other verb, and `-notify` fires the same `proposed` event `polako plan`
-does when a run leaves a backlog to curate. See
-[docs/reference.md](docs/reference.md#auditing-repository-health-unattended-polako-health).
 
 ## The rules it follows
 
@@ -233,12 +210,12 @@ does when a run leaves a backlog to curate. See
 
 ## Why "polako"?
 
-In the Balkans, "polako!" is what you say to someone who's rushing. Slow down,
-you'll get there. It's more a way of living than a word.
-
-It turns out to be a good way to ship code, too. One pull request at a time is
-one you'll actually read. Ten at once and you skim, and the stuff you skim is
-the stuff that bites you later.
+In the Balkans, "polako!" is what you say to someone who's rushing. Slow
+down, you'll get there — a good way to ship code, too: one pull request at a
+time is one you'll actually read. "Wouldn't ten agents be faster?" They'd
+open ten pull requests that all branched from a version of the code that
+stopped being true the moment the first one merged; polako does one, and the
+next starts from what you just merged.
 
 ## What it costs
 
@@ -255,102 +232,19 @@ project, eight issues finished:
 | Time from PR opened to merged | 10m median, because someone was watching |
 
 Your numbers will differ, and the ones that move them most are how big your
-issues are and how often runs crash. A crashed run is resumed, and the resume
-pays to read the context again, so a rough night costs noticeably more per
-merged PR than a smooth one.
-
-Dollars are the Claude CLI's API-equivalent pricing. On an API key that is real
-money; on a subscription plan it is notional. Run `polako stats` for your own
-figures, and set `-max-cost`, `-max-issue-time` or `-max-session-cost` if you
-want a ceiling. [docs/run-data.md](docs/run-data.md) has the whole report.
+issues are and how often runs crash — a crashed run's resume pays to read the
+context again. Run `polako stats` for your own figures, and set `-max-cost`,
+`-max-issue-time` or `-max-session-cost` for a ceiling.
+[docs/run-data.md](docs/run-data.md) has the whole report.
 
 ## Improving polako
 
 Every run records what it did, and those records are only worth keeping if
-something reads them. That something is you, on a cadence. The loop —
-measure, review, change one thing, tag the next batch — runs through the
-operator and the backlog, never through the supervisor reading its own
-telemetry. [plans/continuous-improvement.md](plans/continuous-improvement.md)
-is the long version and the reasoning.
-
-**After a shift worth learning from**, the retro:
-
-1. `polako stats -by shift` to find the batch, then
-   `polako stats -shift <id> -by issue` to see inside it.
-2. Read the **park reasons** line. A count of parks says how often; that line
-   says which half of the tool the next change belongs in.
-3. For every parked issue and every outlier — cost or runs well above the
-   batch median — run `polako stats -runs`, take the session id from its row,
-   and reopen the transcript:
-
-   ```bash
-   claude --resume 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9
-   ```
-
-   Answer one question: *what would have let this run finish?*
-4. Classify the answer — skill wording, a missing tool, supervisor logic, an
-   under-specified issue, a model too weak for that step. Each lands in a
-   different place.
-5. File it as an issue on this repository. polako then works it, which is why
-   the loop is self-hosting. Do it promptly: the resumable transcript is the
-   Claude CLI's, kept under the session id, and all polako keeps is the
-   shift's own [log](docs/reference.md#the-shift-log--log) — the event stream
-   as it was narrated, which you cannot resume from.
-
-**Change one thing, then tag the next batch.** Any change to a `SKILL.md`, to
-the model, or to a strategy knob — `-stall`, `-retries`, `-poll`, the spend
-caps — runs its next batch under a fresh `-run-tag` and gets a row in
-[plans/experiments.md](plans/experiments.md). An untagged batch after a change
-can never be compared to anything, and a verdict nobody wrote down is one you
-will pay to measure again next year.
-
-**After a `claude` CLI upgrade**, count run statuses by version. The `no-skill`
-status exists because an upgrade once changed behaviour silently, and this is
-what catches the next one. `stats` keeps its `-by` list short on purpose, so
-this is a one-liner over the JSONL rather than a flag:
-
-```bash
-jq -rs 'map(select(.kind=="run")) | group_by(.claude_version)[]
-        | "\(.[0].claude_version)  \(length) runs  " +
-          ([.[].status] | group_by(.) | map("\(.[0]) \(length)") | join(", "))' \
-  ~/.polako/metrics/*.jsonl
-```
-
-```
-2.1.84  1 runs  ok 1
-2.1.85  3 runs  crash 1, no-skill 1, ok 1
-```
-
-**Occasionally, audit past the merge.** Merge rate is the headline number and
-it is blind to the failure that matters most: a pull request that merged and
-was then reverted, or hand-patched two days later, counts as a win. GitHub
-knows, so ask it. Run these in the repository polako is working:
-
-```bash
-# what polako merged (issue- is -branch-prefix's default)
-gh pr list --state merged --search 'head:issue-' --limit 20 \
-  --json number,headRefName,title,mergedAt
-
-# did anything revert one of those merges?
-git log origin/main --oneline --grep='^Revert' --since=4.weeks
-
-# did somebody patch the same files soon afterwards? (one PR at a time)
-# The window is the fortnight after *that* merge, not the last fortnight:
-# anchored to now, an older PR reports a clean bill it has not earned. git
-# cannot do the arithmetic — it reads '<date> + 2 weeks' as nothing and says
-# nothing — so jq adds the fortnight in seconds.
-pr=111
-from=$(gh pr view "$pr" --json mergedAt --jq '.mergedAt')
-to=$(gh pr view "$pr" --json mergedAt --jq '.mergedAt | fromdate + 1209600 | todate')
-paths=$(gh pr view "$pr" --json files --jq '.files[].path')
-# An empty $paths would drop the pathspec and list every commit in the window.
-[ -n "$paths" ] && git log origin/main --oneline --no-merges \
-  --since="$from" --until="$to" -- $paths
-```
-
-A hit is a finding, and a finding becomes an issue. None of this is a verb or
-a flag, deliberately: a recipe earns promotion by being typed often enough to
-resent, the same rule that has kept `stats` small.
+something reads them, on a cadence — measure, review, change one thing, tag
+the next batch. That loop runs through you and the backlog, never through the
+supervisor reading its own telemetry.
+[plans/continuous-improvement.md](plans/continuous-improvement.md) has the
+retro checklist, the tagging rule, and the recipes for reading run data back.
 
 ## What it will not do
 
@@ -380,8 +274,8 @@ An unattended run is a Claude session whose only input is issue and comment
 text. On a repository that accepts issues from outside your team, anyone writes
 that input. Two things bound it. The tool allowlist is enforced by Claude Code
 rather than by the model behaving well, and `-label` means a maintainer has to
-opt each issue in before polako will touch it. On a public repository that
-label gate is required, and `polako work` refuses to start without one.
+opt each issue in before polako will touch it — required outright on a public
+repository, unless you pass `-ungated` and mean it.
 
 Nothing you run leaves your machine unless you ask. One exception is named
 outright: `-post-summary`, off by default, comments one line of numbers on your
@@ -395,46 +289,19 @@ vulnerability privately.
 
 ## Questions
 
-**Can I use the skill without the binary?** Yes. Run
-`/polako:implement-issue 48` in Claude Code and it takes that one issue to a PR.
-The binary exists to run it over a whole backlog while you are asleep.
-
-**What happens if it breaks something at 3am?** It cannot merge, so nothing it
-does reaches your default branch without you. An issue it cannot finish is
-parked and the shift carries on. `-notify` runs a command of yours when that
-happens, so you can be told rather than find out in the morning.
-
-**Does it work with my language?** Yes — `-dir` points anywhere. The one thing
-worth tuning per project is the tool allowlist, so a build command it needs
-never stops on a permission prompt.
-
-**How is this different from a hosted coding agent?** Those run on someone
-else's machine and keep their own state. polako runs on yours, under the Claude
-Code login you already have, and keeps every piece of orchestration state in
-GitHub itself. There is no database and no dashboard: kill it whenever, restart
-whenever, and read the whole picture off the issue tracker.
-
-**Can I run it on a public repository?** Yes, with `-label`. Anyone can open an
-issue on a public repo, and open issues are what a shift works, so polako
-refuses to start there without a maintainer-applied label gate — or an explicit
-`-ungated` if you mean it.
-
-**"Wouldn't ten agents be ten times faster?"** They'd open ten pull requests,
-which isn't the same thing. Somebody still has to read them, and they all
-branched from a version of the code that stopped being true the moment the
-first one merged.
-
-polako does one. When you merge it, the next one starts from what you just
-merged.
+The common ones — using the skill without the binary, running it on your
+language, comparisons to a hosted coding agent — are answered in
+[docs/behaviour.md](docs/behaviour.md#questions), which also covers what
+happens when it breaks something at 3am.
 
 ## Documentation
 
 | Page | What is in it |
 | --- | --- |
-| [docs/behaviour.md](docs/behaviour.md) | What polako does when a run crashes, an issue stalls, a PR goes red, or it needs a human. |
+| [docs/behaviour.md](docs/behaviour.md) | What polako does when a run crashes, an issue stalls, a PR goes red, or it needs a human. FAQ at the bottom. |
 | [docs/install.md](docs/install.md) | Every install path, updates, pinning, and using it on another project. |
-| [docs/reference.md](docs/reference.md) | Every flag, plus `-dry-run`, `-notify`, `-remote`, environment defaults and `polako status`. |
-| [docs/run-data.md](docs/run-data.md) | What each run records, spending caps, and the `polako stats` report. |
+| [docs/reference.md](docs/reference.md) | Every flag for `work`, `plan`, `health`, `status` and `tidy`, plus `-dry-run`, `-notify`, `-remote` and environment defaults. |
+| [docs/run-data.md](docs/run-data.md) | What each run records (`work`, `plan` and `health` alike), spending caps, and the `polako stats` report. |
 | [docs/security.md](docs/security.md) | The threat model, the tool allowlist, the `-label` gate, and what leaves your machine. |
 | [docs/hardening.md](docs/hardening.md) | Wrapping a shift in an egress firewall of your own, and why polako does not ship one. |
 | [docs/releasing.md](docs/releasing.md) | Cutting a release: the two tags, the two PRs, and what to bump. |

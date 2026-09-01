@@ -689,10 +689,10 @@ which jq, DuckDB and every spreadsheet already read. What a day cost:
 cat ~/.polako/metrics/*.jsonl | jq -s 'map(select(.kind=="run")) | map(.cost_usd) | add'
 ```
 
-Tagging is a habit rather than a flag, and the habit is written down: the
-README's [Improving polako](../README.md#improving-polako) has the rule for
-when a batch needs a fresh tag, the retro that reads these reports, and two
-recipes over the raw JSONL. [plans/experiments.md](../plans/experiments.md) is
+Tagging is a habit rather than a flag, and the habit is written down:
+[plans/continuous-improvement.md](../plans/continuous-improvement.md) has the
+rule for when a batch needs a fresh tag, the retro that reads these reports,
+and two recipes over the raw JSONL. [plans/experiments.md](../plans/experiments.md) is
 where the verdicts land.
 
 **On dollars:** `cost_usd` is the CLI's API-equivalent pricing — real money on

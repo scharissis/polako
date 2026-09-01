@@ -136,8 +136,8 @@ the labels honest, and the ledger that stops the results evaporating:
   versions in play, and the `no-skill` status exists because a CLI upgrade
   (2.1.85) silently changed behavior — exactly the regression a per-version
   breakdown catches. But `stats` keeps its `-by` list short on purpose and
-  points the long tail at jq and DuckDB, so this is a documented one-liner in
-  the README's run-data section (group status counts by `claude_version`),
+  points the long tail at jq and DuckDB, so this is a documented one-liner
+  (group status counts by `claude_version` — see [Recipes](#recipes) below),
   run as part of the retro after any CLI upgrade. It becomes a `-by` group
   only if someone reaches for the recipe often enough to resent typing it.
 
@@ -149,9 +149,9 @@ counts as a win. The signal exists in GitHub — was a drained PR's merge
 commit later reverted; did a follow-up commit touch the same files within a
 week — and reading GitHub is what polako does everywhere else.
 
-Start as a documented recipe (a `gh` search over merge commits and reverts,
-in the README beside the other analysis examples), run occasionally as part
-of the retro. Promote it to a verb or a `stats` enrichment only when the
+Start as a documented recipe (a `gh` search over merge commits and reverts —
+see [Recipes](#recipes) below), run occasionally as part of the retro.
+Promote it to a verb or a `stats` enrichment only when the
 recipe proves it earns one — the same wait-until-pulled-for that has kept
 `stats` small. Whatever form it takes, it reads GitHub and the operator's
 screen and feeds no decision, so it sits with `status` on the read-only side
@@ -170,6 +170,59 @@ of the house.
 Issue #53's self-contained HTML report is the thing that makes the periodic
 glance cheap, and is already filed; this plan leans on it rather than
 duplicating it.
+
+## Recipes
+
+Two of the cadence table's rows are one-liners over data polako already
+writes. Neither is a verb or a flag, deliberately: a recipe earns promotion
+by being typed often enough to resent, the same rule that has kept `stats`
+small.
+
+**After a `claude` CLI upgrade**, count run statuses by version. The
+`no-skill` status exists because an upgrade once changed behaviour silently,
+and this is what catches the next one. `stats` keeps its `-by` list short on
+purpose, so this is a one-liner over the JSONL rather than a flag:
+
+```bash
+jq -rs 'map(select(.kind=="run")) | group_by(.claude_version)[]
+        | "\(.[0].claude_version)  \(length) runs  " +
+          ([.[].status] | group_by(.) | map("\(.[0]) \(length)") | join(", "))' \
+  ~/.polako/metrics/*.jsonl
+```
+
+```
+2.1.84  1 runs  ok 1
+2.1.85  3 runs  crash 1, no-skill 1, ok 1
+```
+
+**Occasionally, audit past the merge.** Merge rate is the headline number and
+it is blind to the failure that matters most: a pull request that merged and
+was then reverted, or hand-patched two days later, counts as a win. GitHub
+knows, so ask it. Run these in the repository polako is working:
+
+```bash
+# what polako merged (issue- is -branch-prefix's default)
+gh pr list --state merged --search 'head:issue-' --limit 20 \
+  --json number,headRefName,title,mergedAt
+
+# did anything revert one of those merges?
+git log origin/main --oneline --grep='^Revert' --since=4.weeks
+
+# did somebody patch the same files soon afterwards? (one PR at a time)
+# The window is the fortnight after *that* merge, not the last fortnight:
+# anchored to now, an older PR reports a clean bill it has not earned. git
+# cannot do the arithmetic — it reads '<date> + 2 weeks' as nothing and says
+# nothing — so jq adds the fortnight in seconds.
+pr=111
+from=$(gh pr view "$pr" --json mergedAt --jq '.mergedAt')
+to=$(gh pr view "$pr" --json mergedAt --jq '.mergedAt | fromdate + 1209600 | todate')
+paths=$(gh pr view "$pr" --json files --jq '.files[].path')
+# An empty $paths would drop the pathspec and list every commit in the window.
+[ -n "$paths" ] && git log origin/main --oneline --no-merges \
+  --since="$from" --until="$to" -- $paths
+```
+
+A hit is a finding, and a finding becomes an issue.
 
 ## What this plan deliberately does not do
 
@@ -206,7 +259,10 @@ the README: the retro checklist, the tag rule, the per-version and post-merge
 recipes. `plans/experiments.md` seeded with the two named experiments. The
 skill-change/eval rule added to CLAUDE.md's checking section. Documentation
 only — the phase exists so the ritual survives contact with a future operator
-who was not in this conversation.
+who was not in this conversation. (Issue #283 later cut the README down to a
+landing page and moved the checklist, tag rule and both recipes here, into
+this document's own "The cadence" and "Recipes" sections above — the README
+now just points at them.)
 
 **Phase 4 — pulled-for, not promised.** A `-by` group for versions; an audit
 verb; eval-score history beyond PR bodies; any retro automation (a skill that
