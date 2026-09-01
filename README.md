@@ -171,8 +171,11 @@ Both are documented alongside `work`'s own flags: [`plan`](docs/reference.md#pla
 
 Every proposal carries a `proposed` label, and that label is the point:
 `polako work` skips every issue that has one, so nothing a machine proposed
-can reach an unattended run until you have looked at it. Curation is ordinary
-GitHub triage, and there are three moves:
+can reach an unattended run until you have looked at it. Each proposal
+carries acceptance criteria, pointers into the code, what's out of scope, and
+a size (`Estimate: M`) — the model's judgement of the work's shape, not a
+price; what a run actually costs comes from your own history, via `polako
+stats`. Curation is ordinary GitHub triage, and there are three moves:
 
 - **Approve** — remove the `proposed` label. On a `-label`-gated repository, add
   the gate label in the same command:
