@@ -431,8 +431,9 @@ for a PR past the eight-PR cap; `unknown` means gh doesn't know), and
 
 `queue.containers` is objects, not bare numbers — `{ "issue", "total",
 "completed", "finished", "held" }` — so a caller can tell a finished
-container from one in progress without a second call; `held: false` means
-the next shift is about to close it, `held: true` means it's the caller's.
+container from one in progress without a second call. For a finished one,
+`held: false` means the next shift is about to close it, `held: true` means
+it's the caller's.
 Every array field is always `[]`, never `null`; `quiet_seconds` and `plan`
 are the two fields that can be *absent* instead of a fake zero or empty
 string. Same rule as the text report: no issue, PR or comment text, only
