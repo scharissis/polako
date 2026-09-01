@@ -66,8 +66,8 @@ It resolves the next issue exactly as a real shift would — same queue,
 answer — then stops: every call is a read, no labels declared, run-data
 recording and the shift log both forced off. Narration goes to stderr, the
 shell-quoted invocation alone to stdout, so `polako work -dry-run | pbcopy`
-gives you something to run by hand; the real run passes those arguments to
-the CLI directly, never through a shell.
+gives you something to run by hand; the real run passes those arguments
+straight to the CLI, never through a shell.
 
 If the next issue's branch already has a PR, you get what polako would
 actually do with it instead — wait on an open one, close behind a merged
@@ -124,7 +124,6 @@ a 30-second hang costs that notification and gets logged (a `-notify` naming
 a program not on `PATH` is caught at startup instead); and it carries
 **numbers, identifiers and polako's own words only** — issue, comment and PR
 text never reach it, attacker-controllable on a repo taking outside issues.
-
 It stays quiet about the ordinary case too: a PR waiting to be merged
 happens on every healthy issue, and a notifier that fires every time gets
 muted.
@@ -136,8 +135,7 @@ terminal that started it. `-remote` asks for runs to show up in your session
 list on [claude.ai/code](https://claude.ai/code) and the mobile app instead.
 **It does nothing today**, though: no `claude` CLI registers headless runs
 with Remote Control, so polako never passes the flag — same invocation
-whether `-remote` is on or off, nothing leaves this machine. Startup says so
-once:
+either way, nothing leaves this machine. Startup says so once:
 
 ```
   remote  on, but no claude CLI registers headless runs with Remote Control yet — runs stay on this machine and unwatched, and nothing is sent anywhere (-remote=false silences this line; a later polako lights the flag up once a CLI supports it)
