@@ -77,7 +77,7 @@ in the PR body rather than doing it quietly.
   enforcing pass (`labelpass.go`) runs behind both `plan` and `health`.
 - **A plan or health run creates issues and nothing else.** No commits, no
   pushes, no PRs, no edits to threads that already exist — a command that can
-  add `proposed` can strip it too, which would be self-approval. The whole
+  add `proposed` can strip it too, which is self-approval. The whole
   write surface is `gh issue create` plus a scratch body file it deletes; a
   fully subverted run's blast radius is spam sitting behind a label.
 - **An issue with sub-issues is a container.** It's never worked, whatever its
