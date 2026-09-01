@@ -1,74 +1,66 @@
 # How polako works
 
-The [README](../README.md#how-it-works) has the one-page picture. This page is
-the long version: what the supervisor does when a run crashes, when an issue
-cannot be finished, when a PR goes red, and when it needs you. It ends with a
-short [Questions](#questions) section for the common ones that don't fit
-anywhere above.
+The [README](../README.md#how-it-works) has the one-page picture. This page
+is the long version: what the supervisor does when a run crashes, an issue
+can't finish, a PR goes red, or it needs you. A short
+[Questions](#questions) section closes it out.
 
-**Your checkout is kept level with origin, and never written to.** Before each
-issue and after each merge, polako fast-forwards `-dir`'s default branch. It
-has to: polako never pulls — you merge on GitHub and it only watches — so that
-branch falls a commit behind on every merge, and it is what the skill cuts a new
-branch from and what a code review resolves a base against. Left behind, a
-review silently diffs the branch against a base that predates the last merge and
-folds an already-merged PR into what it reviews. It is `--ff-only` and nothing
-else: if your default branch has a commit of its own, or work in the way, or you
-are sitting on another branch, polako says so in its log and leaves it
-exactly as it is.
+## State lives in GitHub, not on disk
 
-**A finished issue's worktree and branch are reclaimed, not left to pile up.**
-Once at shift start and again after each merge it observes, `polako` runs the
-same sweep [`polako tidy`](reference.md#reclaiming-finished-issues-polako-tidy)
-does: for every `issue-N` branch it can prove finished — closed, or merged into
-the default branch, worktree clean, nothing unpushed — it removes the worktree
-and deletes the branch. The shift-start pass is there because between two shifts
-you merge PRs by hand, and each of those leaves a worktree no merge-moment
-cleanup would ever revisit. For the one issue whose merge the shift just
-watched, GitHub's own merge event stands in for the ancestor check, so a squash
-merge is reclaimed too. A leftover branch that fails a check is named in the
-shift log and left exactly as it was; two things are said out loud — a sweep
-that cannot run at all, and the just-merged worktree failing to reclaim because
-it holds uncommitted work the merge did not take. Nothing here ends a shift — a
-tidy-up must not take a backlog down. A put-down issue is never finished, so its
-worktree is left alone (see `-strict-order` below).
+**All state lives in GitHub** — issues, comments, PRs, branches. Kill the
+process anywhere, rerun it later, and it re-derives where things stand from
+GitHub alone. If a PR already exists for `issue-N`, it never re-runs Claude
+on that issue — it goes straight to waiting. It writes two things locally
+that nothing reads back: a line of numbers per run (see
+[Run data & cost tracking](run-data.md)) and a per-shift log of everything
+it narrated (see [The shift log](reference.md#the-shift-log--log)).
 
-`implement-issue` puts that worktree at `.worktrees/issue-N`, inside the main
-checkout, which means it is gitignored rather than merely untracked — so
-**`git clean -xfd`, run in the main checkout, deletes it and everything
-in-flight underneath it**, worktree admin records included. That is a real
-hazard this layout creates: a command that used to only sweep build artifacts
-now also reaches every in-progress issue's uncommitted work.
+**Being interrupted is not failing.** Ctrl+C, a service manager stopping
+the unit, a shutdown — all take the running `claude` down with the
+supervisor, so no orphaned run keeps editing, pushing or opening PRs
+unsupervised. A laptop that sleeps mid-issue costs the run, not the issue:
+`-retries` bounds crashes that got *nothing* done, so real work already
+saved resets the count instead of spending it. A `gh` call that fails
+before the network's back is retried a few times before it's believed.
 
-**All state lives in GitHub** — issues, comments, PRs, branches. The process
-itself is stateless and restart-safe: kill it at any point, rerun it later, and
-it re-derives where things stand. If a PR already exists for `issue-N`, it
-never re-runs Claude on that issue; it goes straight to waiting. (It writes two
-things locally, and nothing reads either back: a line of numbers per run — see
-[Run data & cost tracking](run-data.md) — and a per-shift log of everything it
-narrated — see [The shift log](reference.md#the-shift-log--log).)
+**Your checkout stays level with origin and is never written to.** polako
+fast-forwards `-dir`'s default branch before each issue and after every
+merge — it never pulls, so that branch falls a commit behind on every merge
+it only watches, and it's what the skill branches from and a review diffs
+against. Left stale, a review folds an already-merged PR into what it's
+diffing. It's `--ff-only` and nothing else: a commit of its own, work in
+the way, or a checkout on another branch, and polako logs it and leaves the
+checkout alone.
 
-**Being interrupted is not the same as failing, and is not treated as one.**
-Ctrl+C, a service manager stopping the unit, a shutdown, a terminal going away:
-all of them take the running `claude` down with the supervisor, so no orphaned
-run is left editing, pushing and opening PRs behind a restarted shift's back.
-A laptop that sleeps mid-issue costs the run, not the issue — `-retries` bounds
-crashes that got *nothing* done, so a run cut off after real work resets it
-rather than spending it. If the crashed session turns out to be unresumable, the
-next attempt starts fresh instead of failing on it three more times. And a `gh`
-call that fails because the network has not come back yet is retried a few times
-before it is believed, rather than ending a backlog that was clearing fine.
+**A finished issue's worktree and branch get reclaimed, not left to pile
+up.** At shift start — catching PRs merged by hand between shifts — and
+after each merge it observes, polako runs the same sweep
+[`polako tidy`](reference.md#reclaiming-finished-issues-polako-tidy) does:
+for every `issue-N` branch it can prove finished — closed, or merged with a
+clean worktree and nothing unpushed — it removes the worktree and deletes
+the branch. For the issue whose merge the shift just watched, GitHub's
+merge event stands in for the ancestor check, so a squash merge is
+reclaimed too. A sweep that can't run at all, and the just-merged
+worktree specifically failing to reclaim — usually uncommitted work the
+merge didn't take — are both named in the shift log rather than swallowed;
+neither ends a shift, since a tidy-up must not take a backlog down. A
+put-down issue is never finished, so its worktree stays put (see
+`-strict-order` below).
 
-**One issue that cannot be finished does not end the run.** An issue whose run
-produced nothing, whose retries ran out, whose PR was closed unmerged, whose
-conflicts could not be rebased away, whose CI stayed red, or which ran past a
-cap you set on it — see [Capping what a shift
-spends](run-data.md#capping-what-a-shift-spends) — is *parked*:
-`polako` labels it
-`needs-human`, comments on the thread saying what happened, and moves on to the
-next issue. The label is what takes it out of the queue, so a later run does not
-pick it straight back up — remove the label to put it back in. The process exits
-0 and prints a summary of what merged, what parked and why:
+`implement-issue` puts that worktree at `.worktrees/issue-N`, inside the
+main checkout — gitignored rather than merely untracked, so **`git clean
+-xfd` there deletes it and every in-flight issue's uncommitted work along
+with it**, worktree admin records included.
+
+## When an issue can't be finished
+
+**One issue that cannot finish does not end the run.** A run that produced
+nothing, ran out of retries, had its PR closed unmerged, couldn't rebase
+away a conflict, stayed red on CI, or ran past a cap you set — see
+[Capping what a shift spends](run-data.md#capping-what-a-shift-spends) —
+gets *parked*: `needs-human` goes on, a comment explains why, and the drain
+moves on. The label takes it out of the queue; remove it to put the issue
+back. The process exits 0 and summarizes what merged, what parked, and why:
 
 ```
 summary: 3 issues merged, 1 issue parked, $18.40 spent, 6h12m of wall clock
@@ -76,24 +68,18 @@ summary: 3 issues merged, 1 issue parked, $18.40 spent, 6h12m of wall clock
   parked  #16 ($2.27) — the run completed without opening a PR
 ```
 
-Dollars appear only this shift spent some: one that merely waited on a PR
-an earlier process opened prints the line without them rather than claiming a
-free backlog.
+Dollars appear only when this shift spent some — a shift that only waited
+on an earlier PR prints the line without them.
 
 **An issue that needs no code change is closed, not parked.** Some issues
-describe a change that already happened — the fix shipped in another PR,
-it's a duplicate, the premise turns out to be false — and a run that
-verifies that closes the issue directly instead of opening a PR. The bar is
-narrow: only a merged PR or commit this run itself read, or a human's own
-reply on the thread saying to close it, qualifies — never the issue's own
-text merely asserting the work is done, which is exactly the self-serving
-evidence a run looking to skip its own work would produce. Doubt still goes
-to a park or a question, same as ever; this is not a park's quieter cousin,
-it's a distinct, narrower ending that needs positive evidence, and it counts
-as finished in the summary rather than needing a human to close it by hand.
-The evidence itself is on the issue thread, in the comment the run leaves
-before closing — the summary only says how many issues ended this way, the
-same way it only counts a merge rather than repeating the PR:
+describe a change that already happened — shipped elsewhere, a duplicate, a
+false premise — and a run that verifies that closes the issue instead of
+opening a PR. The bar is narrow: only a merged PR or commit this run itself
+read, or a human's own reply saying to close it — never the issue's own
+text claiming the work is done, exactly the self-serving evidence a run
+ducking its own work would produce. Doubt still goes to a park or a
+question. The evidence is on the issue thread, in the comment the run
+leaves before closing, and it counts as finished in the summary:
 
 ```
 summary: 2 issues merged, 0 issues parked, 1 issue closed with no change needed, $12.10 spent, 4h02m of wall clock
@@ -101,20 +87,18 @@ summary: 2 issues merged, 0 issues parked, 1 issue closed with no change needed,
   closed  #18 ($1.10)
 ```
 
-**A run that ends cleanly without a PR is not automatically a failure.** Four
-different runs end that way: one that was stuck or confused and decided nothing,
-one that finished the change and then ended its turn believing something would
-bring it back — under `claude -p` nothing will — one that simply ran out of
-road mid-task, and one that asked to be granted a tool the allowlist never
-included and got nobody to answer, since nothing was there to. The middle two
-have the work sitting on disk, so before it parks, `polako` asks git what is there: commits
-on `issue-N` ahead of the default branch, and uncommitted changes in the
-worktree. The fourth is read off what the run itself said — its final words if
-the ask ended there, any earlier turn otherwise, since a run can ask partway
-through and then wrap up on some other sentence. When the ask *was* the final
-word it parks straight away rather than being retried — resuming replays the
-same session against the same allowlist and hits the identical wall, so only
-`-add-tools` or a fix to the skill that reached for the tool gets past it:
+**A run that ends without a PR isn't automatically a failure.** Four kinds
+end that way: one that got stuck and decided nothing, one that finished the
+change but expected a later turn `claude -p` never gives, one that ran out
+of road mid-task, and one that asked for a tool the allowlist didn't grant
+and got no answer. The middle two leave work on disk, so before parking,
+polako checks for commits on `issue-N` ahead of the default branch and
+uncommitted changes in the worktree. The fourth is read off what the run
+said — its final words if the ask was the last thing it did, an earlier
+turn otherwise. An ask that was the final word parks immediately rather
+than retrying — resuming replays the same session against the same
+allowlist and hits the same wall, so only `-add-tools` or a skill fix gets
+past it:
 
 ```
   parked  #16 ($2.27) — the run stopped to ask for a permission this allowlist
@@ -122,19 +106,15 @@ same session against the same allowlist and hits the identical wall, so only
   reached for it, then remove needs-human to retry
 ```
 
-When the ask was only an earlier turn, `polako` still resumes first if there is
-work on disk to resume into; the reason above is what it lands on if that run,
-or the lack of one, ends with the issue parked anyway.
+When the ask was only an earlier turn, polako resumes first if there's work
+to resume into, telling it outright that its turn ends the process. If it
+finds nothing, it parks — a machine can't tell what "decided nothing"
+meant.
 
-If it finds work, it resumes the session to finish it, telling that run outright
-that its turn ended the process and there is no later one. If it finds nothing,
-it parks, because a machine cannot tell what "decided nothing" meant.
-
-Those resumes are capped at **two per issue**, and they spend the same overall
-resume allowance a crash resume does — not `-retries`, which counts consecutive
-*fruitless crashes* and nothing else — so an issue that alternates crashing and
-ending its turn cannot outlive both caps. When a cap is what stopped one, the
-park says which:
+Resumes are capped at **two per issue**, off the same allowance a crash
+resume uses, not `-retries` (which counts consecutive *fruitless crashes*
+only) — so alternating crashes and turn-endings can't outlive both caps.
+The park says which cap stopped it:
 
 ```
   parked  #16 ($2.27) — the run completed without opening a PR;
@@ -144,148 +124,148 @@ park says which:
   so start there rather than from scratch
 ```
 
-The worktree's path is printed beside the park in the terminal rather than said
-here, for the same reason the `--resume` id is: this text is posted to the issue
-thread, and a local path is nobody's business but yours.
+The worktree's path is printed beside the park in the terminal, not here —
+this text is posted to the issue thread, and a local path is nobody's
+business but yours.
 
-Parking preserves the no-conflict guarantee: only one issue is ever in flight,
-and a parked issue is simply not in flight.
+Parking preserves the no-conflict guarantee: only one issue is ever in
+flight, and a parked issue isn't in flight.
 
-**A `proposed` issue is one nobody has approved yet, and it is never worked.**
-The label is the curation gate for issues a machine proposed rather than a
-person: `polako` counts them, says so on startup, and leaves them alone until
-you take the label off. Approving is ordinary GitHub triage — `gh issue edit 12
-14 19 --remove-label proposed` approves three at once; rejecting is closing the
-issue; reworking is editing its text, since the text is read at dispatch time.
-Exclusion beats inclusion, so an issue carrying both the `-label` gate label
-*and* `proposed` stays out. Nothing in this release applies the label — it is
-the gate, shipped first, so no version of the binary exists that would work an
-uncurated proposal:
+## The `proposed` and container gates
+
+**A `proposed` issue is one nobody has approved yet, and it's never
+worked.** The label gates issues a machine proposed rather than a person:
+polako counts them on startup and leaves them alone until you remove it.
+Approving is ordinary GitHub triage — `gh issue edit 12 14 19 --remove-label
+proposed` approves three at once; rejecting is closing the issue; reworking
+is editing its text, read fresh at dispatch time. Exclusion beats
+inclusion, so an issue carrying both the `-label` gate label *and*
+`proposed` stays out:
 
 ```
 ignoring 3 proposed issue(s) awaiting curation — remove the proposed label to queue them
 ```
 
-**An issue with sub-issues is a container, and containers are never worked.**
-A parent issue tracks the work rather than being it, so it is dropped from the
-queue whatever its labels — which also protects the epics you group things under
-by hand. That one is structural rather than labelled: it is read off GitHub's
-own sub-issue rollup. A `gh` too old to report that rollup gets one warning and
-carries on, with container issues treated as ordinary work; the `proposed`
-exclusion is labels alone and never depends on it.
+**An issue with sub-issues is a container, and containers are never
+worked** — whatever their labels, which also protects hand-made epics. This
+is structural, read off GitHub's sub-issue rollup, not a label. A `gh` too
+old to report it treats containers as ordinary work after one warning; the
+`proposed` exclusion is label-only and never depends on it.
 
-**A container all of whose sub-issues have closed is closed by the drain that
-notices**, with a comment on its thread first saying why:
+**A container whose sub-issues have all closed gets closed by the drain
+that notices**, with a comment first saying why:
 
 ```
   epic    #113: all 6 sub-issues closed — closed it
 ```
 
-The machine is not judging whether the work is done — the children decided that
-by closing — it acts on the near-certain reading that "every child closed"
-means "the epic is finished", which a reopen undoes for one click the rare time
-it is wrong. The comment is posted first,
-always: it is the record of why the close happened, and it carries a marker so
-a shift whose close failed retries only the close next time rather than
-commenting twice. It names how many children closed, not which ones — listing
-them by number would cost an extra `gh` call. A comment that fails to post is a
-warning and the close does not happen; a close that fails is a warning and the
-next shift retries it. Neither parks anything and neither is fatal.
+The machine isn't judging whether the work is done — the children did, by
+closing — reading "every child closed" as "the epic is finished," a
+misread a reopen undoes in one click. The comment posts first and carries
+a retry marker, and names how many children closed, not which, to save a
+`gh` call. A failed comment is a warning and the close doesn't happen; a
+failed close is a warning the next shift retries. Neither parks anything or
+is fatal. Detection costs nothing extra: it's sourced from the queue
+listing the drain already re-reads every pass, so merging an epic's last
+child mid-shift is enough — no separate `gh` call. Scoped like the rest of
+the queue: a container outside `-label` is never listed, so it's neither
+commented on nor closed.
 
-Sourced from the queue listing the drain already re-reads every pass, so
-merging the last child of an epic mid-shift is enough — no extra `gh` call.
-Scoped the same way the rest of the queue is: a container outside `-label` is
-never in that listing, so it is neither commented on nor closed.
-
-**A container a human has held is left alone.** `needs-human` or `proposed` on
-the container means hands off — it is not commented on and not closed, and it
-keeps the older exit-summary line naming it as yours to close:
+**A container a human has held is left alone.** `needs-human` or
+`proposed` on it means hands off, and the exit summary keeps naming it as
+yours to close:
 
 ```
   epic    #113: all 6 sub-issues closed — close it when the design is satisfied
 ```
 
-That is the per-epic opt-out, and it needs no new flag: `needs-human` on the
-container already means "hold this" everywhere else. `polako status` names a
-held finished container in its `needs you` line for the same reason.
+No new flag needed: `needs-human` already means "hold this" everywhere
+else. `polako status` names a held finished container in its `needs you`
+line for the same reason.
 
-**A ready issue with an open `blockedBy` dependency is put down for this pass**
-rather than worked — a listing that already flags a container also flags an
-unmerged prerequisite, in the same call. Nothing is written anywhere: the next
-listing that finds the blocker closed hands the issue straight back to ready,
-the same shift or a later one. The log names what it is waiting on rather than
-going quiet about it:
+**A ready issue with an open `blockedBy` dependency is put down for this
+pass**, flagged by the same listing call that flags a container. Nothing is
+written anywhere — the next listing that finds the blocker closed hands the
+issue back to ready. The log names what it's waiting on:
 
 ```
 issue #171 blocked by #170 — skipping this pass
 ```
 
-A blocker outside `-label`'s scope still blocks while it is open — the gate is
-whether the work landed, not whether it was this shift's business — and two
-issues blocking each other are both put down without a hang, the rest of the
-backlog unaffected. That out-of-scope guarantee holds when GitHub's own state
-comes back on the `blockedBy` connection, which is the ordinary case; a `gh`
-old enough to omit it falls back to asking whether the blocker showed up
-anywhere in this same listing, and an out-of-`-label` blocker has no row of
-its own to be found by there — the one gap the no-second-request rule leaves
-open on such a host. A container, `needs-human`, `proposed` or
-`awaiting-answer` classification always wins over a blocker: `awaiting-answer`
-in particular keeps its own poll for a reply running regardless of whether some
-unrelated dependency has merged. `-strict-order` does not fold a held-back
-issue into the queue the way it does an awaiting-answer one — running it again
-this pass cannot show anything the same listing did not already know. A `gh`
-too old to see `blockedBy` shares the sub-issue rollup's one warning rather
-than raising a second, and carries on with blocked issues treated as ordinary
-work.
+A blocker outside `-label`'s scope still blocks while open, and two issues
+blocking each other are both put down without a hang. This holds when
+GitHub's own `blockedBy` state comes back; a `gh` too old for it falls back
+to checking the same listing, which misses an out-of-`-label` blocker — the
+one gap that leaves open, sharing the sub-issue rollup's one warning rather
+than a second. A container, `needs-human`, `proposed` or `awaiting-answer`
+classification always wins over a blocker; `awaiting-answer` keeps its own
+poll running regardless of an unrelated dependency merging, and
+`-strict-order` doesn't fold a held-back issue into the queue the way it
+does an awaiting-answer one.
 
-**A run that has to ask something labels the issue `awaiting-answer`**, and the
-supervisor keys off that label rather than off the thread getting busier. The
-distinction matters because plenty of things comment on an issue that are not
-answers to anything — CI, a linked-PR notice, a bot, a passer-by — and treating
-those as a question left polako waiting on a reply nobody knew was expected.
-The label is also the only sign on GitHub that an issue is waiting on *you*;
-reply on the thread and the next check picks it up. `polako` declares the
-label on startup if the repository does not have it yet, and the run that folds
-your answer in is what removes it — or the park, if the issue is handed back
-before anyone gets that far, since a parked issue waits on a decision rather
-than on a reply.
+## `plan` and `health`: proposing work, never doing it
 
-**Ending that wait is the same judgement, made again.** A wait ends on a comment
-written by a *person* after the question was flagged. GitHub Apps — Actions, a
-CI reporter, a stale-bot nudge — are read and skipped, and the log says so
-rather than going quiet:
+`polako plan` and `polako health` fill the same backlog `work` drains —
+`plan` from a vision document, `health` from the repository's own shape.
+Both create issues behind the `proposed` label above and do nothing else:
+no commits, no pushes, no PRs, no edits to threads that already exist. The
+whole write surface is `gh issue create` plus a scratch body file the run
+deletes — a fully subverted run's blast radius is spam behind a label.
+
+The gate doesn't depend on the model remembering it. A shared label pass
+(`labelpass.go`) runs after every `plan` or `health` run — however it
+ended: normal, capped at `-max-issues`, crashed, or Ctrl+C'd — and forces
+every issue that run created to carry *exactly* the `proposed` label,
+stripping anything else and adding it if the run forgot. A failure to
+label is reported loudly, never swallowed.
+
+See [`polako
+plan`](reference.md#planning-a-backlog-unattended-polako-plan) and
+[`polako
+health`](reference.md#auditing-repository-health-unattended-polako-health)
+for the flags each takes.
+
+## Questions on the thread
+
+**A run that has to ask something labels the issue `awaiting-answer`**,
+and the supervisor keys off the label rather than the thread getting
+busier — plenty of comments on an issue aren't answers: CI, a linked-PR
+notice, a bot, a passer-by. The label is also the only sign on GitHub that
+an issue is waiting on *you*; reply and the next check picks it up. polako
+declares the label on startup if the repo lacks it. The run that folds
+your answer in removes it — or the park does, if the issue is handed back
+first, since a parked issue waits on a decision rather than a reply.
+
+**Ending that wait is the same judgement, made again.** A wait ends on a
+comment from a *person* after the question was flagged. GitHub Apps —
+Actions, a CI reporter, a stale-bot nudge — are read and skipped, and the
+log says so:
 
 ```
 issue #16 still awaiting a reply (2 new comment(s), none of them from a person)
 ```
 
-Comments from the account polako itself authenticates as are *not* skipped,
-because on most setups that account is yours — skipping them would swallow the
-answer the wait exists for. Nothing polako writes can end a wait anyway: it
-posts the question the wait starts after, a park notice that takes the issue out
-of the queue, and a closing comment.
+Comments from the account polako authenticates as are *not* skipped, since
+on most setups that account is yours. Nothing polako writes can end a wait
+anyway: it only posts the question, a park notice, or a closing comment.
 
-**A question does not hold up the queue either.** A flagged issue is put down
-and the next one is worked, exactly the way a park advances past an
-unimplementable issue. It is picked back up when the reply lands and nothing
-else is left to work, or straight away once you remove the label by hand. The
-guarantee that runs cannot conflict is that only one issue is ever *in flight*,
-not that they are worked in strict numeric order — and an issue nobody is
-working is not in flight.
+**A question doesn't hold up the queue.** A flagged issue is put down and
+the next one worked, the way a park advances past an unimplementable
+issue. It's picked back up when the reply lands and nothing else is left
+to work, or straight away once you remove the label. Only one issue is
+ever *in flight* — not that they run in strict numeric order.
 
-One thing does weaken, and it is the reason `-strict-order` exists. A put-down
-issue keeps the worktree and branch its first run created — the sweep above
-only reclaims *finished* issues, and a parked one is still open — so when work
-resumes it resumes from the base that run started on, not from the merges that
-landed while it waited. A textual clash with one of those shows up as a `CONFLICTING`
-PR and is rebased automatically; a semantic one — a helper renamed by a merge in
-between — is not, and lands as a PR that passed its own tests and breaks the
-default branch.
+One thing does weaken, which is why `-strict-order` exists. A put-down
+issue keeps the worktree and branch its first run created, so work resumes
+from that original base, not from merges landed while it waited. A textual
+clash shows up as a `CONFLICTING` PR and rebases automatically; a semantic
+one — a helper renamed by a merge in between — doesn't, and lands as a PR
+that passes its own tests and breaks the default branch.
 
-Pass `-strict-order` to turn all of that off and get the old behaviour: the
-queue stays in strict ascending order, an issue awaiting an answer blocks every
-issue behind it until you reply, and nothing merges under a waiting branch. A
-shift that ends with issues still waiting says so:
+Pass `-strict-order` for the old behaviour: the queue stays strictly
+ascending, an awaiting-answer issue blocks everything behind it, and
+nothing merges under a waiting branch. A shift that ends with issues still
+waiting says so:
 
 ```
 summary: 3 issues merged, 0 issues parked, 1 issue awaiting an answer, $12.86 spent, 4h02m of wall clock
@@ -293,96 +273,93 @@ summary: 3 issues merged, 0 issues parked, 1 issue awaiting an answer, $12.86 sp
   waiting #16 ($0.64) — reply on the thread and the next shift picks them up
 ```
 
-One caveat worth knowing: the baseline a wait compares against lives in memory,
-so a restarted shift cannot tell whether a reply arrived while it was down — it
-cannot even pick its own question out of the thread, running as it does under
-your credentials. It spends one run per already-flagged issue finding out — the
-skill re-reads the thread and stops again without re-asking if the answer is not
-there yet — and holds a baseline from then on.
+One caveat: the wait's baseline lives in memory, so a restarted shift can't
+tell whether a reply arrived while it was down. It spends one run per
+flagged issue finding out — the skill re-reads the thread and stops again
+without re-asking if the answer isn't there yet — and holds a baseline from
+then on.
 
-**An open PR that goes red is repaired, not just watched.** Each poll reads the
-PR's check rollup and its reviews as well as its mergeability. A conflict gets a
-rebase; a failing check gets a run that reads the failing job logs, fixes the
-cause, runs the suite locally and pushes. All three are bounded by `-retries`,
-and none may merge, open a second PR, or rerun the workflow it was sent to
-diagnose.
+## Keeping an open PR green
 
-Two rules keep that from turning into a treadmill. Nothing is dispatched while a
-check is still running — a suite that has not finished can only add to the list
-of failures, and diagnosing half of one wastes the run. And a run that finishes
-without moving the branch has said all it is going to: the same logs against the
-same commit reach the same place, so the issue parks for a human instead of
-going round again. Only conclusions a change to the branch could plausibly fix
-count as failures at all — `NEUTRAL` and `SKIPPED` are green, and a check
-stopped on a person (`CANCELLED`, or a deployment gate at `ACTION_REQUIRED` or
-`WAITING`) is reported as `needs a human` rather than dispatched at. That last
-distinction matters twice over: a gated check is not a suite still running, so a
-real failure sitting beside one is still seen.
+**An open PR that goes red is repaired, not just watched.** Each poll
+reads the PR's check rollup, reviews, and mergeability. A conflict gets a
+rebase; a failing check gets a run that reads the failing job logs, fixes
+the cause, runs the suite locally, and pushes. All three are bounded by
+`-retries`, and none may merge, open a second PR, or rerun the workflow it
+was sent to diagnose.
 
-**Requesting changes on the PR is an instruction, not a dead end.** Review the
-PR as you would anyone's; if you ask for changes, the next poll dispatches a run
-that reads what you wrote — both the review bodies and the comments left on
-individual lines of the diff — makes the changes, gets the suite passing, and
-pushes. Then it goes back to waiting, because a re-review is yours to give: the
-run may not dismiss or resolve the review, and still may not merge.
+Two rules stop that becoming a treadmill: nothing is dispatched while a
+check is still running, since diagnosing half a suite wastes the run; and a
+run that finishes without moving the branch has said all it's going to, so
+the issue parks instead of going round again. Only conclusions a branch
+change could plausibly fix count as failures — `NEUTRAL` and `SKIPPED` are
+green, and a check stopped on a person (`CANCELLED`, or a deployment gate
+at `ACTION_REQUIRED` or `WAITING`) reports as `needs a human` instead, so a
+real failure beside a gated check is still seen.
 
-Whether a review has been answered yet is read off GitHub rather than remembered,
-so a shift restarted mid-flight reaches the same conclusion: a review counts as
-outstanding until the branch carries a commit newer than it. Two consequences
-worth knowing. A rebase — including one the conflict remediation performs — gives
-every commit a fresh date and so reads as an answer; that is deliberate, since
-the review then points at a diff that no longer exists, but it does mean a
-conflicting PR with a review open on it comes back to you for a fresh look. And
-the same treadmill rule applies: a run that finishes without moving the branch
-has said all it is going to, so the issue parks rather than re-reading the same
-comments every poll. If your project sets no branch-protection review
-requirement — most do not — this still works, because it reads the reviews
-themselves and not just GitHub's summary `reviewDecision`, which is empty in
-that case.
+**Requesting changes on the PR is an instruction, not a dead end.** Review
+it as you would anyone's; asking for changes gets the next poll to
+dispatch a run that reads what you wrote — bodies and line comments —
+makes the changes, gets the suite passing, and pushes, then waits again: a
+re-review is yours to give, and the run may not dismiss, resolve, or merge
+it.
 
-**Refused credentials stop the shift immediately.** A resume cannot mint a new
-token, so retrying one spends `-retries` × several minutes reaching the
-identical 401 and then reports it as a crash. Instead the run ends the shift
-with the fix in the last line: check `claude auth status`, then
-`claude auth login` — or `claude setup-token`, on an unattended host. State
-lives in GitHub, so starting `polako work` again once the token works picks up
-exactly where it stopped.
+Whether a review's answered is read off GitHub, not remembered, so a
+restarted shift reaches the same conclusion: a review counts as outstanding
+until the branch carries a commit newer than it. A rebase gives every
+commit a fresh date, so it reads as an answer — deliberate, since the
+review then points at a diff that no longer exists — and a conflicting PR
+with an open review comes back to you for a fresh look. The same treadmill
+rule applies: a run that finishes without moving the branch parks rather
+than re-reading the same comments every poll. This works with no
+branch-protection review requirement too, since it reads the reviews
+themselves rather than GitHub's summary `reviewDecision`, empty in that
+case.
 
-**A session limit is waited out, not retried against.** When the account is
-over its usage limit, the CLI refuses every run the same way in seconds and
-says when the limit resets. Retrying against that wall is how a healthy issue
-used to burn its whole resume allowance and park; instead the supervisor reads
-the reset time out of the refusal, sleeps until just past it, and resumes the
-refused session. A refusal whose reset time it cannot read — a wording change,
-a weekly limit's dated reset — falls back to one attempt per `-poll`. Neither
-form of waiting spends `-retries` or the resume ceiling: those bound evidence
-about the issue, and a limit is a fact about the account. Ctrl+C during the
-wait is safe as ever — state lives in GitHub, and rerunning after the reset
-picks the issue back up.
+## Account-level stops
 
-**`-max-session-usage` and `-max-week-usage` are the fence in front of that
-wall.** The refusal above is the CLI stopping a run mid-issue once the account
-is already over; these act between issues, before a run gets that far, once the
-plan's own `/usage` reports either pool at or over the percentage you set. Off
-by default, checked exactly where `-max-session-cost` is, and never a park —
-nothing is wrong with the issue. And the fence behaves like the wall: rather
-than ending the shift, the drain waits the tripped pool's own reset out and
-then carries on, so starting a shift that is already over the ceiling waits
-rather than producing nothing. A weekly pool's reset can be days away, which
-makes for a long wait; Ctrl+C stays safe the whole time, since all state is on
-GitHub and rerunning after the reset picks up where this left off. A probe
-that cannot answer — an old CLI with no `/usage`, an account with no
-subscription, an unparseable reply — trips nothing: it logs once and the drain
-carries on as if neither flag were set, for that pass.
+**Refused credentials stop the shift immediately.** A resume can't mint a
+new token, so retrying would just spend `-retries` × several minutes
+reaching the same 401 as a crash. Instead the run ends the shift with the
+fix in the last line: check `claude auth status`, then `claude auth login`
+— or `claude setup-token` on an unattended host. State lives in GitHub, so
+starting `polako work` again once the token works picks up exactly where
+it stopped.
 
-**Human touchpoints are deliberately just two**, both on GitHub:
+**A session limit is waited out, not retried against.** When the account
+is over its usage limit, the CLI refuses every run the same way in seconds
+and says when the limit resets. Retrying against that wall used to burn a
+healthy issue's whole resume allowance and park it; instead the supervisor
+reads the reset time from the refusal, sleeps past it, and resumes the
+refused session. A refusal whose reset time it can't read — a wording
+change, a weekly limit's dated reset — falls back to one attempt per
+`-poll`. Neither form spends `-retries` or the resume ceiling: those bound
+evidence about the issue, a limit is a fact about the account. Ctrl+C
+during the wait is safe — rerunning after the reset picks the issue back
+up.
+
+**`-max-session-usage` and `-max-week-usage` are the fence in front of
+that wall.** The refusal above stops a run mid-issue once the account is
+already over; these act between issues, once the plan's own `/usage`
+reports either pool at or over the percentage you set. Off by default,
+checked where `-max-session-cost` is, and never a park — nothing's wrong
+with the issue. Like the wall, the drain waits the tripped pool's reset
+out and carries on rather than ending the shift; a weekly pool's reset can
+be days away, and Ctrl+C stays safe throughout. A probe that can't
+answer — an old CLI with no `/usage`, no subscription, an unparseable
+reply — trips nothing: it logs once and carries on as if neither flag were
+set, for that pass.
+
+## Human touchpoints
+
+Deliberately just two, both on GitHub:
 
 1. Answering clarification questions the skill posts on an issue thread.
 2. Merging the PR. Nothing merges itself.
 
-Neither one is on a clock: an unanswered question or an unmerged PR simply
-waits. Both wait out of the queue rather than in it, as a parked issue does, so
-none of them holds anything else up.
+Neither is on a clock: an unanswered question or an unmerged PR simply
+waits. Both wait out of the queue rather than in it, as a parked issue
+does, so neither holds anything else up.
 
 ## Questions
 
@@ -398,5 +375,5 @@ needs never stops on a permission prompt.
 else's machine and keep their own state. polako runs on yours, under the
 Claude Code login you already have, and keeps every piece of orchestration
 state in GitHub itself. There is no database and no dashboard: kill it
-whenever, restart whenever, and read the whole picture off the issue tracker.
-
+whenever, restart whenever, and read the whole picture off the issue
+tracker.
