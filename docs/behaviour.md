@@ -165,8 +165,11 @@ misread a reopen undoes in one click. The comment posts first and carries
 a retry marker, and names how many children closed, not which, to save a
 `gh` call. A failed comment is a warning and the close doesn't happen; a
 failed close is a warning the next shift retries. Neither parks anything or
-is fatal. Scoped like the rest of the queue: a container outside `-label`
-is never listed, so it's neither commented on nor closed.
+is fatal. Detection costs nothing extra: it's sourced from the queue
+listing the drain already re-reads every pass, so merging an epic's last
+child mid-shift is enough — no separate `gh` call. Scoped like the rest of
+the queue: a container outside `-label` is never listed, so it's neither
+commented on nor closed.
 
 **A container a human has held is left alone.** `needs-human` or
 `proposed` on it means hands off, and the exit summary keeps naming it as
