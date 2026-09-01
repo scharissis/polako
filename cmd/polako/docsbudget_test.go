@@ -22,8 +22,9 @@ import (
 
 // docsBudget is chosen from today's line counts so that almost the whole set
 // already clears it and docsDebt stays short — the entries are then the real
-// outliers, not a census. Six of eight files are already under 250; the
-// other two (reference.md, run-data.md) are docsDebt's whole contents.
+// outliers, not a census. Six of eight files are already under 500; the
+// other two (reference.md at 635, run-data.md at 702) are docsDebt's whole
+// contents.
 const docsBudget = 500
 
 // docsDebt holds the offenders present the day this test landed, each with
