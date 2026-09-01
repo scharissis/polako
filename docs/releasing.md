@@ -211,3 +211,18 @@ on this plugin behave.
   The coupling to watch is the branch name: the supervisor finds a PR by its
   head branch, so if the skill ever stops naming branches `issue-N`, that's a
   breaking change on both sides at once. After 1.0, that's what major means.
+
+## GitHub About text
+
+The repo's About sidebar (description and topics) isn't a file, so nothing
+applies it automatically. It's applied by hand, with this:
+
+```bash
+gh repo edit scharissis/polako \
+  --description "Works a GitHub issue backlog to zero, unattended: work drives one issue at a time to a pull request, plan turns a vision document into proposals, and health audits the repo itself for issues to propose. Never merges anything itself." \
+  --add-topic claude-code --add-topic claude-code-plugin --add-topic github-issues \
+  --add-topic backlog --add-topic automation --add-topic ai-agents --add-topic golang --add-topic cli
+```
+
+Keep the description matching the README's opening line, and naming all
+three verbs, whenever either changes.

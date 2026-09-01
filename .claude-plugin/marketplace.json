@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "polako",
-      "description": "Work a GitHub issue backlog to zero, one issue at a time, from issue to merged PR.",
+      "description": "Works a GitHub issue backlog to zero, unattended: plan proposes it, health audits for it, work drives it to a merged PR.",
       "category": "workflow",
       "source": {
         "source": "github",
