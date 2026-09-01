@@ -231,9 +231,10 @@ remember:
 - **The cap.** Counts `gh issue create` calls and kills the run at
   `-max-issues`, epics included — loud, never destructive.
 - **The label pass.** Snapshots the open backlog before the run; after it —
-  always, even on a crash or Ctrl+C — every issue this `gh` account created
-  since is normalised to **exactly** the `proposed` label and the batch
-  milestone. A labelling failure is reported loudly and exits nonzero.
+  always, even on a crash, the cap kill, or Ctrl+C — every issue this `gh`
+  account created since is normalised to **exactly** the `proposed` label
+  and the batch milestone. A labelling failure is reported loudly and exits
+  nonzero.
 
 The honest edge: an operator hand-filing an issue from the same account
 while a run is going gets caught in the sweep too — rare, but logged. When it
