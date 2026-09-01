@@ -28,12 +28,13 @@ private source it's standing in to an address the attacker controls is caught
 by nothing in polako at all. The run has a shell, and the shell has the
 network.
 
-`plan` and `health` are lower risk here, not zero: neither reads untrusted
-issue text the way `work` does, but both run `claude` the same way, over the
-same shell, on the same network — see [Wrapping a shift in an egress
-proxy](#wrapping-a-shift-in-an-egress-proxy) below, which wraps any of the
-three identically. Neither pushes a branch or opens a PR (they only create
-issues), so the SSH-remote caveat further down is `work`-specific.
+`plan` and `health` aren't a special case here: both read the same
+attacker-editable input, open issue bodies (`gh issue list`, plus `gh issue
+view`/`gh search issues` for `plan`), and both run `claude` the same way,
+over the same shell, on the same network — wrap them in the same proxy, see
+[Wrapping a shift in an egress proxy](#wrapping-a-shift-in-an-egress-proxy)
+below. Neither pushes a branch or opens a PR (they only create issues), so
+the SSH-remote caveat further down is `work`-specific.
 
 Egress control is the mitigation that matches that shape. Deny by default,
 allow the handful of hosts a shift genuinely needs, and log what was asked
