@@ -1,44 +1,43 @@
 # Reference
 
 Every flag `polako` takes, and the two read-only reports. Flags also take
-defaults from the environment; see [Setting defaults from the
-environment](#setting-defaults-from-the-environment).
+defaults from the [environment](#setting-defaults-from-the-environment).
 
 ## Flags
 
-These are `polako work`'s own. The two report subcommands take their own smaller
-sets — see [`status`](#where-the-backlog-stands-polako-status) and
+These are `polako work`'s own; the two report subcommands take smaller sets —
+see [`status`](#where-the-backlog-stands-polako-status) and
 [`stats`](run-data.md#reading-it-back-polako-stats).
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `-dir` | `.` | Path to the repository's main checkout. |
-| `-claude` | `claude` | The Claude Code binary to invoke. There is no pass-through for extra `claude` arguments; point this at a wrapper script when you need one — see [Running both halves from a working tree](../CONTRIBUTING.md#running-both-halves-from-a-working-tree). |
+| `-claude` | `claude` | The Claude Code binary to invoke. No pass-through for extra `claude` arguments — point this at a wrapper script instead; see [Running both halves from a working tree](../CONTRIBUTING.md#running-both-halves-from-a-working-tree). |
 | `-skill` | `polako:implement-issue` | Slash command run once per issue. Plugin skills are namespaced `<plugin>:<skill>`; pass `-skill implement-issue` if you copied the skill into `~/.claude/skills` instead. |
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how PRs are matched back to issues. |
 | `-label` | *(none)* | Only process issues carrying this label. Doubles as an access control — see [Security](security.md). |
-| `-ungated` | `false` | Work a public repository without a `-label` gate. Without one or the other, `polako work` refuses to start on a public repo, because anyone who can open an issue could feed its queue — see [Security](security.md). |
-| `-ignore-skew` | `false` | Start even when the installed skill is an older release than this binary. Without it, `polako work` refuses to start on that mismatch — a stale skill is the shape [issue #239](https://github.com/scharissis/polako/issues/239) ran, missing recent cost fixes as well as risking the branch-name contract the two halves share — see [Getting updates](install.md#getting-updates). |
+| `-ungated` | `false` | Work a public repository without a `-label` gate. Without one or the other, `polako work` refuses to start on a public repo — see [Security](security.md). |
+| `-ignore-skew` | `false` | Start even when the installed skill is older than this binary. Without it, that mismatch refuses to start — a stale skill risks missing fixes and the shared branch-name contract ([issue #239](https://github.com/scharissis/polako/issues/239)); see [Getting updates](install.md#getting-updates). |
 | `-tools` | *(see below)* | `--allowedTools` for unattended runs. **Replaces** the default set. |
 | `-add-tools` | *(none)* | Extra `--allowedTools` entries, **appended** to `-tools`. |
 | `-permission-mode` | `acceptEdits` | Passed to `claude --permission-mode`. |
 | `-model` | *(the CLI's own default)* | Passed to `claude --model`. Vary it between batches to compare models — see [Run data & cost tracking](run-data.md). |
 | `-poll` | `5m` | Interval between GitHub checks while waiting. |
-| `-retries` | `3` | Consecutive *fruitless* resume attempts after a crashed run — a crash that got real work done first resets the count rather than spending it — and the bound on remediation runs against an open PR that is conflicting, red, or carrying a request for changes. A run the API refused to authenticate is never one of them, and neither is one refused over the account's session limit, which is waited out instead — see below. |
-| `-retry-wait` | `30s` | Wait before each resume attempt after a *crash*. A clean exit that left work behind is resumed straight away: nothing about it is transient, so there is nothing to wait for. |
+| `-retries` | `3` | Consecutive *fruitless* resume attempts after a crash — one that got real work done resets the count instead of spending it. Also the bound on remediation runs against a conflicting, red, or changes-requested PR. Excludes an auth refusal and a session-limit refusal, which wait instead — see `-max-session-usage` below. |
+| `-retry-wait` | `30s` | Wait before each resume attempt after a *crash*. A clean exit that left work behind resumes right away — nothing about it is transient. |
 | `-stall` | `15m` | Kill and resume a run that has emitted no events for this long (`0` disables). |
-| `-heartbeat` | `5m` | Say a one-line `still working` note while a run is quiet *on the terminal* — repeated every interval of continued silence, `0` disables. It watches the terminal, not the event stream `-stall` watches: a run can be busy for many minutes with nothing the default terminal shows. Chosen against `-stall`'s `15m` so a healthy but quiet run speaks two or three times before the watchdog would worry. Silent under `-verbose`, where the terminal is never quiet. It keeps speaking while a run is *stream*-quiet too: a stalled run's last heartbeats — a frozen tool count beside its phase — are the run-up that makes the `-stall` kill legible rather than a first word at fifteen minutes. |
+| `-heartbeat` | `5m` | Terminal-only `still working` note while the *terminal* is quiet (not the event stream `-stall` watches — a run can be busy for minutes with nothing shown), repeated on this interval (`0` disables); silent under `-verbose`. See [The shift log](#the-shift-log--log). |
 | `-max-cost` | *(no limit)* | Park an issue once this shift's runs on it have cost this many dollars — see [Capping what a shift spends](run-data.md#capping-what-a-shift-spends). |
-| `-max-issue-time` | *(no limit)* | Park an issue once this shift's runs on it have taken this much *run time*, e.g. `-max-issue-time 90m`. Unlike `-stall`, it does not care whether events are arriving. |
+| `-max-issue-time` | *(no limit)* | Park an issue once this shift's runs on it have taken this much *run time*, e.g. `-max-issue-time 90m` — unlike `-stall`, regardless of whether events are arriving. |
 | `-max-session-cost` | *(no limit)* | End the shift cleanly, between issues, once its runs have cost this many dollars. |
-| `-max-session-usage` | *(no limit)* | Pause the shift, between issues, whenever the plan's current-session usage is at or over this percent — waiting the pool's own reset out and then carrying on, the fence in front of the wall a mid-run refusal hits. Starting already over the ceiling waits rather than producing nothing. See [Capping what a shift spends](run-data.md#capping-what-a-shift-spends). |
-| `-max-week-usage` | *(no limit)* | Pause the shift, between issues, whenever the plan's current-week usage is at or over this percent — waited out the same way (a weekly reset can be days off, so the wait can be long; Ctrl+C is safe, state is on GitHub). |
+| `-max-session-usage` | *(no limit)* | Pause the shift, between issues, once the plan's current-session usage hits this percent — waits out the reset, then carries on. Starting already over it waits rather than running nothing. See [Capping what a shift spends](run-data.md#capping-what-a-shift-spends). |
+| `-max-week-usage` | *(no limit)* | Same, for the plan's current-week usage. A weekly reset can be days off, so the wait can be long; Ctrl+C is safe, state is on GitHub. |
 | `-skip` | *(none)* | Comma-separated issue numbers to skip. Issues labelled `needs-human` are skipped anyway — see [How it works](behaviour.md). |
 | `-once` | `false` | Process a single issue to a merge, a park or a question for you, then exit. |
 | `-strict-order` | `false` | Work issues in strict ascending order: wait in place on an issue awaiting an answer instead of moving past it. |
 | `-dry-run` | `false` | Resolve the next issue, print the `claude` invocation it would get, and exit. Runs nothing and writes nothing — see [Looking before you leap](#looking-before-you-leap--dry-run). |
 | `-notify` | *(none)* | Command to run whenever polako needs a human, with context in `POLAKO_NOTIFY_*` — see [Being told when it needs you](#being-told-when-it-needs-you--notify). |
-| `-remote` | `true` | Ask for each run to be watchable from claude.ai/code or the app. **Inert today** — no `claude` CLI registers headless runs, so nothing is sent and runs stay unwatched. See [Watching a shift from anywhere](#watching-a-shift-from-anywhere--remote). |
+| `-remote` | `true` | Ask for each run to be watchable from claude.ai/code or the app. **Inert today** — no `claude` CLI registers headless runs, so nothing is sent. See [Watching a shift from anywhere](#watching-a-shift-from-anywhere--remote). |
 | `-run-tag` | *(none)* | Freeform label recorded with every run, so one batch can be compared against another. |
 | `-metrics` | `~/.polako/metrics` | Directory for run-data records, or `off` to write nothing. |
 | `-log` | `~/.polako/logs` | Directory for the full per-shift log, or `off` to write none — see [The shift log](#the-shift-log--log). |
@@ -62,37 +61,28 @@ issue #12 would be worked next; the invocation follows on stdout
 claude -p '/polako:implement-issue 12' --permission-mode acceptEdits --allowedTools '…' --output-format stream-json --verbose
 ```
 
-It resolves the next issue exactly as a real shift would — same queue, same
-`-skip`, same `needs-human` exclusions, same preference for an issue waiting on
-an answer when nothing else is ready — and then stops. Nothing is run and
-nothing is written: every GitHub call it makes is a read, it declares no labels,
-and run-data recording and the shift log are both forced off for the run, so
-`-metrics` or `-log` in your environment cannot leave a record of a run that
-never happened.
+It resolves the next issue exactly as a real shift would — same queue,
+`-skip`, `needs-human` exclusions, same preference for an issue awaiting an
+answer — then stops: every call is a read, no labels declared, run-data
+recording and the shift log both forced off. Narration goes to stderr, the
+shell-quoted invocation alone to stdout, so `polako work -dry-run | pbcopy`
+gives you something to run by hand; the real run passes those arguments
+straight to the CLI, never through a shell.
 
-The narration goes to stderr and the invocation alone to stdout, so
-`polako work -dry-run | pbcopy` gives you something to paste and run by hand.
-It is printed with shell quoting for that reason; the real run passes those
-arguments to the CLI directly, never through a shell.
-
-If the next issue's branch already has a PR, you get that instead — because
-that is what polako would do with it:
+If the next issue's branch already has a PR, you get what polako would
+actually do with it instead — wait on an open one, close behind a merged
+one, or park behind one closed unmerged:
 
 ```
 issue #12 already has PR #40 (OPEN) on branch issue-12 — it would wait on that PR rather than run claude: https://github.com/example/my-project/pull/40
 ```
 
-It names what it would actually do with that PR, which is not the same in every
-state: wait on an open one, close the issue behind a merged one, and park an
-issue whose PR was closed without merging.
-
 ### Being told when it needs you: `-notify`
 
-A shift left running overnight is quiet about the things you most want to know.
-An issue parks, or stops to ask you a question, and polako does the right
-thing — it works the queue behind it — so the only trace is a label on a thread
-nobody is watching. `-notify` runs a command of your choosing at each of those
-moments:
+A shift left running overnight goes quiet about what you most want to
+know — an issue parks, or a run stops to ask something — leaving only a
+label on a thread nobody's watching. `-notify` runs a command at each of
+those moments:
 
 ```bash
 polako work -notify ~/bin/tell-me
@@ -105,9 +95,9 @@ It fires on six states, and nothing else:
 | `parked` | An issue was parked for a human — including a run that crashed and used up its resumes. |
 | `awaiting-answer` | A run stopped to ask something on the issue thread. Reply there and the next shift folds it in. |
 | `cleared` | The backlog is empty. Nothing is left to work. |
-| `stopped` | The shift ended before the backlog did: a fatal error, or `-max-session-cost` spent. (The plan's own usage reaching `-max-session-usage`/`-max-week-usage` does *not* fire this — the shift waits the reset out and carries on.) |
-| `epic-done` | An epic's last child closed and the drain closed the container, with a comment on the thread saying so. The one event above for something good rather than something stuck. Fires once, on the close; a container a human has held with `needs-human` or `proposed` is left open and fires nothing. |
-| `proposed` | A [`polako plan`](#planning-a-backlog-unattended-polako-plan) run finished with proposals behind the `proposed` label, waiting to be curated. `ISSUE` is empty — it is the whole batch. The one event a plan run raises, and it fires only when the run actually proposed something. |
+| `stopped` | The shift ended before the backlog did: a fatal error, or `-max-session-cost` spent. (`-max-session-usage`/`-max-week-usage` does *not* fire this — the shift waits the reset out and carries on.) |
+| `epic-done` | An epic's last child closed and the drain closed the container, with a comment saying so. Fires once, on the close; a container a human has held with `needs-human` or `proposed` is left open and fires nothing. |
+| `proposed` | A [`polako plan`](#planning-a-backlog-unattended-polako-plan) run finished with proposals behind the `proposed` label. `ISSUE` is empty — it names the whole batch — and it fires only when the run actually proposed something. |
 
 The context arrives in the environment, so the command needs no arguments:
 
@@ -127,64 +117,34 @@ terminal-notifier -title "polako: $POLAKO_NOTIFY_EVENT" \
   -message "${POLAKO_NOTIFY_REPO} #${POLAKO_NOTIFY_ISSUE:-—}: $POLAKO_NOTIFY_REASON"
 ```
 
-Three things to know about how the command is run:
-
-- **It is not a shell.** The command line is split into a program and arguments,
-  honouring quotes so a path with a space in it works, and run directly. There
-  is no pipeline, no redirection and no `$VARIABLE` expansion — put anything
-  like that in a script, which is where it can be tested on its own anyway.
-- **A failing hook never breaks the shift.** A non-zero exit, or one that hangs
-  past 30 seconds, costs you that notification and is logged; polako carries
-  on. A `-notify` naming a program that is not on `PATH` is caught at startup
-  instead, since a night of notifications nobody receives is the one failure the
-  flag must not have.
-- **It carries numbers, identifiers and this program's own words.** Issue,
-  comment and PR text never reach it, for the same reason they never reach a
-  run-data record: on a repository that accepts outside issues, that text is
-  attacker-controllable.
-
-`-notify` is deliberately quiet about the ordinary case. A PR waiting to be
-merged is a human touchpoint too, but it happens on every healthy issue, and a
-notifier that goes off every time is one you mute.
+Three things about how the command runs: it's **not a shell** — program and
+arguments only, no pipeline, redirection or `$VARIABLE` expansion, so put
+that in a script; **a failing hook never breaks the shift** — a bad exit or
+a 30-second hang costs that notification and gets logged (a `-notify` naming
+a program not on `PATH` is caught at startup instead); and it carries
+**numbers, identifiers and polako's own words only** — issue, comment and PR
+text never reach it, attacker-controllable on a repo taking outside issues.
+It stays quiet about the ordinary case too: a PR waiting to be merged
+happens on every healthy issue, and a notifier that fires every time gets
+muted.
 
 ### Watching a shift from anywhere: `-remote`
 
-A shift's runs are unattended by design and invisible with it: while a run is in
-flight, its output exists only in the terminal that started it. `-remote` is the
-flag that asks for those runs to show up in your session list on
-[claude.ai/code](https://claude.ai/code) and in the mobile app instead — live,
-readable, and steerable if you want to step in.
-
-**It does nothing today, and that is not a bug you can fix at your end.** No
-`claude` CLI registers headless runs with Remote Control. The one that ships now
-accepts `--remote-control` under `-p`, starts a perfectly normal session, and
-never brings the remote bridge up; the feature is scoped to interactive
-sessions, and print mode is the whole differentiator. There is no field in the
-session's `init` event to detect the difference from, so polako cannot even tell
-you per-run whether it worked.
-
-So polako does not pass the flag at all — with `-remote` on or off, the
-invocation is the same, and nothing about your session leaves this machine by
-this path. Startup says so once, rather than claiming a session list that will
-stay empty:
+A shift's runs are unattended and invisible — output exists only in the
+terminal that started it. `-remote` asks for runs to show up in your session
+list on [claude.ai/code](https://claude.ai/code) and the mobile app instead.
+**It does nothing today**, though: no `claude` CLI registers headless runs
+with Remote Control, so polako never passes the flag — same invocation
+either way, nothing leaves this machine. Startup says so once:
 
 ```
   remote  on, but no claude CLI registers headless runs with Remote Control yet — runs stay on this machine and unwatched, and nothing is sent anywhere (-remote=false silences this line; a later polako lights the flag up once a CLI supports it)
 ```
 
-`-remote=false` silences that line and changes nothing else.
-
-The flag stays because it is interface, and because the argument for turning it
-on was made and settled on [issue #52](https://github.com/scharissis/polako/issues/52):
-the destination is your own claude.ai account, the channel is Claude Code's own,
-and turning it off restores a byte-identical invocation. When a CLI registers
-headless runs, that is the argument a later polako would pass the flag on — a
-release you would upgrade to, not something that starts happening under a
-binary you already have. See [security.md](security.md) for the trade it would
-commit you to when it does.
-
-Until then, [the shift log](#the-shift-log--log) is how you read a run you were
-not watching, and it never leaves this machine either.
+`-remote=false` silences that line and changes nothing else. The flag stays
+as interface ([issue #52](https://github.com/scharissis/polako/issues/52),
+see [security.md](security.md) for the trade); until a CLI supports it, [the
+shift log](#the-shift-log--log) reads a run you weren't watching.
 
 ### The shift log: `-log`
 
@@ -195,12 +155,10 @@ Each shift writes one complete log of itself to a file, named at startup:
 ```
 
 The file holds everything the shift narrates, timestamped: every terminal
-line, plus the full `[claude]` event stream — one line per assistant message
-and tool call — and anything the `claude` process printed to its own stderr.
-The terminal, by contrast, shows milestones alone: issue started, run started
-and finished with its cost, the phase an `implement-issue` run has reached, PR
-opened and merged, parks, warnings, the exit summary. A healthy run narrates
-its phase once as it enters each one —
+line, the full `[claude]` event stream, and `claude`'s own stderr. The
+terminal shows milestones alone: start/finish with cost, the
+`implement-issue` phase reached, PR opened and merged, parks, warnings, the
+exit summary. A healthy run narrates each phase once:
 
 ```
 15:32:18 [claude] session started (model claude-sonnet-5, session b0f87c49-…)
@@ -214,44 +172,24 @@ its phase once as it enters each one —
 16:01:12 [claude] finished (ok) — 223 turns, 28m57s, $14.03
 ```
 
-— a run that ends in a question instead says `asking on the issue thread…`
-somewhere in place of the later phases. Each phase is said at most once and
-only when the run reaches it; a resumed run legitimately re-reads the issue and
-says so again. Between those milestones, while a long phase runs, `-heartbeat`
-adds a periodic `still working — 12m in, 118 tool calls, implementing` so the
-gap is not silence — the third answer between the default terminal's
-milestones-only and `-verbose`'s everything. The whole conversation between
-those lines is here in the file. The file is the record to read when a run did
-something surprising, and `tail -f` on it — or `-verbose`, which mirrors the
-stream to the terminal — is how to watch a shift work rather than glance at it.
+— a run that ends in a question says `asking on the issue thread…` instead; a
+resumed run re-reads the issue and says so again. Between milestones,
+`-heartbeat` adds a periodic `still working — 12m in, 118 tool calls,
+implementing` so a long phase isn't silence. Read the file when a run did
+something surprising, and `tail -f` it (or `-verbose`) to watch a shift live.
 
-Like the run-data records it is write-only and stays put: nothing in `polako`
-ever reads it back, deleting it mid-shift changes no behaviour, and it never
-leaves this machine. Unlike them it contains transcript text, which is why it
-gets the same private-by-default permissions (`0700` directory, `0600` files)
-and lives deliberately outside any checkout. There is no rotation or
-retention: one file per shift, yours to delete — a restarted shift starts a
-fresh file under its new shift id, so sort by modification time to follow an
-issue across restarts.
-
-`-log <dir>` moves it, `-log off` disables it, and a directory that cannot be
-written warns once and the shift continues on the terminal alone. A
-`-dry-run` writes no log at all.
-
-Every line carries a time; the terminal just wears it quietly. On a TTY the
-gutter shrinks to a dim, time-only stamp — `15:04:05 ` — always, whether or
-not a shift log is open this run: the trade is a quiet terminal, not a
-promise that the date lives elsewhere, so `-log off` or a log that fails to
-open (above) means the terminal's stamp is the least precise record there
-is, not the only one made full again. Milestones are coloured too,
-sparingly. Set `NO_COLOR` (to anything, even nothing) to keep a TTY plain,
-and Windows is plain regardless — the stamp stays, just unstyled. Piped or
-redirected stderr keeps the full `2006/01/02 15:04:05` timestamp and carries
-no colour, so each line of `polako work 2> shift.err` is shaped exactly as
-it always was — but the stream is the quiet one: the per-tool-call `[claude]`
-lines live in the shift log now, so anything that grepped the old firehose
-out of stderr should read the log instead, or run with `-verbose` to put the
-stream back.
+It's write-only, like the run-data records: nothing reads it back, deleting
+it mid-shift changes no behaviour, and it never leaves this machine. Unlike
+them it holds transcript text, hence the same `0700`/`0600` permissions, kept
+outside any checkout. No rotation — one file per shift, yours to delete; a
+restarted shift starts a fresh one, so sort by modification time to follow
+an issue across restarts. `-log <dir>` moves it, `-log off` disables it, a
+bad directory warns once and the shift continues on the terminal alone, and
+`-dry-run` writes no log at all. The terminal wears its own timestamp
+lightly — a dim `15:04:05` on a TTY (plain under `NO_COLOR` or Windows), the
+full `2006/01/02 15:04:05` with no colour when piped — but the per-tool-call
+`[claude]` lines live in the shift log now, not stderr, so grep the log, or
+run `-verbose` to put the stream back.
 
 ### Setting defaults from the environment
 
@@ -263,74 +201,57 @@ export POLAKO_POST_SUMMARY=1
 ```
 
 The name uppercases and swaps `-` for `_`: `-post-summary` reads
-`POLAKO_POST_SUMMARY`, `-retry-wait` reads `POLAKO_RETRY_WAIT`.
-An argument always wins, so a single run can still go the other way with
-`-post-summary=false`, and `polako work -h` prints the defaults actually in
-force — which is how you see what the environment is doing.
+`POLAKO_POST_SUMMARY`. An argument always wins — `-post-summary=false` on
+one run, or `polako work -h` to see the defaults in force. `POLAKO_METRICS`
+covers both halves: where a shift writes, where `stats` reads.
+`-version`/`-dry-run` are deliberately not settable this way — both are
+actions, and leaving one in a profile would silently turn every shift into
+an exit. `POLAKO_VERSION` pins a Dockerfile or CI install; `POLAKO_DRY_RUN`
+previews a repo once, then forget.
 
-`POLAKO_METRICS` covers both halves at once: where a shift writes, and
-where `stats` reads. `-version` and `-dry-run` are deliberately *not* settable
-this way — both are actions rather than preferences, and either one left in a
-profile would quietly turn every shift on that machine into something that
-exits, successfully, before doing any work. `POLAKO_VERSION` is exactly
-the variable a Dockerfile or CI job pins an install with, and
-`POLAKO_DRY_RUN` is the one you export to preview an unfamiliar
-repository once and then forget.
-
-A value a flag cannot parse stops the run and names both the variable and the
-flag it was setting, rather than being skipped: a preference that was set,
-looks set, and quietly does nothing is worse than no preference at all.
-
-The `POLAKO_NOTIFY_*` variables a hook receives sit deliberately clear of
-this namespace: none of them is `POLAKO_<FLAG>` for any flag, so a
-notification cannot reconfigure a `polako` you run from inside your own
-hook. A test enforces it.
+A value a flag can't parse stops the run and names the variable and flag it
+was setting — a preference that looks set and quietly does nothing is worse
+than none at all. And `POLAKO_NOTIFY_*` sits clear of this namespace: none
+of it is `POLAKO_<FLAG>`, so a notification can't reconfigure a `polako` run
+from inside your own hook.
 
 ## Planning a backlog unattended: `polako plan`
 
-`polako plan` runs the [`plan-backlog`](../README.md#planning-a-backlog) skill
-the way `polako work` runs `implement-issue`: point it at a vision document and
-it proposes a curated backlog — epics and one-PR issues — behind the `proposed`
-label a human lifts to queue the work.
+`polako plan` runs the [`plan-backlog`](../README.md#planning-a-backlog)
+skill the way `polako work` runs `implement-issue`: point it at a vision
+document and it proposes a curated backlog — epics and one-PR issues —
+behind the `proposed` label a human lifts to queue.
 
-The run is one `claude` invocation through the same path `polako work` uses,
-bracketed by two enforcement mechanisms that keep the curation gate structural
-rather than something the model has to remember:
+One `claude` invocation, bracketed by two enforcement mechanisms that keep
+the curation gate structural rather than something the model has to
+remember:
 
-- **The cap.** The stream watcher counts `gh issue create` tool calls and kills
-  the run at `-max-issues`, epics included, the way it kills a stalled one.
-  Over-cap is loud, never destructive — nothing is closed.
-- **The label pass.** Before the run, `polako plan` snapshots the open backlog.
-  After it — always, even on a crash, the cap kill or a Ctrl+C — every issue
-  this `gh` account created since is normalised to carry **exactly** the
-  `proposed` label (a missing one added, any other stripped), and the batch
-  milestone is attached to any the skill missed. A failure to label is reported
-  loudly and makes `polako plan` exit nonzero; it is never swallowed.
+- **The cap.** Counts `gh issue create` calls and kills the run at
+  `-max-issues`, epics included — loud, never destructive.
+- **The label pass.** Snapshots the open backlog before the run; after it —
+  always, even on a crash, the cap kill, or Ctrl+C — every issue this `gh`
+  account created since is normalised to **exactly** the `proposed` label
+  and the batch milestone. A labelling failure is reported loudly and exits
+  nonzero.
 
-The honest edge: an operator hand-filing an issue from the same account while a
-run is going is caught in the sweep — logged, visible, reversible, rare.
+The honest edge: an operator hand-filing an issue from the same account
+while a run is going gets caught in the sweep too — rare, but logged. When it
+ends — clean finish, cap, crash, or Ctrl+C — a plan run leaves one
+`kind:"plan"` line in [run data](run-data.md), and, if it proposed
+something, one `proposed`
+[notification](#being-told-when-it-needs-you--notify).
 
-When it ends — a clean finish, the `-max-issues` cap, a crash, a Ctrl+C — a
-plan run leaves the two traces every run leaves: one `kind:"plan"` line in the
-[run data](run-data.md), and, when it proposed something, one `proposed`
-[notification](#being-told-when-it-needs-you--notify) naming what awaits
-curation. A run that proposed nothing notifies nothing.
-
-After the label pass, a run that proposed something prints one line pricing the
-batch from your own history — the median cost and median run time of a merged
-issue in this repository, times the number of proposals:
+After the label pass, a run that proposed something prints one line pricing
+the batch from your own history — median cost and run time of a merged
+issue here, times the number of proposals:
 
 ```
 plan: your last 14 merged issues ran $2.70 and 38m median — 7 proposals ≈ $19 and 4½h of run time, before curation cuts
 ```
 
-The projected totals are rounded coarse on purpose: a median times a count is
-an estimate, and it is curation fuel — which two proposals to approve first —
-not a quote. The model never states a dollar figure; this line is the only
-place `polako plan` does, and it only ever restates what the
-[run records](run-data.md) already hold. With no history, or none that was
-ever priced (`-metrics off`, or a repository whose only runs crashed before
-reporting a cost), it says so instead and guesses nothing:
+Rounded coarse on purpose — curation fuel, not a quote, and the only place
+`polako plan` states a dollar figure. With no history, or none ever priced
+(`-metrics off`, or only crashed runs), it says so instead:
 
 ```
 plan: no run history to price against — work a few issues and future plans will estimate themselves
@@ -365,27 +286,19 @@ polako plan -vision docs/VISION.md            # the real thing
 
 `polako health` runs the [`review-health`](../README.md#planning-a-backlog)
 skill the way `polako plan` runs `plan-backlog`: point it at a repository via
-`-dir` — the flag every verb takes — and it measures that repository's own
-shape (file and function sizes, duplicated helpers, abstractions nothing
-uses) and files what it finds as **proposals**, the same `proposed`-label
-curation gate and sizing contract `plan` uses.
+`-dir` and it measures that repo's own shape (file and function sizes,
+duplicated helpers, abstractions nothing uses), filing what it finds as
+**proposals** under `plan`'s own curation gate and sizing contract.
 
-It differs from `plan` only in what it plans from and what it attaches:
-
-- No `-vision` / `-brief` / `-milestone` — review-health reads the
-  repository `-dir` already names rather than a document, and attaches no
-  milestone to what it creates. `-focus` is the only free-text steer.
-- The default `-tools` allowlist is narrower still: review-health's own
-  SKILL.md bounds its entire `gh` surface to three call shapes — the two
-  `issue list` reads and the one `issue create` — so the default grants only
-  those, plus repo reads and the scratch body file.
-
-Otherwise the shape is identical to [`polako
+It differs from `plan` only in what it plans from and what it attaches: no
+`-vision` / `-brief` / `-milestone` — it reads the repository `-dir` already
+names, and attaches no milestone; `-focus` is the only free-text steer. The
+default `-tools` allowlist is narrower too: review-health's own SKILL.md
+bounds its `gh` surface to three call shapes — two `issue list` reads and
+one `issue create` — plus repo reads and the scratch body file. Otherwise
+the shape is identical to [`polako
 plan`](#planning-a-backlog-unattended-polako-plan)'s, cap and label pass
-included: dispatchClaude counts `gh issue create` tool calls and kills the
-run at `-max-issues`, and the same enforcing label pass runs after the run
-ends, whatever its status, and normalises everything the run created to
-carry exactly the `proposed` label.
+included.
 
 ```bash
 polako health -dir ~/code/some-repo -dry-run
@@ -408,10 +321,9 @@ polako health -dir ~/code/some-repo            # the real thing
 
 ## Where the backlog stands: `polako status`
 
-While a shift runs, the only view of it is the terminal it runs in. Everything
-worth knowing is already on GitHub — that is where all the orchestration state
-lives — but reassembling it means a queue page, a label search and a PR tab.
-`status` prints the whole picture at once:
+While a shift runs, the only view of it is its terminal. Everything worth
+knowing is already on GitHub, but reassembling it means a queue page, a
+label search and a PR tab — `status` prints the whole picture at once:
 
 ```bash
 polako status
@@ -434,15 +346,13 @@ open prs on issue branches
 needs you: reply on #9; review and merge PR #58; decide what to do about #5 (drop needs-human to requeue); curate #27, #28 (drop proposed to queue them)
 ```
 
-What it prints is what a shift starting right now would do next — which is the
-same thing a running shift is already doing. It reports **state, not liveness**:
-it never asks whether a shift is running, and says the same thing either way.
-That is what makes it useful from a laptop about a shift running on a server.
-
-The closing `needs you:` line is the point of the whole thing — the items only a
-person can move. A PR polako would remediate itself (conflicting, red, or
-carrying an unanswered review) is deliberately not on it: that one is still
-polako's job.
+What it prints is what a shift starting right now would do next, the same
+thing a running shift is already doing. It reports **state, not liveness** —
+never asking whether a shift is running — so it's useful from a laptop about
+a shift running on a server. The closing `needs you:` line is the point of
+the whole thing — items only a person can move. A PR polako would remediate
+itself (conflicting, red, or an unanswered review) is deliberately not on
+it: that's still polako's job.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
@@ -453,36 +363,24 @@ polako's job.
 | `-strict-order` | `false` | Report as a work run with `-strict-order` would: an issue awaiting an answer keeps its place, so `next` can name it rather than the ready issue behind it. |
 | `-json` | `false` | Print one JSON document to stdout instead of the text report — see [As JSON](#as-json--json) below. |
 
-They take environment defaults the same way `polako work`'s do, so a
-`POLAKO_LABEL` that scopes your work scopes the report of it too — and
-anything narrowing or reordering the snapshot is named on the header line, since
-a flag left in a profile is otherwise invisible here.
+They take environment defaults the same way `polako work`'s do — a
+`POLAKO_LABEL` that scopes your work scopes the report too, named on the
+header line. `-skip` is deliberately not among them: a head-of-line escape
+hatch typed on one invocation, not a property of the backlog.
 
-**Reads only.** Every call it makes is one of the read subcommands polako
-itself re-derives state with at startup — `gh issue list`, `gh pr list`, `gh pr
-view`, and the REST read of a thread's comments — so nothing here can move an
-issue, a label or a PR. A test asserts the list of calls, which is stronger than
-checking that nothing changed: a write GitHub refuses changes nothing either.
+**Reads only.** Every call is a read subcommand polako itself re-derives
+state with at startup — `gh issue list`, `gh pr list`, `gh pr view`, the REST
+read of a thread's comments — so nothing moves an issue, label or PR. It
+reads no run data either (those files are for `stats` and `polako plan`'s
+pricing line) and prints no issue, PR or comment text — numbers, branches,
+labels and states only, enough to decide where to go next.
 
-It reads no run data. Those files are read only by `stats` and `polako plan`'s
-pricing line, and a status that opened them would be wrong anyway about a shift
-running on somebody else's machine.
-
-It prints no issue, PR or comment text — numbers, branches, labels and states
-only. That is what you need in order to decide where to go next, and it keeps
-text anybody on the internet can write out of your terminal.
-
-`-skip` is deliberately not among the flags: it is a head-of-line escape hatch
-typed on one invocation rather than a property of the backlog, and the person
-running `status` is the one who typed it.
-
-Two things worth knowing about the numbers. **Quiet** is the age of the newest
-comment on a thread, which is a proxy for how long the question has waited:
-which comment is the skill's question cannot be told apart from here, since the
-polako asks under your own credentials, so this reports what it can actually see.
-And the PR table details the first eight PRs it finds on issue branches — one
-issue is in flight at a time, so there is normally one — with anything past that
-listed by number and said out loud rather than silently dropped.
+Two things about the numbers. **Quiet** is the age of the newest comment on
+a thread, a proxy for how long a question has waited — which comment is the
+skill's own can't be told apart from here, since polako asks under your own
+credentials. The PR table details the first eight PRs on issue branches —
+normally one, since one issue is in flight at a time — anything past that
+listed by number rather than dropped.
 
 ### As JSON: `-json`
 
@@ -523,49 +421,30 @@ polako status -json | jq .
 }
 ```
 
-With `-json`, stdout carries exactly one document — no header, no `needs you:`
-line, nothing else — so a pipe into `jq` sees only the facts.
-
-It is the same snapshot the text report renders, field for field: `queue`
-holds the same five lists (`ready`, `blocked`, `parked`, `proposed`,
-`containers`), `next` names the issue a shift starting now would pick up and
-why, `prs` is the same table (`mergeable`/`checks`/`review` are the exact
-strings the text columns print, including `not read` for a PR past the
-eight-PR cap whose state was never looked up — `unknown` is a different,
-also-real state: gh was asked and does not know), and `needs_you` is the
-closing line's clauses as an array instead of a `;`-joined sentence.
+With `-json`, stdout carries exactly one document — no header, no
+`needs you:` line — the same snapshot the text report renders, field for
+field: `queue` holds the same five lists, `next` names the issue a shift
+would pick up and why, `prs` matches the text columns exactly (`not read`
+for a PR past the eight-PR cap; `unknown` means gh doesn't know), and
+`needs_you` is the closing line's clauses as an array.
 
 `queue.containers` is objects, not bare numbers — `{ "issue", "total",
-"completed", "finished", "held" }` — so a caller can tell a finished container
-from one still in progress without a second call. `finished` is `total > 0 &&
-completed == total` computed once in Go rather than left for every consumer
-to reimplement — a jq script checks the field rather than repeating the
-comparison. `held` is `true` when `needs-human` or `proposed` is on the
-container: a finished one with `held: false` is about to be closed by the next
-shift, a finished one with `held: true` is the caller's to close. This narrows
-the shape #118 originally published, where it was a plain array of issue
-numbers like every other list here.
-
-Every array field is always present as `[]`, never `null`, even when empty —
-`.queue.ready[]` never needs a `// empty` guard. `quiet_seconds` is the one
-field that can be *absent*: it is whole seconds since the thread's newest
-comment, omitted rather than `0` when that comment's timestamp could not be
-parsed, so "just replied" and "unreadable" cannot be confused. `plan` is
-absent the same way, and for the same reason: a probe that could not read
-the CLI's own `/usage` output — an old CLI, an account with no subscription,
-a wording change — leaves the field out entirely, never `""` standing in for
-"no usage at all". The same rule `status`'s text report follows applies here
-too — no issue, PR or comment text, only numbers, branches, labels, states
-and URLs.
+"completed", "finished", "held" }` — so a caller can tell a finished
+container from one in progress without a second call. For a finished one,
+`held: false` means the next shift is about to close it, `held: true` means
+it's the caller's.
+Every array field is always `[]`, never `null`; `quiet_seconds` and `plan`
+are the two fields that can be *absent* instead of a fake zero or empty
+string. Same rule as the text report: no issue, PR or comment text, only
+numbers, branches, labels, states and URLs.
 
 ## Reclaiming finished issues: `polako tidy`
 
 A shift runs this sweep itself — once at start, once after each merge it
 observes (see [How polako works](behaviour.md)) — so a drained backlog needs
-no follow-up. `tidy` is the same sweep as a verb you can point at a repository
-by hand: after an interactive `implement-issue` run, or a shift that was killed
-before it could clean up, or just to see what is reclaimable before letting a
-shift do it.
+no follow-up. `tidy` is the same sweep pointed at a repository by hand:
+after an interactive run, a killed shift, or just to preview what's
+reclaimable.
 
 ```bash
 polako tidy
@@ -588,29 +467,18 @@ skipped
 Before touching anything it proves the branch safe to remove — **all** of
 these, not any one:
 
-- no human has put `needs-human` or `proposed` on the issue — either label is
-  a hold, only a human takes it off, and it outranks even a merged PR:
-  someone who finishes a parked issue by hand still gets to clear the label
-  themselves;
-- the issue is closed, or its PR is merged — GitHub is the authority, as
-  always;
-- the branch is merged into the default branch (an ancestor of
-  `origin/HEAD`'s branch, after a fast-forward refresh exactly like the one a
-  shift does before picking up an issue). A branch merged via a squash is not
-  literally an ancestor of anything, and `tidy` does not try to reason about
-  that — it reports "not merged into the default branch" and leaves the
-  branch alone. (A shift sweeping right after a merge it watched is the
-  exception: GitHub's merge event is proof enough for that one branch, squash
-  or not.);
+- no human has put `needs-human` or `proposed` on the issue — a hold only a
+  human clears, outranking even a merged PR;
+- the issue is closed, or its PR is merged;
+- the branch is merged into the default branch, after the same fast-forward
+  refresh a shift does before picking up an issue — except right after a
+  merge a shift itself watched, where GitHub's event is proof enough;
 - its worktree, if it has one, has no uncommitted or untracked changes
-  (`PLAN.md` — the skill's own planning note, which nothing ever commits —
-  does not count against it, the same exception `-dry-run`'s park messages
-  already carry);
+  (`PLAN.md` doesn't count, same exception `-dry-run`'s park messages carry);
 - nothing about it is unpushed.
 
-Anything that fails one of those is named and left alone — that output is
-the feature, not a diagnostic: it is how you learn `issue-178` still has two
-files uncommitted. Refusing is always recoverable; removing wrongly is not.
+Anything that fails is named and left alone — the feature, not a
+diagnostic. Refusing is recoverable; removing wrongly is not.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
@@ -620,16 +488,13 @@ files uncommitted. Refusing is always recoverable; removing wrongly is not.
 | `-apply` | `false` | Actually remove worktrees and delete branches. Every other verb here defaults to acting; this is the one whose actions cannot be undone, so it defaults to only reporting what it would do. Cannot be set from the environment — see below. |
 
 `-branch-prefix` and `-dir`/`-repo` take environment defaults the same way
-every other verb's do. `-apply` deliberately does not: a `POLAKO_APPLY=1`
-left in a shell profile would turn every future preview into a live deletion
-run, which is exactly the mistake defaulting to dry-run exists to prevent.
-
-`implement-issue` creates its worktree at `<main-checkout>/.worktrees/issue-N`.
-That is matched the same way any other worktree is — by the branch it has
-checked out, not by its directory name — so an older sibling-folder worktree,
-or a `.claude/worktrees/<slug>-<hash>` one from a desktop session, is
-reclaimed exactly when it carries a finished `issue-N` branch, and left alone
-otherwise, including a detached one, which carries no branch at all.
+every other verb's do; `-apply` deliberately doesn't, since a
+`POLAKO_APPLY=1` in a shell profile would turn every future preview into a
+live deletion run. A worktree is matched by the branch it has checked out,
+not its directory name — so a sibling-folder worktree, or a
+`.claude/worktrees/<slug>-<hash>` one from a desktop session, is reclaimed
+exactly when it carries a finished `issue-N` branch, and left alone
+otherwise, including a detached one.
 
 A repository with nothing to reclaim prints one line and exits 0.
 
