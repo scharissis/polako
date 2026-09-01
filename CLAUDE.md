@@ -143,7 +143,7 @@ in the PR body rather than doing it quietly.
   exception: a comment recording an invariant, a why-not, a measured finding
   or a rejected alternative is worth keeping even stale — a wrong comment
   costs one confused session, a deleted invariant costs the invariant.
-- Errors say what a human should do about it — "needs a human decision,"
+- Errors say what a human should do about it — "needs a human decision",
   "check that `-skill` names a skill this installation has" — not just what
   failed. This runs unattended; its output is often the only diagnostic.
 - Everything polako writes for a human — PR and issue bodies, thread
