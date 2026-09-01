@@ -28,7 +28,8 @@ Three verbs:
 
 - **`work`** — works the backlog to zero, one issue at a time, never merging.
 - **`plan`** — turns a vision document into a curated backlog of proposals.
-- **`health`** — reads the repository itself and proposes what it finds off.
+- **`health`** — reads the repository itself and files what looks off as
+  proposals.
 
 `plan` and `health` file everything behind a `proposed` label a human has to
 lift — see [Planning a backlog](#planning-a-backlog).
