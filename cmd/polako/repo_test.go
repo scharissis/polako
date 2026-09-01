@@ -434,16 +434,17 @@ func TestPlanSkillBodySectionsAllHaveBudgets(t *testing.T) {
 	skill := planSkill(t)
 
 	start := strings.Index(skill, "## Summary — what this proposes and why")
-	end := -1
-	if start >= 0 {
-		if n := strings.Index(skill[start:], "Depends on: #168, #170"); n >= 0 {
-			end = start + n
-		}
+	if start < 0 {
+		t.Fatal("SKILL.md's issue body template no longer starts with `## Summary`")
 	}
-	if start < 0 || end < 0 {
-		t.Fatal("SKILL.md's issue body template no longer runs from `## Summary` to the `Depends on:` line")
+	// The footer line is the anchor, not `Depends on:` — that line's issue
+	// numbers also appear earlier as a worked example in Phase 2's prose, so
+	// anchoring there would break on an editor changing the example alone.
+	n := strings.Index(skill[start:], "Proposed by polako plan from docs/VISION.md @ 1a2b3c4")
+	if n < 0 {
+		t.Fatal("SKILL.md's issue body template no longer ends with the `Proposed by polako plan` footer")
 	}
-	template := skill[start:end]
+	template := skill[start : start+n]
 
 	sections := []string{"## Summary", "## Why now", "## Acceptance criteria", "## Pointers", "## Out of scope"}
 	budget := regexp.MustCompile(`sentence|line each|one to|screen|paragraph|at most|no more than`)
