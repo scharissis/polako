@@ -259,7 +259,10 @@ the README: the retro checklist, the tag rule, the per-version and post-merge
 recipes. `plans/experiments.md` seeded with the two named experiments. The
 skill-change/eval rule added to CLAUDE.md's checking section. Documentation
 only — the phase exists so the ritual survives contact with a future operator
-who was not in this conversation.
+who was not in this conversation. (Issue #283 later cut the README down to a
+landing page and moved the checklist, tag rule and both recipes here, into
+this document's own "The cadence" and "Recipes" sections above — the README
+now just points at them.)
 
 **Phase 4 — pulled-for, not promised.** A `-by` group for versions; an audit
 verb; eval-score history beyond PR bodies; any retro automation (a skill that
