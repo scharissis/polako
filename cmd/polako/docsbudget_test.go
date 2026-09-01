@@ -22,18 +22,16 @@ import (
 
 // docsBudget is chosen from today's line counts so that almost the whole set
 // already clears it and docsDebt stays short — the entries are then the real
-// outliers, not a census. Seven of eight files are already under 500; the
-// other (run-data.md at 702) is docsDebt's whole contents. reference.md paid
-// its debt in issue #284 (635 -> 500).
+// outliers, not a census. reference.md paid its debt in issue #284
+// (635 -> 500), run-data.md in issue #287 (702 -> under 500); every doc page
+// now clears the budget outright, so docsDebt is empty.
 const docsBudget = 500
 
 // docsDebt holds the offenders present the day this test landed, each with
 // the length measured then. Same rule as fileDebt: entries come off as the
 // debt is paid, nothing new goes on, and the recorded number is a ceiling —
 // raising it is off the table.
-var docsDebt = map[string]int{
-	"run-data.md": 702,
-}
+var docsDebt = map[string]int{}
 
 func TestDocsStayWithinLineBudget(t *testing.T) {
 	files := map[string]int{"README.md": countRepoFileLines(t, "README.md")}

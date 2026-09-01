@@ -4,76 +4,45 @@ Every run writes one line of numbers, so you can answer what a cleared backlog
 actually cost — and which settings are worth changing.
 
 **What is written, in full:** for each `claude` invocation, one JSON object
-holding the repository and issue number, a random id for the shift that wrote
-it, why the run happened and what it left behind (a PR, questions, a closed
-issue, or neither),
-its status and exit code, turns, tool-use count, wall and API duration, tokens
-(in / out / cache read / cache write, plus the per-model split), dollars, and
-the configuration under test — skill, model, permission mode, `-run-tag`, a
-hash of the tool allowlist, the strategy knobs, and the three versions in play
-(this binary, the installed skill, and the
-Claude CLI). One more object per issue records how it ended —
-`merged`, `closed_no_change`, `closed_unmerged` or `needs_human` — and, when it was handed back, why
-(`park_reason`: `budget`, `retries_exhausted`, `produced_nothing`,
-`permission_refused`, `no_skill`, `auth`, `conflict_remediation`,
-`checks_remediation`, `review_remediation`, `pr_state`, or `unknown` when the
-path could not say) — and, when GitHub could
-be asked, what the PR turned out to be: additions, deletions, changed files,
-how many reviews it drew, and when it opened and merged. That is one extra `gh pr view`
-as each issue ends, and none at all under `-metrics off`. When
-[the usage gate](#capping-what-a-shift-spends) is on, that same object also
-carries the plan's week-usage percent as this issue was picked up and again
-as it reached this terminal state — what a later report needs to say what the
-issue cost the plan.
+with the repo and issue number, a random shift id, why the run happened and
+what it left behind (a PR, questions, a closed issue, or neither), status,
+exit code, turns, tool-use count, wall and API duration, tokens (in / out /
+cache read / cache write, per model), dollars, and the configuration under
+test (skill, model, permission mode, `-run-tag`, a tool-allowlist hash, the
+strategy knobs, and the three versions of binary, skill and Claude CLI in
+play). One more object per issue records how it ended (`merged`,
+`closed_no_change`, `closed_unmerged` or `needs_human`, with a
+`park_reason` when parked) and, when GitHub can answer (one extra `gh pr
+view`, skipped under `-metrics off`), the PR's additions, deletions,
+changed files, review count, and open/merge times. When
+[the usage gate](#capping-what-a-shift-spends) is on, it also carries the
+plan's week-usage percent at pickup and at the terminal state.
 
-[`polako plan`](reference.md#planning-a-backlog-unattended-polako-plan) writes
-one more kind, `plan` — a single line per run, whatever its status. It carries
-the same run-stream numbers and configuration snapshot as a `claude`
-invocation's record (status, turns, tokens, dollars, skill, model, `-run-tag`,
-the tool-hash, the three versions, the shift id), and adds what the run was
-planning from and what it produced: `vision` (the `-vision` path you typed, or
-the literal `(brief)` — never the brief's own text), `milestone`,
-`issues_created`, `epics_created`, `cap` (`-max-issues`), and `labels_enforced`
-(how many label edits the supervisor's curation pass had to make — the measure
-of how far the run fell short of self-applying the gate). No issue or PR
-number, because a plan run works neither. `polako stats` has no section for it
-yet and skips it, the same way it skips any record kind newer than itself.
-
+[`polako plan`](reference.md#planning-a-backlog-unattended-polako-plan) and
 [`polako health`](reference.md#auditing-repository-health-unattended-polako-health)
-writes a `health` kind alongside it — the same run-stream numbers and
-configuration snapshot, and the same `issues_created`, `epics_created`, `cap`
-and `labels_enforced` fields a `plan` record carries. No `vision` or
-`milestone`: review-health plans from the repository itself rather than a
-document, and attaches no milestone. `polako stats` skips it too, for the same
-reason it skips `plan`.
+each write their own kind, `plan` and `health` — one line per run, plus
+`issues_created`, `epics_created`, `cap` (`-max-issues`) and
+`labels_enforced`; `plan` also carries `vision` and `milestone`, `health`
+neither, and neither carries an issue or PR number. `stats` skips both
+kinds today.
 
-**What is never written:** issue titles, issue bodies, PR titles, comment text,
-review text, diffs, or anything the model said. Reviews are counted, never
-quoted. Records hold numbers, identifiers and labels you chose. That is what
-makes one of these files safe to hand to a teammate, or paste into an analysis
-session, without re-reading it first.
+**What is never written:** issue titles, bodies, PR titles, comment text,
+review text, diffs, or anything the model said — reviews are counted, never
+quoted. Records hold numbers, identifiers and labels you chose, which is
+what makes one of these files safe to hand to a teammate unread. They live
+at `~/.polako/metrics/<owner>--<repo>.jsonl`, one append-only file per
+repository, created `0700`, never inside your checkout.
 
-**Where it goes:** `~/.polako/metrics/<owner>--<repo>.jsonl`, one
-append-only file per repository — so deleting one project's data is `rm` on one
-file, and aggregating across projects is a glob. Created `0700`, so on a shared
-machine the records stay yours. Never inside your checkout: the skill commits
-things there, and cost data must not become committable by accident.
-
-**Run data never leaves your machine unless you ask it to.** There is no
-telemetry endpoint, no phone-home, and no network path out of the recorder — the
-binary is the only thing that meters anything, and it writes to your disk. The
-single exception is [`-post-summary`](#putting-it-on-the-pr--post-summary), off
-unless you turn it on, which puts one line of numbers on your own merged PR. The
-skill half, the part you can install from a marketplace, carries no data
-collection at all: it is a prompt.
-
-[`-remote`](reference.md#watching-a-shift-from-anywhere--remote) used to be
-named here as the one other thing about a shift visible off this machine. It is
-not one today: no `claude` CLI registers headless runs with Remote Control, so
-polako no longer passes the flag and nothing about the session goes anywhere.
-The flag stays for the CLI that supports it, and
-[security.md](security.md#-remote-and-why-it-is-not-in-that-table) is where the
-trade is argued for the day it does.
+**Run data never leaves your machine unless you ask it to** — no telemetry
+endpoint, no phone-home. The one exception is
+[`-post-summary`](#putting-it-on-the-pr--post-summary), off by default,
+which puts one line of numbers on your own merged PR; the installed skill
+itself collects nothing, it's a prompt.
+[`-remote`](reference.md#watching-a-shift-from-anywhere--remote) isn't a
+second exception today: no `claude` CLI registers headless runs with Remote
+Control, so nothing about the session goes anywhere — see
+[security.md](security.md#-remote-and-why-it-is-not-in-that-table) for the
+day a CLI does.
 
 To write nothing at all:
 
@@ -81,19 +50,14 @@ To write nothing at all:
 polako work -metrics off
 ```
 
-Records are write-only by design, with exactly two readers — `polako stats`,
-and the one line `polako plan` prints after its label pass estimating what the
-batch it proposed will cost to implement. Both are human-facing rendering
-computed after a run has ended; no orchestration decision depends on either.
-The work loop never reads a record, and deleting the directory mid-shift
-changes nothing about what the supervisor does next — that is what keeps run
-data compatible with "all state lives in GitHub". Writes are best-effort: a
-failure warns once and polako carries on.
+Records are write-only, with exactly two readers — `stats`, and the cost
+line `polako plan` prints after its label pass. Deleting the directory
+mid-shift changes nothing about what the supervisor does next. Writes are
+best-effort: a failure warns once and polako carries on.
 
 ## Capping what a shift spends
 
-All five caps are off unless you set one, so a shift that sets none behaves
-exactly as it always did.
+All five caps are off unless you set one.
 
 ```bash
 polako work -max-cost 15 -max-issue-time 90m -max-session-cost 200 \
@@ -101,71 +65,41 @@ polako work -max-cost 15 -max-issue-time 90m -max-session-cost 200 \
 ```
 
 - **`-max-cost`** — dollars one issue may cost before it is parked.
-- **`-max-issue-time`** — how much *run time* one issue may consume before it
-  is parked. Not the wall clock since the issue was picked up: an issue spends
-  most of its life waiting for you to merge its PR, and parking issues over how
-  long that took would punish nobody's slowness but the reviewer's.
+- **`-max-issue-time`** — run time (not wall clock) one issue may consume
+  before it is parked, so a slow reviewer never costs it the park. Catches
+  what `-stall` can't: an agent looping productively but uselessly for
+  hours still emits events, so that watchdog never fires.
 - **`-max-session-cost`** — dollars this shift may spend before it stops.
-- **`-max-session-usage`** / **`-max-week-usage`** — the plan's own limits
-  rather than this binary's arithmetic: percentages read off `claude`'s own
-  `/usage`, checked between issues exactly where `-max-session-cost` is, and
-  never a park — this is a fact about the account, not about the issue. Unlike
-  the cost caps they do not *stop* the shift: whichever pool is over its
-  ceiling, the drain waits that pool's own reset out and then carries on — the
-  fence behaving like the wall it fronts (see [behaviour.md](behaviour.md), "A
-  session limit is waited out, not retried against"). Starting a shift already
-  over the ceiling therefore waits rather than producing nothing. A weekly
-  reset can be days off, so that wait can be long; Ctrl+C is safe throughout,
-  since all state is on GitHub. A probe that cannot answer — an old CLI with no
-  `/usage`, an unparseable reply — trips nothing: it logs once and the drain
-  carries on uncapped for that pass.
+- **`-max-session-usage`** / **`-max-week-usage`** — the plan's own limits,
+  read off `claude`'s `/usage` between issues. Unlike the cost caps these
+  never park an issue: whichever pool is over its ceiling, the drain waits
+  that pool's reset out and carries on (see [behaviour.md](behaviour.md), "A
+  session limit is waited out, not retried against"); Ctrl+C is safe
+  throughout, since all state is on GitHub. A probe that can't answer trips
+  nothing.
 
-`-max-issue-time` is the one that catches what `-stall` cannot. That watchdog
-kills a run that has gone *silent*; an agent looping productively but uselessly
-for three hours emits events the whole way through and is invisible to it. This
-cap does not care whether events are arriving, so it kills that run and parks
-the issue for you.
-
-The two per-issue caps read the tally of every run this shift dispatched for
-the issue — the first attempt, its resumes, the re-run that folded your answer
-in, and any conflict, CI or review remediation against its PR. They gate work
-about to be dispatched and never work already done, which is why a run that
-overspends but *opens a PR* is not parked: the work is on GitHub and waiting
-for a merge costs nothing more. What is parked is the issue whose next run
-would take it further over. The reason goes in the park comment on the thread
-and in the exit summary, the same as any other park:
+The two per-issue caps read the tally of every run dispatched for the issue
+— first attempt, resumes, remediation — and gate work about to be
+dispatched, never work already done: an overspending run that *opens a PR*
+isn't parked, since the work is on GitHub already. The reason goes on the
+park comment and the exit summary:
 
 ```
   parked  #16 ($15.40) — this shift has spent $15.40 on it, the whole of its -max-cost of $15.00
 ```
 
-`-max-session-cost` is checked between issues rather than inside one, because
-ending a shift cleanly means declining to take on more work rather than killing
-a run part-way and having to park a healthy issue over it. So one issue can
-carry the total past the budget, by whatever that issue costs. `-max-cost` does
-not bound the overrun to itself, either: it gates the *next* run rather than the
-one in flight, so an issue can end at its `-max-cost` plus the whole of the run
-that carried it over. Size the budget with a run's worth of headroom under it.
-Nothing is parked when it trips: polako logs what it spent, prints its
-summary and exits 0, and since all state is on GitHub, raising the budget and
-starting it again picks up exactly where it stopped.
+`-max-session-cost` is checked between issues, not inside one, so one issue
+can carry the total past budget by whatever it costs; size it with a run's
+worth of headroom. Nothing is parked when it trips — polako logs what it
+spent and exits 0; starting again picks up exactly where it stopped.
 
-One honest limitation, in the safe direction. A run that crashed, stalled or
-was interrupted never emitted a `result` event, so it reported no cost —
-pricing belongs to the Claude CLI and this binary will not guess at it. Its
-tokens are still counted (as observed) and its duration is timed from the
-clock, but its dollars are zero. A cost cap is therefore a ceiling on what was
-*observed*, and a shift that keeps dying spends more than the number admits.
-The summary says so when it happened:
+One honest limitation: a crashed, stalled or interrupted run never emitted
+a `result` event, so it reports zero cost, and a shift that keeps dying
+spends more than the number admits:
 
 ```
 summary: 2 issues merged, 1 issue parked, $9.10 spent (3 runs reported none, so that is an undercount), 5h40m of wall clock
 ```
-
-Caps in force are named at startup, because
-[the environment can set any flag](reference.md#setting-defaults-from-the-environment) and
-a park whose reason quotes a `-max-cost` you never typed is a mystery worth
-pre-empting.
 
 ## Putting it on the PR: `-post-summary`
 
@@ -181,30 +115,22 @@ polako work -post-summary
 > <sub>Recorded by polako v0.5.0, covering the runs this shift
 > supervised. Dollars are the Claude CLI's API-equivalent pricing.</sub>
 
-Numbers only, on the PR they describe, readable by exactly the people who can
-already see that PR. A run that crashed, stalled or was interrupted never
-reported a cost, so when the tally holds one the comment says how many and that
-its tokens and dollars are undercounts. It covers the runs *this* shift supervised, and says so: a
-supervisor restarted mid-issue reports what it saw, and one that only waited on
-a PR an earlier process opened comments nothing rather than claiming a free PR.
+Numbers only, on the PR they describe. A crashed, stalled or interrupted run
+never reported a cost, so the comment says how many and that its tokens and
+dollars are undercounts. It covers only the runs *this* shift supervised, so
+a restarted supervisor reports what it saw rather than claim a free PR.
 
-To make it your default without typing it, export
-`POLAKO_POST_SUMMARY=1` — see
+Export `POLAKO_POST_SUMMARY=1` for a default — see
 [Setting defaults from the environment](reference.md#setting-defaults-from-the-environment).
-Startup says when it is on, so a variable you set months ago in a profile is
-never a mystery.
-
-It is independent of `-metrics`, so `-metrics off -post-summary` is the
-combination for wanting team visibility and no local files at all. Best-effort
-like the rest of run data: a comment that cannot be posted is a log line, never
-a failed shift.
+Independent of `-metrics`, so `-metrics off -post-summary` gives team
+visibility with no local files. Best-effort: a comment that can't post is a
+log line, never a failed shift.
 
 ## Reading it back: `polako stats`
 
-`stats` is the only thing that ever reads those files — its sibling
-[`status`](reference.md#where-the-backlog-stands-polako-status) reads GitHub and
-never touches them. A bare `polako` prints the verb table; nothing about the
-report touches GitHub or starts a run.
+`stats` is the only thing that reads those files — its sibling
+[`status`](reference.md#where-the-backlog-stands-polako-status) reads GitHub
+instead.
 
 ```bash
 polako stats
@@ -253,93 +179,45 @@ human latency
 | `-html` | *(off)* | Also write the report to this path, as one self-contained HTML file — see [Keeping a copy](#keeping-a-copy--html). |
 | `-json` | `false` | Print one JSON document to stdout instead of the text report — see [As JSON](#as-json--json) below. |
 
-A window can keep an issue's terminal record while clipping away the runs that
-produced it. Those issues still count toward the merge rate, but they cannot be
-priced, so the per-issue figures cover only issues with runs inside the window
-and say when that differs. Files in the directory that cannot be opened — the
-normal case in a shared one, since records are written `0600` — are named in
-the report rather than failing it.
+A window can keep an issue's terminal record while clipping the runs that
+produced it — those issues still count toward the merge rate but can't be
+priced, and the report says when that differs. Unreadable files (`0600`
+records in a shared directory) are named rather than failing the report.
+**Blocked on answers** is the gap between the run that posted questions and
+the re-run that folded the reply in; **PR open to merge** ends whenever
+somebody pressed the button — part of the elapsed time, not a property of
+the automation.
 
-Every summable number is derived at read time from the run records — cost per
-issue, runs per issue, question rounds, the spans below. That is why an issue
-record carries no totals of its own: there are none to go stale, and none the
-supervisor has to keep across a restart.
-
-Two of the numbers measure people rather than the tool. **Blocked on answers**
-is the gap between the run that posted questions and the re-run that folded the
-reply in. **PR open to merge** ends whenever somebody got round to pressing the
-button — reported because it is part of the elapsed time, but it is not a
-property of the automation, and no change to the skill will move it.
-
-**On park reasons:** `needs human` is one bucket on the `terminal` line, and
-**park reasons** is what it is made of — `budget 3, checks remediation 1` says
-which half of the tool the next change belongs in, which the count alone never
-could. The value is an identifier chosen at the park itself, never the sentence
-posted to the issue thread: that text quotes issue numbers, dollar figures and
-branch names, and records hold none of those. A park path that genuinely cannot
-say records `unknown`, which is deliberately not the same as a record written
-before the field existed — those count as `unrecorded`, so an old file cannot
-pass for a supervisor that stopped classifying its parks. The line is absent
-when nothing in the window was parked.
-
-**On PR size:** an issue whose terminal record carries GitHub's answer about
-its PR adds a **change per issue** line — the median additions, deletions,
-changed files and reviews. Records written before that enrichment existed carry
-none, and neither does one whose lookup failed, so the line counts its own
-issues and says how many. The same two timestamps give **PR open to merge** the
-authoritative span, which is right even when the run that opened the PR falls
-outside the window or belonged to a shift on another machine.
+**On park reasons:** `needs human` is one bucket on the `terminal` line;
+**park reasons** breaks it down (`budget 3, checks remediation 1`), an
+identifier chosen at the park itself, never the sentence posted to the
+thread. A park that can't say records `unknown`. **On PR size:** a terminal
+record carrying GitHub's answer about its PR adds a **change per issue**
+line — median additions, deletions, changed files and reviews; records
+from before that enrichment carry none.
 
 **On resumed sessions:** a crashed run and the `--resume` that finishes its
-work are two records, and `stats` sums both. The same goes for the `unfinished`
-reason, which is a `--resume` of a run that ended its turn without a PR rather
-than one that crashed — counting how often that happens is how you tell whether
-the skill's one-turn rule is landing. Those rows also carry a `resumed_from`,
-the session id passed to `--resume`; today's CLI keeps the session id across a
-resume, so it always equals the row's own `session`. It is stored as the resume
-*target* — a property of the invocation — so it would still say something
-against a CLI that forks a new session on resume rather than continuing the old.
+work are two records, and `stats` sums both — including `unfinished`, a
+`--resume` of a run that ended its turn without a PR rather than crashed.
+Summing is correct: a `--resume`d run's `result` event reports that
+invocation alone, not the session it continued.
 
-Summing both is right, and that took measuring. A `--resume`d run's `result`
-event reports **that invocation, not the session it continued**, so the two
-rows do not overlap. The evidence is a real resume pair — same session id,
-both sides reaching a priced `result` event — in which the resumed half
-reported *fewer* turns (31 against 62) and fewer tokens on every field of
-`usage` (15,651 output against 54,077; 4.9M cache reads against 6.2M) than the
-run it resumed. A session total cannot go down. `total_cost_usd` rides the same
-event and is exactly the sum of `modelUsage`'s `costUSD`, whose map on the
-resumed run carried a single model key — not the key the earlier half had been
-billed under, which a cumulative map would still be carrying. Reports used to
-count the resumes and warn about this; they no longer need to, though the
-`reasons` line still says how many there were.
+`tokens` and `cost_usd` don't cover the same work: `tokens` is the CLI's
+main-loop `usage` block, while `cost_usd` also aggregates subagents, so
+dividing one by the other isn't a price per token. A run with background
+subagents streams several `result` events; `turns`, `wall_ms`, `api_ms` and
+`tokens` sum across them, while `cost_usd` takes the last event's
+cumulative figure (fixed in issue #227, which had undercounted roughly
+sixfold on a run reaching the review gate).
 
-One thing to keep straight when reading a record: its `tokens` and its
-`cost_usd` do not cover the same work. `tokens` is the CLI's main-loop `usage`
-block; `cost_usd` is `total_cost_usd`, which matches `modelUsage` — the
-per-model breakdown that also aggregates whatever subagents the run spawned. So
-a run that used subagents is billed for them and does not count their tokens,
-and dividing one figure by the other is not a price per token.
-
-A run with background subagents streams several `result` events — one per
-dequeued prompt, all at process exit — and the record's `turns`, `wall_ms`,
-`api_ms` and `tokens` are the sum across them, while `cost_usd` and
-`model_usage` are the last event's, since each already carries the whole
-invocation's cumulative figure. Before this was fixed (issue #227) every
-per-turn field was the last event's too, so `stats` under-reported turns and
-every token figure — roughly sixfold on a run that reached the review gate.
-
-**On approximated runs:** a run that crashed, stalled or was interrupted never
-emitted a `result` event. Its tokens are the tally seen streaming past, an
-undercount, and its dollars read as zero, because pricing belongs to the CLI
-and this binary never guesses at it. Those runs are counted out separately
-rather than mixed in silently — a crash-prone configuration should not get to
-look cheap.
+**On approximated runs:** a crashed, stalled or interrupted run's tokens
+are the tally seen streaming past, dollars read zero — counted out
+separately so a crash-prone configuration doesn't get to look cheap.
 
 ## Calendar windows: `-window`
 
-`-since` looks back a fixed span from whenever you happen to run `stats`. A
-plan's own limits don't reset on a rolling clock like that — they reset at a
-calendar boundary — so `-window` names one instead:
+`-since` looks back a fixed span from now. A plan's own limits reset on a
+calendar boundary instead, so `-window` names one:
 
 ```bash
 polako stats -window today    # local midnight to now
@@ -348,35 +226,16 @@ polako stats -window month    # the 1st of the month, local, to now
 polako stats -window session  # an approximation of the plan's 5h block
 ```
 
-`-window` and `-since` both name a window to report; giving both is a flag
-error naming the conflict rather than one silently winning.
+`-window` and `-since` are mutually exclusive — giving both is a flag error.
+`today` and `month` use calendar arithmetic, so they land correctly across
+a DST change or a 28/30/31-day month. `week` anchors to the plan's own
+weekly reset when the same usage probe
+[`-max-week-usage`](#capping-what-a-shift-spends) reads can answer, or the
+most recent Monday 00:00 local when it can't. `session` approximates the
+plan's five-hour block, anchored to the earliest run seen in the last 5h,
+always labelled an approximation.
 
-`today` and `month` resolve in the machine's local zone, from local midnight
-and the 1st of the month respectively — computed with calendar arithmetic
-(add a day, add a month) rather than a fixed 24h/730h span, which is what
-lets the bound land on the right side of a DST change or a month with 28, 30
-or 31 days in it, every time, rather than drifting an hour or a day off on
-the transitions where a fixed span would.
-
-`week` anchors to the plan's own weekly reset when a live usage probe (the
-same one [`-max-week-usage`](#capping-what-a-shift-spends) and `polako
-status` read) can answer, rolled back in 7-day steps to the most recent
-occurrence at or before now. When the probe can't answer — no subscription,
-an old CLI, offline — it falls back to the most recent Monday 00:00 local.
-Either way the `window` line in the header names which anchor won, because a
-plan whose week resets on a Wednesday evening is not the same window as the
-ISO week, and a report that silently picked the wrong one is indistinguishable
-from one that picked right.
-
-`session` approximates the plan's five-hour block: the 5h span anchored to
-the earliest run seen in the last 5h, or a plain "5h ending now" when there
-is none to anchor to. It is always named as an approximation in the header —
-the plan's own session boundaries are not read off anywhere `stats` can see,
-only guessed at from where the work actually landed.
-
-Whichever window is in force, the header's `window` line reports the
-resolved bounds, how far through the window now falls, and how much of it is
-left:
+The header names the resolved bounds and how far through the window falls:
 
 ```
   window  2026-08-24T00:00:00Z → 2026-08-25T00:00:00Z (today; 9h12m elapsed, 14h48m left, 38% through)
@@ -389,54 +248,38 @@ when `-window` was given.
 ## What an issue costs the plan
 
 When [the usage gate](#capping-what-a-shift-spends) is on, each issue's
-terminal record carries two samples of the plan's own week-usage percentage —
-one from when the issue was picked up, one from when it reached a terminal
-state. The delta between them is what that issue cost the plan, as a
-percentage of a week, and the issues section adds a line for it:
+terminal record carries two samples of the plan's week-usage percentage, at
+pickup and at the terminal state. The delta is what that issue cost the
+plan, as a percentage of a week:
 
 ```
   plan cost per issue  1.4% mean, 1.7% median of a week — about 59 issues to a full week (upper bound: counts everything the account did meanwhile, not just this issue; polako's own share was 29% of the last 24h)
 ```
 
-**Stated as the upper bound it is.** The delta counts everything the account
-did during that span — including your own interactive session on another
-machine, or any other automation sharing the plan — not only this issue's own
-runs. The parenthetical after it is the cross-check: the usage probe's own
-attribution figure (the same "polako was N% of the last 24h" line `work`'s
-banner and `polako status` print), a different, self-reported measure over a
-different window. It sits beside the mean/median and is never folded into it.
+**Stated as the upper bound it is** — the delta counts everything the
+account did during that span, not just this issue. The parenthetical is a
+cross-check: the usage probe's own attribution figure ("polako was N% of
+the last 24h"), shown beside the mean/median but never folded into it.
+Absent when no terminal issue in scope has a usable sample; a mid-issue
+reset drops that reading rather than average it into a meaningless
+negative.
 
-The line is absent entirely when no terminal issue in scope carries a usable
-sample — the usage gate was off, or every probe along the way failed to
-answer — the same treatment the PR-size line above already gets. When some
-issues have a sample and others don't, the line still prints and names how
-many were left out.
-
-One reading is dropped rather than averaged in: a mid-issue reset makes the
-terminal sample belong to a fresh weekly cycle rather than a continuation of
-the pickup one, so subtracting them would produce a meaningless negative
-number. That issue is counted the same as an unsampled one.
-
-`-json` carries the same figures as a typed `plan` object (`mean_percent_of_week`,
-`median_percent_of_week`, `sampled_issues`, `unsampled_issues`, and
-`cross_check_percent`/`cross_check_window` when the probe answered), present
-only when at least one issue has a usable sample. The HTML report adds the
-same figures as a card, under the same condition.
+`-json` and `-html` carry the same figures, as a typed `plan` object or a
+card respectively, present only when at least one issue has a usable
+sample.
 
 ## Telling one shift from another: `-shift`
 
-Records from last night's batch, this morning's restart and a shift still
-running all interleave in one file, and `-since` cannot separate them: shifts
-that ran back to back, or overlapped, defeat a time window. So every shift
-stamps its records with a random id and says so once at startup:
+Records from last night's batch and a shift still running interleave in one
+file, and `-since` can't separate them. So every shift stamps its records
+with a random id, once at startup:
 
 ```
   run data  /Users/you/.polako/metrics — numbers only, never leaves this machine (-metrics off to disable)
   shift     7f3a91c4 — `polako stats -shift 7f3a91c4` reports on it alone
 ```
 
-That line is the only place the id appears — nothing reads it back, and the
-shift keeps no note of it anywhere else. Two questions it makes exact:
+Nothing else reads that id back. Two questions it makes exact:
 
 ```bash
 polako stats -shift last     # what has the shift running right now spent?
@@ -444,33 +287,26 @@ polako stats -by shift       # what did each shift do?
 ```
 
 `last` is whichever shift wrote the newest record *in scope*, so it composes
-with the other filters rather than overriding them —
-`stats -shift last -repo owner/name` is the last shift to touch that
-repository, which is not always the last shift overall. Whichever way it
-resolves, the report names the id it landed on rather than the word you typed:
+with other filters — `stats -shift last -repo owner/name` is the last shift
+to touch that repository. The report names the id it resolved to:
 
 ```
   filtered  for scharissis/polako from shift 7f3a91c4
 ```
 
-Records written before ids existed group and filter as `(none)`, the same
-spelling an untagged run gets, so older files still load and still count.
+Records written before ids existed group and filter as `(none)`.
 
-An issue picked up by one shift and finished by another after a restart is
-counted under each, and `-by shift` says when that happened. The two views of
-such an issue differ on purpose. In `-by shift`, **merged** is the issue's own
-final outcome — the same rule as `-by tag`, and what makes `$/merged` "spent by
-this shift per issue of theirs that shipped" — so both shifts count the merge.
-Under `-shift <id>` the records *are* that shift's, so the report shows what
-that shift concluded, which for the one that handed the issue on is
-`needs human`. One asks what became of the issues a shift worked; the other
-asks what that shift did.
+An issue picked up by one shift and finished by another is counted under
+each, and `-by shift` says when that happened: **merged** is the issue's
+own final outcome there, so both shifts count the merge, but under `-shift
+<id>` the report shows only what that shift concluded (`needs human` for
+the one that handed the issue on).
 
 ## Reopening a past run: `-runs`
 
 Everything above is a rollup. `-runs` adds the ledger those numbers were
-derived from — one row per run, in the order they happened, under whatever
-`-repo`, `-since` and `-shift` are already in force:
+derived from — one row per run, in order, under whatever `-repo`, `-since`
+and `-shift` are already in force:
 
 ```bash
 polako stats -runs -since 48h
@@ -485,26 +321,17 @@ run log
   2026-08-25T09:06:00Z  scharissis/polako#49  resume     ok        opened pr         b2e7c045-19af-4d6a-b7f1-8c02ea3169d4        1  $3.00    5.5M   34m
 ```
 
-The `session` column is the point of it — the last of the text columns, before
-the numbers. A session id is what the Claude CLI keeps the transcript under, so
-any row turns back into the whole run:
+`session` is the point of it — a session id is what the Claude CLI keeps the
+transcript under, so any row reopens the whole run exactly as it ended:
 
 ```bash
 claude --resume 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9
 ```
 
-That opens the run in Claude Code exactly as it ended — every message, every
-tool call, every file it read — which is the intended way to find out what a
-run actually did. Nothing extra is stored to make it work: the CLI already
-keeps the transcript, and the records already keep the id.
-
-The two rows above sharing an id are a crash and the `--resume` that finished
-its work, which is what that pairing looks like from here. A run that reported
-no session renders `—`: records written before this column existed carry none,
-and neither does a run that died before the CLI announced itself.
-
-The id is in the live log too, on every run's first line, and again beside a
-park — the two moments somebody wants to read a transcript:
+The two rows sharing an id above are a crash and the `--resume` that
+finished its work. A run that reported no session renders `—`: it died
+before the CLI announced itself. The id is also in the live log, on every
+run's first line and beside a park:
 
 ```
 [claude] session started (model claude-opus-5, session 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9)
@@ -512,44 +339,32 @@ issue #48 needs a human: claude crashed and 3 resume attempts failed — parking
 issue #48: `claude --resume 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9` reopens what the last skill run on it did
 ```
 
-It stays local, like every other number here: the id goes to the terminal and
-to the record file, never onto the issue thread the park comment goes to.
+It stays local: the id goes to the terminal and the record file, never onto
+the issue thread.
 
 ## Keeping a copy: `-html`
 
-The text report answers one question per invocation, sized to a terminal.
-`-html` writes the same report as one HTML file you can keep, send to a
-teammate, or open next month without still having the records that produced it:
+`-html` writes the same report as one self-contained HTML file you can
+keep, send to a teammate, or open next month without the records that
+produced it:
 
 ```bash
 polako stats -html ~/polako-report.html
 ```
 
-The text report still prints — `-html` adds an output, it does not swap one out
-— and the last line names the file it wrote. The page holds everything the text
-report does, laid out rather than listed: the headline numbers as cards, spend
-over time as a chart, how the issues and runs ended as proportion bars, then
-the same summary sections and the `by shift` and `by issue` tables. Issue
-numbers link out to GitHub. `-repo`, `-since` and `-shift` narrow it exactly as
-they narrow the text; `-by model` or `-by tag` adds that table too, and `-runs`
-adds the run log.
+The text report still prints — `-html` adds an output, it doesn't swap one
+out. The page holds everything the text report does, laid out rather than
+listed: headline numbers as cards, spend over time as a chart, how issues
+and runs ended as proportion bars, then the summary sections and the `by
+shift`/`by issue` tables. Issue numbers link out to GitHub; `-repo`,
+`-since`, `-shift`, `-by` and `-runs` narrow it as they narrow the text.
 
-**Self-contained means self-contained.** No script, no external stylesheet, no
-webfont, no image — the chart is inline SVG, and the whole file is markup and
-styles in one document. It renders with the network cable pulled, and opening
-it tells nobody that you did. A test asserts that against the rendered bytes,
-because the file holds your private numbers and "it happens to work offline" is
-not the same promise. The links to github.com are the one thing that names a
-remote host, and a link is fetched when it is clicked, not when the page loads.
+**Self-contained means self-contained** — no script, no external stylesheet,
+no webfont, no image; the chart is inline SVG. Links to github.com are the
+one thing naming a remote host, fetched only when clicked.
 
-The file is written `0600`, like the records themselves — it is those same
-numbers laid out, and the same rule applies to who on the machine can read it.
-It contains no issue, comment or PR text, for the same reason [the records
-don't](#run-data-and-cost-tracking): numbers, identifiers and your own labels, so
-it is safe to hand to a teammate without re-reading it first.
-
-An empty window still gets a file, saying so. A nightly `stats -html` that
-skipped the write would leave yesterday's numbers on disk looking like today's.
+Written `0600`, the same as the records themselves, holding no issue,
+comment or PR text either. An empty window still gets a file, saying so.
 
 ## As JSON: `-json`
 
@@ -605,11 +420,10 @@ polako stats -json | jq .
 }
 ```
 
-That is `polako stats` above, field for field: `source` is the `read`/`window`/`repos`
-line, `issues`/`runs`/`cost`/`latency` are the four summary sections, and
-every number is the one the text renderer printed — not a second computation
-of it. `-by` and `-runs` add their own top-level fields, present only when the
-flag was given:
+Field for field, this is `polako stats` above: `source` is the
+`read`/`window`/`repos` line, `issues`/`runs`/`cost`/`latency` the four
+summary sections. `-by` and `run_log` are top-level fields present only
+when given:
 
 ```bash
 polako stats -json -by tag -runs | jq '.by, .run_log[0]'
@@ -632,27 +446,14 @@ polako stats -json -by tag -runs | jq '.by, .run_log[0]'
 
 `.by.issues` holds the rows instead of `.by.groups` when `-by issue` was
 given. Outcome, status, reason and park-reason values are the raw on-disk
-vocabulary this page documents (`opened_pr`, not "opened pr") — the JSON is
-for scripts, and a script comparing against `"opened_pr"` should not also
-have to know the text report's prose.
-
-Every array and breakdown map defaults to `[]` / `{}`, never `null`, even
-when empty — `.source.repos[]` never needs a `// empty` guard. A handful of
-fields are conditionally *absent* rather than a zero value standing in for
-"not applicable" — `park_reasons`, `change_per_issue`, `per_day_usd`,
-`per_merged_usd`, and the four `*_per_issue*` fields together, which are all
-absent exactly when the text report's matching line is absent ("nothing to
-price", no park reasons, nothing merged, no PR-size data, less than an hour
-of window). `scope.shift` is the *resolved* id (`ds.shift`), never the
-literal `last`, the same rule [`-shift`](#telling-one-shift-from-another--shift)
-follows in text. `-by` and `run_log` are omitted entirely, not empty, when
-their flag was not given, so `.by == null` is how a script asks "was `-by`
-used".
-
-With `-json` and `-html` together, the file still gets written, but the
-"wrote the HTML report to …" confirmation moves to stderr — stdout carries
-exactly the one document a `| jq` pipeline expects, never a line of prose
-after it.
+vocabulary this page documents (`opened_pr`, not "opened pr"). Every array
+and breakdown map defaults to `[]`/`{}`, never `null`; a handful of fields
+are conditionally *absent* instead — `park_reasons`, `change_per_issue`,
+`per_day_usd`, `per_merged_usd`, the four `*_per_issue*` fields — exactly
+when the text report's matching line is. `-by` and `run_log` are omitted,
+not empty, when their flag wasn't given. With `-json -html` together, the
+"wrote the HTML report to …" line moves to stderr, so stdout carries
+exactly the document a `| jq` pipeline expects.
 
 ## Comparing configurations
 
@@ -662,13 +463,10 @@ after it.
 polako work -model claude-opus-5 -run-tag baseline
 ```
 
-Change one thing — the model, the skill's wording, `-stall` — tag the next
-batch differently, and the two sets of records are comparable. Note that the
-binary's version does not pin the skill's text: you can run any binary against
-any installed version of the plugin, so tag discipline is what makes
+Change one thing — model, skill wording, `-stall` — tag the next batch
+differently, and the two sets of records are comparable. The binary's
+version doesn't pin the skill's text, so tag discipline is what makes
 skill-wording experiments mean anything.
-
-Then compare them:
 
 ```bash
 polako stats -by tag
@@ -681,22 +479,19 @@ by tag
   terse-plan       2       1     2  $1.40     $1.40    2.2M
 ```
 
-An issue worked under two tags is counted under each, and the table says so
-when it happens. For anything `stats` does not answer, the files are JSONL,
-which jq, DuckDB and every spreadsheet already read. What a day cost:
+An issue worked under two tags is counted under each. For anything `stats`
+doesn't answer, the files are JSONL, readable by jq, DuckDB or any
+spreadsheet:
 
 ```bash
 cat ~/.polako/metrics/*.jsonl | jq -s 'map(select(.kind=="run")) | map(.cost_usd) | add'
 ```
 
-Tagging is a habit rather than a flag, and the habit is written down:
-[plans/continuous-improvement.md](../plans/continuous-improvement.md) has the
-rule for when a batch needs a fresh tag, the retro that reads these reports,
-and two recipes over the raw JSONL. [plans/experiments.md](../plans/experiments.md) is
-where the verdicts land.
+Tagging is a habit, not a flag: see
+[plans/continuous-improvement.md](../plans/continuous-improvement.md) for
+when a batch needs a fresh tag, and
+[plans/experiments.md](../plans/experiments.md) for the verdicts.
 
-**On dollars:** `cost_usd` is the CLI's API-equivalent pricing — real money on
-API-key auth, notional on a subscription plan. Tokens are the ground truth;
-dollars are derived from them. This binary never hardcodes a price sheet, since
-prices change and the CLI already applies the current ones.
-
+**On dollars:** `cost_usd` is the CLI's API-equivalent pricing — real money
+on API-key auth, notional on a subscription plan. Tokens are the ground
+truth; dollars are derived from them.
