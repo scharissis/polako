@@ -1,94 +1,94 @@
 # Security
 
 An unattended run is a Claude session with `--permission-mode acceptEdits`
-whose only input is issue bodies and comments. On any repository that accepts
-issues from outside the team, that input is attacker-controllable. Two things
-constrain it, and they work at different layers:
+whose only input is issue bodies and comments — attacker-controlled on any
+repo that takes outside issues. `polako work` bounds that at two layers,
+below; `plan` and `health` run a narrower allowlist of their own, below too.
 
-**The tool allowlist bounds what a run can do.** `-tools` is enforced by Claude
-Code itself, not by the skill's good behaviour, so it does not depend on the
-model declining a request. gh is granted per subcommand — `Bash(gh issue
-view:*)`, `Bash(gh pr create:*)` and a few more — rather than as a blanket
-`Bash(gh:*)`, which would also permit `gh api`, `gh secret set` and `gh repo
-delete`. Even a per-verb grant is too wide: `Bash(gh pr:*)` includes
-`gh pr merge`, `Bash(gh issue:*)` includes `gh issue edit --add-label`, which is
-enough to pull an unlabelled issue into a `-label`-gated queue, and
-`Bash(gh run:*)` includes `gh run rerun`, `gh run cancel` and `gh run delete` —
-so a red build is diagnosed with `gh pr checks`, `gh run list` and
-`gh run view`, which only read. If
-your project genuinely needs more, add it explicitly with `-add-tools` rather
-than widening back to a whole verb.
+## `polako work`
 
-The skill does need one label command, to raise `awaiting-answer` when it stops
-to ask something. Rather than granting `gh issue edit` at large, the supervisor
-mints that grant per run and pins it to the issue number that run was
-dispatched for — `Bash(gh issue edit 42 --add-label:*)` and its `--remove-label`
-twin. Ordinarily the furthest attacker-supplied issue text can then reach is the
-issue the run is already working on, where the worst it can do is park or unpark
-itself. Like every entry in the list this is a prefix, not a signature: `gh issue
-edit` takes several numbers, and one appended *after* the flag still starts with
-the granted prefix. So read it as narrowing the blast radius from every issue in
-the repository to something an audit of the run's own commands would catch —
-which is what the rest of this section says about the allowlist generally.
+**The tool allowlist bounds what a run can do.** `-tools` is enforced by
+Claude Code, not the skill's good behaviour. `gh` is granted per subcommand —
+`Bash(gh issue view:*)`, `Bash(gh pr create:*)`, a few more — never as a
+blanket `Bash(gh:*)`, which would also permit `gh api`, `gh secret set`, `gh
+repo delete`. Even a per-verb grant is too wide: `Bash(gh pr:*)` includes `gh
+pr merge`; `Bash(gh issue:*)` includes `gh issue edit --add-label`, enough to
+pull an unlabelled issue into a `-label`-gated queue; `Bash(gh run:*)`
+includes `gh run rerun/cancel/delete` — so a red build is diagnosed with the
+read-only `gh pr checks` and `gh run list/view` instead. Need more? Use
+`-add-tools`, never widen back to a whole verb.
 
-A review remediation gets one more, minted and pinned the same way. Most of a
-review's substance is in the comments left on individual lines of the diff, and
-gh has no `pr` subcommand that prints them, so that run alone is granted
-`Bash(gh api repos/you/project/pulls/42/comments:*)` — one PR of one repository,
-where a blanket `Bash(gh api:*)` would be the entire GitHub API, secrets and
-repository deletion included. Ordinarily the furthest it reaches is the comment
-thread of that one PR. The same caveat as above applies, and harder: this is a
-prefix, not a signature, so anything appended after `comments` still matches —
-a `--method DELETE`, or a `../..` the API host resolves back out of the path.
-Read it, like the label grant, as narrowing the blast radius to something an
-audit of the run's own commands would catch, not as a boundary. Granting nothing
-would not be safer either: an unattended run that trips a permission prompt hangs
+The skill gets one label command too, to raise `awaiting-answer` when it
+stops to ask something — minted per run, pinned to that run's own issue
+number (`Bash(gh issue edit 42 --add-label:*)` and its `--remove-label`
+twin), so attacker-supplied text can ordinarily reach no further than the
+issue already being worked, where the worst it can do is park or unpark
+itself. Like every grant here it's a prefix, not a signature — one appended
+after the flag still matches — so read this as narrowing the blast radius to
+something an audit of the run's own commands would catch, not a boundary.
+
+A review remediation gets one more grant, pinned the same way: `Bash(gh api
+repos/you/project/pulls/42/comments:*)`, since `gh` has no `pr` subcommand
+that prints per-line diff comments — one PR of one repo, not the blanket
+`Bash(gh api:*)`, the entire API, secrets and repo deletion included. The
+same prefix caveat applies, harder: anything after `comments` still
+matches — a `--method DELETE`, a `../..` the API host resolves back out of.
+Granting nothing isn't safer either: a tripped permission prompt hangs a run
 in silence until the stall watchdog kills it.
 
-What the allowlist does *not* close, and cannot: `Bash(git:*)` includes
-`git push`, which is what opening a PR requires; the build commands run
-whatever the checked-out repo's scripts contain; and `Bash(python:*)`,
-`Bash(npx:*)`, `Bash(uv:*)` and `Bash(go:*)` are arbitrary code execution by
-construction — `python -c` can run anything the user can, gh included. So the
-allowlist is a narrowing, not a sandbox. Point `-dir` at repositories you would
-run `make test` in yourself, and drop the interpreter entries from `-tools` if
-your project does not need them.
+What the allowlist can't close: `Bash(git:*)` includes `git push`, which
+opening a PR requires; build commands run whatever the checked-out repo's
+scripts contain; `Bash(python:*)`, `Bash(npx:*)`, `Bash(uv:*)`, `Bash(go:*)`
+are arbitrary code execution by construction. So it's a narrowing, not a
+sandbox — point `-dir` at repos you'd run `make test` in yourself, and drop
+interpreter entries from `-tools` you don't need.
 
-Closing the rest of that gap means a boundary outside the process, and the one
-worth building first is on egress: a run with a shell has the network, and a
-prompt injection that gets something *out* is the one the human merge step
-cannot catch. [hardening.md](hardening.md) is how to put an egress firewall of
-your own around a shift, and why that firewall stays yours rather than becoming
-a polako flag.
+The rest of that gap needs a boundary outside the process — egress first,
+since a run with a shell has the network, and a prompt injection that gets
+something *out* is what the human merge step can't catch.
+[hardening.md](hardening.md) covers building your own firewall around a
+shift, and why that stays yours rather than a polako flag.
 
-**`-label` bounds *which* issues are eligible.** Applying a label takes triage
-permission or better, so requiring one means a maintainer has to opt each issue
-in before the supervisor will touch it. An outsider can still file an issue;
-they just cannot start a run with it — unless an issue template hands them the
-label, since the `labels:` key on a template or issue form is applied on
-creation whoever files it. Keep the gate label out of your templates.
+**`-label` bounds *which* issues are eligible.** Applying a label takes
+triage permission or better, so it means a maintainer opts each issue in
+before the supervisor touches it. An outsider can still file an issue, just
+not start a run with it — unless a template's `labels:` key hands them the
+gate label on creation. Keep it out of your templates.
 
 ```bash
 polako work -label ready-for-claude
 ```
 
-On any repository open to issues from outside the team, run it that way. It is
-the difference between "anyone can queue work for an unattended agent" and
-"a maintainer chose this one".
+Run it that way on any repo open to outside issues — "a maintainer chose
+this one" instead of "anyone can queue an unattended agent".
 
-On a *public* repository the gate is not just advice: `polako work` refuses to
-start there without a `-label`, because that is the one repository shape where
-the risk is structural rather than a judgement call. `-ungated` overrules it —
-an explicit flag, so choosing the unfiltered queue is something an operator
-says rather than something that happens — and a [`-dry-run`](reference.md#looking-before-you-leap--dry-run)
-may still look without either, since it runs nothing and seeing the queue is
-how you decide what to label.
+On a *public* repo the gate isn't advice: `polako work` refuses to start
+without a `-label`, the one shape where the risk is structural. `-ungated`
+overrules it, an explicit flag so the unfiltered queue is something an
+operator says; a [`-dry-run`](reference.md#looking-before-you-leap--dry-run)
+may still look without either, since it runs nothing.
 
-Beyond those, the skill is told in Phase 0 to read issue and comment text as a
-description of a change to make, never as instructions addressed to it, and to
-report anything that tries to be — rather than obey it — in the PR body. That
-is a mitigation, not a boundary: treat it as defence in depth behind the two
-above, and keep the human merge step as the last check on what actually lands.
+Beyond those: Phase 0 tells the skill to read issue and comment text as a
+change to make, never instructions addressed to it, and to report anything
+that tries to be rather than obey it. Defence in depth behind the two
+above — the human merge step is still the last check on what lands.
+
+## `polako plan` and `polako health`
+
+Both run a different skill, unattended the same way, on a far narrower
+allowlist of their own (`planTools`, `healthTools`): no `git push`, no `gh
+pr`, no interpreters. The whole write surface is `gh issue create` plus a
+scratch body file — no PR, no thread, nothing shaped like `-label`'s gate.
+
+What replaces it: every issue such a run creates must carry `proposed`
+before it's workable, enforced supervisor-side, not left to the model
+remembering `--label`. A label pass runs after the skill exits — always,
+crash, cap-kill or Ctrl+C included — normalising every issue the run's
+account created since, and `-max-issues` caps how many it can create at all.
+So a fully subverted run's worst case is spam behind a label a human
+lifts — the same prefix-not-signature, narrowing-not-sandbox caveats above
+still apply. See [`plan`](reference.md#planning-a-backlog-unattended-polako-plan)
+and [`health`](reference.md#auditing-repository-health-unattended-polako-health).
 
 ## What leaves the machine
 
@@ -98,32 +98,32 @@ One thing, and only on request:
 | --- | --- | --- |
 | [`-post-summary`](run-data.md#putting-it-on-the-pr--post-summary) | One line of run numbers, as a comment on your own merged PR — readable by exactly the people who can already see that PR. | Off. |
 
-Everything else stays local. Run data is written to your disk and read by
-nothing but `polako stats`, whose [`-html`](run-data.md#keeping-a-copy--html) writes those
-numbers to a second local file and fetches nothing when you open it; the
-[shift log](reference.md#the-shift-log--log) — the one local file that holds
-transcript text rather than numbers — is written `0600` to your home
-directory, read back by nothing, and turned off with `-log off`; `-notify`
-runs a command of yours on your own machine; and the skill half, being a
-prompt, collects nothing at all.
+`plan` and `health` don't change this — neither has a `-post-summary` of its
+own, and neither posts anything anywhere.
 
-### `-remote`, and why it is not in that table
+Everything else stays local. Run data is written to disk and read by
+nothing but `polako stats`, whose [`-html`](run-data.md#keeping-a-copy--html)
+writes those numbers to a second local file and fetches nothing when
+opened; the [shift log](reference.md#the-shift-log--log) — the one local
+file holding transcript text — is written `0600` to your home directory,
+read back by nothing, turned off with `-log off`; `-notify` runs a command
+of yours on your own machine; the skill half, being a prompt, collects
+nothing at all.
+
+### `-remote`, and why it isn't in that table
 
 [`-remote`](reference.md#watching-a-shift-from-anywhere--remote) is on by
-default and used to be listed here as the second outward path — the one
-carrying session *text* rather than numbers. It is not one today. No `claude`
-CLI registers headless runs with Remote Control: the current one accepts
-`--remote-control` under `-p` and never starts the bridge. polako therefore
-stops passing the flag at all, so with `-remote` on or off, no session content
-goes anywhere.
+default and used to be the second outward path — session *text*, not
+numbers. It isn't, today: no `claude` CLI registers headless runs with
+Remote Control — the current one takes `--remote-control` under `-p` and
+never starts the bridge. polako stops passing the flag at all, so with
+`-remote` on or off, no session content goes anywhere.
 
-That is worth stating rather than quietly dropping, because the reverse is what
-would matter to you. If a future CLI does register headless runs and polako
-starts passing the flag again, this table gains a row and this section goes
-back to arguing the trade: a registered session is readable through the
-claude.ai account the CLI is already authenticated as — the same account that is
-running the model and already holds the transcript — over Claude Code's own
-channel, reaching you and nobody else. That is the same visibility an
-interactive session started with `claude --remote-control` has, and
-`-remote=false` would again be the way to decline it. Until then there is
+Worth stating rather than dropping quietly, because the reverse matters. If
+a future CLI registers headless runs and polako passes the flag again, this
+table gains a row: a registered session is readable through the claude.ai
+account the CLI already authenticates as — the same account running the
+model and holding the transcript — reaching you and nobody else, the same
+visibility an interactive `claude --remote-control` session has.
+`-remote=false` would again be the way to decline it. Until then there's
 nothing to decline.
