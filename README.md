@@ -136,8 +136,8 @@ scharissis/polako
   next          #14 — its branch already has PR #61, so it would wait on that rather than run the skill again
 
 open prs on issue branches
-  pr   branch    issue  mergeable  checks              review  url
-  #61  issue-14  #14    mergeable  failing (test-mac)  clear   https://github.com/scharissis/polako/pull/61
+  pr   branch    issue  mergeable  checks   review  url
+  #61  issue-14  #14    mergeable  passing  clear   https://github.com/scharissis/polako/pull/61
 
 needs you: reply on #9; review and merge PR #61; decide what to do about #5 (drop needs-human to requeue); curate #27, #28 (drop proposed to queue them)
 ```
