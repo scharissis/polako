@@ -2,7 +2,9 @@
 
 The [README](../README.md#how-it-works) has the one-page picture. This page is
 the long version: what the supervisor does when a run crashes, when an issue
-cannot be finished, when a PR goes red, and when it needs you.
+cannot be finished, when a PR goes red, and when it needs you. It ends with a
+short [Questions](#questions) section for the common ones that don't fit
+anywhere above.
 
 **Your checkout is kept level with origin, and never written to.** Before each
 issue and after each merge, polako fast-forwards `-dir`'s default branch. It
