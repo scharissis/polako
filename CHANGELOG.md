@@ -13,6 +13,17 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.19.1]
+
+### What's Changed
+* feat: a title convention for plan-backlog and review-health by @scharissis in https://github.com/scharissis/polako/pull/308 (closes #292)
+* fix: cap the batch milestone title on characters, not words by @scharissis in https://github.com/scharissis/polako/pull/309 (closes #293)
+* docs: settle #227's open questions — resumed-run cost is per process by @scharissis in https://github.com/scharissis/polako/pull/310 (closes #258)
+* docs: the first eval run was two findings short of green, not one by @scharissis in https://github.com/scharissis/polako/pull/312
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.19.0...v0.19.1
+
 ## [0.19.0]
 
 ### What's Changed
