@@ -54,6 +54,16 @@ jobs:
           foreach ($p in @('go.exe', 'git.exe', 'fake-cli.exe')) {
             Add-MpPreference -ExclusionProcess $p -ErrorAction SilentlyContinue
           }
+          # SilentlyContinue above hides a refusal, and a silently-skipped
+          # exclusion would look exactly like an exclusion that did not help.
+          # Print what actually stuck so the log can tell those apart.
+          $p = Get-MpPreference -ErrorAction SilentlyContinue
+          if ($p) {
+            Write-Host "excluded paths: $($p.ExclusionPath -join ', ')"
+            Write-Host "excluded processes: $($p.ExclusionProcess -join ', ')"
+          } else {
+            Write-Host "no Defender on this runner; nothing to exclude"
+          }
 
       # cache: false, because setup-go's own caching cannot work here. It keys
       # on a hash of go.sum, and stdlib-only means there is no go.sum — so the
