@@ -124,8 +124,11 @@ type runReport struct {
 	// stays zero because pricing belongs to the CLI, never to this binary.
 	observed      tokenCounts
 	observedTurns int
-	// issueCreates counts the `gh issue create` tool calls the run made — the
-	// one action `polako plan` caps. dispatchClaude kills the run the way it
+	// issueCreates counts the `gh issue create` tool calls the run completed —
+	// on the tool_result, not the tool_use, so a create still in flight when
+	// the cap is reached is never counted (issue #340: counting the dispatch
+	// let the Nth create be killed mid-flight, so N filed N-1). The one
+	// action `polako plan` caps: dispatchClaude kills the run the way it
 	// kills a stalled one once it reaches cfg.maxIssues; see capped below.
 	issueCreates int
 
@@ -258,9 +261,6 @@ func (r *runReport) observe(ev streamEvent) {
 			switch c.Type {
 			case "tool_use":
 				r.toolUses++
-				if isIssueCreate(c.Name, c.Input) {
-					r.issueCreates++
-				}
 				if c.ID != "" {
 					if r.pendingTools == nil {
 						r.pendingTools = make(map[string]pendingTool)
@@ -289,6 +289,14 @@ func (r *runReport) observe(ev streamEvent) {
 			}
 			tool, hadTool := r.pendingTools[c.ToolUseID]
 			delete(r.pendingTools, c.ToolUseID)
+			// Counted here, not on the tool_use above: a create still in
+			// flight when -max-issues is reached must not count, or the kill
+			// lands before it returns and N files N-1 (issue #340). A
+			// rejected create the skill retries still counts — see
+			// ghIssueCreate's comment on that coarseness.
+			if hadTool && isIssueCreate(tool.name, tool.input) {
+				r.issueCreates++
+			}
 			if !c.IsError {
 				continue
 			}
@@ -358,8 +366,8 @@ func (r *runReport) observe(ev streamEvent) {
 // leading `cd x && gh issue create` both count, and anchored on `gh` at a word
 // boundary so a path ending in "gh" or a `gh issue create-foo` subcommand that
 // never existed does not. A compound command that files two issues in one
-// tool_use still counts once — the same "observe counts tool_use events"
-// coarseness every other counter here has, and the reason -max-issues is
+// tool call still counts once — observe counts calls, not issues, the same
+// coarseness every other counter here has — and the reason -max-issues is
 // documented as a ceiling rather than an exact stop: a rejected create (an old
 // gh refusing `--parent`, say) that the skill retries flat counts twice, so the
 // cap can fire a create or two early. That is the safe direction to be wrong in.
