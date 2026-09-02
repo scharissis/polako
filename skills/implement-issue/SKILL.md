@@ -311,25 +311,39 @@ don't post again, and stop.
       it. `git -C <worktree> diff --stat` against the `origin/…` ref Phase 1
       resolved (`...HEAD`) — which a has just fast-forwarded the local default
       branch to, and which d already works from — prints the changed-line
-      count for nothing. The rule: `medium` under 300 changed lines
-      (insertions plus deletions), `high` at 300 or more. `medium` asks the
-      review for "fewer, high-confidence findings" and a smaller subagent
-      fan-out; `high` asks for "broader coverage" and the full one. A one-line
-      `docs:` fix reaching this gate should not cost what a rewrite of
-      `main.go` does, and the level is the only lever this repo holds over
-      that (issue #225).
-      Then invoke `/code-review <level> issue-$issue`, and in the same request
-      tell the review its agent and every subagent under it must read and
-      write in `<worktree>` (its absolute path) — no `--fix`. State in your
-      turn which level you picked and the changed-line count behind it, so the
-      choice is auditable. Both halves aim the
-      review and neither is optional: the branch aims what it diffs,
-      `<worktree>` aims where it works. The review takes one branch or path
-      as its target, so the worktree goes in as that instruction rather
-      than a second target. Without it the review forks a fresh
-      agent that starts in the session's cwd, which this skill never moves,
-      so it reviews whatever that cwd holds — the main checkout on a clean
-      default branch under most invocations, a change someone already
+      count for nothing. The rule, changed lines meaning insertions plus
+      deletions: `cheap` under 30, `medium` from 30 through 299, `high` at
+      300 or more — three disjoint bands, so a count of exactly 300 is
+      unambiguously `high`. A one-line `docs:` fix reaching this gate should
+      not cost what a rewrite of `main.go` does, and the level is the only
+      lever this repo holds over
+      that (issues #225, #255). State in your turn which level you picked and
+      the changed-line count behind it, so the choice is auditable.
+
+      `cheap` never invokes the review skill. Do a single self-review pass
+      instead: re-read the full diff critically for correctness, edge cases,
+      and convention violations, and write what you find into the `## Review`
+      section — "Reviewed through: <the commit issue-$issue's HEAD resolves
+      to right now>" and every finding "pending" — noting it took the cheap
+      path because the diff was under 30 lines. This is the same pass the
+      skill falls back to below when the review skill turns out not to be
+      invocable at all, promoted here to the deliberate path for a change
+      this small: the mandatory gate still runs, it just doesn't fork an
+      agent and fan out subagents to review a handful of lines. Then skip the
+      rest of this step and go straight to d.
+
+      For `medium` or `high`, invoke `/code-review <level> issue-$issue`, and
+      in the same request tell the review its agent and every subagent under
+      it must read and write in `<worktree>` (its absolute path) — no
+      `--fix`. `medium` asks the review for "fewer, high-confidence findings"
+      and a smaller subagent fan-out; `high` asks for "broader coverage" and
+      the full one. Both halves aim the review and neither is optional: the
+      branch aims what it diffs, `<worktree>` aims where it works. The review
+      takes one branch or path as its target, so the worktree goes in as that
+      instruction rather than a second target. Without it the review forks a
+      fresh agent that starts in the session's cwd, which this skill never
+      moves, so it reviews whatever that cwd holds — the main checkout on a
+      clean default branch under most invocations, a change someone already
       merged — and the finder subagents it fans out open that checkout's
       copy of every file your commits touched, the default-branch version
       rather than yours, so a finding lands against the wrong body and a fix
@@ -351,14 +365,14 @@ don't post again, and stop.
       "invoke c again" retry d sends here on an audit failure — never
       append beside an older one, which would leave a stale sha or stale
       finding statuses for a later run to misread as current.
-      If the code-review skill is not invocable in this session, say so
-      explicitly and perform a substitute review pass here instead (a has
-      already run by the time this step is reached, so there is nothing extra
-      to remember to do first): re-read the full diff critically for
-      correctness, edge cases, and convention violations, and write what you
-      find into the `## Review` section the same way — "Reviewed through",
-      each finding "pending" — noting it was a substitute pass rather than
-      the invocation above.
+      If the code-review skill is not invocable in this session for a
+      `medium` or `high` diff, say so explicitly and perform the same
+      self-review pass the `cheap` path above uses instead (a has already run
+      by the time this step is reached, so there is nothing extra to
+      remember to do first), writing the `## Review` section the same way —
+      "Reviewed through", each finding "pending" — noting it was a
+      substitute pass because the skill was unavailable, not because the
+      diff took the cheap path.
    d. Work the findings still marked "pending" — all of them the first time
       through, only the leftover ones on a run resuming mid-fix, none at all
       if a previous run already fixed every one.
