@@ -270,7 +270,7 @@ polako plan -vision docs/VISION.md            # the real thing
 | `-vision` | *(none)* | Path, resolved under `-dir`, to the vision or roadmap document to plan from. Exactly one of `-vision` / `-brief` is required — never a does-the-file-exist guess, so a typo fails loudly. |
 | `-brief` | *(none)* | Inline vision text in place of `-vision`, e.g. `-brief "a dating app for horses"` — the greenfield story, same trust tier as the document. Past ~2000 characters, put it in a file. |
 | `-focus` | *(none)* | Free-text steer for the run, e.g. `-focus "only the observability section"`. |
-| `-milestone` | *(derived)* | Batch milestone title, created idempotently at preflight and attached to every issue the run files by the label pass. Defaults to the vision file's name, or the brief's first words. `-milestone off` skips the milestone entirely. |
+| `-milestone` | *(derived)* | Batch milestone title, created idempotently at preflight and attached to every issue the run files by the label pass. Defaults to the vision file's name, or the brief capped at 50 characters, cut at a word boundary. `-milestone off` skips the milestone entirely. |
 | `-max-issues` | `10` | Ceiling on the issues a run may create, epics included. A ceiling, not a target — fewer, sharper issues beat coverage. |
 | `-model` | `opus` | Passed to `claude --model`. An alias, not a pinned id: a plan run happens once per batch and steers every run downstream, so it defaults to the strongest tier. |
 | `-skill` | `polako:plan-backlog` | Slash command the run invokes. |

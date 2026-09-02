@@ -429,17 +429,52 @@ func planMilestoneTitle(opt *planOptions) string {
 		}
 		return base
 	}
-	return firstWords(strings.TrimSpace(opt.brief), 8)
+	return briefTitle(strings.TrimSpace(opt.brief))
 }
 
-// firstWords is the first n whitespace-separated words of s, joined by single
-// spaces — enough of a brief to name a milestone after.
-func firstWords(s string, n int) string {
-	fields := strings.Fields(s)
-	if len(fields) > n {
-		fields = fields[:n]
+// briefTitleMax is the character cap on a brief-derived milestone title —
+// long enough to read as a title, short enough to render on one line.
+const briefTitleMax = 50
+
+// briefTitle derives a milestone title from a brief: unchanged if it already
+// fits under briefTitleMax, otherwise cut at the last whole word inside the
+// cap and trimmed so the cut doesn't leave a dangling connective or stray
+// punctuation at the end.
+func briefTitle(s string) string {
+	runes := []rune(s)
+	if len(runes) <= briefTitleMax {
+		return s
 	}
-	return strings.Join(fields, " ")
+	// Cut on runes, not bytes: a byte-index slice can split a multi-byte
+	// character in two and leave invalid UTF-8 in the milestone title.
+	cut := string(runes[:briefTitleMax])
+	if i := strings.LastIndexByte(cut, ' '); i >= 0 {
+		cut = cut[:i]
+	}
+	return trimDangling(cut)
+}
+
+// danglingConnectives are the words most likely to be left stranded at the
+// end of a brief cut off mid-sentence.
+var danglingConnectives = map[string]bool{
+	"and": true, "or": true, "with": true, "for": true, "to": true, "the": true,
+}
+
+// trimDangling strips trailing punctuation and a trailing connective word off
+// s, repeating until neither applies — a comma can sit right after a
+// connective ("horses, and,"), so one pass of each isn't always enough.
+func trimDangling(s string) string {
+	for {
+		trimmed := strings.TrimRight(s, " ,.;:!?-")
+		fields := strings.Fields(trimmed)
+		if n := len(fields); n > 0 && danglingConnectives[strings.ToLower(fields[n-1])] {
+			trimmed = strings.Join(fields[:n-1], " ")
+		}
+		if trimmed == s {
+			return s
+		}
+		s = trimmed
+	}
 }
 
 // ghCreatesSubIssues reports whether this gh can file a child issue in one
