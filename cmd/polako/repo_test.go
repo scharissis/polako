@@ -490,6 +490,33 @@ func TestPlanSkillBodySectionsAllHaveBudgets(t *testing.T) {
 	}
 }
 
+// The footer polako plan writes is a contract like issue-N branch naming: the
+// binary parses it (parsePlanFooter) and CLAUDE.md names it, so the skill and
+// the parser have to agree on the wording. This pulls the footer line straight
+// out of SKILL.md and runs it through the parser — a change to the leading
+// phrase or the ` @ ` on either side fails here. Sits beside
+// TestPlanSkillBodySectionsAllHaveBudgets, which anchors on the same line.
+func TestPlanSkillFooterMatchesTheParser(t *testing.T) {
+	skill := planSkill(t)
+
+	start := strings.Index(skill, planFooterPrefix)
+	if start < 0 {
+		t.Fatalf("SKILL.md no longer writes the %q footer phrase the binary parses", planFooterPrefix)
+	}
+	footer := skill[start:]
+	if n := strings.IndexByte(footer, '\n'); n >= 0 {
+		footer = footer[:n]
+	}
+
+	got, ok := parsePlanFooter(footer)
+	if !ok {
+		t.Fatalf("parsePlanFooter rejects the footer the skill ships:\n\t%s", footer)
+	}
+	if got.doc != "docs/VISION.md" || got.sha != "1a2b3c4" {
+		t.Errorf("parsePlanFooter(skill footer) = %+v, want {doc:docs/VISION.md sha:1a2b3c4}", got)
+	}
+}
+
 // The one guarantee that makes proposals safe to file unattended: this run
 // creates labelled issues and does nothing else. No commits, no pushes, no pull
 // requests, and no touching threads that already exist — an edit could strip a
