@@ -26,6 +26,24 @@ jobs:
         with:
           fetch-depth: 0
 
+      # This cache is frozen, and that is fine. setup-go keys on a hash of
+      # go.sum; stdlib-only means there is no go.sum, so the key is a constant
+      # that hits every run, and on a hit the action skips saving. It has held
+      # whatever the first run ever stored since — 19380376 bytes, byte for
+      # byte, run after run.
+      #
+      # Looks like an obvious bug. It was measured, and fixing it costs a
+      # minute a run on Windows: caching GOCACHE explicitly, keyed on the
+      # sources, took the Windows compile from ~60s to 113/135/179s over three
+      # warm runs, with the `go test` step going 173s -> 236/244/295s. The
+      # stale cache already holds the stdlib objects, which are the expensive
+      # part and never change; this module is ~12k lines and compiles fast. A
+      # bigger restored cache only adds work — Go trims it, and deleting
+      # thousands of small files on Windows is slow.
+      #
+      # So don't "fix" this without measuring Windows. The real cost there is
+      # process spawns, not compilation: ~1,500 git calls and ~300 fake-CLI
+      # ones per suite run, all serial. See issues #316 and #318.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
