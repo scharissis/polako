@@ -131,6 +131,11 @@ func drain(ctx context.Context, cfg config) error {
 	// lastContainers can no longer speak for it. Not state either — a restart
 	// re-derives an epic's closed state from GitHub like everything else.
 	var closedEpics []containerInfo
+	// Same shape and reasoning as closedEpics: the retire issues this shift
+	// filed off a container close, accumulated across passes for the exit
+	// summary. Not state — a restart re-derives whether a retire issue is
+	// needed from GitHub alone, same as everything else here.
+	var retiredDocs []retiredDoc
 
 	var results []issueResult
 	// The containers the most recent successful listing found — carried across
@@ -147,7 +152,7 @@ func drain(ctx context.Context, cfg config) error {
 	// died on is not among them — unfinished is not an outcome — so a run that
 	// dies on its first issue has nothing to summarize and says nothing.
 	finish := func(err error) error {
-		if lines := drainSummary(append(results, stillWaiting(states)...), lastContainers, closedEpics, time.Since(started)); len(lines) > 0 {
+		if lines := drainSummary(append(results, stillWaiting(states)...), lastContainers, closedEpics, retiredDocs, time.Since(started)); len(lines) > 0 {
 			narrate(sevSection, "%s", lines[0]) // the shift's own closing heading
 			for _, line := range lines[1:] {
 				log.Print(line)
@@ -206,8 +211,9 @@ func drain(ctx context.Context, cfg config) error {
 		}
 		lastContainers = containers
 		logHeldBack(heldBack, skip)
-		closedNow, err := closeFinishedContainers(ctx, cfg, containers, commentedContainers, closedContainers)
+		closedNow, retiredNow, err := closeFinishedContainers(ctx, cfg, containers, commentedContainers, closedContainers)
 		closedEpics = append(closedEpics, closedNow...)
+		retiredDocs = append(retiredDocs, retiredNow...)
 		if err != nil {
 			return finish(err)
 		}
@@ -473,10 +479,14 @@ func finishedContainerComment(c containerInfo) string {
 // of this back, so a failed comment or a failed close is a warning and the
 // shift carries on — except a context cancellation, the operator stopping the
 // process on purpose, which propagates like every other gh call in this loop.
-// Returns the containers it closed this call, for the exit summary. Never
-// reached on a dry run — dryRun and drain are separate paths off run().
-func closeFinishedContainers(ctx context.Context, cfg config, containers []containerInfo, commented, closedThisShift map[int]bool) ([]containerInfo, error) {
+// Returns the containers it closed this call, for the exit summary, and any
+// retire issue that close triggered (retire.go) — best-effort in the same
+// way, so a failure there never turns a successful container close into a
+// drain failure. Never reached on a dry run — dryRun and drain are separate
+// paths off run().
+func closeFinishedContainers(ctx context.Context, cfg config, containers []containerInfo, commented, closedThisShift map[int]bool) ([]containerInfo, []retiredDoc, error) {
 	var closed []containerInfo
+	var retired []retiredDoc
 	for _, c := range containers {
 		if !c.finished() || c.held || closedThisShift[c.number] {
 			continue
@@ -485,7 +495,7 @@ func closeFinishedContainers(ctx context.Context, cfg config, containers []conta
 			comments, err := issueComments(ctx, cfg, c.number)
 			if err != nil {
 				if ctx.Err() != nil {
-					return closed, ctx.Err()
+					return closed, retired, ctx.Err()
 				}
 				narrate(sevWarning, "could not read #%d's thread to check for the epic-finished note (%v) — "+
 					"will try again next pass", c.number, err)
@@ -497,7 +507,7 @@ func closeFinishedContainers(ctx context.Context, cfg config, containers []conta
 			if !hasMarker {
 				if _, err := gh(ctx, cfg, "issue", "comment", strconv.Itoa(c.number), "--body", finishedContainerComment(c)); err != nil {
 					if ctx.Err() != nil {
-						return closed, ctx.Err()
+						return closed, retired, ctx.Err()
 					}
 					narrate(sevWarning, "could not comment on finished epic #%d (%v) — will try again next pass", c.number, err)
 					continue
@@ -507,7 +517,7 @@ func closeFinishedContainers(ctx context.Context, cfg config, containers []conta
 		}
 		if _, err := gh(ctx, cfg, "issue", "close", strconv.Itoa(c.number), "--reason", "completed"); err != nil {
 			if ctx.Err() != nil {
-				return closed, ctx.Err()
+				return closed, retired, ctx.Err()
 			}
 			closedThisShift[c.number] = true
 			narrate(sevWarning, "could not close finished epic #%d (%v) — the comment saying why is on the thread; "+
@@ -519,8 +529,13 @@ func closeFinishedContainers(ctx context.Context, cfg config, containers []conta
 		log.Printf("epic #%d: all %s closed — commented and closed it", c.number, plural(c.total, "sub-issue"))
 		notify(ctx, cfg, notification{event: notifyEpicDone, issue: c.number,
 			reason: fmt.Sprintf("all %s closed — closed it", plural(c.total, "sub-issue"))})
+		if r, ok, err := retireOrphanedDoc(ctx, cfg, c); err != nil {
+			return closed, retired, err
+		} else if ok {
+			retired = append(retired, r)
+		}
 	}
-	return closed, nil
+	return closed, retired, nil
 }
 
 // ensureLabel declares a label on the repository, and errors if it was already
@@ -554,13 +569,24 @@ func ensureLabel(ctx context.Context, cfg config, name, color, description strin
 // was already warned about). Scope is decided upstream: a container outside
 // `-label` was in neither set to begin with. A container closed just before a
 // stop that skips the re-list is in both — named once, from closed.
-func drainSummary(results []issueResult, containers, closed []containerInfo, elapsed time.Duration) []string {
+//
+// retired is the retire issues (retire.go) any of those closes triggered —
+// keyed by the container that triggered it, so its line prints right after
+// that container's own "closed it".
+func drainSummary(results []issueResult, containers, closed []containerInfo, retired []retiredDoc, elapsed time.Duration) []string {
 	var epics []string
+	retiredByContainer := make(map[int]retiredDoc, len(retired))
+	for _, r := range retired {
+		retiredByContainer[r.container] = r
+	}
 	closedNums := make(map[int]bool, len(closed))
 	for _, c := range closed {
 		closedNums[c.number] = true
 		epics = append(epics, fmt.Sprintf("  epic    #%d: all %s closed — closed it",
 			c.number, plural(c.total, "sub-issue")))
+		if r, ok := retiredByContainer[c.number]; ok {
+			epics = append(epics, fmt.Sprintf("  retire  #%d: %s — every issue it proposed is closed", r.issue, r.doc))
+		}
 	}
 	for _, c := range containers {
 		if c.finished() && !closedNums[c.number] {

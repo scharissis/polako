@@ -138,7 +138,13 @@ type fakeIssue struct {
 	// Body is the issue body text. The plans derivation (plans.go) is the
 	// only reader in this binary — parsePlanFooter searches it for the
 	// footer `polako plan` stamps — so no other fake call composes it.
+	// `issue create` (retire.go's own write surface) also sets it, on the
+	// issue it creates.
 	Body string `json:"body"`
+	// Title is set only by `issue create` (retire.go), the one call in this
+	// binary that files an issue with one of its own rather than leaving
+	// GitHub's default.
+	Title string `json:"title"`
 }
 
 type fakePR struct {
@@ -328,6 +334,11 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			}
 			fields = append(fields, `"labels":[`+strings.Join(labels, ",")+`]`)
 		}
+		if strings.Contains(want, "body") {
+			// retire.go's own read of a container that just closed, checking
+			// for a plan footer.
+			fields = append(fields, fmt.Sprintf(`"body":%q`, is.Body))
+		}
 		return "{" + strings.Join(fields, ",") + "}", changed, 0
 
 	case "api comments":
@@ -394,6 +405,10 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 				created.Labels = append(created.Labels, args[i+1])
 			case "--milestone":
 				created.Milestone = args[i+1]
+			case "--title":
+				created.Title = args[i+1]
+			case "--body":
+				created.Body = args[i+1]
 			}
 		}
 		if st.Issues == nil {
@@ -2456,12 +2471,12 @@ func TestCloseFinishedContainersIgnoresAStaleListing(t *testing.T) {
 	commented, closedThisShift := map[int]bool{}, map[int]bool{}
 	stale := []containerInfo{{number: 113, total: 6, completed: 6}}
 
-	first, err := closeFinishedContainers(context.Background(), cfg, stale, commented, closedThisShift)
+	first, _, err := closeFinishedContainers(context.Background(), cfg, stale, commented, closedThisShift)
 	if err != nil || len(first) != 1 {
 		t.Fatalf("first call = %v, %v, want it to close #113", first, err)
 	}
 	// The same listing again, as if the close has not propagated yet.
-	second, err := closeFinishedContainers(context.Background(), cfg, stale, commented, closedThisShift)
+	second, _, err := closeFinishedContainers(context.Background(), cfg, stale, commented, closedThisShift)
 	if err != nil {
 		t.Fatalf("second call: %v", err)
 	}
@@ -2574,6 +2589,140 @@ func TestDrainLeavesAHeldFinishedContainerAlone(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// planFooterLine renders the same footer polako plan stamps on every
+// proposal it files (footer.go's own contract), for a test fixture's body.
+func planFooterLine(doc string) string {
+	return planFooterPrefix + doc + " @ abc1234 — edit freely; remove the `proposed` label to queue it."
+}
+
+// A container whose body carries a plan footer, closing with no other open
+// issue naming that document, gets a retire issue filed for it — the
+// "Retire on close" step (docs/plans/plan-conventions.md). The retire
+// issue's own body carries the same footer, which is what a later close on
+// the same document finds (see the "already filed" case below).
+func TestDrainFilesARetireIssueWhenAContainerCloses(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/plans/foo.md")},
+		},
+		Labels: []string{proposedLabel},
+	})
+	calls := filepath.Join(t.TempDir(), "gh-calls.log")
+	t.Setenv(fakeGhLogEnv, calls)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if st.Issues["113"].Open {
+		t.Error("the finished container should have closed")
+	}
+	retired := st.Issues["114"]
+	if retired == nil {
+		t.Fatalf("no retire issue was filed; issues = %v", st.Issues)
+	}
+	if !slices.Contains(retired.Labels, proposedLabel) {
+		t.Errorf("retire issue labels = %v, want it to carry %q", retired.Labels, proposedLabel)
+	}
+	if !strings.Contains(retired.Body, planFooterPrefix+"docs/plans/foo.md") {
+		t.Errorf("retire issue body = %q, want it to carry the same footer", retired.Body)
+	}
+	argv, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatalf("reading the gh call log: %v", err)
+	}
+	if !strings.Contains(string(argv), "docs: retire docs/plans/foo.md — every issue it proposed is closed") {
+		t.Errorf("no call carried the expected title\ngot:\n%s", argv)
+	}
+	want := "retire  #114: docs/plans/foo.md — every issue it proposed is closed"
+	if !strings.Contains(buf.String(), want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, buf.String())
+	}
+}
+
+// A retire issue already open for the same document — filed by an earlier
+// shift closing a different container naming it — is what the search inside
+// retireOrphanedDoc is supposed to find. Filing a second one would leave two
+// competing "retire this" issues for a human to sort out.
+func TestDrainFilesNoSecondRetireIssueForTheSameDocument(t *testing.T) {
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/plans/foo.md")},
+			// The retire issue an earlier shift already filed for this same
+			// document — still open, nobody has approved the cleanup yet.
+			"50": {Open: true, Labels: []string{proposedLabel}, Body: "Every issue proposed from docs/plans/foo.md " +
+				"is closed. Retire the document.\n\n" + planFooterLine("docs/plans/foo.md")},
+		},
+		Labels: []string{proposedLabel},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if st.Issues["113"].Open {
+		t.Error("the finished container should still have closed")
+	}
+	if len(st.Issues) != 2 {
+		t.Errorf("issues = %v, want no third issue filed", st.Issues)
+	}
+}
+
+// Another still-open issue naming the same document — not itself a retire
+// issue, just unfinished work the plan proposed — means the document is not
+// orphaned yet, so nothing is filed.
+func TestDrainFilesNoRetireIssueWhileAnotherOpenIssueNamesTheDoc(t *testing.T) {
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/plans/foo.md")},
+			// Still open and unapproved — the plan this container tracked
+			// also proposed this one, and a human has not queued it yet.
+			// Labelled proposed so the drain leaves it alone rather than
+			// trying to work it, the same as any other unapproved proposal.
+			"50": {Open: true, Labels: []string{proposedLabel}, Body: planFooterLine("docs/plans/foo.md")},
+		},
+		Labels: []string{proposedLabel},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if st.Issues["113"].Open {
+		t.Error("the finished container should still have closed")
+	}
+	if len(st.Issues) != 2 {
+		t.Errorf("issues = %v, want no third issue filed", st.Issues)
+	}
+}
+
+// A container whose body carries no plan footer at all — a hand-made epic,
+// most likely — is invisible to the derivation: nothing names a document, so
+// nothing can say one is done.
+func TestDrainFilesNoRetireIssueWithoutAPlanFooter(t *testing.T) {
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6},
+		},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if st.Issues["113"].Open {
+		t.Error("the finished container should still have closed")
+	}
+	if len(st.Issues) != 1 {
+		t.Errorf("issues = %v, want no retire issue filed", st.Issues)
 	}
 }
 
@@ -3094,7 +3243,7 @@ func TestDrainSummaryReportsEveryOutcome(t *testing.T) {
 		{issue: 5},
 		{issue: 3, awaiting: true},
 		{issue: 4, closedNoChange: true},
-	}, nil, nil, 90*time.Minute), "\n")
+	}, nil, nil, nil, 90*time.Minute), "\n")
 
 	for _, want := range []string{
 		"summary: 2 issues merged, 1 issue parked, 1 issue closed with no change needed, 1 issue awaiting an answer, 1h30m of wall clock",
@@ -3112,7 +3261,7 @@ func TestDrainSummaryReportsEveryOutcome(t *testing.T) {
 // Most drains have nothing waiting, and a bucket that reads "0 issues awaiting
 // an answer" on every ordinary run is noise in the one line anybody reads.
 func TestDrainSummaryOmitsAnEmptyWaitingBucket(t *testing.T) {
-	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil, nil, time.Minute), "\n")
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil, nil, nil, time.Minute), "\n")
 	if want := "summary: 1 issue merged, 0 issues parked, 1m of wall clock"; !strings.Contains(got, want) {
 		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
 	}
@@ -3124,7 +3273,7 @@ func TestDrainSummaryOmitsAnEmptyWaitingBucket(t *testing.T) {
 // A drain that never reached an issue has nothing to summarize, and "0 issues
 // merged" on every empty backlog is noise.
 func TestDrainSummaryIsSilentWithoutResults(t *testing.T) {
-	if got := drainSummary(nil, nil, nil, time.Minute); got != nil {
+	if got := drainSummary(nil, nil, nil, nil, time.Minute); got != nil {
 		t.Errorf("summary = %v, want nothing", got)
 	}
 }
@@ -3135,7 +3284,7 @@ func TestDrainSummaryPricesTheDrainAndEachIssue(t *testing.T) {
 		{issue: 1, parked: true, reason: "no PR and no questions", cost: 2.5},
 		{issue: 2, cost: 4},
 		{issue: 3, awaiting: true, cost: 0.25},
-	}, nil, nil, 90*time.Minute), "\n")
+	}, nil, nil, nil, 90*time.Minute), "\n")
 
 	for _, want := range []string{
 		"$6.75 spent, 1h30m of wall clock",
@@ -3156,7 +3305,7 @@ func TestDrainSummaryPricesTheDrainAndEachIssue(t *testing.T) {
 func TestDrainSummarySaysWhenTheTotalUndercounts(t *testing.T) {
 	got := strings.Join(drainSummary([]issueResult{
 		{issue: 1, cost: 4, approximated: 2},
-	}, nil, nil, time.Minute), "\n")
+	}, nil, nil, nil, time.Minute), "\n")
 
 	if want := "$4.00 spent (2 runs reported none, so that is an undercount)"; !strings.Contains(got, want) {
 		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
@@ -3166,7 +3315,7 @@ func TestDrainSummarySaysWhenTheTotalUndercounts(t *testing.T) {
 // A drain that only waited on a PR an earlier process opened spent nothing,
 // and "$0.00" reads as a free backlog rather than as an absent number.
 func TestDrainSummaryOmitsDollarsItNeverSpent(t *testing.T) {
-	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil, nil, time.Minute), "\n")
+	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil, nil, nil, time.Minute), "\n")
 	if strings.Contains(got, "$") {
 		t.Errorf("an uncosted drain should print no dollars at all\ngot:\n%s", got)
 	}
@@ -3177,7 +3326,7 @@ func TestDrainSummaryOmitsDollarsItNeverSpent(t *testing.T) {
 // is gone from the next listing and can only be named from there.
 func TestDrainSummaryNamesAContainerItClosed(t *testing.T) {
 	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil,
-		[]containerInfo{{number: 113, total: 6, completed: 6}}, time.Minute), "\n")
+		[]containerInfo{{number: 113, total: 6, completed: 6}}, nil, time.Minute), "\n")
 	if want := "epic    #113: all 6 sub-issues closed — closed it"; !strings.Contains(got, want) {
 		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
 	}
@@ -3188,7 +3337,7 @@ func TestDrainSummaryNamesAContainerItClosed(t *testing.T) {
 // older "yours to close" mood.
 func TestDrainSummaryNamesAHeldFinishedContainer(t *testing.T) {
 	got := strings.Join(drainSummary([]issueResult{{issue: 2}},
-		[]containerInfo{{number: 113, total: 6, completed: 6, held: true}}, nil, time.Minute), "\n")
+		[]containerInfo{{number: 113, total: 6, completed: 6, held: true}}, nil, nil, time.Minute), "\n")
 	if want := "epic    #113: all 6 sub-issues closed — close it when the design is satisfied"; !strings.Contains(got, want) {
 		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
 	}
@@ -3200,7 +3349,7 @@ func TestDrainSummaryNamesAHeldFinishedContainer(t *testing.T) {
 func TestDrainSummaryNamesAJustClosedContainerOnce(t *testing.T) {
 	c := containerInfo{number: 113, total: 6, completed: 6}
 	got := strings.Join(drainSummary([]issueResult{{issue: 2}},
-		[]containerInfo{c}, []containerInfo{c}, time.Minute), "\n")
+		[]containerInfo{c}, []containerInfo{c}, nil, time.Minute), "\n")
 	if n := strings.Count(got, "#113"); n != 1 {
 		t.Errorf("epic #113 named %d times, want exactly 1\ngot:\n%s", n, got)
 	}
@@ -3213,7 +3362,7 @@ func TestDrainSummaryNamesAJustClosedContainerOnce(t *testing.T) {
 // finished in it should read exactly like no container list.
 func TestDrainSummaryOmitsContainersThatAreNotFinished(t *testing.T) {
 	got := strings.Join(drainSummary([]issueResult{{issue: 2}},
-		[]containerInfo{{number: 113, total: 6, completed: 3}}, nil, time.Minute), "\n")
+		[]containerInfo{{number: 113, total: 6, completed: 3}}, nil, nil, time.Minute), "\n")
 	if strings.Contains(got, "epic") {
 		t.Errorf("no container finished, so the summary should not mention one\ngot:\n%s", got)
 	}
@@ -3223,7 +3372,7 @@ func TestDrainSummaryOmitsContainersThatAreNotFinished(t *testing.T) {
 // > 0 is the whole of the rule — so the singular has to read right too.
 func TestDrainSummaryNamesAFinishedContainerOfOne(t *testing.T) {
 	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil,
-		[]containerInfo{{number: 113, total: 1, completed: 1}}, time.Minute), "\n")
+		[]containerInfo{{number: 113, total: 1, completed: 1}}, nil, time.Minute), "\n")
 	if want := "epic    #113: all 1 sub-issue closed — closed it"; !strings.Contains(got, want) {
 		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
 	}
@@ -3234,7 +3383,7 @@ func TestDrainSummaryNamesAFinishedContainerOfOne(t *testing.T) {
 // "0 issues merged, 0 issues parked" header that would frame it as a no-op.
 func TestDrainSummaryReportsAClosedContainerEvenWithNoIssueResults(t *testing.T) {
 	got := strings.Join(drainSummary(nil, nil,
-		[]containerInfo{{number: 113, total: 6, completed: 6}}, time.Minute), "\n")
+		[]containerInfo{{number: 113, total: 6, completed: 6}}, nil, time.Minute), "\n")
 	if want := "epic    #113: all 6 sub-issues closed — closed it"; !strings.Contains(got, want) {
 		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
 	}
