@@ -437,7 +437,7 @@ func TestPlanSkillStatesTheTitleConvention(t *testing.T) {
 		"<type>: <what changes>",
 		"epic(<type>): <the outcome>",
 		"70 characters including the prefix",
-		"fix", "feat", "docs", "test", "refactor", "chore",
+		"`fix`, `feat`, `docs`, `test`, `refactor`, `chore`",
 		"tracking(<type>):",
 	} {
 		if !strings.Contains(flat, marker) {
