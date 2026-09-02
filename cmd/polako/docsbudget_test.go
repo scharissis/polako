@@ -23,8 +23,8 @@ import (
 // docsBudget is chosen from today's line counts so that almost the whole set
 // already clears it and docsDebt stays short — the entries are then the real
 // outliers, not a census. reference.md paid its debt in issue #284
-// (635 -> 500), run-data.md in issue #287 (702 -> under 500); every doc page
-// now clears the budget outright, so docsDebt is empty.
+// (635 -> 500), run-data.md in issue #287 (702 -> under 500), then reference.md
+// re-entered docsDebt in issue #324 — see the entry below for why.
 const docsBudget = 500
 
 // docsDebt holds the offenders present the day this test landed, each with
