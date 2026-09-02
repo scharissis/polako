@@ -79,6 +79,13 @@ longer, because it is the design record for its children, not a screen-bound
 proposal itself. Phase 5's per-section budgets are this rule made specific;
 where they are silent, this is still the rule.
 
+Titles follow one convention too. A child or flat issue: `<type>: <what
+changes>` — the repo's own commit types where it has them, `fix`, `feat`,
+`docs`, `test`, `refactor`, `chore` where it doesn't. Lower case after the
+colon, no trailing period, one clause, 70 characters including the prefix. An
+epic: `epic(<type>): <the outcome>`, `<type>` naming the dominant intent of
+its children, same cap, same rules.
+
 ## Phase 0 — Context and posture (every run, before anything else)
 
 1. Resolve $repo and confirm it is a git checkout. If it is empty, use the
@@ -267,11 +274,12 @@ failed, which is exactly the diligence probe this skill's `gh` surface forbids.
 - If the error names `--parent` — an older `gh` with no sub-issue support, so
   `--blocked-by` was never reachable either — file everything flat and fold the
   epic's design into a plain tracking issue that lists its children by number.
-  Its title starts `Tracking:` and its first line says it is a design record to
-  close rather than to queue, so a curator lifting the gate does not hand an
-  unattended run a design document to implement. Say which mode you ended up in,
-  and say the cost: a tracking issue with no sub-issues is not a container, so
-  nothing structural keeps an unattended run off it.
+  Its title starts `tracking(<type>):`, `<type>` naming the dominant intent of
+  its children the same way the epic form does, and its first line says it is
+  a design record to close rather than to queue, so a curator lifting the gate
+  does not hand an unattended run a design document to implement. Say which
+  mode you ended up in, and say the cost: a tracking issue with no sub-issues
+  is not a container, so nothing structural keeps an unattended run off it.
 - If the error names `--blocked-by` alone — `--parent` is supported, only
   dependency links are not — degrade just that flag: keep `--parent` on every
   child, decide once, and drop `--blocked-by` from the rest of this run's create
