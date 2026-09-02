@@ -1177,11 +1177,13 @@ func TestResolveToolsAppendsWithoutDuplicating(t *testing.T) {
 
 // The skill reads code, writes files, and invokes /code-review as a mandatory
 // gate. Unattended runs die silently if any of those tools needs a prompt.
+// Bash(evals/run.sh:*) is the same story for a run that changes a shipped
+// SKILL.md: the eval step in Phase 3 hangs without it.
 func TestDefaultToolsCoverWhatTheSkillNeeds(t *testing.T) {
 	have := strings.Split(defaultTools, ",")
 	for _, want := range []string{
 		"Bash(git:*)", "Bash(gh issue view:*)", "Bash(gh issue comment:*)", "Bash(gh pr create:*)",
-		"Read", "Write", "Edit", "Glob", "Grep", "Skill",
+		"Read", "Write", "Edit", "Glob", "Grep", "Skill", "Bash(evals/run.sh:*)",
 	} {
 		if !slices.Contains(have, want) {
 			t.Errorf("defaultTools is missing %q", want)

@@ -218,6 +218,16 @@ type config struct {
 //
 // The one label command the skill does need is not here either: it is minted
 // per run and pinned to that run's issue number — see issueLabelTools.
+//
+// Bash(evals/run.sh:*) is here for the one repository that has such a script —
+// polako itself, drained by polako. A run that changes a shipped SKILL.md runs
+// the eval cases its change touches (CLAUDE.md, "The suite is the
+// verification"); the grant is a fixed prefix because the skill invokes the
+// main checkout's copy of the script from that checkout's cwd, passing
+// --plugin-dir to aim it at the worktree. On every other repo the path does
+// not exist, so the entry grants nothing. Its blast radius on polako is an
+// attacker-supplied issue burning eval spend, bounded by run.sh's own
+// --max-cost.
 const defaultTools = "Bash(git:*)," +
 	"Bash(gh issue view:*),Bash(gh issue comment:*)," +
 	"Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh pr diff:*)," +
@@ -226,7 +236,8 @@ const defaultTools = "Bash(git:*)," +
 	"Bash(npm:*),Bash(npx:*),Bash(pnpm:*),Bash(yarn:*)," +
 	"Bash(go:*),Bash(cargo:*),Bash(make:*)," +
 	"Bash(python:*),Bash(python3:*),Bash(pytest:*),Bash(uv:*)," +
-	"Bash(dotnet:*),Bash(mvn:*),Bash(gradle:*)"
+	"Bash(dotnet:*),Bash(mvn:*),Bash(gradle:*)," +
+	"Bash(evals/run.sh:*)"
 
 // defaultMaxIssueTime is -max-issue-time's default (issue #256). #239's two
 // normal shifts ran 30m10s and 34m29s of run time; the #216 shift this ticket
