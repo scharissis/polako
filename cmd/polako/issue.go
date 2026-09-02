@@ -38,10 +38,12 @@ const defaultResumeCeiling = 20
 //
 // Every attempt of this kind burns a *complete* run rather than failing fast in
 // seconds the way a crash loop does — the run this exists for cost $3.61 and
-// eight minutes — and -max-cost and -max-issue-time are both off by default, so
-// nothing else is standing between a run that keeps deciding to wait and a
-// three-figure bill. Two buys the case worth buying, a run that was one commit
-// from done, and refuses to fund the other one.
+// eight minutes. -max-cost is off by default, and -max-issue-time's own
+// default (45m) sums across every resume of the issue, so it would eventually
+// catch this loop too — but not fast: two 8-minute attempts is nowhere near
+// 45m, so this ceiling is still the one that actually stops it quickly. Two
+// buys the case worth buying, a run that was one commit from done, and
+// refuses to fund the other one.
 const cleanExitResumeCeiling = 2
 
 // resumeLedger is the state machine processIssue's loop runs on: across the

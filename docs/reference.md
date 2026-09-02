@@ -28,7 +28,7 @@ see [`status`](#where-the-backlog-stands-polako-status) and
 | `-stall` | `15m` | Kill and resume a run that has emitted no events for this long (`0` disables). |
 | `-heartbeat` | `5m` | Terminal-only `still working` note while the *terminal* is quiet (not the event stream `-stall` watches — a run can be busy for minutes with nothing shown), repeated on this interval (`0` disables); silent under `-verbose`. See [The shift log](#the-shift-log--log). |
 | `-max-cost` | *(no limit)* | Park an issue once this shift's runs on it have cost this many dollars — see [Capping what a shift spends](run-data.md#capping-what-a-shift-spends). |
-| `-max-issue-time` | *(no limit)* | Park an issue once this shift's runs on it have taken this much *run time*, e.g. `-max-issue-time 90m` — unlike `-stall`, regardless of whether events are arriving. |
+| `-max-issue-time` | `45m` | Park an issue once this shift's runs on it have taken this much *run time* — unlike `-stall`, regardless of whether events are arriving. `0` disables it, restoring the old unbounded behaviour. |
 | `-max-session-cost` | *(no limit)* | End the shift cleanly, between issues, once its runs have cost this many dollars. |
 | `-max-session-usage` | *(no limit)* | Pause the shift, between issues, once the plan's current-session usage hits this percent — waits out the reset, then carries on. Starting already over it waits rather than running nothing. See [Capping what a shift spends](run-data.md#capping-what-a-shift-spends). |
 | `-max-week-usage` | *(no limit)* | Same, for the plan's current-week usage. A weekly reset can be days off, so the wait can be long; Ctrl+C is safe, state is on GitHub. |

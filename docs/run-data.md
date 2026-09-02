@@ -57,7 +57,7 @@ best-effort: a failure warns once and polako carries on.
 
 ## Capping what a shift spends
 
-All five caps are off unless you set one.
+`-max-issue-time` defaults to `45m`; the rest are off unless you set one.
 
 ```bash
 polako work -max-cost 15 -max-issue-time 90m -max-session-cost 200 \
@@ -68,7 +68,7 @@ polako work -max-cost 15 -max-issue-time 90m -max-session-cost 200 \
 - **`-max-issue-time`** — run time (not wall clock) one issue may consume
   before it is parked, so a slow reviewer never costs it the park. Catches
   what `-stall` can't: an agent looping productively but uselessly for
-  hours still emits events, so that watchdog never fires.
+  hours still emits events, so that watchdog never fires; defaults to `45m`.
 - **`-max-session-cost`** — dollars this shift may spend before it stops.
 - **`-max-session-usage`** / **`-max-week-usage`** — the plan's own limits,
   read off `claude`'s `/usage` between issues. Unlike the cost caps these

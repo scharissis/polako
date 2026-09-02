@@ -71,11 +71,18 @@ type config struct {
 	// filtered its events out. `polako plan` leaves it unset — the stage
 	// recognizer the line names is an implement-issue thing.
 	heartbeat time.Duration
-	// The spend caps, all zero — off — unless an operator asks for them.
-	// maxCost and maxIssueTime bound one issue and park it when it breaches;
-	// maxSessionCost bounds the whole drain and ends it cleanly instead. They
-	// are what -stall is not: that watchdog catches silence, and a run that
-	// loops productively but uselessly for hours emits events the whole way.
+	// The spend caps. maxCost and maxIssueTime bound one issue and park it
+	// when it breaches; maxSessionCost bounds the whole drain and ends it
+	// cleanly instead. They are what -stall is not: that watchdog catches
+	// silence, and a run that loops productively but uselessly for hours
+	// emits events the whole way.
+	//
+	// maxCost and maxSessionCost default to zero — off — unless an operator
+	// asks for them. maxIssueTime does not: parseFlags pins it to
+	// defaultMaxIssueTime (issue #256) — the #216 shift ($29.57, 90m30s on
+	// one issue) is exactly what -stall cannot catch, and only a wall-clock
+	// default needs no pricing, so it is the one cap on by default. `0` still
+	// disables it.
 	//
 	// maxIssueTime counts the run time this drain spent on the issue, not the
 	// wall clock since it was picked up: an issue spends most of its life
@@ -221,6 +228,15 @@ const defaultTools = "Bash(git:*)," +
 	"Bash(python:*),Bash(python3:*),Bash(pytest:*),Bash(uv:*)," +
 	"Bash(dotnet:*),Bash(mvn:*),Bash(gradle:*)"
 
+// defaultMaxIssueTime is -max-issue-time's default (issue #256). #239's two
+// normal shifts ran 30m10s and 34m29s of run time; the #216 shift this ticket
+// cites ran 90m30s and cost $29.57 on one issue with -stall powerless to
+// catch it, since it kept emitting events the whole way. 45m sits above the
+// normal range and at half of #216's length, so that shape parks with spend
+// to spare rather than at the wire. `-max-issue-time 0` restores the old
+// unbounded behaviour.
+const defaultMaxIssueTime = 45 * time.Minute
+
 // verbUsage is the bare invocation's answer: the one line of etymology that
 // explains the name, then the verbs. It lists only verbs that exist, so the
 // usage never advertises a verb that errors.
@@ -266,7 +282,7 @@ func parseFlags() config {
 		"say a one-line note while a run is quiet on the terminal, repeated every interval of continued silence (0 disables)")
 	flag.Float64Var(&cfg.maxCost, "max-cost", 0,
 		"park an issue once this shift's runs on it have cost this many dollars (0 disables)")
-	flag.DurationVar(&cfg.maxIssueTime, "max-issue-time", 0,
+	flag.DurationVar(&cfg.maxIssueTime, "max-issue-time", defaultMaxIssueTime,
 		"park an issue once this shift's runs on it have taken this much run time (0 disables)")
 	flag.Float64Var(&cfg.maxSessionCost, "max-session-cost", 0,
 		"end the shift between issues once its runs have cost this many dollars (0 disables)")
