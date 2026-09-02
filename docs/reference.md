@@ -217,10 +217,12 @@ from inside your own hook.
 
 ## Planning a backlog unattended: `polako plan`
 
-`polako plan` runs the [`plan-backlog`](../README.md#planning-a-backlog)
-skill the way `polako work` runs `implement-issue`: point it at a vision
-document and it proposes a curated backlog — epics and one-PR issues —
-behind the `proposed` label a human lifts to queue.
+`polako plan` runs the [`plan-backlog`](../README.md#planning-a-backlog) skill
+the way `polako work` runs `implement-issue`: point it at a vision document
+and it proposes a curated backlog — epics and one-PR issues — behind the
+`proposed` label a human lifts to queue. The layout travels: `docs/VISION.md`
+the long-range document, one plan per file under `docs/plans/`, no
+`Status:`/`Tracking:` line, `polako status` the index, a done plan leaves.
 
 One `claude` invocation, bracketed by two enforcement mechanisms that keep
 the curation gate structural rather than something the model has to
@@ -237,9 +239,8 @@ remember:
 The honest edge: an operator hand-filing an issue from the same account
 while a run is going gets caught in the sweep too — rare, but logged. When it
 ends — clean finish, cap, crash, or Ctrl+C — a plan run leaves one
-`kind:"plan"` line in [run data](run-data.md), and, if it proposed
-something, one `proposed`
-[notification](#being-told-when-it-needs-you--notify).
+`kind:"plan"` line in [run data](run-data.md), and, if it proposed something,
+one `proposed` [notification](#being-told-when-it-needs-you--notify).
 
 After the label pass, a run that proposed something prints one line pricing
 the batch from your own history — median cost and run time of a merged
@@ -267,7 +268,7 @@ polako plan -vision docs/VISION.md            # the real thing
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `-vision` | *(none)* | Path, resolved under `-dir`, to the vision or roadmap document to plan from. Exactly one of `-vision` / `-brief` is required — never a does-the-file-exist guess, so a typo fails loudly. |
+| `-vision` | *(none)* | Path, resolved under `-dir`, to the vision or roadmap document to plan from — `docs/VISION.md` for the long-range one, `docs/plans/<topic>.md` for a single batch. Exactly one of `-vision` / `-brief` is required — never a does-the-file-exist guess, so a typo fails loudly. |
 | `-brief` | *(none)* | Inline vision text in place of `-vision`, e.g. `-brief "a dating app for horses"` — the greenfield story, same trust tier as the document. Past ~2000 characters, put it in a file. |
 | `-focus` | *(none)* | Free-text steer for the run, e.g. `-focus "only the observability section"`. |
 | `-milestone` | *(derived)* | Batch milestone title, created idempotently at preflight and attached to every issue the run files by the label pass. Defaults to the vision file's name, or the brief capped at 50 characters, cut at a word boundary. `-milestone off` skips the milestone entirely. |
@@ -296,9 +297,9 @@ names, and attaches no milestone; `-focus` is the only free-text steer. The
 default `-tools` allowlist is narrower too: review-health's own SKILL.md
 bounds its `gh` surface to three call shapes — two `issue list` reads and
 one `issue create` — plus repo reads and the scratch body file. Otherwise
-the shape is identical to [`polako
-plan`](#planning-a-backlog-unattended-polako-plan)'s, cap and label pass
-included.
+the shape is identical to
+[`polako plan`](#planning-a-backlog-unattended-polako-plan)'s, cap and label
+pass included.
 
 ```bash
 polako health -dir ~/code/some-repo -dry-run
@@ -506,4 +507,3 @@ exactly when it carries a finished `issue-N` branch, and left alone
 otherwise, including a detached one.
 
 A repository with nothing to reclaim prints one line and exits 0.
-
