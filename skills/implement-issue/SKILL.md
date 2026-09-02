@@ -311,10 +311,12 @@ don't post again, and stop.
       it. `git -C <worktree> diff --stat` against the `origin/…` ref Phase 1
       resolved (`...HEAD`) — which a has just fast-forwarded the local default
       branch to, and which d already works from — prints the changed-line
-      count for nothing. The rule: `cheap` under 30 changed lines (insertions
-      plus deletions), `medium` from 30 up to 300, `high` at 300 or more. A
-      one-line `docs:` fix reaching this gate should not cost what a rewrite
-      of `main.go` does, and the level is the only lever this repo holds over
+      count for nothing. The rule, changed lines meaning insertions plus
+      deletions: `cheap` under 30, `medium` from 30 through 299, `high` at
+      300 or more — three disjoint bands, so a count of exactly 300 is
+      unambiguously `high`. A one-line `docs:` fix reaching this gate should
+      not cost what a rewrite of `main.go` does, and the level is the only
+      lever this repo holds over
       that (issues #225, #255). State in your turn which level you picked and
       the changed-line count behind it, so the choice is auditable.
 
