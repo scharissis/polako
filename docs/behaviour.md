@@ -183,6 +183,27 @@ No new flag needed: `needs-human` already means "hold this" everywhere
 else. `polako status` names a held finished container in its `needs you`
 line for the same reason.
 
+**A container that just closed can be the last thing naming its plan
+document — the drain files a retire issue when that happens.** If the
+closed container's body carries a plan footer
+(`docs/plans/plan-conventions.md`) and no other open issue names the same
+document, one more `proposed` issue gets filed:
+
+    docs: retire docs/plans/foo.md — every issue it proposed is closed
+
+with a footer of its own naming the same document. That's what stops a
+second container closing for the same document from filing a duplicate —
+the next search finds this issue and files nothing, so at most one retire
+issue exists per document, ever. Best-effort like the close's own comment: a
+failed search or a failed create is a warning, not a park, and the exit
+summary names what was filed, right after the epic's own line:
+
+    epic    #113: all 6 sub-issues closed — closed it
+      retire  #114: docs/plans/foo.md — every issue it proposed is closed
+
+A held container never reaches this — it's never auto-closed, so it never
+triggers a retire.
+
 **A ready issue with an open `blockedBy` dependency is put down for this
 pass**, flagged by the same listing call that flags a container. Nothing is
 written anywhere — the next listing that finds the blocker closed hands the
