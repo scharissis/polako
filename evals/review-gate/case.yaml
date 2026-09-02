@@ -20,43 +20,52 @@ graders:
     name: review_ran_before_the_pr
     focus: the order of the review gate and the PR in the transcript
     criteria: >
-      The run invoked /code-review before it ran `gh pr create`. If the
+      The run reviewed its own diff before it ran `gh pr create` — either by
+      invoking /code-review, or, for a small enough diff, by doing the
+      skill's cheap-path self-review pass instead (SKILL.md's Phase 3 step 2c
+      names a diff under 30 changed lines as the threshold for this). If the
       code-review skill was not invocable in this session, the run must have
       said so explicitly and then done a substitute review pass over its own
-      diff — that fallback counts as passing. Fail if the PR was created with no
-      review of any kind, or if the review came after the PR.
+      diff — that fallback counts as passing too. Fail if the PR was created
+      with no review of any kind, or if the review came after the PR.
 
   - type: llm
     name: review_was_aimed_at_this_branch
-    focus: how /code-review was invoked
+    focus: how /code-review was invoked, if it was invoked at all
     criteria: >
-      The invocation named the branch (issue-1) as its target, and did not
-      pass --fix (the gate now applies findings itself, one at a time, so it
-      can checkpoint between them — see SKILL.md's Phase 3 step 2). Fail if
-      /code-review was invoked bare, which reviews whatever the main checkout
-      holds rather than this branch, or if --fix was passed.
+      This only applies if the run actually invoked /code-review (a `medium`
+      or `high` diff) — if the diff was small enough for the cheap
+      self-review path, there is no invocation to check and this passes by
+      default. When /code-review was invoked, the invocation must have named
+      the branch (issue-1) as its target, and must not have passed --fix (the
+      gate now applies findings itself, one at a time, so it can checkpoint
+      between them — see SKILL.md's Phase 3 step 2). Fail if /code-review was
+      invoked bare, which reviews whatever the main checkout holds rather
+      than this branch, or if --fix was passed.
 
   - type: llm
     name: base_was_refreshed_first
     focus: whether the local default branch was brought up to date before review
     criteria: >
-      Before invoking the review, the run ran `git merge --ff-only` against the
+      Before reviewing the diff (whether by invoking /code-review or by the
+      cheap self-review path), the run ran `git merge --ff-only` against the
       origin ref in the main checkout, or established that it was unnecessary or
       that the checkout was not on the default branch. Fail if the run forced
       the update with reset, rebase or a non-fast-forward merge.
 
   - type: llm
     name: review_level_scaled_to_the_diff
-    focus: how the run chose the /code-review level
+    focus: how the run chose the review level
     criteria: >
-      Before invoking the review the run sized the change (e.g. `git diff
-      --stat` against the origin ref) and picked the level from it — `medium`
-      under a few hundred changed lines, `high` above — rather than always
-      asking for `high`. The run should have stated which level it picked and
-      the line count behind it. The scaffold's diff is small, so `medium` is
-      the expected choice; `high` with a stated reason also passes. Fail only
-      if the run gave no sign of sizing the change, or asked for `high` with
-      no rationale.
+      Before reviewing, the run sized the change (e.g. `git diff --stat`
+      against the origin ref) and picked the level from it — `cheap` under 30
+      changed lines, `medium` from 30 up to a few hundred, `high` above —
+      rather than always asking for `high`. The run should have stated which
+      level it picked and the line count behind it. The scaffold's diff is
+      small, so either `cheap` (with a self-review pass instead of an
+      invocation) or `medium` is the expected choice; `high` with a stated
+      reason also passes. Fail only if the run gave no sign of sizing the
+      change, or asked for `high` with no rationale.
 
   - type: tool_used
     tool: Skill
