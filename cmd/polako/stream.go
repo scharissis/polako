@@ -321,10 +321,17 @@ func (r *runReport) observe(ev streamEvent) {
 		// flushed at exit (issue #227). num_turns, the two durations and the
 		// top-level usage block are that prompt turn's alone, so they add up
 		// across the events; total_cost_usd and modelUsage are
-		// session-cumulative and already whole on every event, so they stay
+		// process-cumulative and already whole on every event, so they stay
 		// last-wins. The two families are indistinguishable in the JSON — only
 		// what the CLI puts in them differs — so treating them differently is
 		// deliberate, not an oversight to "fix" back to matching assignments.
+		//
+		// Process-cumulative, not session-: the counter resets with the
+		// process, so a --resume reports its own spend and not the session it
+		// continued — which is why tally.add may sum records. Measured on CLI
+		// 2.1.252 for issue #258: one session across three processes billed
+		// $0.0695, then $0.0165, then $0.0091, and a cumulative counter
+		// cannot go down. #227 left that open because this word was loose.
 		if firstResult {
 			r.turns = 0 // clear the -1 pre-result sentinel errNoWork reads
 		}

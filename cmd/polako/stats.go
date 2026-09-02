@@ -17,9 +17,9 @@ package main
 //
 // One rule that had to be measured rather than reasoned out: a resumed run's
 // row is summed like any other. A --resume'd result event reports that
-// invocation and not the session it continued, settled on issue #78 against
-// real records, so the two halves of a resumed session do not overlap and
-// nothing here has to take a per-session maximum. Reports used to carry a
+// invocation and not the session it continued — issue #78 against real
+// records, #258 by a deliberate resume — so the two halves of a resumed
+// session do not overlap and nothing takes a per-session maximum. Reports used to carry a
 // footnote hedging on that; they no longer need one.
 
 import (

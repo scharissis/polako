@@ -666,6 +666,33 @@ func TestIssueTallySumsTheRunsThisDrainSaw(t *testing.T) {
 	}
 }
 
+// Issue #258: the two halves of one resumed session are two records, and the
+// tally adds both. A --resume'd result event reports that process's spend
+// alone — measured against the real CLI, where one session across three
+// processes billed $0.0695, $0.0165 and $0.0091 — so summing is the whole
+// end-to-end cost, not a double-count. #258 opened proposing the opposite:
+// track a per-session running maximum, or add deltas. Either would report
+// $2.50 here instead of $3.75, losing the resumed process's own spend. This
+// test exists so that rewrite trips something named.
+func TestIssueTallySumsBothHalvesOfAResumedSession(t *testing.T) {
+	const session = "3401260d-a25d-4583-b0af-ed7e2c6ed0e6"
+	var tally issueTally
+	tally.add(runRecord{Session: session, Outcome: outcomeNothing,
+		UsageSource: usageResult, CostUSD: 1.25})
+	// Same session id — a resume keeps it — and a cost that is this process's
+	// alone rather than the session's running total.
+	tally.add(runRecord{Session: session, ResumedFrom: session,
+		Outcome: outcomeOpenedPR, UsageSource: usageResult, CostUSD: 2.50})
+
+	if tally.runs != 2 {
+		t.Errorf("runs = %d, want both halves counted", tally.runs)
+	}
+	if tally.costUSD != 3.75 {
+		t.Errorf("costUSD = %v, want 3.75 — both processes summed, not deduped "+
+			"to the last one seen for the session", tally.costUSD)
+	}
+}
+
 // -post-summary works with -metrics off — the escape hatch for an operator who
 // wants no local files at all — so the record has to be built whether or not
 // anything is written.

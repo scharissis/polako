@@ -1025,7 +1025,7 @@ func TestFinishLineRendersFromTheReport(t *testing.T) {
 
 	// The whole run's standing: two results streamed, turns and wall are the
 	// sum of both prompt turns (16+74, 61s+1141s) while total_cost_usd —
-	// session-cumulative and whole on every event — stays last-wins, not
+	// process-cumulative and whole on every event — stays last-wins, not
 	// summed to $41.57.
 	sev, line := finishLine(feed(
 		`{"type":"result","subtype":"success","num_turns":16,"duration_ms":61000,"total_cost_usd":12.00}`,
@@ -1057,8 +1057,10 @@ func TestFinishLineRendersFromTheReport(t *testing.T) {
 // Issue #227: a run with background subagents streams one result event per
 // dequeued prompt, all at exit. The per-prompt-turn fields — num_turns, the
 // two durations, the top-level usage block — accumulate across them; the
-// session-cumulative fields — total_cost_usd, modelUsage — stay last-wins,
-// since every event already carries the whole run's figure.
+// process-cumulative fields — total_cost_usd, modelUsage — stay last-wins,
+// since every event already carries the whole process's figure. Cumulative
+// over the process, not the session: see stream.go's result case, and
+// TestIssueTallySumsBothHalvesOfAResumedSession for the other half.
 func TestObserveSumsPerTurnFieldsAcrossResultEvents(t *testing.T) {
 	rep := runReport{turns: -1}
 	rep.observe(streamEvent{Type: "result", Subtype: "success",
