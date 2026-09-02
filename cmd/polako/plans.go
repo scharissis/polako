@@ -105,11 +105,15 @@ func readPlanDocs(ctx context.Context, cfg config) (planDocsSnapshot, error) {
 		localSet[d] = true
 	}
 
+	// Asks for one row past the bound: that's the only way to tell "exactly
+	// planDocsLimit issues, nothing missed" from "more than planDocsLimit,
+	// truncated" — both would otherwise come back as exactly planDocsLimit
+	// rows and be indistinguishable.
 	raw, err := retryRead(ctx, cfg, "listing plan-stamped issues", func() ([]byte, error) {
 		return gh(ctx, cfg, "issue", "list", "--state", "all",
 			"--search", `"`+planFooterSearchPhrase+`" in:body`,
 			"--json", "number,state,labels,body,subIssuesSummary",
-			"--limit", strconv.Itoa(planDocsLimit))
+			"--limit", strconv.Itoa(planDocsLimit+1))
 	})
 	if err != nil {
 		return planDocsSnapshot{}, err
@@ -118,6 +122,12 @@ func readPlanDocs(ctx context.Context, cfg config) (planDocsSnapshot, error) {
 	var issues []ghPlanIssue
 	if err := json.Unmarshal(raw, &issues); err != nil {
 		return planDocsSnapshot{}, fmt.Errorf("parsing plan-stamped issue list: %w", err)
+	}
+
+	snap := planDocsSnapshot{}
+	if len(issues) > planDocsLimit {
+		snap.truncated = true
+		issues = issues[:planDocsLimit]
 	}
 
 	byDoc := map[string][]ghPlanIssue{}
@@ -129,7 +139,6 @@ func readPlanDocs(ctx context.Context, cfg config) (planDocsSnapshot, error) {
 		byDoc[footer.doc] = append(byDoc[footer.doc], is)
 	}
 
-	snap := planDocsSnapshot{truncated: len(issues) >= planDocsLimit}
 	if haveLocal {
 		for _, path := range local {
 			snap.docs = append(snap.docs, planDocStatusFrom(path, byDoc[path]))

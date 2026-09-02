@@ -1083,6 +1083,35 @@ func TestPlanDocsWithNoLocalCheckoutReportsNothingRatherThanGuessing(t *testing.
 // The search call is bounded, and a repo whose stamped issues outgrow it
 // gets a warning naming the bound rather than a silently incomplete state.
 func TestPlanDocsWarnsWhenTheSearchIsTruncated(t *testing.T) {
+	// One past the bound: readPlanDocs asks for planDocsLimit+1 rows
+	// precisely so this case — more than the bound — is distinguishable
+	// from landing exactly on it (see the next test).
+	issues := make(map[string]*fakeIssue, planDocsLimit+1)
+	for i := 1; i <= planDocsLimit+1; i++ {
+		issues[strconv.Itoa(i)] = &fakeIssue{Open: true, Body: planFooterFor("docs/plans/flood.md", "abc0000")}
+	}
+	cfg, _ := statusConfigFor(t, &ghState{Issues: issues})
+	writePlanDoc(t, cfg.dir, "flood.md")
+
+	snap, err := readPlanDocs(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("readPlanDocs: %v", err)
+	}
+	if !snap.truncated {
+		t.Error("truncated = false, want true when more than the limit carries the footer")
+	}
+
+	var out strings.Builder
+	printPlanDocs(&out, report{}, snap)
+	if !strings.Contains(out.String(), fmt.Sprintf("past the first %d", planDocsLimit)) {
+		t.Errorf("report missing the truncation warning:\n%s", out.String())
+	}
+}
+
+// Landing exactly on the bound is a complete result, not a truncated one —
+// the search asks for one row past planDocsLimit precisely so this case
+// reads back false rather than a false positive.
+func TestPlanDocsNotTruncatedExactlyAtTheLimit(t *testing.T) {
 	issues := make(map[string]*fakeIssue, planDocsLimit)
 	for i := 1; i <= planDocsLimit; i++ {
 		issues[strconv.Itoa(i)] = &fakeIssue{Open: true, Body: planFooterFor("docs/plans/flood.md", "abc0000")}
@@ -1094,14 +1123,8 @@ func TestPlanDocsWarnsWhenTheSearchIsTruncated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readPlanDocs: %v", err)
 	}
-	if !snap.truncated {
-		t.Error("truncated = false, want true when the search call hits the limit")
-	}
-
-	var out strings.Builder
-	printPlanDocs(&out, report{}, snap)
-	if !strings.Contains(out.String(), fmt.Sprintf("past the first %d", planDocsLimit)) {
-		t.Errorf("report missing the truncation warning:\n%s", out.String())
+	if snap.truncated {
+		t.Error("truncated = true, want false — exactly planDocsLimit issues is a complete result")
 	}
 }
 
