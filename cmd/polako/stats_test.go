@@ -354,6 +354,17 @@ func TestStatsByModelAndTag(t *testing.T) {
 	if got := stats(t, "-metrics", dir, "-by", byTag); !strings.Contains(got, wantTag) {
 		t.Errorf("-by tag table differs\n--- got ---\n%s\n--- want ---\n%s", got, wantTag)
 	}
+	wantReason := `by reason
+  reason     issues  merged  runs   cost  $/merged  tokens
+  resume          1       1     1  $3.00     $3.00    5.5M
+  answers         1       1     1  $2.50     $2.50    6.4M
+  implement       4       3     4  $2.20     $0.73    6.6M
+  remediate       1       0     1  $0.40         —  635.4k
+  (2 issues spans more than one reason, and is counted under each)
+`
+	if got := stats(t, "-metrics", dir, "-by", byReason); !strings.Contains(got, wantReason) {
+		t.Errorf("-by reason table differs\n--- got ---\n%s\n--- want ---\n%s", got, wantReason)
+	}
 }
 
 // The ledger every other section is a rollup of, and the only place a run's
