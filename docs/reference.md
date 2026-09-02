@@ -228,8 +228,8 @@ One `claude` invocation, bracketed by two enforcement mechanisms that keep
 the curation gate structural rather than something the model has to
 remember:
 
-- **The cap.** Counts `gh issue create` calls and kills the run at
-  `-max-issues`, epics included — loud, never destructive.
+- **The cap.** Counts a finished `gh issue create` call and kills the run at
+  `-max-issues`, epics included — loud, never destructive; N filed, never N-1.
 - **The label pass.** Snapshots the open backlog before the run; after it —
   always, even on a crash, the cap kill, or Ctrl+C — every issue this `gh`
   account created since is normalised to **exactly** the `proposed` label

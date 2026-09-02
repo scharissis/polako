@@ -237,8 +237,10 @@ The gate doesn't depend on the model remembering it. A shared label pass
 (`labelpass.go`) runs after every `plan` or `health` run — however it
 ended: normal, capped at `-max-issues`, crashed, or Ctrl+C'd — and forces
 every issue that run created to carry *exactly* the `proposed` label,
-stripping anything else and adding it if the run forgot. A failure to
-label is reported loudly, never swallowed.
+stripping anything else and adding it if the run forgot. The cap counts a
+`gh issue create` once it actually finishes, not once the run dispatches it,
+so a cap of N always leaves N issues for this pass to find, never N-1. A
+failure to label is reported loudly, never swallowed.
 
 See [`polako
 plan`](reference.md#planning-a-backlog-unattended-polako-plan) and
