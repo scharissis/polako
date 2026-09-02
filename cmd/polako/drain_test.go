@@ -134,6 +134,11 @@ type fakeIssue struct {
 	// Milestone is the title `issue edit --milestone` set, or an `issue create`
 	// carried — all the plan label pass reads or writes here.
 	Milestone string `json:"milestone"`
+
+	// Body is the issue body text. The plans derivation (plans.go) is the
+	// only reader in this binary — parsePlanFooter searches it for the
+	// footer `polako plan` stamps — so no other fake call composes it.
+	Body string `json:"body"`
 }
 
 type fakePR struct {
@@ -283,6 +288,12 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 		return fmt.Sprintf(`{"nameWithOwner":%q,"visibility":%q}`, st.Repo, vis), false, 0
 
 	case "issue list":
+		if flagVal("--search") != "" {
+			// The plans derivation's own call: --state all, no --label, no
+			// --author — routed on --search alone since that's the one flag
+			// unique to it.
+			return listPlanIssues(st, flagVal("--json"), flagVal("--limit"))
+		}
 		return listIssues(st, flagVal("--label"), flagVal("--author"), flagVal("--json"))
 
 	case "issue view":
@@ -660,6 +671,55 @@ func listIssues(st *ghState, label, author, fields string) (out string, changed 
 		rows = append(rows, row+"}")
 	}
 	return "[" + strings.Join(rows, ",") + "]", changed, 0
+}
+
+// listPlanIssues renders the plans derivation's one search call: every
+// issue, open or closed, whose body contains the footer phrase — a literal
+// substring stand-in for GitHub's body search, which is all a fake needs
+// since the phrase this binary ever searches for is fixed. limit caps the
+// rows the same way gh's own --limit does, oldest-numbered first, so a test
+// can prove the truncation warning fires.
+func listPlanIssues(st *ghState, fields, limit string) (out string, changed bool, code int) {
+	subIssues := strings.Contains(fields, "subIssuesSummary")
+	rowCap := planDocsLimit
+	if n, err := strconv.Atoi(limit); err == nil && n > 0 {
+		rowCap = n
+	}
+
+	numbers := make([]int, 0, len(st.Issues))
+	for k := range st.Issues {
+		if n, err := strconv.Atoi(k); err == nil {
+			numbers = append(numbers, n)
+		}
+	}
+	slices.Sort(numbers)
+
+	var rows []string
+	for _, n := range numbers {
+		is := st.Issues[strconv.Itoa(n)]
+		if !strings.Contains(is.Body, planFooterSearchPhrase) {
+			continue
+		}
+		if len(rows) >= rowCap {
+			break
+		}
+		state := "CLOSED"
+		if is.Open {
+			state = "OPEN"
+		}
+		var labels []string
+		for _, l := range is.Labels {
+			labels = append(labels, fmt.Sprintf(`{"name":%q}`, l))
+		}
+		row := fmt.Sprintf(`{"number":%d,"state":%q,"labels":[%s],"body":%q`,
+			n, state, strings.Join(labels, ","), is.Body)
+		if subIssues {
+			row += fmt.Sprintf(`,"subIssuesSummary":{"total":%d,"completed":%d,"percentCompleted":0}`,
+				is.SubIssues, is.SubIssuesCompleted)
+		}
+		rows = append(rows, row+"}")
+	}
+	return "[" + strings.Join(rows, ",") + "]", false, 0
 }
 
 // --- the drain loop, end to end ---

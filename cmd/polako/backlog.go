@@ -332,7 +332,15 @@ func (b ghBlocker) open(seenOpen map[int]bool) bool {
 
 // hasLabel matches case-insensitively, the way GitHub treats label names.
 func (i ghIssue) hasLabel(name string) bool {
-	return slices.ContainsFunc(i.Labels, func(l ghLabel) bool {
+	return hasLabel(i.Labels, name)
+}
+
+// hasLabel is the label match itself, shared with plans.go's own
+// gh-list rows — both read the same `labels` shape off a different
+// --json field set, and a container's held state is decided the same way in
+// both places.
+func hasLabel(labels []ghLabel, name string) bool {
+	return slices.ContainsFunc(labels, func(l ghLabel) bool {
 		return strings.EqualFold(l.Name, name)
 	})
 }

@@ -346,6 +346,12 @@ open prs on issue branches
 needs you: reply on #9; review and merge PR #58; decide what to do about #5 (drop needs-human to requeue); curate #27, #28 (drop proposed to queue them)
 ```
 
+Below that table, `plan documents` adds one row per file under `docs/plans/`:
+state derived from the naming issues (`docs/plans/plan-conventions.md`'s
+table), their `(completed/total closed)` container epics and open children
+(shape in the JSON example below), and a `gone` line for a footer naming a
+deleted document. One capped `gh issue list` call for the section.
+
 What it prints is what a shift starting right now would do next, the same
 thing a running shift is already doing. It reports **state, not liveness** —
 never asking whether a shift is running — so it's useful from a laptop about
@@ -417,6 +423,7 @@ polako status -json | jq .
     "decide what to do about #5 (drop needs-human to requeue)",
     "curate #27, #28 (drop proposed to queue them)"
   ],
+  "plans": { "docs": [{ "path": "docs/plans/backlog-fill.md", "state": "active", "open_children": 4, "containers": [{ "issue": 101, "total": 6, "completed": 2, "finished": false, "held": false }] }], "gone": [], "truncated": false },
   "plan": "plan: session 42%, week 52% (resets Sep 2, 6pm) — polako was 29% of the last 24h"
 }
 ```
@@ -426,13 +433,15 @@ With `-json`, stdout carries exactly one document — no header, no
 field: `queue` holds the same five lists, `next` names the issue a shift
 would pick up and why, `prs` matches the text columns exactly (`not read`
 for a PR past the eight-PR cap; `unknown` means gh doesn't know), and
-`needs_you` is the closing line's clauses as an array.
+`needs_you` is the closing line's clauses as an array. `plans` (plural —
+distinct from `plan`, the usage line below it) mirrors the plan documents
+table row for row; its `gone` is `{ "path", "issues" }`.
 
-`queue.containers` is objects, not bare numbers — `{ "issue", "total",
-"completed", "finished", "held" }` — so a caller can tell a finished
-container from one in progress without a second call. For a finished one,
-`held: false` means the next shift is about to close it, `held: true` means
-it's the caller's.
+`queue.containers`, and `plans.docs[].containers` the same way, is objects,
+not bare numbers — `{ "issue", "total", "completed", "finished", "held" }` —
+so a caller can tell a finished container from one in progress without a
+second call. For a finished one, `held: false` means the next shift is about
+to close it, `held: true` means it's the caller's.
 Every array field is always `[]`, never `null`; `quiet_seconds` and `plan`
 are the two fields that can be *absent* instead of a fake zero or empty
 string. Same rule as the text report: no issue, PR or comment text, only
