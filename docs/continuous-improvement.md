@@ -31,7 +31,7 @@ the backlog, never through the supervisor reading its own telemetry.
    gates skill text; `-run-tag` discipline makes before/after batches
    comparable; the numbers that settle a comparison are trustworthy.
 3. **The invariants come out untouched.** No new telemetry readers (the plan
-   report's pricing line, argued in `backlog-fill.md`, would be the second and
+   report's pricing line, argued in `docs/plans/backlog-fill.md`, would be the second and
    last), no work-loop reads, no self-tuning, no third destination off the
    machine, no issue or PR text in a record — reviewing text means following
    a session id to the CLI's own files, never copying text into ours.
@@ -240,7 +240,7 @@ A hit is a finding, and a finding becomes an issue.
   the backlog.
 - **No text in records, and no new record fields that tempt it.**
   `park_reason` is an enum precisely so it never becomes a message.
-- **No new telemetry readers.** `backlog-fill.md` argues the second reader
+- **No new telemetry readers.** `docs/plans/backlog-fill.md` argues the second reader
   (the plan report's pricing line) out loud; this plan adds none, and the
   audit recipe reads GitHub, not the record files.
 - **No metrics service, no dashboards, no CSV export yet** — all parked in
