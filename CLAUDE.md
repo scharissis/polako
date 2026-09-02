@@ -96,6 +96,11 @@ in the PR body rather than doing it quietly.
 - **`issue-N` branch naming is a contract.** The supervisor finds a PR by its
   head branch; the skill names the branch. Change either side and you must
   change both — `-branch-prefix` has to keep working.
+- **The plan footer is a contract, like `issue-N` branch naming.** Every issue
+  `plan` files ends with `Proposed by polako plan from <doc> @ <sha> — ...`;
+  the binary parses it (`parsePlanFooter`), `repo_test.go` asserts
+  `plan-backlog/SKILL.md` still writes the wording the parser expects, and
+  changing either side means changing both.
 - **Nothing merges itself.** The supervisor may open, update and repair PRs,
   but never merge one or commit to the default branch. Merging is one of the
   two deliberate human touchpoints; answering questions on an issue thread is
