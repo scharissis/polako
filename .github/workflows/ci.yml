@@ -26,45 +26,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Defender scans every file the toolchain writes and every process it
-      # spawns. Hermetic tests make that the hot path rather than something
-      # beside it: one suite run spawns ~1,500 git processes and ~300 fake-CLI
-      # ones, each a scan of a multi-megabyte binary. TEMP earns its place
-      # twice over — the fake CLI is built there and re-exec'd for every one of
-      # those 300 calls, and every t.TempDir() git repo lives there too.
-      # Excluding them changes nothing about what runs.
-      #
-      # Before setup-go on purpose, so unpacking the toolchain is covered too.
-      # Best-effort throughout: a runner image without Defender, or with it
-      # centrally managed, must skip this rather than fail the build over it.
-      - name: exclude the build from Defender
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          foreach ($p in @(
-            $env:GITHUB_WORKSPACE
-            $env:RUNNER_TEMP
-            $env:TEMP
-            $env:RUNNER_TOOL_CACHE
-            "$env:LOCALAPPDATA\go-build"
-          )) {
-            if ($p) { Add-MpPreference -ExclusionPath $p -ErrorAction SilentlyContinue }
-          }
-          foreach ($p in @('go.exe', 'git.exe', 'fake-cli.exe')) {
-            Add-MpPreference -ExclusionProcess $p -ErrorAction SilentlyContinue
-          }
-          # SilentlyContinue above hides a refusal, and a silently-skipped
-          # exclusion would look exactly like an exclusion that did not help.
-          # Print what actually stuck so the log can tell those apart.
-          $p = Get-MpPreference -ErrorAction SilentlyContinue
-          if ($p) {
-            Write-Host "excluded paths: $($p.ExclusionPath -join ', ')"
-            Write-Host "excluded processes: $($p.ExclusionProcess -join ', ')"
-          } else {
-            Write-Host "no Defender on this runner; nothing to exclude"
-          }
-
       # cache: false, because setup-go's own caching cannot work here. It keys
       # on a hash of go.sum, and stdlib-only means there is no go.sum — so the
       # key is a constant, hits every run, and on a hit the action skips
