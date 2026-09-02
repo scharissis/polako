@@ -61,6 +61,13 @@ longer, because it is the design record for its children, not a screen-bound
 proposal itself. Phase 4's per-section budgets are this rule made specific;
 where they are silent, this is still the rule.
 
+Titles follow one convention too. A child or flat issue: `<type>: <what
+changes>` — the repo's own commit types where it has them, `fix`, `feat`,
+`docs`, `test`, `refactor`, `chore` where it doesn't. Lower case after the
+colon, no trailing period, one clause, 70 characters including the prefix. An
+epic: `epic(<type>): <the outcome>`, `<type>` naming the dominant intent of
+its children, same cap, same rules.
+
 ## Phase 0 — Context and posture (every run, before anything else)
 1. Read $vision, resolved inside the repository.
 2. Read the backlog, **including proposals already filed**:
@@ -221,8 +228,10 @@ so `--blocked-by` was never reachable either — file everything flat instead an
 fold the epic's design into a plain tracking issue that lists its children by
 number. Say which mode you ended up in, in the report, and say the cost of the
 flat mode outright: a tracking issue with no sub-issues is not a container, so
-nothing structural keeps an unattended run off it. Its title starts `Tracking:`
-and its first line says it is a design record to close rather than to queue, so
+nothing structural keeps an unattended run off it. Its title starts
+`tracking(<type>):`, `<type>` naming the dominant intent of its children the
+same way the epic form does, and its first line says it is a design record to
+close rather than to queue, so
 a curator lifting the gate on the batch does not hand an unattended run a
 design document to implement.
 
