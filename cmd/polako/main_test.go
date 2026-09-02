@@ -68,6 +68,9 @@ func TestMain(m *testing.M) {
 	if fakeCLIDir != "" {
 		os.RemoveAll(fakeCLIDir)
 	}
+	if gitFixtureDir != "" {
+		os.RemoveAll(gitFixtureDir)
+	}
 	os.Exit(code)
 }
 
