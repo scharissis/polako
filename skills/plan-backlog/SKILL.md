@@ -40,6 +40,15 @@ which file is the roadmap: picking the wrong one produces a plausible backlog
 for a project nobody is building, and the mistake is invisible until a curator
 reads seven issues that make no sense.
 
+## The layout convention
+
+This travels with the skill into any repo it runs in, not just this one:
+`docs/VISION.md` is the long-range document, one plan per file under
+`docs/plans/`, no `Status:` or `Tracking:` line, `polako status` is the
+index, a done plan leaves once its durable content moves into `docs/`
+proper. `$vision` may name either — the roadmap itself, or one of its own
+plan documents for a single batch.
+
 ## This run gets one turn
 Ending your turn ends the process. There is no later turn to come back to and
 nothing that can wake you — not a `Monitor`, not a scheduled wake-up, not a
