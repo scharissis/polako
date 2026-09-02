@@ -13,6 +13,21 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.19.0]
+
+### What's Changed
+* test: a line budget for the docs, so terser stays terser by @scharissis in https://github.com/scharissis/polako/pull/297 (closes #282)
+* docs: cut the README from 445 to 312 lines by @scharissis in https://github.com/scharissis/polako/pull/298 (closes #283)
+* docs: reference.md argues where it should state — tighten the flag table and the verb sections by @scharissis in https://github.com/scharissis/polako/pull/300 (closes #284)
+* docs: give behaviour.md sections, cover plan and health by @scharissis in https://github.com/scharissis/polako/pull/301 (closes #285)
+* docs: cover plan and health in security.md by @scharissis in https://github.com/scharissis/polako/pull/302 (closes #286)
+* docs: run-data.md is 702 lines — keep the sample reports, cut the argument by @scharissis in https://github.com/scharissis/polako/pull/303 (closes #287)
+* docs: the same plain-English pass over install.md, hardening.md and releasing.md by @scharissis in https://github.com/scharissis/polako/pull/304 (closes #288)
+* docs: add GitHub About text block, fix drifted tagline copies by @scharissis in https://github.com/scharissis/polako/pull/305 (closes #289)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.18.0...v0.19.0
+
 ## [0.18.0]
 
 ### What's Changed
