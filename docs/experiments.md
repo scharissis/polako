@@ -40,8 +40,7 @@ sits inside.
 ## How to settle one
 
 Run enough issues under the tag that the comparison is not one lucky night —
-the batches in `run-data-capture.md` are the method, and it is batches over
-time with honest labels, not A/B machinery. Then `polako stats -by tag`, and
+batches over time with honest labels are the method, not A/B machinery. Then `polako stats -by tag`, and
 fill in the verdict with the numbers rather than the impression. An issue
 worked under two tags counts under each, and the table says so when it
 happened; if that is most of the batch, the comparison is not one.

@@ -76,8 +76,7 @@ the push.
 
 **Closed 2026-08-27 on issue #78.** A `--resume`d run's result event reports
 that invocation, not the session, so summing rows as `stats` already does is
-correct and the footnote it used to print is gone. See open question 1 of
-`run-data-capture.md` for the evidence — a recorded resume pair, not the
+correct and the footnote it used to print is gone. The evidence was a recorded resume pair, not the
 disposable probe this pillar asked for, which never ran.
 
 Nothing here blocks pillar 4 any longer: a tag comparison across batches with
@@ -122,7 +121,7 @@ Two design points keep this inside the invariants:
 ## Pillar 4 — experiments: tags with discipline
 
 The comparison machinery exists — `-run-tag`, `-model`, `stats -by tag` — and
-`run-data-capture.md` already settled the method: batches over time with
+the method was settled early: batches over time with
 honest labels, no A/B machinery. What is missing is the discipline that makes
 the labels honest, and the ledger that stops the results evaporating:
 
@@ -245,7 +244,7 @@ A hit is a finding, and a finding becomes an issue.
   (the plan report's pricing line) out loud; this plan adds none, and the
   audit recipe reads GitHub, not the record files.
 - **No metrics service, no dashboards, no CSV export yet** — all parked in
-  `run-data-capture.md` phase 4 already, and nothing here pulls for them.
+  phase 4 below, and nothing here pulls for them.
 
 ## Implementation phases
 
@@ -279,7 +278,7 @@ waits for the manual form to demonstrate the need.
 
 ## Open questions and verification tasks
 
-1. **Resume semantics** — inherited from `run-data-capture.md`, restated here
+1. **Resume semantics** — a pre-existing question, restated here
    because pillar 4 depends on it. One disposable resume settles it.
 2. **The `park_reason` taxonomy.** Derive from the actual park callsites at
    implementation time rather than guessing here; seed with the obvious
