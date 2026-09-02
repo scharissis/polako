@@ -448,6 +448,29 @@ func TestPlanSkillStatesTheTitleConvention(t *testing.T) {
 	}
 }
 
+// issue #326: the plan-document layout convention
+// (docs/plans/plan-conventions.md) existed only in a plan document other
+// repos never see, so a plan run elsewhere had nowhere to learn where plan
+// documents belong. Mirrors TestPlanSkillStatesTheTitleConvention's
+// marker-list shape.
+func TestPlanSkillStatesTheDocumentLayout(t *testing.T) {
+	skill := planSkill(t)
+
+	flat := strings.Join(strings.Fields(skill), " ")
+	for _, marker := range []string{
+		"docs/VISION.md` is the long-range document",
+		"one plan per file under `docs/plans/`",
+		"no `Status:` or `Tracking:` line",
+		"`polako status` is the index",
+		"a done plan leaves",
+	} {
+		if !strings.Contains(flat, marker) {
+			t.Errorf("SKILL.md no longer states the plan-document layout convention (missing %q) — without it a"+
+				" plan run in another repo has nowhere to learn where plan documents live", marker)
+		}
+	}
+}
+
 // issue #273: the proposed-issue body template named five sections and bounded
 // none of them, so a curator deciding whether to lift the `proposed` label had
 // to read however much the run felt like writing. Mirrors
