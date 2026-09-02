@@ -90,8 +90,14 @@ func retireOrphanedDoc(ctx context.Context, cfg config, c containerInfo, filedTh
 
 // containerBody reads back the one field this step needs off a container
 // that just closed — nothing upstream of here ever had reason to fetch it.
+// Through retryRead like every other read-only gh lookup on this same code
+// path (issueComments, called moments earlier in closeFinishedContainers) —
+// a transient failure here should not read as "no footer" any more than one
+// there should read as "no marker".
 func containerBody(ctx context.Context, cfg config, issue int) (string, error) {
-	raw, err := gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "body")
+	raw, err := retryRead(ctx, cfg, fmt.Sprintf("reading #%d's body", issue), func() ([]byte, error) {
+		return gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "body")
+	})
 	if err != nil {
 		return "", err
 	}
@@ -116,10 +122,17 @@ func containerBody(ctx context.Context, cfg config, issue int) (string, error) {
 // respect --state server-side on every version, and relying on that alone
 // would silently reintroduce the container's own now-closed issue as a false
 // positive on a lagging index.
+//
+// Through retryRead, the same as containerBody above and every other
+// read-only gh lookup on this code path — a transient failure here should
+// not read as "nothing else names this document" any more than one there
+// should read as "no footer".
 func anyOtherOpenIssueNamesDoc(ctx context.Context, cfg config, doc string) (bool, error) {
-	raw, err := gh(ctx, cfg, "issue", "list", "--state", "open",
-		"--search", `"`+planFooterSearchPhrase+`" in:body`,
-		"--json", "number,state,body", "--limit", strconv.Itoa(planDocsLimit+1))
+	raw, err := retryRead(ctx, cfg, "searching for other open issues naming "+doc, func() ([]byte, error) {
+		return gh(ctx, cfg, "issue", "list", "--state", "open",
+			"--search", `"`+planFooterSearchPhrase+`" in:body`,
+			"--json", "number,state,body", "--limit", strconv.Itoa(planDocsLimit+1))
+	})
 	if err != nil {
 		return false, err
 	}
