@@ -278,11 +278,15 @@ don't post again, and stop.
    checkout either way — so the fixed `Bash(evals/run.sh:*)` grant matches;
    `--plugin-dir <worktree>` aims it at your branch. `evals/README.md` maps
    cases to skills; run all of a skill's cases when you can't tell which one
-   your change touched. It is minutes per case — the one-turn rules above
-   apply, so wait it out. Put the per-case verdicts and the spend in the PR
-   body's `## Verification`. If there is no `evals/run.sh`, or the run is not
-   granted `Bash(evals/run.sh:*)`, say so in `## Verification` and note a
-   human must run it — don't stop.
+   your change touched. It is minutes per case and the whole run can pass
+   `-stall`, so background it and poll — the same rule the one-turn section
+   above gives for any long wait, not a blocking call. Put the per-case
+   verdicts and the spend in the PR body's `## Verification`. If there is no
+   `evals/run.sh` (every repo but polako's own), this step does not apply. If
+   it is there but the backgrounded run never starts or errors out — an
+   operator narrowed `-tools` past `Bash(evals/run.sh:*)`, say — note in
+   `## Verification` that the touched cases still need a human and carry on;
+   don't stop.
 2. MANDATORY GATE — do not create a PR until this step has run. It writes one
    marker into PLAN.md's `## Review` section — "Reviewed through: <sha>",
    written by c each time c actually runs — that b reads to decide whether
