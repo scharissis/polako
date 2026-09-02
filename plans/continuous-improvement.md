@@ -4,9 +4,9 @@ Status: proposed · Scope: mostly ritual, plus small additions to the recorder
 and `stats` · Behavior change: none to the work loop — that is the point
 
 polako now measures itself. Every run writes a record, every terminal issue
-writes another, `stats` rolls them up by issue, model, tag and shift, `-runs`
-lists every run with the session id that reopens it, and `status` says where
-the backlog stands from GitHub alone. The question that started this document
+writes another, `stats` rolls them up by issue, model, tag, shift and reason,
+`-runs` lists every run with the session id that reopens it, and `status` says
+where the backlog stands from GitHub alone. The question that started this document
 was "should we store and review logs of previous runs?" — and the honest
 answer is that the storing is done, half by us and half by the Claude CLI,
 which already keeps every session transcript on disk keyed by the session id

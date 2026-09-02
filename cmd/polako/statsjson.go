@@ -197,7 +197,8 @@ type statsDocIssueRow struct {
 	WallSeconds int64   `json:"wall_seconds"`
 }
 
-// statsDocGroupRow is one row of `-by model`, `-by tag` or `-by shift`.
+// statsDocGroupRow is one row of `-by model`, `-by tag`, `-by shift` or
+// `-by reason`.
 type statsDocGroupRow struct {
 	Name         string   `json:"name"`
 	Issues       int      `json:"issues"`

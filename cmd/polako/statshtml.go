@@ -187,10 +187,10 @@ func buildHTMLReport(ds dataset, issues []*issueStats, summary statsSummary, opt
 	}
 
 	// By shift and by issue always: they are the two breakdowns this page
-	// exists for. -by model and -by tag add a third, so no flag an operator
-	// typed alongside -html turns out to have meant nothing.
+	// exists for. -by model, -by tag and -by reason add a third, so no flag
+	// an operator typed alongside -html turns out to have meant nothing.
 	rep.Tables = append(rep.Tables, groupTable(ds, issues, byShift))
-	if opt.by == byModel || opt.by == byTag {
+	if opt.by == byModel || opt.by == byTag || opt.by == byReason {
 		rep.Tables = append(rep.Tables, groupTable(ds, issues, opt.by))
 	}
 	rep.Tables = append(rep.Tables, perIssueTable(issues))

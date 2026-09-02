@@ -22,7 +22,7 @@ func printGroupTable(w io.Writer, rpt report, ds dataset, issues []*issueStats, 
 }
 
 // groupHeader names the first column after whatever is being grouped by, so
-// the same builder serves -by model, -by tag and -by shift.
+// the same builder serves -by model, -by tag, -by shift and -by reason.
 func groupHeader(by string) []string {
 	return []string{by, "issues", "merged", "runs", "cost", "$/merged", "tokens"}
 }
@@ -40,12 +40,17 @@ func spanningNote(spanning int, by string) string {
 		plural(spanning, "issue")+" spans", by)
 }
 
-// groupRows breaks the numbers down by the configuration under test, or by the
-// drain that did the work. An issue whose runs span two models or two tags
-// counts under each — the point of the breakdown is comparing batches, and a
-// batch is normally one of both, so the footnote appears only when that
-// assumption does not hold. By drain it holds far less often: an issue picked
-// up by one drain and finished by the next is the ordinary shape of a restart.
+// groupRows breaks the numbers down by the configuration under test, by the
+// drain that did the work, or by why each run happened. An issue whose runs
+// span two models or two tags counts under each — the point of the breakdown
+// is comparing batches, and a batch is normally one of both, so the footnote
+// appears only when that assumption does not hold. By drain it holds far less
+// often: an issue picked up by one drain and finished by the next is the
+// ordinary shape of a restart. By reason it barely holds at all — an issue
+// with more than one run routinely cycles through several reasons, so the
+// footnote firing on most -by reason reports is expected, not a signal
+// something is off; $/merged there reads as "spent on issues that ever needed
+// this kind of run, per one that shipped", not a like-for-like cost compare.
 //
 // merged is the issue's own final outcome, so every group that worked it
 // counts the merge — the same rule for a drain as for a tag, and what makes
@@ -90,13 +95,14 @@ type statGroup struct {
 	issues map[issueKey]bool
 }
 
-// groupTotals breaks the numbers down by the configuration under test, or by
-// the drain that did the work. An issue whose runs span two models or two
-// tags counts under each — the point of the breakdown is comparing batches,
-// and a batch is normally one of both, so spanningCount's footnote appears
-// only when that assumption does not hold. By drain it holds far less often:
-// an issue picked up by one drain and finished by the next is the ordinary
-// shape of a restart.
+// groupTotals breaks the numbers down by the configuration under test, by
+// the drain that did the work, or by why each run happened. An issue whose
+// runs span two models or two tags counts under each — the point of the
+// breakdown is comparing batches, and a batch is normally one of both, so
+// spanningCount's footnote appears only when that assumption does not hold.
+// By drain it holds far less often: an issue picked up by one drain and
+// finished by the next is the ordinary shape of a restart. By reason,
+// spanning is the common case rather than the exception — see groupRows.
 func groupTotals(ds dataset, by string) (groups map[string]*statGroup, order []string) {
 	groups = map[string]*statGroup{}
 	for _, r := range ds.runs {
@@ -107,7 +113,10 @@ func groupTotals(ds dataset, by string) (groups map[string]*statGroup, order []s
 		case byShift:
 			name = r.Shift
 		case byReason:
-			name = r.Reason
+			// label(), not the raw value: the run log (stats.go) and the
+			// "reasons" summary line render reason this same way, and a group
+			// name is exactly the kind of place that convention exists for.
+			name = label(r.Reason)
 		default:
 			name = r.Tag
 		}
