@@ -611,8 +611,8 @@ func TestPlanRunCapsIssueCreationAndStillNormalises(t *testing.T) {
 			t.Errorf("a capped run's issue is unlabelled: %v", is.Labels)
 		}
 	}
-	if created < opt.maxIssues {
-		t.Errorf("the fake skill filed %d issues, want at least the cap of %d", created, opt.maxIssues)
+	if created != opt.maxIssues {
+		t.Errorf("the fake skill filed %d issues, want exactly the cap of %d", created, opt.maxIssues)
 	}
 	if !strings.Contains(buf.String(), "-max-issues") {
 		t.Errorf("the log does not mention the cap:\n%s", buf.String())
@@ -626,7 +626,7 @@ func TestPlanRunCapsIssueCreationAndStillNormalises(t *testing.T) {
 // detached deadline.
 func TestPlanRunInterruptReportsAsCancelled(t *testing.T) {
 	captureLog(t)
-	// "plancap" lingers after it has emitted its events, so the context kill —
+	// "plancap" pauses between its create iterations, so the context kill —
 	// not the process's own exit — is what ends the run.
 	cfg, statePath := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plancap")
 

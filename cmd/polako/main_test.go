@@ -513,12 +513,16 @@ func fakeClaude(mode string) int {
 		return fakeClaude("stream")
 	case "plan", "plancap":
 		// A `polako plan` run: file some proposals through the fake gh — a mix
-		// of labelled and not — and emit one `gh issue create` tool_use per
-		// file so the -max-issues counter in dispatchClaude has something to
-		// count. "plancap" files one more than the cap the test sets, so the
-		// kill path runs; it then lingers so the supervisor's kill, not this
-		// process's own exit, is what ends the run.
-		if err := fakePlanEffect(mode); err != nil {
+		// of labelled and not — pairing each `gh issue create` tool_use with a
+		// real tool_result once the fake gh has actually created it, since
+		// the -max-issues counter now counts the result, not the dispatch
+		// (issue #340). "plancap" files one more than any cap a test sets, so
+		// the kill path runs; the pause after each result gives the parent's
+		// kill a real window to land between issues rather than after every
+		// one already exists — the same pattern "heartbeat" uses.
+		path := os.Getenv(fakeGhEnv)
+		st, err := readGhState(path)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
 			return 1
 		}
@@ -528,14 +532,29 @@ func fakeClaude(mode string) int {
 			n = 4
 		}
 		for i := 0; i < n; i++ {
-			emit(`{"type":"assistant","session_id":"sess-plan","message":{"content":[` +
-				`{"type":"tool_use","name":"Bash","input":{"command":"gh issue create --title T --label proposed --body-file ISSUE_BODY.md"}}]}}`)
+			id := fmt.Sprintf("toolu_create_%d", i+1)
+			emit(fmt.Sprintf(`{"type":"assistant","session_id":"sess-plan","message":{"content":[`+
+				`{"type":"tool_use","id":%q,"name":"Bash","input":{"command":"gh issue create --title T --label proposed --body-file ISSUE_BODY.md"}}]}}`, id))
+			args := []string{"issue", "create", "--title", fmt.Sprintf("Proposal %d", i+1), "--body-file", "ISSUE_BODY.md"}
+			if i == 0 {
+				args = append(args, "--label", proposedLabel)
+			}
+			if _, _, code := answerGh(st, args); code != 0 {
+				fmt.Fprintf(os.Stderr, "fake claude: gh refused to create proposal %d\n", i+1)
+				return 1
+			}
+			if err := writeGhState(path, st); err != nil {
+				fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+				return 1
+			}
+			emit(fmt.Sprintf(`{"type":"user","session_id":"sess-plan","message":{"content":[`+
+				`{"type":"tool_result","tool_use_id":%q,"is_error":false,"content":"created"}]}}`, id))
+			if mode == "plancap" {
+				time.Sleep(100 * time.Millisecond)
+			}
 		}
 		emit(`{"type":"result","subtype":"success","session_id":"sess-plan","duration_ms":100,` +
 			`"num_turns":4,"total_cost_usd":0.3,"result":"Filed the proposals."}`)
-		if mode == "plancap" {
-			time.Sleep(500 * time.Millisecond)
-		}
 		return 0
 	case "planempty":
 		// A `polako plan` run that proposed nothing — the document held no
@@ -716,33 +735,6 @@ func fakeSkillEffect(mode string) error {
 	}
 	if err != nil {
 		return err
-	}
-	return writeGhState(path, st)
-}
-
-// fakePlanEffect is what a `polako plan` run leaves on the pretend repository:
-// a handful of proposals, written through the same fake gh the label pass then
-// reads. Only the first carries the `proposed` label, so the pass has a
-// missing one to add and correct ones to leave alone. "plancap" files one more
-// than any cap a test would set.
-func fakePlanEffect(mode string) error {
-	path := os.Getenv(fakeGhEnv)
-	st, err := readGhState(path)
-	if err != nil {
-		return err
-	}
-	n := 3
-	if mode == "plancap" {
-		n = 4
-	}
-	for i := 0; i < n; i++ {
-		args := []string{"issue", "create", "--title", fmt.Sprintf("Proposal %d", i+1), "--body-file", "ISSUE_BODY.md"}
-		if i == 0 {
-			args = append(args, "--label", proposedLabel)
-		}
-		if _, _, code := answerGh(st, args); code != 0 {
-			return fmt.Errorf("fake gh refused to create proposal %d", i+1)
-		}
 	}
 	return writeGhState(path, st)
 }
