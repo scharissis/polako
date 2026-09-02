@@ -31,13 +31,19 @@ const groupLeft = 1
 
 // spanningNote reports how many issues fell into more than one group — not how
 // many surplus memberships they add up to, which is a different and larger
-// number whenever one spans three.
+// number whenever one spans three. -by reason fires it on nearly every report
+// (see groupRows), so the number has to agree with its verb here rather than
+// reading "2 issues spans".
 func spanningNote(spanning int, by string) string {
 	if spanning == 0 {
 		return ""
 	}
-	return fmt.Sprintf("(%s more than one %s, and is counted under each)",
-		plural(spanning, "issue")+" spans", by)
+	spans, counted := "spans", "is counted"
+	if spanning != 1 {
+		spans, counted = "span", "are counted"
+	}
+	return fmt.Sprintf("(%s %s more than one %s, and %s under each)",
+		plural(spanning, "issue"), spans, by, counted)
 }
 
 // groupRows breaks the numbers down by the configuration under test, by the

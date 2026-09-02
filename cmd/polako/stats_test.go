@@ -360,7 +360,7 @@ func TestStatsByModelAndTag(t *testing.T) {
   answers         1       1     1  $2.50     $2.50    6.4M
   implement       4       3     4  $2.20     $0.73    6.6M
   remediate       1       0     1  $0.40         —  635.4k
-  (2 issues spans more than one reason, and is counted under each)
+  (2 issues span more than one reason, and are counted under each)
 `
 	if got := stats(t, "-metrics", dir, "-by", byReason); !strings.Contains(got, wantReason) {
 		t.Errorf("-by reason table differs\n--- got ---\n%s\n--- want ---\n%s", got, wantReason)
