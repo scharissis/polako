@@ -16,7 +16,8 @@ import (
 
 // overBudget reports which per-issue cap an issue has reached, in the words the
 // park comment and the exit summary go on to carry — or "" while both caps are
-// off, which is the default, or while neither has been reached.
+// off (maxCost's default; maxIssueTime is off only under -max-issue-time 0),
+// or while neither has been reached.
 //
 // It gates work about to be dispatched and never work already done. A run that
 // overspent and opened a PR leaves an issue this process has finished with, and
