@@ -1,6 +1,6 @@
 # Continuous improvement: closing the loop from run data to better shifts
 
-Status: proposed · Scope: mostly ritual, plus small additions to the recorder
+Scope: mostly ritual, plus small additions to the recorder
 and `stats` · Behavior change: none to the work loop — that is the point
 
 polako now measures itself. Every run writes a record, every terminal issue
@@ -129,9 +129,9 @@ the labels honest, and the ledger that stops the results evaporating:
 - **The rule:** any change to a `SKILL.md`, the model, or a strategy knob
   (`-stall`, `-retries`, `-poll`, the caps) runs its next batch under a fresh
   tag. An untagged batch after a change is a batch that can never be compared.
-- **The ledger:** `plans/experiments.md`, one row per experiment — tag,
+- **The ledger:** `docs/experiments.md`, one row per experiment — tag,
   hypothesis, what changed, the `stats -by tag` verdict, decision. It is a
-  document, versioned and reviewed like the rest of `plans/`; it is not
+  document, versioned and reviewed like the rest of the docs; it is not
   orchestration state and nothing reads it. Ten rows of this beat any
   dashboard, at this scale.
 - **The first two experiments**, chosen because the records can already
@@ -264,7 +264,7 @@ with or beside issue #56 so the log line and the record tell the same story.
 
 **Phase 3 — the ritual, written down.** A short "Improving polako" section in
 the README: the retro checklist, the tag rule, the per-version and post-merge
-recipes. `plans/experiments.md` seeded with the two named experiments. The
+recipes. `docs/experiments.md` seeded with the two named experiments. The
 skill-change/eval rule added to CLAUDE.md's checking section. Documentation
 only — the phase exists so the ritual survives contact with a future operator
 who was not in this conversation. (Issue #283 later cut the README down to a

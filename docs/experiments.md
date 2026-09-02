@@ -1,6 +1,6 @@
 # Experiments: the ledger
 
-Status: living document · Scope: a record, not a mechanism · Behavior change:
+Scope: a record, not a mechanism · Behavior change:
 none — nothing in the binary reads this file
 
 polako can already compare two configurations: `-run-tag` labels a batch,
@@ -24,7 +24,7 @@ Rows are appended, never rewritten: a hypothesis that turned out wrong is the
 most useful kind of row, and editing it away leaves the next operator to have
 the same idea from scratch.
 
-This is a document, versioned and reviewed like the rest of `plans/`. It is
+This is a document, versioned and reviewed like the rest of the docs. It is
 not orchestration state — nothing reads it, no decision depends on it, and
 deleting it changes no behaviour. Ten honest rows beat any dashboard at this
 scale.
@@ -62,7 +62,7 @@ happened; if that is most of the batch, the comparison is not one.
 | `review-cheap-path` | #225 scaled the gate's level to the diff but `medium` still forks an agent and fans out subagents, so a genuinely trivial diff (the kind `/implement-issue` is sized to produce) pays a fan-out cost that can dwarf the change it is checking. Skipping `/code-review` altogether under a small-diff threshold, in favour of the single-pass self-review the skill already runs when the review skill is unavailable, should cut review cost on trivial diffs without lowering merged-PR quality. | `skills/implement-issue/SKILL.md` (#255): Phase 3 step 2c adds a `cheap` tier under 30 changed lines that does a self-review pass instead of invoking `/code-review`, `medium` and `high` unchanged apart from the floor moving off zero. | *pending* — compare the `review` run token cost and subagent count per merged PR against the pre-#255 batch, split by diff size, and check eval scores and the park rate did not move. | *open* |
 
 The `remediation-sonnet` and `stall-30m` rows come from
-`plans/continuous-improvement.md`, pillar 4, which chose them because the
+`docs/continuous-improvement.md`, pillar 4, which chose them because the
 records can already answer them. `poll-floor`, `review-worktree`,
 `review-level-scaling`, `accretion-check`, `plan-exists-read`,
 `pr-body-question-shape`, `proposal-body-budget` and `review-cheap-path` came

@@ -1,6 +1,6 @@
 # Backlog-fill: proposing the backlog polako works
 
-Status: proposed, revised in review · Name: `polako`, provisional · Scope:
+Name: `polako`, provisional · Scope:
 both halves, plus one new skill, plus the rename · Behavior change: the CLI
 restructures in phase 0 — licensed by the fact that we are currently this
 tool's only users
