@@ -234,6 +234,29 @@ func TestHealthSkillCarriesTheHouseStyle(t *testing.T) {
 	}
 }
 
+// Mirrors TestPlanSkillStatesTheTitleConvention (issue #292): this skill told
+// a run to spell `--title "..."` and never said what belonged in the quotes,
+// so titles were conventional only by accident of which repo loads polako's
+// own CLAUDE.md.
+func TestHealthSkillStatesTheTitleConvention(t *testing.T) {
+	skill := healthSkill(t)
+
+	flat := strings.Join(strings.Fields(skill), " ")
+	for _, marker := range []string{
+		"<type>: <what changes>",
+		"epic(<type>): <the outcome>",
+		"70 characters including the prefix",
+		"fix", "feat", "docs", "test", "refactor", "chore",
+		"tracking(<type>):",
+	} {
+		if !strings.Contains(flat, marker) {
+			t.Errorf("SKILL.md no longer states the title convention (missing %q) — without it a"+
+				" run's issue titles are conventional only by accident of which repo loads"+
+				" polako's own CLAUDE.md", marker)
+		}
+	}
+}
+
 // Mirrors TestPlanSkillBodySectionsAllHaveBudgets (issue #273): the
 // proposed-issue body template named five sections and bounded none of them,
 // so a curator deciding whether to lift the `proposed` label had to read
