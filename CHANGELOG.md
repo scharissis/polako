@@ -13,6 +13,27 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.20.0]
+
+### What's Changed
+* docs: add the polako loop infographic to the README by @scharissis in https://github.com/scharissis/polako/pull/317
+* docs: record why the frozen CI build cache stays frozen by @scharissis in https://github.com/scharissis/polako/pull/315
+* feat: the review gate can be cheaper than "medium" on a small diff by @scharissis in https://github.com/scharissis/polako/pull/319 (closes #255)
+* docs: add VISION.md and the plan-conventions plan by @scharissis in https://github.com/scharissis/polako/pull/320
+* feat: default -max-issue-time to 45m instead of unbounded by @scharissis in https://github.com/scharissis/polako/pull/328 (closes #256)
+* feat: stats -by reason by @scharissis in https://github.com/scharissis/polako/pull/329 (closes #257)
+* test: share one git fixture across upstream() callers by @scharissis in https://github.com/scharissis/polako/pull/330 (closes #316)
+* feat: skill-change runs let the eval suite run itself by @scharissis in https://github.com/scharissis/polako/pull/331 (closes #311)
+* docs: fold every plan document into one docs/plans/ directory by @scharissis in https://github.com/scharissis/polako/pull/332 (closes #322)
+* feat: parse the plan footer out of an issue body by @scharissis in https://github.com/scharissis/polako/pull/333 (closes #323)
+* feat: status gains a plans section derived from issue footers by @scharissis in https://github.com/scharissis/polako/pull/334 (closes #324)
+* feat: a closed epic files a retire issue for its plan document by @scharissis in https://github.com/scharissis/polako/pull/335 (closes #325)
+* docs: the plan-document convention travels with plan-backlog by @scharissis in https://github.com/scharissis/polako/pull/336 (closes #326)
+* docs: triage the surviving plan documents by @scharissis in https://github.com/scharissis/polako/pull/337 (closes #327)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.19.1...v0.20.0
+
 ## [0.19.1]
 
 ### What's Changed
