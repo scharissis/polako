@@ -26,10 +26,61 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Defender scans every file the toolchain writes and every process it
+      # spawns. Hermetic tests make that the hot path rather than something
+      # beside it: one suite run spawns ~1,500 git processes and ~300 fake-CLI
+      # ones, each a scan of a multi-megabyte binary. TEMP earns its place
+      # twice over — the fake CLI is built there and re-exec'd for every one of
+      # those 300 calls, and every t.TempDir() git repo lives there too.
+      # Excluding them changes nothing about what runs.
+      #
+      # Before setup-go on purpose, so unpacking the toolchain is covered too.
+      # Best-effort throughout: a runner image without Defender, or with it
+      # centrally managed, must skip this rather than fail the build over it.
+      - name: exclude the build from Defender
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          foreach ($p in @(
+            $env:GITHUB_WORKSPACE
+            $env:RUNNER_TEMP
+            $env:TEMP
+            $env:RUNNER_TOOL_CACHE
+            "$env:LOCALAPPDATA\go-build"
+          )) {
+            if ($p) { Add-MpPreference -ExclusionPath $p -ErrorAction SilentlyContinue }
+          }
+          foreach ($p in @('go.exe', 'git.exe', 'fake-cli.exe')) {
+            Add-MpPreference -ExclusionProcess $p -ErrorAction SilentlyContinue
+          }
+
+      # cache: false, because setup-go's own caching cannot work here. It keys
+      # on a hash of go.sum, and stdlib-only means there is no go.sum — so the
+      # key is a constant, hits every run, and on a hit the action skips
+      # saving. The cache stayed frozen at whatever the first run stored:
+      # 19380376 bytes, byte for byte, run after run, while Windows recompiled
+      # from cold every time. The explicit cache below keys on the sources
+      # instead, so it actually re-saves.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
+
+      - name: locate the build cache
+        id: gocache
+        shell: bash
+        run: echo "dir=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+
+      # restore-keys is what makes this pay: the stdlib objects dominate the
+      # cache and almost never change, so a near-miss on the exact key still
+      # restores the expensive part and leaves only this module to compile.
+      # go.mod is in the hash, so a toolchain bump invalidates it.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ steps.gocache.outputs.dir }}
+          key: go-build-${{ runner.os }}-${{ hashFiles('**/*.go', 'go.mod') }}
+          restore-keys: go-build-${{ runner.os }}-
 
       - name: gofmt
         if: runner.os != 'Windows'
@@ -74,7 +125,21 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
+
+      # Its own key prefix, not the test job's: this job's cache is five
+      # targets' worth of cross-compiled objects, and sharing a prefix would
+      # have the two jobs restoring each other's near-misses all day.
+      - name: locate the build cache
+        id: gocache
+        shell: bash
+        run: echo "dir=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ steps.gocache.outputs.dir }}
+          key: go-cross-${{ hashFiles('**/*.go', 'go.mod') }}
+          restore-keys: go-cross-
 
       # Stdlib-only Go is the whole point: it has to build for every target.
       - name: build every target
