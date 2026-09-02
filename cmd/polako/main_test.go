@@ -45,6 +45,35 @@ const envCanaryVar = "POLAKO_TEST_ENV_CANARY"
 // leaves no other trace at all.
 const fakeArgsLogEnv = "POLAKO_FAKE_ARGS_LOG"
 
+// fakeEnv turns alternating key, value pairs into KEY=value entries for
+// config.env, which hands them to a child without t.Setenv on the parent —
+// the thing that would otherwise bar the test from t.Parallel(). A pair whose
+// value is "" is dropped: with config.env an absent entry is the "unset" the
+// child sees, so no placeholder is needed.
+func fakeEnv(kv ...string) []string {
+	var env []string
+	for i := 0; i+1 < len(kv); i += 2 {
+		if kv[i+1] != "" {
+			env = append(env, kv[i]+"="+kv[i+1])
+		}
+	}
+	return env
+}
+
+// setFakeEnv replaces (or adds, or with an empty value removes) KEY=value
+// entries on cfg.env, for a test that layers one more handshake variable on a
+// config a builder already populated.
+func setFakeEnv(cfg *config, kv ...string) {
+	for i := 0; i+1 < len(kv); i += 2 {
+		cfg.env = slices.DeleteFunc(cfg.env, func(e string) bool {
+			return strings.HasPrefix(e, kv[i]+"=")
+		})
+		if kv[i+1] != "" {
+			cfg.env = append(cfg.env, kv[i]+"="+kv[i+1])
+		}
+	}
+}
+
 func TestMain(m *testing.M) {
 	// A notify command inherits every variable the drain has, the fake-CLI ones
 	// included, so what says this invocation is the notifier is the one variable
@@ -640,11 +669,12 @@ func recordFakeArgs() {
 }
 
 // watchClaudeArgs points the fake CLI at a fresh log and returns the reader for
-// it: one string per invocation the supervisor made, in order.
-func watchClaudeArgs(t *testing.T) func() []string {
+// it: one string per invocation the supervisor made, in order. It records the
+// log path on cfg.env, so the config must be built first.
+func watchClaudeArgs(t *testing.T, cfg *config) func() []string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "claude-args.log")
-	t.Setenv(fakeArgsLogEnv, path)
+	setFakeEnv(cfg, fakeArgsLogEnv, path)
 	return func() []string {
 		b, err := os.ReadFile(path)
 		if errors.Is(err, os.ErrNotExist) {
@@ -1858,8 +1888,8 @@ func TestSleepReturnsOnCancel(t *testing.T) {
 
 func fakeClaudeConfig(t *testing.T, mode string) config {
 	t.Helper()
-	t.Setenv(fakeClaudeEnv, mode) // inherited by the child process
 	return config{
+		env:            fakeEnv(fakeClaudeEnv, mode), // handed to the child, not set on the parent
 		dir:            t.TempDir(),
 		claudeBin:      fakeCLI(t), // this test package, re-entered via TestMain
 		skill:          defaultSkill,
@@ -1912,9 +1942,9 @@ func TestExecClaudeCarriesChildStderrIntoTheNarration(t *testing.T) {
 // is what the pair guards against coming back — a flag reintroduced anywhere
 // between buildArgs and exec would pass the unit test and still overpromise.
 func TestDispatchNeverSendsRemoteControlToTheCLI(t *testing.T) {
-	args := watchClaudeArgs(t)
 	cfg := fakeClaudeConfig(t, "stream")
 	cfg.remote, cfg.repo = true, "example/repo"
+	args := watchClaudeArgs(t, &cfg)
 
 	if _, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0); err != nil {
 		t.Fatalf("a healthy run under -remote: %v", err)

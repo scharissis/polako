@@ -673,9 +673,8 @@ func drainConfig(t *testing.T, mode string, st *ghState) (config, string) {
 	if err := writeGhState(path, st); err != nil {
 		t.Fatalf("writing fake gh state: %v", err)
 	}
-	t.Setenv(fakeGhEnv, path)
-	t.Setenv(fakeClaudeEnv, mode)
 	return config{
+		env: fakeEnv(fakeGhEnv, path, fakeClaudeEnv, mode),
 		// Not a checkout at all, which is deliberate: worktree cleanup is
 		// best-effort, and so is the probe that says what a parked run left
 		// behind — every git call here fails, so every park in these tests
@@ -875,7 +874,7 @@ func TestDrainParkSaysWhatTheRunLeftBehind(t *testing.T) {
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 	leftBehind(t, &cfg)
 	records := t.TempDir()
 	cfg.rec = newRecorder(records)
@@ -986,7 +985,7 @@ func TestDrainParksAPermissionRefusalWithoutResuming(t *testing.T) {
 	})
 	cfg.shiftID = "shift99"
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 	records := t.TempDir()
 	cfg.rec = newRecorder(records)
 
@@ -1044,7 +1043,7 @@ func TestDrainParksARefusedToolResultWithoutResuming(t *testing.T) {
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 	records := t.TempDir()
 	cfg.rec = newRecorder(records)
 
@@ -2461,7 +2460,7 @@ func TestDrainReadsAFinishedContainerOnceInAShift(t *testing.T) {
 		},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("drain: %v", err)
@@ -2559,7 +2558,7 @@ func TestOldGhListsWithoutTheSubIssueRollup(t *testing.T) {
 		},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 
 	// Twice, because both the fallback and the warning have to be paid for once
 	// a shift rather than once per issue — and the drain lists once per issue.
@@ -3302,7 +3301,7 @@ func TestDrainWaitsOutTheWeekUsageGateThenCarriesOn(t *testing.T) {
 		// back under the ceiling, as if the block had reset during the wait.
 		PRs: map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
 	})
-	t.Setenv(fakeUsageEnv, "over-then-under")
+	setFakeEnv(&cfg, fakeUsageEnv, "over-then-under")
 	cfg.maxWeekUsage = 50
 
 	if err := drain(context.Background(), cfg); err != nil {
@@ -3339,7 +3338,7 @@ func TestDrainWaitsOutTheSessionUsageGate(t *testing.T) {
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 		PRs:    map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
 	})
-	t.Setenv(fakeUsageEnv, "over-then-under")
+	setFakeEnv(&cfg, fakeUsageEnv, "over-then-under")
 	cfg.maxSessionUsage = 40
 
 	if err := drain(context.Background(), cfg); err != nil {
@@ -3405,14 +3404,14 @@ func TestUsageGateWait(t *testing.T) {
 // fake CLI that would happily answer /usage if asked.
 func TestDrainUsageGateOffChangesNothing(t *testing.T) {
 	buf := captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	// Restart safety: a PR already on the branch means no claude run at all,
 	// so this is a clean merge with nothing about the run itself in play.
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 		PRs:    map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
 	})
-	t.Setenv(fakeUsageEnv, "sub")
+	setFakeEnv(&cfg, fakeUsageEnv, "sub")
+	getArgs := watchClaudeArgs(t, &cfg)
 
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("drain: %v", err)
@@ -3465,8 +3464,8 @@ func TestDrainRecordsUsageSamplesOnTheTerminalRecord(t *testing.T) {
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 	})
-	t.Setenv(fakeUsageEnv, "sub") // week (all models): 52% used, both samples
-	cfg.maxWeekUsage = 99         // high enough that the gate never trips
+	setFakeEnv(&cfg, fakeUsageEnv, "sub") // week (all models): 52% used, both samples
+	cfg.maxWeekUsage = 99                 // high enough that the gate never trips
 	records := t.TempDir()
 	cfg.rec = newRecorder(records)
 

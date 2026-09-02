@@ -31,6 +31,7 @@ func healthTestConfig(t *testing.T, st *ghState) (cfg config, statePath, checkou
 	_, checkout = upstream(t)
 	cfg = config{
 		dir:            checkout,
+		env:            slices.Clone(drainCfg.env), // the fake gh and claude handshake, for the child
 		ghBin:          drainCfg.ghBin,
 		claudeBin:      drainCfg.claudeBin,
 		ghRetryWait:    time.Millisecond,
@@ -198,7 +199,7 @@ func healthRunConfig(t *testing.T, st *ghState, claudeMode string) (config, stri
 	t.Helper()
 	cfg, statePath, _ := healthTestConfig(t, st)
 	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
-	t.Setenv(fakeClaudeEnv, claudeMode)
+	setFakeEnv(&cfg, fakeClaudeEnv, claudeMode)
 	return cfg, statePath
 }
 

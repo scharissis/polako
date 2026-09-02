@@ -29,6 +29,7 @@ func statusConfigFor(t *testing.T, st *ghState) (config, string) {
 	drainCfg, path := drainConfig(t, "stream", st)
 	return config{
 		dir:          drainCfg.dir,
+		env:          slices.Clone(drainCfg.env), // fake gh/claude handshake, for the child
 		ghBin:        drainCfg.ghBin,
 		claudeBin:    drainCfg.claudeBin,
 		repo:         drainCfg.repo,
@@ -494,7 +495,7 @@ func TestStatusMakesOnlyReadCalls(t *testing.T) {
 		PRs: map[string]*fakePR{"issue-1": {Number: 8, State: "OPEN", Mergeable: "MERGEABLE"}},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 	before, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("reading fake gh state: %v", err)
@@ -893,8 +894,8 @@ func TestRunStatusRejectsAnArgument(t *testing.T) {
 // status prints the same "plan" line work's startup banner does, read from
 // the same usage probe — one renderer per fact, not two.
 func TestStatusReportsThePlanLineWhenTheProbeAnswers(t *testing.T) {
-	t.Setenv(fakeUsageEnv, "sub")
 	cfg, _ := statusConfigFor(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: true}}})
+	setFakeEnv(&cfg, fakeUsageEnv, "sub")
 
 	snap, err := readStatus(context.Background(), cfg, statusNow)
 	if err != nil {

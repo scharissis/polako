@@ -100,7 +100,7 @@ func TestPreflightLetsADryRunLookThroughTheGate(t *testing.T) {
 
 func TestPluginVersionReadsTheInstalledPlugin(t *testing.T) {
 	cfg := fakeClaudeConfig(t, "stream")
-	t.Setenv(fakePluginEnv, "0.3.0")
+	setFakeEnv(&cfg, fakePluginEnv, "0.3.0")
 
 	got, id := pluginVersion(context.Background(), cfg)
 	if got != "0.3.0" {
@@ -117,7 +117,7 @@ func TestPluginVersionReadsTheInstalledPlugin(t *testing.T) {
 func TestPluginVersionIsEmptyForAHandInstalledSkill(t *testing.T) {
 	cfg := fakeClaudeConfig(t, "stream")
 	cfg.skill = skillDir
-	t.Setenv(fakePluginEnv, "0.3.0")
+	setFakeEnv(&cfg, fakePluginEnv, "0.3.0")
 
 	if got, _ := pluginVersion(context.Background(), cfg); got != "" {
 		t.Errorf("pluginVersion = %q, want empty: a hand-installed skill has no version", got)
