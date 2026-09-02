@@ -178,14 +178,44 @@ measure something.
 
 **Shape.** One controlled experiment first: a run with a known single-process
 cost, killed once and resumed, with the two process costs and the tally
-compared. If Q1 confirms, change `tally.add` to add per-session *deltas*
-(track the last value seen for a session id, add the difference) rather than
-raw per-process totals, with the comment spelling out why — the same
-cumulative-vs-per-turn trap #227's fix documents. Q2 is a separate
-investigation into what `model_usage` counts.
+compared. Q2 is a separate investigation into what `model_usage` counts.
 
-**Done when.** A deliberately resumed run records its true end-to-end cost
-once, and `docs/run-data.md` says whether `model_usage` is authoritative.
+**Settled (2026-09-02, CLI 2.1.252, issue #258).** Both answers are no-change.
+
+*Q1 — not cumulative across processes.* One session driven through three
+processes billed $0.0695 (a 900-word essay), then $0.0165, then $0.0091 (a
+one-word reply each). A counter carrying the session's history cannot go down,
+so `total_cost_usd` is **process**-cumulative: it accumulates across the
+prompts one process dequeues and resets when the process does. Summing the
+three processes' `modelUsage` reproduces the session transcript's deduped
+totals exactly on all four token fields, so the processes partition the session
+rather than overlapping. `tally.add`'s `+=` is therefore correct as it
+stands, and the per-session-delta rewrite this ticket sketched would have
+*undercounted* every resume. The trap was one loose word: `stream.go` said
+"session-cumulative" where it meant "process-cumulative", which is what left
+#227's question open. The word is now fixed, and the measurement is in the
+comment beside it.
+
+*Q2 — `model_usage` is authoritative; `tokens` is not.* Across all 144
+records on hand that carry one, `model_usage`'s `cost_usd` entries sum to
+the record's `cost_usd` **exactly**, with zero mismatches, and its token
+counts are never below `tokens` (median ~1.3x, max 2x post-#227). The reason
+it "cannot be reconciled with session transcripts" is that the transcript is
+not a complete record of a run: one API response is written as several lines
+repeating a single `usage` block (95 of 126 responses on the run measured,
+83.8k output tokens of double-count), and subagent turns are never written at
+all — 0 of 195 transcript files in this repo's project directory hold a
+sidechain entry. Deduped on `message.id`, the main chain of session
+`3a06e67c` matches its record's `tokens` block field for field (in 252,
+out 75,919, cache read 22,151,813, cache write 221,223) while `model_usage`
+is larger (out 135,983). So `tokens` is the main loop, `model_usage` is the
+main loop plus subagents and sidecar models, and the gap is real work rather
+than a measurement error.
+
+**Done when.** ~~A deliberately resumed run records its true end-to-end cost
+once, and `docs/run-data.md` says whether `model_usage` is authoritative.~~
+Done: the resume was run, no code change was needed, and `docs/run-data.md`
+now says `model_usage` is the authoritative figure.
 
 ## Considered and not proposed
 

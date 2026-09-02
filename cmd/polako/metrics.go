@@ -371,6 +371,11 @@ func (t *issueTally) add(rec runRecord) {
 	if rec.UsageSource == usageObserved {
 		t.approximated++
 	}
+	// Summing holds even when two of these records are the two halves of one
+	// resumed session: a --resume'd result event reports that process's spend
+	// alone (measured, issue #258 — see stream.go's result case). #258 first
+	// proposed tracking per-session deltas here instead; that would have
+	// undercounted every resume by the cost of the resumed process.
 	t.costUSD += rec.CostUSD
 	t.tokens.addCounts(rec.Tokens)
 	t.wallMS += rec.WallMS

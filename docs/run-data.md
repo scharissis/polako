@@ -200,15 +200,18 @@ from before that enrichment carry none.
 work are two records, and `stats` sums both — including `unfinished`, a
 `--resume` of a run that ended its turn without a PR rather than crashed.
 Summing is correct: a `--resume`d run's `result` event reports that
-invocation alone, not the session it continued.
+invocation alone, not the session it continued (measured on issue #258).
 
-`tokens` and `cost_usd` don't cover the same work: `tokens` is the CLI's
-main-loop `usage` block, while `cost_usd` also aggregates subagents, so
-dividing one by the other isn't a price per token. A run with background
-subagents streams several `result` events; `turns`, `wall_ms`, `api_ms` and
-`tokens` sum across them, while `cost_usd` takes the last event's
-cumulative figure (fixed in issue #227, which had undercounted roughly
-sixfold on a run reaching the review gate).
+**On `model_usage`:** it is the authoritative figure and `tokens` is not.
+`tokens` is the main conversation loop alone; `model_usage` also counts
+subagents and the CLI's sidecar models, so it never reads below `tokens`
+(~1.3x median, 2x through the review gate) and its `cost_usd` entries sum to
+the record's own exactly, in every record on hand. A run with subagents
+streams several `result` events: `turns`, `wall_ms`, `api_ms` and `tokens`
+sum across them, while `cost_usd` and `model_usage` take the last event's
+process-cumulative figure (#227, which had undercounted sixfold). Neither
+reconciles against a session transcript, which repeats one `usage` block
+over several lines and omits subagent turns.
 
 **On approximated runs:** a crashed, stalled or interrupted run's tokens
 are the tally seen streaming past, dollars read zero — counted out
