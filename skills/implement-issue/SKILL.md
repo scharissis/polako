@@ -270,6 +270,23 @@ don't post again, and stop.
    /commit`, `go -C <worktree> test/vet/build`, or the ecosystem's own
    equivalent — the same rule Phase 1 set: nothing here moves the session's
    cwd there for you.
+   If this run's own commits changed a shipped skill file
+   (`skills/*/SKILL.md`) and the repo has an `evals/run.sh`, run the eval
+   cases that change touches:
+   `evals/run.sh --plugin-dir <worktree> --max-cost 5 <case>...`. Spell it
+   `evals/run.sh` relative — it resolves against the session's cwd, a full
+   checkout either way — so the fixed `Bash(evals/run.sh:*)` grant matches;
+   `--plugin-dir <worktree>` aims it at your branch. `evals/README.md` maps
+   cases to skills; run all of a skill's cases when you can't tell which one
+   your change touched. It is minutes per case and the whole run can pass
+   `-stall`, so background it and poll — the same rule the one-turn section
+   above gives for any long wait, not a blocking call. Put the per-case
+   verdicts and the spend in the PR body's `## Verification`. If there is no
+   `evals/run.sh` (every repo but polako's own), this step does not apply. If
+   it is there but the backgrounded run never starts or errors out — an
+   operator narrowed `-tools` past `Bash(evals/run.sh:*)`, say — note in
+   `## Verification` that the touched cases still need a human and carry on;
+   don't stop.
 2. MANDATORY GATE — do not create a PR until this step has run. It writes one
    marker into PLAN.md's `## Review` section — "Reviewed through: <sha>",
    written by c each time c actually runs — that b reads to decide whether

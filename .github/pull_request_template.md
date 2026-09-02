@@ -23,6 +23,7 @@
 ## Verification
 
 <!-- How you know it works. `./scripts/check.sh` is the baseline: gofmt, go vet
-     and the full suite. If you changed skills/implement-issue/SKILL.md, say
-     which real issue you drove through it — the hermetic tests cannot check
-     that half. -->
+     and the full suite. If you changed a shipped SKILL.md, say which real
+     issue you drove through it and quote the eval scores for the cases it
+     touched (`evals/run.sh <case>`) — the hermetic tests cannot check that
+     half. -->

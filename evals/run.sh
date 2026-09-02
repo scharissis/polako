@@ -29,14 +29,29 @@
 #
 # Exit: 0 green; 1 a behavioral grader failed, a case timed out, or the
 # harness itself broke (the per-case line says which); 3 nothing failed but
-# graders await a human (--no-judge).
+# graders await a human (--no-judge); 4 the --max-cost cap stopped the run
+# before every case executed.
 #
-# Usage: evals/run.sh [--no-judge] [--judge-model M] [case ...]
+# Usage: evals/run.sh [--no-judge] [--judge-model M] [--plugin-dir DIR]
+#                     [--max-cost N] [case ...]
 #        (no case names = every directory under evals/ with a case.yaml)
+#
+# --plugin-dir points the scaffolded runs at a plugin checkout other than this
+# script's own. An implement-issue run drives the suite from its worktree while
+# invoking the main checkout's copy of this script, so the tool grant can stay
+# a fixed `Bash(evals/run.sh:*)` — see CLAUDE.md, "The suite is the
+# verification". Defaults to this script's repo root.
+#
+# --max-cost caps the run in dollars: after each case the `total_cost_usd` of
+# every case run so far is summed, and once that is at or past the cap the
+# remaining cases are skipped and the suite exits 4. Default 0 — off; a
+# skill-PR run passes `--max-cost 5`.
 set -euo pipefail
 
 evals_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(dirname "$evals_dir")
+plugin_dir=$repo_root
+max_cost=0
 
 judge_model=haiku
 cases=()
@@ -44,6 +59,8 @@ while [ $# -gt 0 ]; do
   case $1 in
     --no-judge) judge_model=none ;;
     --judge-model) judge_model=${2:?--judge-model needs a value}; shift ;;
+    --plugin-dir) plugin_dir=${2:?--plugin-dir needs a value}; shift ;;
+    --max-cost) max_cost=${2:?--max-cost needs a value}; shift ;;
     -*) echo "run.sh: unknown flag $1 (see the header of this script)" >&2; exit 2 ;;
     *) cases+=("$1") ;;
   esac
@@ -66,13 +83,57 @@ for tool in claude git python3; do
     echo "run.sh: needs $tool on PATH — install it and rerun" >&2; exit 2; }
 done
 
+plugin_dir=$(cd "$plugin_dir" 2>/dev/null && pwd) || {
+  echo "run.sh: --plugin-dir is not a directory: $plugin_dir" >&2; exit 2; }
+if [ ! -f "$plugin_dir/.claude-plugin/plugin.json" ]; then
+  echo "run.sh: --plugin-dir $plugin_dir has no .claude-plugin/plugin.json — point it at a plugin checkout" >&2
+  exit 2
+fi
+[ "$plugin_dir" = "$repo_root" ] || echo "plugin under test: $plugin_dir"
+
+python3 -c 'import sys; float(sys.argv[1])' "$max_cost" 2>/dev/null || {
+  echo "run.sh: --max-cost wants a number of dollars, got: $max_cost" >&2; exit 2; }
+
 results=$evals_dir/results/$(date +%Y%m%d-%H%M%S)-by-hand
 mkdir -p "$results"
 echo "results: $results"
 
+# spent_usd prints the summed `total_cost_usd` of every result event written
+# under the results tree so far. python3 is already required above; jq is not.
+spent_usd() {
+  python3 - "$results" <<'PY'
+import glob, json, os, sys
+total = 0.0
+for path in glob.glob(os.path.join(sys.argv[1], "*", "run.stream.jsonl")):
+    try:
+        lines = open(path).read().splitlines()
+    except OSError:
+        continue
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if ev.get("type") == "result" and isinstance(ev.get("total_cost_usd"), (int, float)):
+            total += ev["total_cost_usd"]
+print(f"{total:.2f}")
+PY
+}
+
 failed=0
 pending=0
+budget_stopped=0
 for c in "${cases[@]}"; do
+  spent=$(spent_usd || echo 0)
+  if python3 -c 'import sys; s,c=float(sys.argv[1]),float(sys.argv[2]); sys.exit(0 if c>0 and s>=c else 1)' "$spent" "$max_cost"; then
+    echo
+    echo "=== budget: STOPPED at \$$spent, at or past the --max-cost of \$$max_cost — $c and any case after it not run"
+    budget_stopped=1
+    break
+  fi
   case_dir=$evals_dir/$c
   [ -f "$case_dir/case.yaml" ] || {
     echo "run.sh: no case named '$c' under evals/" >&2; exit 2; }
@@ -100,7 +161,7 @@ for c in "${cases[@]}"; do
   # grading is about to read.
   (
     cd "$ws" && exec env PATH="$ws/.eval/bin:$PATH" claude -p "$prompt" \
-      --plugin-dir "$repo_root" \
+      --plugin-dir "$plugin_dir" \
       --allowedTools Bash Write Edit \
       --max-turns "$max_turns" \
       --output-format stream-json --verbose \
@@ -144,10 +205,16 @@ for c in "${cases[@]}"; do
 done
 
 echo
+echo "spend: \$$(spent_usd || echo 0) across $results"
 if [ $failed -ne 0 ]; then
   echo "suite: RED — read the failing case's evidence.md and summary.json under $results"
   exit 1
-elif [ $pending -ne 0 ]; then
+fi
+if [ "$budget_stopped" -eq 1 ]; then
+  echo "suite: STOPPED at the \$$max_cost --max-cost cap — the cases that ran are graded above, the rest did not"
+  exit 4
+fi
+if [ $pending -ne 0 ]; then
   echo "suite: graders await a human — score them from each case's evidence.md under $results"
   exit 3
 fi

@@ -965,6 +965,22 @@ func TestSkillBranchNameMatchesTheBranchPrefixDefault(t *testing.T) {
 	}
 }
 
+// A run that changes a shipped SKILL.md runs the eval cases its change
+// touches — the supervisor grants Bash(evals/run.sh:*) in defaultTools for
+// exactly this (TestDefaultToolsCoverWhatTheSkillNeeds), and without the step
+// spelled here that grant sits unused and the CLAUDE.md rule goes unfollowed,
+// which is issue #311. --plugin-dir is what lets the run invoke the main
+// checkout's script against its own worktree.
+func TestSkillRunsTheEvalCasesOnASkillChange(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+	for _, marker := range []string{"evals/run.sh", "--plugin-dir <worktree>"} {
+		if !strings.Contains(skill, marker) {
+			t.Errorf("SKILL.md no longer spells %q — the eval step a skill-change PR runs is"+
+				" gone or renamed, and Bash(evals/run.sh:*) in defaultTools grants nothing", marker)
+		}
+	}
+}
+
 // The PR body is the only account of the run a human reads before merging, and
 // its last line is what advances the queue: the merge auto-closes the issue,
 // and a closed issue is how the next drain sees the work as done. Left off, the

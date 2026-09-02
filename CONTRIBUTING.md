@@ -113,6 +113,13 @@ This one is not part of `check.sh` and not in CI. It needs the network, a real
 reasoning is in [`evals/README.md`](evals/README.md) along with the caveat that
 the suite is new and has not yet had a green run.
 
+A PR that changes a shipped `SKILL.md` runs the cases its change touches and
+quotes the scores in its body. An unattended `implement-issue` run does this
+itself — `evals/run.sh --plugin-dir <worktree> --max-cost 5`, where
+`--plugin-dir` aims the stable script at the run's own worktree. Opening a PR
+by hand from a branch checkout, it is just `evals/run.sh <case>`. See
+`CLAUDE.md`, "The suite is the verification".
+
 ## Running both halves from a working tree
 
 The hermetic suite never runs the skill, and the eval cases run it against a

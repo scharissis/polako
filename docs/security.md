@@ -39,7 +39,12 @@ in silence until the stall watchdog kills it.
 What the allowlist can't close: `Bash(git:*)` includes `git push`, which
 opening a PR requires; build commands run whatever the checked-out repo's
 scripts contain; `Bash(python:*)`, `Bash(npx:*)`, `Bash(uv:*)`, `Bash(go:*)`
-are arbitrary code execution by construction. So it's a narrowing, not a
+are arbitrary code execution by construction. `Bash(evals/run.sh:*)` is one
+named repo script in the default set — dormant on any repo without that path;
+on polako itself it runs the eval suite, which spawns nested `claude`
+sessions and spends money, so read it with the interpreter entries, not as
+something smaller: the skill invokes it with `run.sh --max-cost`, but a
+prefix grant doesn't force the argument. So it's a narrowing, not a
 sandbox — point `-dir` at repos you'd run `make test` in yourself, and drop
 interpreter entries from `-tools` you don't need.
 
