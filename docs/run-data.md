@@ -174,7 +174,7 @@ human latency
 | `-since` | *(all of it)* | Only count records newer than this, e.g. `-since 168h`. |
 | `-window` | *(off)* | Report a calendar-aligned window instead of `-since`: `today`, `week`, `month` or `session` — see [Calendar windows](#calendar-windows--window) below. Errors if `-since` is also given. |
 | `-shift` | *(every shift)* | Only count records from one shift — its id, or `last` for the newest shift in scope. |
-| `-by` | *(none)* | Add a breakdown table: `issue`, `model`, `tag` or `shift`. |
+| `-by` | *(none)* | Add a breakdown table: `issue`, `model`, `tag`, `shift` or `reason` — `reason` groups by why each run happened (`implement`, `resume`, `answers`, ...; see the `reasons` line above) rather than by a configuration knob. |
 | `-runs` | *(off)* | Add the run log: one row per run, with the session id that reopens it — see [Reopening a past run](#reopening-a-past-run--runs). |
 | `-html` | *(off)* | Also write the report to this path, as one self-contained HTML file — see [Keeping a copy](#keeping-a-copy--html). |
 | `-json` | `false` | Print one JSON document to stdout instead of the text report — see [As JSON](#as-json--json) below. |
