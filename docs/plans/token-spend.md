@@ -1,6 +1,6 @@
 # Token spend: is a drain more expensive than it needs to be?
 
-Status: proposed · Scope: a diagnosis, plus drafted tickets — no code in this
+Scope: a diagnosis, plus drafted tickets — no code in this
 document · Behavior change: none
 
 Issue #239 reports a shift that worked two issues (#102, #103) and left the
@@ -101,7 +101,7 @@ tool calls and $29.57 for a shift. On a genuinely small change — the kind
 implementation it is checking.
 
 **Shape.** A skill-side change (so it runs its eval cases and earns a row in
-`plans/experiments.md`). Under some small-diff threshold, have Phase 3's gate
+`docs/experiments.md`). Under some small-diff threshold, have Phase 3's gate
 do a single-pass self-review of the diff instead of invoking `/code-review` at
 all — the substitute pass the skill already defines for when the review skill
 is unavailable, promoted to the deliberate path for trivial changes. Measure
@@ -227,7 +227,7 @@ now says `model_usage` is the authoritative figure.
   them reintroduces the stale-reading bug the split fixed. Left alone.
 - **Running planning or the review gate on a cheaper model.** Plausible, but
   it is a skill-side model-selection design question of its own, not a bug
-  fix, and it belongs in the `plans/experiments.md` loop with a real A/B
+  fix, and it belongs in the `docs/experiments.md` loop with a real A/B
   rather than in a token-spend bug. Noted here, not drafted.
 
 ## Recommendation

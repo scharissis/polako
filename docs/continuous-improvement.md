@@ -1,6 +1,6 @@
 # Continuous improvement: closing the loop from run data to better shifts
 
-Status: proposed · Scope: mostly ritual, plus small additions to the recorder
+Scope: mostly ritual, plus small additions to the recorder
 and `stats` · Behavior change: none to the work loop — that is the point
 
 polako now measures itself. Every run writes a record, every terminal issue
@@ -31,7 +31,7 @@ the backlog, never through the supervisor reading its own telemetry.
    gates skill text; `-run-tag` discipline makes before/after batches
    comparable; the numbers that settle a comparison are trustworthy.
 3. **The invariants come out untouched.** No new telemetry readers (the plan
-   report's pricing line, argued in `backlog-fill.md`, would be the second and
+   report's pricing line, argued in `docs/plans/backlog-fill.md`, would be the second and
    last), no work-loop reads, no self-tuning, no third destination off the
    machine, no issue or PR text in a record — reviewing text means following
    a session id to the CLI's own files, never copying text into ours.
@@ -76,8 +76,7 @@ the push.
 
 **Closed 2026-08-27 on issue #78.** A `--resume`d run's result event reports
 that invocation, not the session, so summing rows as `stats` already does is
-correct and the footnote it used to print is gone. See open question 1 of
-`run-data-capture.md` for the evidence — a recorded resume pair, not the
+correct and the footnote it used to print is gone. The evidence was a recorded resume pair, not the
 disposable probe this pillar asked for, which never ran.
 
 Nothing here blocks pillar 4 any longer: a tag comparison across batches with
@@ -122,16 +121,16 @@ Two design points keep this inside the invariants:
 ## Pillar 4 — experiments: tags with discipline
 
 The comparison machinery exists — `-run-tag`, `-model`, `stats -by tag` — and
-`run-data-capture.md` already settled the method: batches over time with
+the method was settled early: batches over time with
 honest labels, no A/B machinery. What is missing is the discipline that makes
 the labels honest, and the ledger that stops the results evaporating:
 
 - **The rule:** any change to a `SKILL.md`, the model, or a strategy knob
   (`-stall`, `-retries`, `-poll`, the caps) runs its next batch under a fresh
   tag. An untagged batch after a change is a batch that can never be compared.
-- **The ledger:** `plans/experiments.md`, one row per experiment — tag,
+- **The ledger:** `docs/experiments.md`, one row per experiment — tag,
   hypothesis, what changed, the `stats -by tag` verdict, decision. It is a
-  document, versioned and reviewed like the rest of `plans/`; it is not
+  document, versioned and reviewed like the rest of the docs; it is not
   orchestration state and nothing reads it. Ten rows of this beat any
   dashboard, at this scale.
 - **The first two experiments**, chosen because the records can already
@@ -241,11 +240,11 @@ A hit is a finding, and a finding becomes an issue.
   the backlog.
 - **No text in records, and no new record fields that tempt it.**
   `park_reason` is an enum precisely so it never becomes a message.
-- **No new telemetry readers.** `backlog-fill.md` argues the second reader
+- **No new telemetry readers.** `docs/plans/backlog-fill.md` argues the second reader
   (the plan report's pricing line) out loud; this plan adds none, and the
   audit recipe reads GitHub, not the record files.
 - **No metrics service, no dashboards, no CSV export yet** — all parked in
-  `run-data-capture.md` phase 4 already, and nothing here pulls for them.
+  phase 4 below, and nothing here pulls for them.
 
 ## Implementation phases
 
@@ -264,7 +263,7 @@ with or beside issue #56 so the log line and the record tell the same story.
 
 **Phase 3 — the ritual, written down.** A short "Improving polako" section in
 the README: the retro checklist, the tag rule, the per-version and post-merge
-recipes. `plans/experiments.md` seeded with the two named experiments. The
+recipes. `docs/experiments.md` seeded with the two named experiments. The
 skill-change/eval rule added to CLAUDE.md's checking section. Documentation
 only — the phase exists so the ritual survives contact with a future operator
 who was not in this conversation. (Issue #283 later cut the README down to a
@@ -279,7 +278,7 @@ waits for the manual form to demonstrate the need.
 
 ## Open questions and verification tasks
 
-1. **Resume semantics** — inherited from `run-data-capture.md`, restated here
+1. **Resume semantics** — a pre-existing question, restated here
    because pillar 4 depends on it. One disposable resume settles it.
 2. **The `park_reason` taxonomy.** Derive from the actual park callsites at
    implementation time rather than guessing here; seed with the obvious

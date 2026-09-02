@@ -24,7 +24,7 @@
 # the account's rate limits and interleave the progress output this script is
 # often watched through. Results land under evals/results/ (gitignored), one
 # timestamped directory per invocation; the durable record of a run is the
-# scores quoted in a PR body or a plans/experiments.md row, per "Improving
+# scores quoted in a PR body or a docs/experiments.md row, per "Improving
 # polako" in the README.
 #
 # Exit: 0 green; 1 a behavioral grader failed, a case timed out, or the

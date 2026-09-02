@@ -247,7 +247,7 @@ Every run records what it did, and those records are only worth keeping if
 something reads them, on a cadence — measure, review, change one thing, tag
 the next batch. That loop runs through you and the backlog, never through the
 supervisor reading its own telemetry.
-[plans/continuous-improvement.md](plans/continuous-improvement.md) has the
+[docs/continuous-improvement.md](docs/continuous-improvement.md) has the
 retro checklist, the tagging rule, and the recipes for reading run data back.
 
 ## What it will not do

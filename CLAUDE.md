@@ -222,6 +222,6 @@ defers to a human and says so in its body. A wobbling case gets run three
 times (`--runs 3` on the CLI, three `run.sh` invocations by hand): a flaky
 grader is worse than no grader, since it teaches the habit of ignoring
 red. Skill wording is a tagged change too, so the next batch runs under a
-fresh `-run-tag` and earns a row in `plans/experiments.md` — see
-`plans/continuous-improvement.md` for the full ritual, linked from the
+fresh `-run-tag` and earns a row in `docs/experiments.md` — see
+`docs/continuous-improvement.md` for the full ritual, linked from the
 README's "Improving polako" section.
