@@ -491,9 +491,9 @@ cat ~/.polako/metrics/*.jsonl | jq -s 'map(select(.kind=="run")) | map(.cost_usd
 ```
 
 Tagging is a habit, not a flag: see
-[plans/continuous-improvement.md](../plans/continuous-improvement.md) for
+[continuous-improvement.md](continuous-improvement.md) for
 when a batch needs a fresh tag, and
-[plans/experiments.md](../plans/experiments.md) for the verdicts.
+[experiments.md](experiments.md) for the verdicts.
 
 **On dollars:** `cost_usd` is the CLI's API-equivalent pricing — real money
 on API-key auth, notional on a subscription plan. Tokens are the ground

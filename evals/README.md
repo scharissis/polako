@@ -138,7 +138,7 @@ divergences from a naive reading of the cases, each argued where it lives:
 Results under `evals/results/` are scratch, and gitignored like the CLI's own.
 The durable record of a run is the per-case verdicts quoted in the PR body —
 "say what was verified", the convention `CLAUDE.md` sets — and, for tagged
-skill experiments, a row in `plans/experiments.md`.
+skill experiments, a row in `docs/experiments.md`.
 
 ## This suite is deliberately not in CI
 
