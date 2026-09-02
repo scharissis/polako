@@ -42,8 +42,9 @@ func overBudget(cfg config, t issueTally) string {
 }
 
 // runLimit is how long a run dispatched now may take before -max-issue-time is
-// spent. Zero means unbounded — the default, and what every run got before the
-// cap existed.
+// spent. Zero means unbounded — what every run got before the cap existed,
+// and what -max-issue-time 0 still restores, though the flag no longer
+// defaults there.
 //
 // The floor is defensive only: every caller asks overBudget first, and an issue
 // with nothing left to spend parks there rather than reaching this.
