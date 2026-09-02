@@ -93,7 +93,14 @@ func TestPlanMilestoneTitle(t *testing.T) {
 		{planOptions{milestone: "Batch 3"}, "Batch 3"},
 		{planOptions{milestone: "off", vision: "docs/VISION.md"}, ""},
 		{planOptions{vision: "docs/roadmap-2026.md"}, "roadmap-2026"},
+		// Over the cap: cut at the last whole word inside it, then the
+		// trailing "and" — a dangling connective — is trimmed off too.
 		{planOptions{brief: "a dating app for horses, with barn matching and hay reviews"}, "a dating app for horses, with barn matching"},
+		// Under the cap: passes through unchanged, no trim applied.
+		{planOptions{brief: "a dating app for horses"}, "a dating app for horses"},
+		// The cut lands right after a comma: the stray punctuation is
+		// trimmed off the end along with the word boundary.
+		{planOptions{brief: "a dating app for horses and donkeys and mules, with barn matching"}, "a dating app for horses and donkeys and mules"},
 	}
 	for _, tc := range cases {
 		if got := planMilestoneTitle(&tc.opt); got != tc.want {
