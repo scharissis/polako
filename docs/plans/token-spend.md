@@ -91,6 +91,8 @@ shift keeps surfacing it. Keep `-skill` pointing anywhere as an escape hatch.
 or says so more than once, and the message names the cost behaviour, not only
 the branch contract.
 
+Filed as #254, closed.
+
 ### 2. Let the review gate be cheaper on a small diff than "medium"
 
 **Problem.** #225 scaled the gate's *level* (medium/high) to the diff, but both
@@ -110,6 +112,8 @@ merged-PR quality across a tagged batch before and after.
 **Done when.** A batch of small issues worked with the cheap path holds its
 eval scores against a batch worked with the full gate, and `stats -by tag`
 shows the spend difference.
+
+Filed as #255, closed.
 
 ### 3. A default ceiling, or a preflight that recommends one
 
@@ -136,6 +140,8 @@ money before anyone noticed.
 $29.57 on one issue without either warning or stopping, and the default (if
 any) is documented and `0`-disableable.
 
+Filed as #256, closed.
+
 ### 4. `stats -by reason`
 
 **Problem.** Every run record carries `Reason` —
@@ -154,6 +160,8 @@ no recorder change — the data is already on disk.
 
 **Done when.** `polako stats -by reason` prints a row per reason with runs,
 cost and tokens, and a `docs/` test covers the new value.
+
+Filed as #257, closed.
 
 ### 5. Settle #227's open questions before trusting any resumed-run cost
 

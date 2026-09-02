@@ -528,7 +528,7 @@ re-proposed, the cap respected, and no write outside `gh issue create`.
 Each lands independently green — gofmt, vet, full suite, README rows for
 every flag, `claude plugin validate .` — with its own `chore(release)` bump.
 
-**Phase 0 — the identity release (0.7.0).** `polako` everywhere the rename
+- [x] **Phase 0 — the identity release (0.7.0).** `polako` everywhere the rename
 checklist says — verbs `plan` and `work` — bare invocation prints the verb table
 under the one-line etymology, `status` reserved for issue #50. The table
 ships listing only the verbs that exist — `work` and `stats`; `plan` and
@@ -550,24 +550,25 @@ pass from the rename checklist, and then the first `polako work -once` on
 the existing backlog *is* the release smoke test, per the README's
 standing philosophy that the first real issue is the honest one.
 
-**Phase 1 — the drain learns the gate (0.8.0).** `proposed` exclusion,
+- [x] **Phase 1 — the drain learns the gate (0.8.0).** `proposed` exclusion,
 structural container skip with the old-gh fallback, the ignored-proposals
 log line, tests, README and CLAUDE.md amendments. Protective and inert — no
 repo has these labels or parents yet — and shipped *before* any fill exists,
 so at no commit can a drain work an uncurated proposal.
 
-**Phase 2 — the skill (0.9.0).** `skills/plan-backlog/SKILL.md`, the
+- [x] **Phase 2 — the skill (0.9.0).** `skills/plan-backlog/SKILL.md`, the
 `repo_test.go` pins, the eval case, README's "Filling a backlog" section.
 Immediately usable interactively — `/polako:plan-backlog docs/VISION.md`
 with a human watching — the same standalone-first property
 `/implement-issue` had before the binary existed. The PR body says which real
 vision document it was verified against, per the standing evals caveat.
 
-**Phase 3 — the supervisor (0.10.0).** The `plan` verb: preflight and
+- [x] **Phase 3 — the supervisor (0.10.0).** The `plan` verb: preflight and
 probes, `ensureMilestone`, the strong-model default, the narrow allowlist,
 cap enforcement, the label pass, the pricing line, `-dry-run`, the `proposed`
 notify event, the `plan` record. Plus the two read-only drain courtesies:
 `blockedBy` respected, all-children-closed epics named in the exit summary.
+Shipped as epic #101 (sub-issues #102–#106), all closed.
 
 **Phase 4 — pulled-for, not promised.** `stats` fill section; per-size
 estimate calibration (the argued-about mechanism above); a bulk-approve
