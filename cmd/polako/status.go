@@ -805,6 +805,16 @@ type statusDocContainer struct {
 	Held bool `json:"held"`
 }
 
+// toStatusDocContainer is the one place containerInfo becomes a
+// statusDocContainer, so queue.containers and plans.docs[].containers cannot
+// silently diverge in shape the way two copies of this literal would let
+// them.
+func toStatusDocContainer(c containerInfo) statusDocContainer {
+	return statusDocContainer{
+		Issue: c.number, Total: c.total, Completed: c.completed, Finished: c.finished(), Held: c.held,
+	}
+}
+
 // statusDocBlocked is one issue awaiting an answer. QuietSeconds is a pointer
 // because 0 (a reply just landed) and "the thread's age could not be read"
 // are both real, distinct states — the same distinction unknownCell exists to
@@ -888,9 +898,7 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 
 	containers := make([]statusDocContainer, 0, len(snap.queues.containers))
 	for _, c := range snap.queues.containers {
-		containers = append(containers, statusDocContainer{
-			Issue: c.number, Total: c.total, Completed: c.completed, Finished: c.finished(), Held: c.held,
-		})
+		containers = append(containers, toStatusDocContainer(c))
 	}
 
 	prs := make([]statusDocPR, 0, len(snap.prs))
@@ -910,9 +918,7 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 	for _, d := range snap.plans.docs {
 		dcontainers := make([]statusDocContainer, 0, len(d.containers))
 		for _, c := range d.containers {
-			dcontainers = append(dcontainers, statusDocContainer{
-				Issue: c.number, Total: c.total, Completed: c.completed, Finished: c.finished(), Held: c.held,
-			})
+			dcontainers = append(dcontainers, toStatusDocContainer(c))
 		}
 		planDocs = append(planDocs, statusDocPlan{
 			Path: d.path, State: string(d.state), Containers: nonNilSlice(dcontainers), OpenChildren: d.openChildren,
