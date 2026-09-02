@@ -59,7 +59,7 @@ graders:
     criteria: >
       Before reviewing, the run sized the change (e.g. `git diff --stat`
       against the origin ref) and picked the level from it — `cheap` under 30
-      changed lines, `medium` from 30 up to a few hundred, `high` above —
+      changed lines, `medium` from 30 through 299, `high` at 300 or more —
       rather than always asking for `high`. The run should have stated which
       level it picked and the line count behind it. The scaffold's diff is
       small, so either `cheap` (with a self-review pass instead of an
