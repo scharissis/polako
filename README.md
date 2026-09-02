@@ -7,16 +7,16 @@
 [![claude code plugin](https://img.shields.io/badge/claude%20code-plugin-8A63D2)](#install)
 [![docs](https://img.shields.io/badge/docs-polako-blue)](docs/)
 
-**polako works a GitHub issue backlog to zero.** It takes the lowest open issue,
+**Autonomous code delivery between human gates.**. Polako works a GitHub issue backlog to zero. It takes the lowest open issue,
 hands it to Claude Code, waits for you to merge the pull request, and moves on
 to the next one. It runs unattended, one issue at a time. It never merges
-anything itself.
+anything itself. The Github issues and pull requests are reviewed by humans.
 
-*Polako* is Croatian for "take it slow".
+*Polako* is Croatian for "take it easy" or "slow and steady", which is the philosophy we follow here. We have engineered for correctness over speed. Polako takes its time so reviewers don't waste theirs.
 
 ![polako status printing the state of a backlog, then polako work -dry-run resolving the next issue and printing the exact claude invocation it would run](docs/demo.gif)
 
-## What it does
+## How it works
 
 Two halves, one release: the **`/implement-issue` skill** takes one issue
 from research to a plan to a pull request, on its own or driven by the
@@ -34,7 +34,6 @@ Three verbs:
 `plan` and `health` file everything behind a `proposed` label a human has to
 lift — see [Planning a backlog](#planning-a-backlog).
 
-## How it works
 
 ```
 lowest open issue with no sub-issues and no `needs-human`, `proposed`
@@ -219,7 +218,7 @@ next starts from what you just merged.
 
 ## What it costs
 
-Real money, and more than you might guess. Every run records what it spent, so
+Every run records what it spent, so
 these are measured rather than estimated — from one 33-hour shift on a small Go
 project, eight issues finished:
 
