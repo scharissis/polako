@@ -611,8 +611,8 @@ func TestPlanRunCapsIssueCreationAndStillNormalises(t *testing.T) {
 			t.Errorf("a capped run's issue is unlabelled: %v", is.Labels)
 		}
 	}
-	if created < opt.maxIssues {
-		t.Errorf("the fake skill filed %d issues, want at least the cap of %d", created, opt.maxIssues)
+	if created != opt.maxIssues {
+		t.Errorf("the fake skill filed %d issues, want exactly the cap of %d", created, opt.maxIssues)
 	}
 	if !strings.Contains(buf.String(), "-max-issues") {
 		t.Errorf("the log does not mention the cap:\n%s", buf.String())
