@@ -225,9 +225,11 @@ type config struct {
 // verification"); the grant is a fixed prefix because the skill invokes the
 // main checkout's copy of the script from that checkout's cwd, passing
 // --plugin-dir to aim it at the worktree. On every other repo the path does
-// not exist, so the entry grants nothing. Its blast radius on polako is an
-// attacker-supplied issue burning eval spend, bounded by run.sh's own
-// --max-cost.
+// not exist, so the entry grants nothing. On polako itself it runs the eval
+// suite — nested `claude` sessions and real spend, the same class as the
+// Bash(go:*)/Bash(python:*) entries below. The skill passes run.sh with
+// --max-cost, but a prefix grant does not force the argument, so treat this
+// as narrowing the audit trail, not capping the blast radius.
 const defaultTools = "Bash(git:*)," +
 	"Bash(gh issue view:*),Bash(gh issue comment:*)," +
 	"Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh pr diff:*)," +
