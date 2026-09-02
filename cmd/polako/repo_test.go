@@ -382,6 +382,32 @@ func TestPlanSkillClosesItsGhSurface(t *testing.T) {
 	}
 }
 
+// issue #341: the gh-surface paragraph used to rest its three-shape ceiling on
+// "the `plan` verb that would grant reads like `issue view` or `search issues`
+// has not shipped" — false, planTools grants both. The true ground is that the
+// surface is the binary's to grant and `issue list` + `issue create` are the
+// floor common to every shipped verb, so the skill can rely on nothing wider.
+// This pins both halves: the false claim stays gone, and the floor the skill
+// names is granted by plan (runs this skill) and health (runs its twin).
+func TestPlanSkillGhSurfaceMatchesEveryVerbsGrant(t *testing.T) {
+	skill := planSkill(t)
+
+	if strings.Contains(skill, "has not shipped") {
+		t.Error("SKILL.md still claims a gh-granting verb \"has not shipped\"; planTools grants" +
+			" `gh issue view` and `gh search issues` today, so any prose resting on that is false")
+	}
+
+	for _, grant := range []string{"Bash(gh issue list:*)", "Bash(gh issue create:*)"} {
+		if !strings.Contains(planTools, grant) {
+			t.Errorf("planTools no longer grants %s, which plan-backlog's SKILL.md names as its surface", grant)
+		}
+		if !strings.Contains(healthTools, grant) {
+			t.Errorf("healthTools no longer grants %s — plan-backlog's SKILL.md rests its `gh` ceiling"+
+				" on this shape being the floor every shipped verb grants", grant)
+		}
+	}
+}
+
 // The estimate is the curator's cheapest signal, and it is only useful if it is
 // shaped the same every time. The one thing it must never carry is money: the
 // model has no price sheet, the binary refuses to hardcode one, and a
