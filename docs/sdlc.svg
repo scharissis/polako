@@ -1,0 +1,258 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="856" viewBox="0 0 1200 840" role="img" aria-labelledby="t d">
+  <title id="t">The polako loop</title>
+  <desc id="d">Five steps, repeated until the backlog is zero: fill the backlog with polako plan or health (unattended), curate the proposals (human gate), polako work runs one issue through Claude Code to a pull request (unattended), you review and merge (human gate), polako advances to the next issue branched from what you just merged.</desc>
+  <defs>
+    <style>
+      .sans { font-family: Inter, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+      .mono { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+      .wordmark { font-size: 42px; font-weight: 800; fill: #f1f5fb; letter-spacing: -1.5px; }
+      .tagline { font-size: 17px; fill: #9fb0cc; }
+      .eyebrow { font-size: 11.5px; font-weight: 700; fill: #6f82a3; letter-spacing: 2.2px; }
+      .legend { font-size: 13px; fill: #9fb0cc; }
+      .num { font-size: 13px; font-weight: 700; letter-spacing: 1px; }
+      .title { font-size: 19px; font-weight: 750; fill: #f1f5fb; letter-spacing: -0.3px; }
+      .body { font-size: 13px; fill: #c3cee2; }
+      .dim { fill: #8b9ab5; }
+      .hi { fill: #f1f5fb; font-weight: 600; }
+      .chip { font-size: 12px; font-weight: 600; }
+      .lbl { font-size: 12px; font-weight: 600; }
+      .pill { font-size: 10px; font-weight: 800; letter-spacing: 1.6px; }
+      .pcmd { font-size: 14px; font-weight: 700; }
+      .pdesc { font-size: 12.5px; fill: #9fb0cc; }
+      .rule { font-size: 13px; font-weight: 600; fill: #d5deee; }
+      .foot { font-size: 12.5px; fill: #6f82a3; }
+      .cy { fill: #22d3ee; }  .am { fill: #f5a524; }  .vi { fill: #a78bfa; }  .gr { fill: #34d399; }
+    </style>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="#ffffff" fill-opacity="0.045"/>
+    </pattern>
+    <radialGradient id="glowCy" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(140 120) scale(520 380)">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity="0.16"/><stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowAm" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1080 776) scale(520 360)">
+      <stop offset="0" stop-color="#f5a524" stop-opacity="0.13"/><stop offset="1" stop-color="#f5a524" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="loop" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+    <marker id="arrowCy" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M1 1 L9 5 L1 9 Z" fill="#22d3ee"/>
+    </marker>
+    <clipPath id="frame"><rect width="1200" height="856" rx="22"/></clipPath>
+  </defs>
+
+  <!-- canvas -->
+  <g clip-path="url(#frame)">
+    <rect width="1200" height="856" fill="#0b1120"/>
+    <rect width="1200" height="856" fill="url(#grid)"/>
+    <rect width="1200" height="856" fill="url(#glowCy)"/>
+    <rect width="1200" height="856" fill="url(#glowAm)"/>
+  </g>
+  <rect x="0.5" y="0.5" width="1199" height="855" rx="22" fill="none" stroke="#1e2a44"/>
+
+  <!-- header -->
+  <text x="40" y="66" class="sans wordmark">polako</text>
+  <text x="40" y="96" class="sans tagline">Autonomous code delivery between human gates.</text>
+  <g class="sans legend">
+    <circle cx="884" cy="56" r="5" fill="#22d3ee"/><text x="898" y="61">unattended · the machine works</text>
+    <circle cx="884" cy="84" r="5" fill="#f5a524"/><text x="898" y="89">human gate · you decide</text>
+  </g>
+
+  <!-- pipeline -->
+  <text x="31" y="136" class="sans eyebrow">THE LOOP  ·  FROM A VISION DOCUMENT TO MERGED PULL REQUESTS, ONE ISSUE AT A TIME</text>
+
+  <!-- step 1 -->
+  <g transform="translate(31 150)">
+    <rect width="210" height="356" rx="14" fill="#111a2e" stroke="#22d3ee" stroke-opacity="0.35"/>
+    <rect x="16" y="16" width="36" height="36" rx="9" fill="#22d3ee" fill-opacity="0.12"/>
+    <g fill="none" stroke="#22d3ee" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M26 26 h11 l6 6 v14 h-17 z"/><path d="M37 26 v6 h6"/><path d="M30 39 h9 M30 43 h7"/>
+    </g>
+    <rect x="103" y="24" width="91" height="20" rx="10" fill="#22d3ee" fill-opacity="0.12"/>
+    <text x="148.5" y="38" text-anchor="middle" class="sans pill cy">UNATTENDED</text>
+    <text x="16" y="86" class="sans title"><tspan class="mono num cy">01</tspan><tspan dx="9">Fill the backlog</tspan></text>
+    <rect x="16" y="100" width="98" height="22" rx="6" fill="#0b1120" stroke="#22d3ee" stroke-opacity="0.35"/>
+    <text x="65" y="115.5" text-anchor="middle" class="mono chip cy">polako plan</text>
+    <rect x="16" y="128" width="110" height="22" rx="6" fill="#0b1120" stroke="#22d3ee" stroke-opacity="0.35"/>
+    <text x="71" y="143.5" text-anchor="middle" class="mono chip cy">polako health</text>
+    <g class="sans body">
+      <text x="16" y="181">A vision document, or the</text>
+      <text x="16" y="200">codebase itself, becomes</text>
+      <text x="16" y="219">issues sized to one PR each,</text>
+      <text x="16" y="238">epics for the cross-cutting.</text>
+      <text x="16" y="266">Every one lands behind a</text>
+      <text x="16" y="285"><tspan class="mono lbl am">proposed</tspan> label. Nothing a</text>
+      <text x="16" y="304">machine wrote reaches a run</text>
+      <text x="16" y="323">until you have looked at it.</text>
+    </g>
+  </g>
+
+  <!-- step 2 · human gate -->
+  <g transform="translate(263 150)">
+    <rect width="210" height="356" rx="14" fill="#151a28" stroke="#f5a524" stroke-opacity="0.6" stroke-width="1.5"/>
+    <rect x="16" y="16" width="36" height="36" rx="9" fill="#f5a524" fill-opacity="0.14"/>
+    <g fill="none" stroke="#f5a524" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="26" y="26" width="16" height="18" rx="2"/><path d="M31 24 h6 v4 h-6 z"/><path d="M30 36 l3 3 l6 -6"/>
+    </g>
+    <rect x="96" y="24" width="98" height="20" rx="10" fill="#f5a524" fill-opacity="0.16"/>
+    <text x="145" y="38" text-anchor="middle" class="sans pill am">HUMAN GATE</text>
+    <text x="16" y="86" class="sans title"><tspan class="mono num am">02</tspan><tspan dx="9">Curate</tspan></text>
+    <rect x="16" y="100" width="130" height="22" rx="6" fill="#0b1120" stroke="#f5a524" stroke-opacity="0.4"/>
+    <text x="81" y="115.5" text-anchor="middle" class="mono chip am">GitHub · labels</text>
+    <g class="sans body">
+      <text x="16" y="181">Ordinary GitHub triage,</text>
+      <text x="16" y="200">three moves:</text>
+      <text x="16" y="228"><tspan class="hi">Approve</tspan> · drop <tspan class="mono lbl am">proposed</tspan></text>
+      <text x="16" y="247"><tspan class="hi">Reject</tspan> · close the issue</text>
+      <text x="16" y="266"><tspan class="hi">Rework</tspan> · edit the text</text>
+      <text x="16" y="294">A run reads the issue when</text>
+      <text x="16" y="313">it picks it up, so your edit</text>
+      <text x="16" y="332"><tspan class="hi">is</tspan> the spec. No other step.</text>
+    </g>
+  </g>
+
+  <!-- step 3 -->
+  <g transform="translate(495 150)">
+    <rect width="210" height="356" rx="14" fill="#111a2e" stroke="#22d3ee" stroke-opacity="0.35"/>
+    <rect x="16" y="16" width="36" height="36" rx="9" fill="#22d3ee" fill-opacity="0.12"/>
+    <g fill="none" stroke="#22d3ee" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="25" y="26" width="18" height="16" rx="3"/><path d="M29 31 l3 3 l-3 3"/><path d="M34 37 h5"/>
+    </g>
+    <rect x="103" y="24" width="91" height="20" rx="10" fill="#22d3ee" fill-opacity="0.12"/>
+    <text x="148.5" y="38" text-anchor="middle" class="sans pill cy">UNATTENDED</text>
+    <text x="16" y="86" class="sans title"><tspan class="mono num cy">03</tspan><tspan dx="9">Work</tspan></text>
+    <rect x="16" y="100" width="98" height="22" rx="6" fill="#0b1120" stroke="#22d3ee" stroke-opacity="0.35"/>
+    <text x="65" y="115.5" text-anchor="middle" class="mono chip cy">polako work</text>
+    <g class="sans body">
+      <text x="16" y="152">Lowest open issue, then one</text>
+      <text x="16" y="171">headless Claude Code run:</text>
+      <text x="16" y="190" class="mono lbl vi">/implement-issue N</text>
+      <text x="16" y="209">Research → plan → PR from</text>
+      <text x="16" y="228">branch <tspan class="mono lbl dim">issue-N</tspan>.</text>
+      <text x="16" y="256"><tspan class="hi">Red CI?</tspan> It fixes and re-pushes.</text>
+      <text x="16" y="275"><tspan class="hi">Conflict?</tspan> It rebases.</text>
+      <text x="16" y="294"><tspan class="hi">Changes requested?</tspan> Done.</text>
+      <text x="16" y="322"><tspan class="hi">Stuck?</tspan> It asks on the thread</text>
+      <text x="16" y="341">or parks it: <tspan class="mono lbl am">needs-human</tspan>.</text>
+    </g>
+  </g>
+
+  <!-- step 4 · human gate -->
+  <g transform="translate(727 150)">
+    <rect width="210" height="356" rx="14" fill="#151a28" stroke="#f5a524" stroke-opacity="0.6" stroke-width="1.5"/>
+    <rect x="16" y="16" width="36" height="36" rx="9" fill="#f5a524" fill-opacity="0.14"/>
+    <g fill="none" stroke="#f5a524" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="28" cy="27" r="2.5"/><circle cx="28" cy="43" r="2.5"/><circle cx="41" cy="33" r="2.5"/>
+      <path d="M28 29.5 v11"/><path d="M28 36 c0 -4 5 -3 10.5 -3"/>
+    </g>
+    <rect x="96" y="24" width="98" height="20" rx="10" fill="#f5a524" fill-opacity="0.16"/>
+    <text x="145" y="38" text-anchor="middle" class="sans pill am">HUMAN GATE</text>
+    <text x="16" y="86" class="sans title"><tspan class="mono num am">04</tspan><tspan dx="9">Review &amp; merge</tspan></text>
+    <rect x="16" y="100" width="156" height="22" rx="6" fill="#0b1120" stroke="#f5a524" stroke-opacity="0.4"/>
+    <text x="94" y="115.5" text-anchor="middle" class="mono chip am">GitHub · merge button</text>
+    <g class="sans body">
+      <text x="16" y="181">One pull request at a time,</text>
+      <text x="16" y="200">so one you will actually read.</text>
+      <text x="16" y="228"><tspan class="hi">You merge.</tspan> polako never</text>
+      <text x="16" y="247">does, and no flag changes</text>
+      <text x="16" y="266">that.</text>
+      <text x="16" y="294">Your other job: answer when a</text>
+      <text x="16" y="313">run asks on the issue thread.</text>
+      <text x="16" y="332">Neither job is on a clock.</text>
+    </g>
+  </g>
+
+  <!-- step 5 -->
+  <g transform="translate(959 150)">
+    <rect width="210" height="356" rx="14" fill="#111a2e" stroke="#22d3ee" stroke-opacity="0.35"/>
+    <rect x="16" y="16" width="36" height="36" rx="9" fill="#22d3ee" fill-opacity="0.12"/>
+    <g fill="none" stroke="#22d3ee" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M41 30 a8 8 0 1 0 1 6"/><path d="M41 25 v5 h-5"/>
+    </g>
+    <rect x="103" y="24" width="91" height="20" rx="10" fill="#22d3ee" fill-opacity="0.12"/>
+    <text x="148.5" y="38" text-anchor="middle" class="sans pill cy">UNATTENDED</text>
+    <text x="16" y="86" class="sans title"><tspan class="mono num cy">05</tspan><tspan dx="9">Advance</tspan></text>
+    <rect x="16" y="100" width="118" height="22" rx="6" fill="#0b1120" stroke="#22d3ee" stroke-opacity="0.35"/>
+    <text x="75" y="115.5" text-anchor="middle" class="mono chip cy">merge detected</text>
+    <g class="sans body">
+      <text x="16" y="181">Close the issue, remove the</text>
+      <text x="16" y="200">worktree, fast-forward your</text>
+      <text x="16" y="219">default branch.</text>
+      <text x="16" y="247">The next issue branches</text>
+      <text x="16" y="266">from what you just merged,</text>
+      <text x="16" y="285">so runs cannot conflict.</text>
+      <text x="16" y="313">Repeat until the backlog</text>
+      <text x="16" y="332">is zero.</text>
+    </g>
+  </g>
+
+  <!-- connectors -->
+  <g fill="#3b4b6b">
+    <path d="M245 322 l9 6 l-9 6 z"/>
+    <path d="M477 322 l9 6 l-9 6 z"/>
+    <path d="M709 322 l9 6 l-9 6 z"/>
+    <path d="M941 322 l9 6 l-9 6 z"/>
+  </g>
+
+  <!-- loop back -->
+  <path d="M1064 506 v30 a10 10 0 0 1 -10 10 H610 a10 10 0 0 1 -10 -10 v-26" fill="none" stroke="url(#loop)" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrowCy)"/>
+  <rect x="716" y="534" width="232" height="24" rx="12" fill="#0b1120" stroke="#22d3ee" stroke-opacity="0.35"/>
+  <text x="832" y="550.5" text-anchor="middle" class="sans lbl cy">next issue · one in flight, never two</text>
+
+  <!-- meanwhile -->
+  <text x="31" y="606" class="sans eyebrow">MEANWHILE, FROM ANY MACHINE</text>
+  <g transform="translate(31 620)">
+    <rect width="268" height="86" rx="12" fill="#0f1729" stroke="#1e2a44"/>
+    <text x="18" y="30" class="mono pcmd cy">polako status</text>
+    <g class="sans pdesc"><text x="18" y="54">What is ready, parked, proposed,</text><text x="18" y="72">and exactly what needs you.</text></g>
+  </g>
+  <g transform="translate(321 620)">
+    <rect width="268" height="86" rx="12" fill="#0f1729" stroke="#1e2a44"/>
+    <text x="18" y="30" class="mono pcmd cy">polako stats</text>
+    <g class="sans pdesc"><text x="18" y="54">Measured dollars per issue, from</text><text x="18" y="72">your own runs. Not estimates.</text></g>
+  </g>
+  <g transform="translate(611 620)">
+    <rect width="268" height="86" rx="12" fill="#0f1729" stroke="#1e2a44"/>
+    <text x="18" y="30" class="mono pcmd cy">-notify ~/bin/tell-me</text>
+    <g class="sans pdesc"><text x="18" y="54">Pings you only when a run needs</text><text x="18" y="72">an answer or a merge.</text></g>
+  </g>
+  <g transform="translate(901 620)">
+    <rect width="268" height="86" rx="12" fill="#0f1729" stroke="#1e2a44"/>
+    <text x="18" y="30" class="mono pcmd gr">^C  …  polako work</text>
+    <g class="sans pdesc"><text x="18" y="54">Kill it anywhere, rerun it later. It</text><text x="18" y="72">re-derives everything from GitHub.</text></g>
+  </g>
+
+  <!-- rules -->
+  <text x="31" y="747" class="sans eyebrow">THE RULES IT FOLLOWS</text>
+  <g class="sans rule">
+    <g transform="translate(31 760)">
+      <rect width="164" height="30" rx="15" fill="#0f1729" stroke="#1e2a44"/>
+      <path d="M14 15 l4 4 l7 -8" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="32" y="19.5">One issue in flight</text>
+    </g>
+    <g transform="translate(211 760)">
+      <rect width="182" height="30" rx="15" fill="#0f1729" stroke="#1e2a44"/>
+      <path d="M14 15 l4 4 l7 -8" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="32" y="19.5">Nothing merges itself</text>
+    </g>
+    <g transform="translate(409 760)">
+      <rect width="206" height="30" rx="15" fill="#0f1729" stroke="#1e2a44"/>
+      <path d="M14 15 l4 4 l7 -8" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="32" y="19.5">All state lives in GitHub</text>
+    </g>
+    <g transform="translate(631 760)">
+      <rect width="256" height="30" rx="15" fill="#0f1729" stroke="#1e2a44"/>
+      <path d="M14 15 l4 4 l7 -8" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="32" y="19.5">Your checkout is never written to</text>
+    </g>
+    <g transform="translate(903 760)">
+      <rect width="266" height="30" rx="15" fill="#0f1729" stroke="#1e2a44"/>
+      <path d="M14 15 l4 4 l7 -8" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="32" y="19.5">Issue text is data, not instructions</text>
+    </g>
+  </g>
+
+  <!-- footer -->
+  <text x="31" y="829" class="mono foot">github.com/scharissis/polako</text>
+  <text x="1169" y="829" text-anchor="end" class="sans foot">polako · Croatian for “take it easy”. One pull request at a time is one you will actually read.</text>
+</svg>

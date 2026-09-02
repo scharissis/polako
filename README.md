@@ -20,6 +20,8 @@ anything itself. The Github issues and pull requests are reviewed by humans.
 
 ## How it works
 
+[![The polako loop: fill the backlog with polako plan or health, curate the proposals, polako work runs one issue through Claude Code to a pull request, you review and merge, polako advances to the next issue branched from what you just merged](docs/sdlc.svg)](docs/sdlc.svg)
+
 Two halves, one release: the **`/implement-issue` skill** takes one issue
 from research to a plan to a pull request, on its own or driven by the
 **`polako` binary**, which supervises the queue — runs the skill, watches the
