@@ -7,7 +7,9 @@
 [![claude code plugin](https://img.shields.io/badge/claude%20code-plugin-8A63D2)](#install)
 [![docs](https://img.shields.io/badge/docs-polako-blue)](docs/)
 
-**Autonomous code delivery between human gates.**. Polako works a GitHub issue backlog to zero. It takes the lowest open issue,
+**Autonomous code delivery between human gates.**
+
+Polako works a GitHub issue backlog to zero. It takes the lowest open issue,
 hands it to Claude Code, waits for you to merge the pull request, and moves on
 to the next one. It runs unattended, one issue at a time. It never merges
 anything itself. The Github issues and pull requests are reviewed by humans.
