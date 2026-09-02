@@ -63,9 +63,10 @@ The work, in order:
 Issue #311 landed the enforcement half of that standing rule: `evals/run.sh`
 takes `--plugin-dir` and `--max-cost`, `Bash(evals/run.sh:*)` is granted in
 `defaultTools`, and Phase 3 has an `implement-issue` run execute the touched
-cases against its own worktree on a $5 budget when its commits change a
-shipped `SKILL.md`. What is still owed is the first green run itself — the
-budgeted debugging session above.
+cases against its own worktree, passing `--max-cost 5` (which stops before
+the next case once the spend so far reaches the cap — not a hard ceiling
+inside one case), when its commits change a shipped `SKILL.md`. What is still
+owed is the first green run itself — the budgeted debugging session above.
 
 The suite stays opt-in and out of CI, per the agreement on issue #9 — it
 needs network, a real `claude` and money. The gate is the release ritual, not
