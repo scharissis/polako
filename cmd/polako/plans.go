@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -242,4 +243,82 @@ func planDocStatusFrom(path string, issues []ghPlanIssue) planDocStatus {
 	slices.SortFunc(containers, func(a, b containerInfo) int { return a.number - b.number })
 
 	return planDocStatus{path: path, state: state, containers: containers, openChildren: openChildren}
+}
+
+// --- rendering ---
+
+// printPlanDocs prints the docs/plans/ section built by readPlanDocs: one
+// row per document, its derived state, its container issues, and how many
+// of those containers' children are still open. Absent when there is
+// nothing to say — no local docs/plans and no gone footer either — the same
+// "no line on a healthy backlog" rule needsYou (status.go) follows.
+func printPlanDocs(w io.Writer, rpt report, plans planDocsSnapshot) {
+	if len(plans.docs) == 0 && len(plans.gone) == 0 {
+		return
+	}
+	if len(plans.docs) > 0 {
+		rows := make([][]string, 0, len(plans.docs))
+		for _, d := range plans.docs {
+			rows = append(rows, []string{d.path, string(d.state), planContainersCell(d), planOpenChildrenCell(d)})
+		}
+		header := []string{"doc", "state", "containers", "open children"}
+		printTable(w, rpt, "plan documents", header, rows, len(header))
+	} else {
+		fmt.Fprintf(w, "\n%s\n", rpt.bold("plan documents"))
+	}
+	if len(plans.gone) > 0 {
+		refs := make([]string, len(plans.gone))
+		for i, g := range plans.gone {
+			refs[i] = fmt.Sprintf("%s (%s)", g.path, issueRefs(g.issues))
+		}
+		fmt.Fprintf(w, "  (gone — footer names a document no longer on disk: %s)\n", strings.Join(refs, ", "))
+	}
+	if plans.truncated {
+		fmt.Fprintf(w, "  (past the first %d issues carrying the plan footer — state above may be incomplete)\n",
+			planDocsLimit)
+	}
+}
+
+func planContainersCell(d planDocStatus) string {
+	if len(d.containers) == 0 {
+		return "—"
+	}
+	return containerRefs(d.containers)
+}
+
+func planOpenChildrenCell(d planDocStatus) string {
+	if len(d.containers) == 0 {
+		return "—"
+	}
+	return strconv.Itoa(d.openChildren)
+}
+
+// --- JSON rendering ---
+
+// statusDocPlans mirrors planDocsSnapshot field for field: Docs is the text
+// report's table rows, Gone the same footers-with-no-file the "gone" note
+// lists, Truncated the same warning the note prints.
+type statusDocPlans struct {
+	Docs      []statusDocPlan `json:"docs"`
+	Gone      []statusDocGone `json:"gone"`
+	Truncated bool            `json:"truncated"`
+}
+
+// statusDocPlan is one document's line: State is planDocState's string form
+// ("draft", "proposed", "active", "done"); Containers reuses
+// statusDocContainer (status.go), the same shape the queue's own containers
+// carry, so a caller reads a container issue's rollup the same way in both
+// places.
+type statusDocPlan struct {
+	Path         string               `json:"path"`
+	State        string               `json:"state"`
+	Containers   []statusDocContainer `json:"containers"`
+	OpenChildren int                  `json:"open_children"`
+}
+
+// statusDocGone is a footer naming a document with no matching file on disk,
+// and the issue numbers whose footer names it.
+type statusDocGone struct {
+	Path   string `json:"path"`
+	Issues []int  `json:"issues"`
 }
