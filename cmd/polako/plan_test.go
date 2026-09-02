@@ -626,7 +626,7 @@ func TestPlanRunCapsIssueCreationAndStillNormalises(t *testing.T) {
 // detached deadline.
 func TestPlanRunInterruptReportsAsCancelled(t *testing.T) {
 	captureLog(t)
-	// "plancap" lingers after it has emitted its events, so the context kill —
+	// "plancap" pauses between its create iterations, so the context kill —
 	// not the process's own exit — is what ends the run.
 	cfg, statePath := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plancap")
 
