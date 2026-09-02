@@ -236,8 +236,9 @@ project, eight issues finished:
 
 Your numbers will differ, and the ones that move them most are how big your
 issues are and how often runs crash — a crashed run's resume pays to read the
-context again. Run `polako stats` for your own figures, and set `-max-cost`,
-`-max-issue-time` or `-max-session-cost` for a ceiling.
+context again. Run `polako stats` for your own figures. `-max-issue-time`
+already defaults to a ceiling; set `-max-cost` or `-max-session-cost` for one
+too.
 [docs/run-data.md](docs/run-data.md) has the whole report.
 
 ## Improving polako
