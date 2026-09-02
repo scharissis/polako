@@ -441,10 +441,13 @@ const briefTitleMax = 50
 // cap and trimmed so the cut doesn't leave a dangling connective or stray
 // punctuation at the end.
 func briefTitle(s string) string {
-	if len(s) <= briefTitleMax {
+	runes := []rune(s)
+	if len(runes) <= briefTitleMax {
 		return s
 	}
-	cut := s[:briefTitleMax]
+	// Cut on runes, not bytes: a byte-index slice can split a multi-byte
+	// character in two and leave invalid UTF-8 in the milestone title.
+	cut := string(runes[:briefTitleMax])
 	if i := strings.LastIndexByte(cut, ' '); i >= 0 {
 		cut = cut[:i]
 	}

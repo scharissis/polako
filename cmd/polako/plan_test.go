@@ -101,6 +101,9 @@ func TestPlanMilestoneTitle(t *testing.T) {
 		// The cut lands right after a comma: the stray punctuation is
 		// trimmed off the end along with the word boundary.
 		{planOptions{brief: "a dating app for horses and donkeys and mules, with barn matching"}, "a dating app for horses and donkeys and mules"},
+		// No space near the cap: the cut must land on a rune boundary, not a
+		// byte one, or the title comes out as invalid UTF-8.
+		{planOptions{brief: strings.Repeat("x", 48) + "日本語テスト"}, strings.Repeat("x", 48) + "日本"},
 	}
 	for _, tc := range cases {
 		if got := planMilestoneTitle(&tc.opt); got != tc.want {
