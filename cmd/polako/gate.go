@@ -53,7 +53,7 @@ func refuseOrNote(err error, dryRun bool) error {
 // version it cannot read leaves the field empty rather than stopping a drain
 // over telemetry.
 func claudeVersion(ctx context.Context, cfg config) string {
-	out, err := capture(ctx, cfg.dir, cfg.claudeBin, "--version")
+	out, err := capture(ctx, cfg.dir, cfg.env, cfg.claudeBin, "--version")
 	if err != nil {
 		return ""
 	}
@@ -76,7 +76,7 @@ func pluginVersion(ctx context.Context, cfg config) (version, id string) {
 	if !ok || plugin == "" {
 		return "", ""
 	}
-	out, err := capture(ctx, cfg.dir, cfg.claudeBin, "plugin", "list", "--json")
+	out, err := capture(ctx, cfg.dir, cfg.env, cfg.claudeBin, "plugin", "list", "--json")
 	if err != nil {
 		return "", ""
 	}

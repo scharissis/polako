@@ -41,9 +41,18 @@ type config struct {
 	// proves the ceiling stops the loop rather than proving its size.
 	// parseFlags pins it to defaultResumeCeiling.
 	resumeCeiling int
-	skill         string
-	branchPrefix  string
-	label         string
+	// env is extra "KEY=value" entries handed to every child this config
+	// spawns — gh, git, claude, the notify hook — on top of the operator's
+	// own environment, never instead of it. A test seam only: production
+	// leaves it nil, so real runs inherit the environment byte-for-byte
+	// (docs/hardening.md's HTTPS_PROXY passthrough depends on that). The
+	// suite uses it to hand a child its fake-CLI handshake variables without
+	// calling t.Setenv on the parent, which would bar the test from
+	// t.Parallel(). See capture, dispatchClaude and notify.
+	env          []string
+	skill        string
+	branchPrefix string
+	label        string
 	// ignoreSkew is consent to what versionSkewGate otherwise refuses:
 	// starting a drain whose installed skill is an older release than this
 	// binary, which is the #239 shape — a shift on a skill missing recent

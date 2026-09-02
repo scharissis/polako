@@ -211,7 +211,7 @@ func inspectLeftWork(ctx context.Context, cfg config, issue int) leftWork {
 		// into one `?? pkg/` line — and a run that wrote a new package and never
 		// committed it is exactly the case this message exists for, so "1 file"
 		// there would understate it by however many files it added.
-		out, err := capture(ctx, w.path, "git", "status", "--porcelain", "--untracked-files=all")
+		out, err := capture(ctx, w.path, cfg.env, "git", "status", "--porcelain", "--untracked-files=all")
 		if err != nil {
 			// git goes on listing a worktree whose directory somebody deleted by
 			// hand until the next prune, and sending a person to a path that is

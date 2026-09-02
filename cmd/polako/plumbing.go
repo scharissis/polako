@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"slices"
 	"strings"
@@ -15,7 +16,7 @@ import (
 )
 
 func gh(ctx context.Context, cfg config, args ...string) ([]byte, error) {
-	return capture(ctx, cfg.dir, cfg.ghBin, ghArgs(cfg.ghRepo, args)...)
+	return capture(ctx, cfg.dir, cfg.env, cfg.ghBin, ghArgs(cfg.ghRepo, args)...)
 }
 
 // ghArgs names the repository on a call that would otherwise be resolved from
@@ -95,12 +96,27 @@ func retryRead[T any](ctx context.Context, cfg config, what string, read func() 
 }
 
 func git(ctx context.Context, cfg config, args ...string) ([]byte, error) {
-	return capture(ctx, cfg.dir, "git", args...)
+	return capture(ctx, cfg.dir, cfg.env, "git", args...)
 }
 
-func capture(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+// childEnv is the environment for a child process: nil when extra is empty —
+// production, always — so os/exec passes the parent's environment through
+// untouched, which docs/hardening.md's egress-proxy flow relies on; the
+// parent's plus extra when the suite has fake-CLI handshake variables to hand
+// a child without t.Setenv on the parent. See config.env.
+func childEnv(extra []string) []string {
+	if len(extra) == 0 {
+		return nil
+	}
+	return append(os.Environ(), extra...)
+}
+
+// capture runs name in dir and hands back its stdout. env is extra
+// "KEY=value" entries for the child; see childEnv.
+func capture(ctx context.Context, dir string, env []string, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
+	cmd.Env = childEnv(env)
 	var errBuf strings.Builder
 	cmd.Stderr = &errBuf
 	out, err := cmd.Output()

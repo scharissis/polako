@@ -291,6 +291,7 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	detail.Printf("running: %s %s", cfg.claudeBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.claudeBin, args...)
 	cmd.Dir = cfg.dir
+	cmd.Env = childEnv(cfg.env) // nil in production, so os/exec passes the parent env through
 	// The child's stderr goes into the narration stream line by line, so it
 	// lands in the shift log stamped and attributed rather than raw across the
 	// terminal. The tail is remembered besides, for the diagnoses stdout

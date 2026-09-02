@@ -1963,7 +1963,7 @@ func TestGhAndGitInheritTheOperatorsEnvironmentToo(t *testing.T) {
 	t.Setenv(fakeClaudeEnv, "envcanaryout") // inherited by the child process
 	t.Setenv(envCanaryVar, "http://localhost:8443")
 
-	out, err := capture(context.Background(), t.TempDir(), fakeCLI(t), "status")
+	out, err := capture(context.Background(), t.TempDir(), nil, fakeCLI(t), "status")
 	if err != nil {
 		t.Fatalf("capture: %v", err)
 	}

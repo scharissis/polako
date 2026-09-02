@@ -74,7 +74,7 @@ func probeUsage(ctx context.Context, cfg config) (usageSnapshot, bool) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	out, err := capture(ctx, cfg.dir, cfg.claudeBin, "-p", "/usage", "--output-format", "json")
+	out, err := capture(ctx, cfg.dir, cfg.env, cfg.claudeBin, "-p", "/usage", "--output-format", "json")
 	if err != nil {
 		log.Printf("usage probe: %v", err)
 		return usageSnapshot{}, false
