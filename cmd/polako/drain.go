@@ -487,6 +487,10 @@ func finishedContainerComment(c containerInfo) string {
 func closeFinishedContainers(ctx context.Context, cfg config, containers []containerInfo, commented, closedThisShift map[int]bool) ([]containerInfo, []retiredDoc, error) {
 	var closed []containerInfo
 	var retired []retiredDoc
+	// The documents this call has already retired, moments ago, for an
+	// earlier container in this same loop — see retireOrphanedDoc's own
+	// comment for why the search alone cannot be trusted to catch this.
+	retiredThisCall := map[string]bool{}
 	for _, c := range containers {
 		if !c.finished() || c.held || closedThisShift[c.number] {
 			continue
@@ -529,10 +533,11 @@ func closeFinishedContainers(ctx context.Context, cfg config, containers []conta
 		log.Printf("epic #%d: all %s closed — commented and closed it", c.number, plural(c.total, "sub-issue"))
 		notify(ctx, cfg, notification{event: notifyEpicDone, issue: c.number,
 			reason: fmt.Sprintf("all %s closed — closed it", plural(c.total, "sub-issue"))})
-		if r, ok, err := retireOrphanedDoc(ctx, cfg, c); err != nil {
+		if r, ok, err := retireOrphanedDoc(ctx, cfg, c, retiredThisCall); err != nil {
 			return closed, retired, err
 		} else if ok {
 			retired = append(retired, r)
+			retiredThisCall[r.doc] = true
 		}
 	}
 	return closed, retired, nil

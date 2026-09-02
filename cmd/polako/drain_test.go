@@ -2674,6 +2674,72 @@ func TestDrainFilesNoSecondRetireIssueForTheSameDocument(t *testing.T) {
 	}
 }
 
+// Two containers naming the same document, both finishing in the same pass,
+// must still file exactly one retire issue between them — closeFinishedContainers
+// closes both in the same call, and the second must not rely on a GitHub
+// search seeing the first container's create in time (its index lags a write
+// by seconds to a minute, per docs/plans/plan-conventions.md).
+func TestDrainFilesOnlyOneRetireIssueForTwoContainersClosingTogether(t *testing.T) {
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/plans/foo.md")},
+			"200": {Open: true, SubIssues: 3, SubIssuesCompleted: 3, Body: planFooterLine("docs/plans/foo.md")},
+		},
+		Labels: []string{proposedLabel},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if st.Issues["113"].Open || st.Issues["200"].Open {
+		t.Error("both finished containers should have closed")
+	}
+	var retireIssues []string
+	for n := range st.Issues {
+		if n != "113" && n != "200" {
+			retireIssues = append(retireIssues, n)
+		}
+	}
+	if len(retireIssues) != 1 {
+		t.Errorf("retire issues filed = %v, want exactly 1", retireIssues)
+	}
+}
+
+// The hermetic fake's `issue list --search` has no index lag at all, so it
+// alone cannot prove the previous test is exercising the fix rather than
+// coincidentally passing — the fake would find a moments-ago create either
+// way. This tests the actual guard directly: once a document is in
+// filedThisCall, retireOrphanedDoc must not touch the network at all for it,
+// which is true regardless of what any search would or wouldn't find.
+func TestRetireOrphanedDocSkipsADocumentAlreadyRetiredThisCall(t *testing.T) {
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"200": {Open: true, Body: planFooterLine("docs/plans/foo.md")},
+		},
+	})
+	calls := filepath.Join(t.TempDir(), "gh-calls.log")
+	t.Setenv(fakeGhLogEnv, calls)
+
+	filedThisCall := map[string]bool{"docs/plans/foo.md": true}
+	_, ok, err := retireOrphanedDoc(context.Background(), cfg,
+		containerInfo{number: 200, total: 3, completed: 3}, filedThisCall)
+	if err != nil {
+		t.Fatalf("retireOrphanedDoc: %v", err)
+	}
+	if ok {
+		t.Error("should not have filed a second retire issue for a document this call already retired")
+	}
+	argv, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatalf("reading the gh call log: %v", err)
+	}
+	if strings.Contains(string(argv), "issue list") || strings.Contains(string(argv), "issue create") {
+		t.Errorf("the local memo should have skipped the search and the create entirely\ngot:\n%s", argv)
+	}
+}
+
 // Another still-open issue naming the same document — not itself a retire
 // issue, just unfinished work the plan proposed — means the document is not
 // orphaned yet, so nothing is filed.

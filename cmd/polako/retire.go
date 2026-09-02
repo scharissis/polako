@@ -32,7 +32,19 @@ type retiredDoc struct {
 // was actually filed. err is non-nil only for a real context cancellation —
 // every other failure is narrated here and swallowed, matching how the
 // comment and close steps around it in closeFinishedContainers behave.
-func retireOrphanedDoc(ctx context.Context, cfg config, c containerInfo) (rd retiredDoc, ok bool, err error) {
+//
+// filedThisCall is the set of documents this same closeFinishedContainers
+// call has already retired, moments ago, for a different container. It has
+// to be checked ahead of the GitHub search below: two containers naming the
+// same document can both be finished in the same pass, and the search alone
+// cannot be trusted to see the first container's create in time for the
+// second — GitHub's search index lags a write by seconds to a minute (the
+// same lag docs/plans/plan-conventions.md already accepts across shifts),
+// which is far longer than the gap between two loop iterations in one call.
+// This local set closes that gap for free — it costs no extra call, since
+// closeFinishedContainers already holds the equivalent information in the
+// `retired` slice it is accumulating.
+func retireOrphanedDoc(ctx context.Context, cfg config, c containerInfo, filedThisCall map[string]bool) (rd retiredDoc, ok bool, err error) {
 	body, err := containerBody(ctx, cfg, c.number)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -44,6 +56,9 @@ func retireOrphanedDoc(ctx context.Context, cfg config, c containerInfo) (rd ret
 	}
 	footer, ok := parsePlanFooter(body)
 	if !ok {
+		return retiredDoc{}, false, nil
+	}
+	if filedThisCall[footer.doc] {
 		return retiredDoc{}, false, nil
 	}
 
