@@ -97,24 +97,31 @@ know whether a case is flaky rather than whether it works — every case here se
 The entitlement may never arrive, so the suite does not depend on it:
 
 ```bash
-evals/run.sh                  # every case
-evals/run.sh clear-issue      # one case
-evals/run.sh --no-judge       # skip the llm judge; grade those yourself
+evals/run.sh                       # every case
+evals/run.sh clear-issue           # one case
+evals/run.sh --no-judge            # skip the llm judge; grade those yourself
+evals/run.sh --plugin-dir ../wt    # test a plugin checkout other than this one
+evals/run.sh --max-cost 5          # stop before the next case once $5 is spent
 ```
 
 `run.sh` reproduces what `plugin eval` would do for this suite — scaffold each
 case into a fresh workspace under `evals/results/<timestamp>-by-hand/`, run the
-case's prompt in a headless session with the plugin loaded from this checkout,
-then grade what the run left behind (`lib/grade.py`). `file_exists` graders are
-checked mechanically; `llm` graders go to a judge session — haiku, the CLI's
-own default judge, `--judge-model` to override — fed the recorded artifacts,
-repository state and a tool-call timeline, all of which is also written to each
-case's `evidence.md` so a verdict can be audited rather than trusted. Exit 0 is
-green; 1 means a grader failed, a case timed out, or the harness broke, and the
-per-case line says which — a harness error is not a skill verdict; `--no-judge`
-exits 3 until a human scores what the judge would have. To re-run one wobbling
-case three times, invoke `evals/run.sh <case>` three times — each invocation
-gets its own timestamped results directory.
+case's prompt in a headless session with the plugin loaded (from this checkout,
+or from `--plugin-dir` — how an `implement-issue` run drives the suite from its
+worktree while invoking the main checkout's copy of this script, so the tool
+grant can stay a fixed `Bash(evals/run.sh:*)`), then grade what the run left
+behind (`lib/grade.py`). `file_exists` graders are checked mechanically; `llm`
+graders go to a judge session — haiku, the CLI's own default judge,
+`--judge-model` to override — fed the recorded artifacts, repository state and a
+tool-call timeline, all of which is also written to each case's `evidence.md` so
+a verdict can be audited rather than trusted. Exit 0 is green; 1 means a grader
+failed, a case timed out, or the harness broke, and the per-case line says
+which — a harness error is not a skill verdict; `--no-judge` exits 3 until a
+human scores what the judge would have; `--max-cost` (dollars, default off)
+sums `total_cost_usd` across the cases run so far and exits 4 having skipped the
+rest once the cap is reached. To re-run one wobbling case three times, invoke
+`evals/run.sh <case>` three times — each invocation gets its own timestamped
+results directory.
 
 It costs the same money the real runner would — roughly $0.30–$1.60 per case,
 plus cents of judging — and needs `claude`, `git` and `python3`. Two deliberate
@@ -142,6 +149,11 @@ full cycle driven by a live model. So it is opt-in, run by hand, and
 
 That is a deliberate exception to the hermetic-tests convention in `CLAUDE.md`,
 agreed on issue #9 rather than taken quietly.
+
+An unattended `implement-issue` run is the other caller: when its own commits
+change a shipped `SKILL.md` it runs the cases the change touches, on
+`--max-cost 5`, and quotes the verdicts in the PR body (`CLAUDE.md`, "The suite
+is the verification"). Still opt-in — nothing runs it unless a skill file moved.
 
 The free half of skill coverage lives in `cmd/polako/repo_test.go`, which
 asserts the contract-bearing lines of both skills — the review gate, the label

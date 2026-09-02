@@ -206,14 +206,21 @@ needs the network, a real `claude`, and money, so it's opt-in and stays out
 of `check.sh` and CI. Its first and only full run (by hand, 2026-08-28, six
 cases — `review-health` came later) scored 32/34, two genuine skill findings
 short of green: issues #128 and #131. Both were fixed that evening, neither
-with its case re-run to confirm it, and nothing has run the suite since.
+with its case re-run to confirm it, and the suite has still never been green.
 
 **The suite is the verification.** A PR that changes a skill's `SKILL.md`
-runs it — or at least the cases its change touches: `evals/run.sh <case>`
-today, `--case <name>` once the entitled CLI runs — and quotes the scores in
-its body, "say what was verified" in stricter form. A wobbling case gets run
-three times (`--runs 3` on the CLI, three `run.sh` invocations by hand): a
-flaky grader is worse than no grader, since it teaches the habit of ignoring
+runs the eval cases its change touches and quotes the per-case verdicts and
+the spend in its body — "say what was verified" in stricter form. An
+unattended run does this itself: `Bash(evals/run.sh:*)` is in `defaultTools`,
+and Phase 3 has the skill run `evals/run.sh --plugin-dir <worktree>
+--max-cost 5 <case>` once its own commits touch a shipped `SKILL.md`. By hand
+it's the same command without `--max-cost`, or `--case <name>` once the
+entitled CLI runs. The one thing a run can't do is verify its own change's
+evals before that change merges — the `--plugin-dir` support and the tool
+grant both land here — so this PR, and any that changes `run.sh` itself,
+defers to a human and says so in its body. A wobbling case gets run three
+times (`--runs 3` on the CLI, three `run.sh` invocations by hand): a flaky
+grader is worse than no grader, since it teaches the habit of ignoring
 red. Skill wording is a tagged change too, so the next batch runs under a
 fresh `-run-tag` and earns a row in `plans/experiments.md` — see
 `plans/continuous-improvement.md` for the full ritual, linked from the

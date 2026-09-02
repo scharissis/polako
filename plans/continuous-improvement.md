@@ -60,6 +60,13 @@ The work, in order:
 - When `/plan-backlog` lands (issue #66), its `plan-vision/` eval case joins
   the suite under the same rule.
 
+Issue #311 landed the enforcement half of that standing rule: `evals/run.sh`
+takes `--plugin-dir` and `--max-cost`, `Bash(evals/run.sh:*)` is granted in
+`defaultTools`, and Phase 3 has an `implement-issue` run execute the touched
+cases against its own worktree on a $5 budget when its commits change a
+shipped `SKILL.md`. What is still owed is the first green run itself — the
+budgeted debugging session above.
+
 The suite stays opt-in and out of CI, per the agreement on issue #9 — it
 needs network, a real `claude` and money. The gate is the release ritual, not
 the push.
