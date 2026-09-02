@@ -185,18 +185,19 @@ rather than having to work out where the run put its worktree.
 
 ## What a hand-run settled, and what only the CLI can
 
-The suite has now run in anger — every case, by hand, on 2026-08-28 (the
-"Running it by hand" path above) — so the scaffold, the stand-in `gh` and the
-graders are no longer read-only theory. What that run settled:
+The suite has now run in anger — every case then in it, by hand, on 2026-08-28
+(the "Running it by hand" path above) — so the scaffold, the stand-in `gh` and
+the graders are no longer read-only theory. What that run settled:
 
 - **The scratch world works as written.** `lib/scaffold.sh` and `lib/gh-fake.sh`
   behaved as designed on their first execution, including the seeds, and
   `plan-vision`'s bare `VISION.md` prompt was found through the workspace
   `CLAUDE.md` pointer without needing a `repo/` prefix.
-- **The skills held.** Every behavioral grader passed except one genuine catch:
-  a plan run improvised `gh label list`, a read outside its granted surface,
-  which the stand-in rejected and the grader failed — issue #128, a skill
-  problem, not grader noise.
+- **The skills held.** 32/34 behavioral graders passed. The two reds were both
+  genuine catches, not grader noise: a plan run improvised `gh label list`, a
+  read outside its granted surface, which the stand-in rejected (issue #128);
+  and a `review-gate` run skipped `SKILL.md`'s `--ff-only` mirror refresh and
+  branched from `origin/main` instead (issue #131).
 - **`.claude/settings.json` is not how the stand-in `gh` gets onto `PATH`**
   under a headless `claude -p` — the launch environment is (issue #126). The
   failure was loud, exactly as this section predicted.

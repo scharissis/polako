@@ -203,10 +203,10 @@ above — but it's named here for the same reason that invariant exists.
 
 This suite is the one exception to hermetic tests, agreed on issue #9: it
 needs the network, a real `claude`, and money, so it's opt-in and stays out
-of `check.sh` and CI. Its first full run (by hand, 2026-08-28) came back one
-genuine finding short of green — issue #128 — so until that's settled, a
-change under `skills/` runs the suite via `evals/run.sh` and the PR body says
-what was verified.
+of `check.sh` and CI. Its first and only full run (by hand, 2026-08-28, six
+cases — `review-health` came later) scored 32/34, two genuine skill findings
+short of green: issues #128 and #131. Both were fixed that evening, neither
+with its case re-run to confirm it, and nothing has run the suite since.
 
 **The suite is the verification.** A PR that changes a skill's `SKILL.md`
 runs it — or at least the cases its change touches: `evals/run.sh <case>`
