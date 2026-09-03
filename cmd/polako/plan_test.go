@@ -65,20 +65,21 @@ func TestVerbUsageListsPlan(t *testing.T) {
 // Exactly one of -vision / -brief, and never a does-the-file-exist heuristic on
 // -vision: a typo'd path has to fail loudly rather than become "no document".
 func TestPlanConfigRequiresExactlyOneSource(t *testing.T) {
-	if _, err := planConfig(&planOptions{maxIssues: 10}); err == nil {
+	sane := intakeOptions{maxIssues: 10}
+	if _, err := planConfig(&planOptions{intakeOptions: sane}); err == nil {
 		t.Error("planConfig accepted neither -vision nor -brief")
 	}
-	if _, err := planConfig(&planOptions{vision: "V.md", brief: "a horse app", maxIssues: 10}); err == nil {
+	if _, err := planConfig(&planOptions{intakeOptions: sane, vision: "V.md", brief: "a horse app"}); err == nil {
 		t.Error("planConfig accepted both -vision and -brief")
 	}
-	if _, err := planConfig(&planOptions{vision: "docs/V.md", maxIssues: 10}); err != nil {
+	if _, err := planConfig(&planOptions{intakeOptions: sane, vision: "docs/V.md"}); err != nil {
 		t.Errorf("planConfig rejected -vision alone: %v", err)
 	}
-	if _, err := planConfig(&planOptions{brief: "a dating app for horses", maxIssues: 10}); err != nil {
+	if _, err := planConfig(&planOptions{intakeOptions: sane, brief: "a dating app for horses"}); err != nil {
 		t.Errorf("planConfig rejected -brief alone: %v", err)
 	}
 	long := strings.Repeat("x ", planBriefMax)
-	if _, err := planConfig(&planOptions{brief: long, maxIssues: 10}); err == nil {
+	if _, err := planConfig(&planOptions{intakeOptions: sane, brief: long}); err == nil {
 		t.Error("planConfig accepted a -brief long enough to be a document")
 	}
 }
@@ -118,7 +119,10 @@ func TestPlanPreflightProbesParentSupport(t *testing.T) {
 	newGh := func(st *ghState) (config, *planOptions, string) {
 		cfg, _, checkout := planTestConfig(t, st)
 		writeVision(t, checkout, "VISION.md")
-		return cfg, &planOptions{vision: "VISION.md", milestone: "off", maxIssues: 10, dryRun: true}, checkout
+		return cfg, &planOptions{
+			intakeOptions: intakeOptions{maxIssues: 10, dryRun: true},
+			vision:        "VISION.md", milestone: "off",
+		}, checkout
 	}
 
 	cfg, opt, _ := newGh(&ghState{})
@@ -140,7 +144,10 @@ func TestPlanPreflightProbesParentSupport(t *testing.T) {
 func TestPlanPreflightFailsWithAdvice(t *testing.T) {
 	cfg, _, _ := planTestConfig(t, &ghState{})
 	_, _, err := planPreflight(context.Background(), &cfg,
-		&planOptions{vision: "docs/not-here.md", milestone: "off", maxIssues: 10, dryRun: true})
+		&planOptions{
+			intakeOptions: intakeOptions{maxIssues: 10, dryRun: true},
+			vision:        "docs/not-here.md", milestone: "off",
+		})
 	if err == nil {
 		t.Fatal("planPreflight accepted a -vision path with no file behind it")
 	}
@@ -184,7 +191,7 @@ func TestPlanPreflightDeclaresTheGateForARealRun(t *testing.T) {
 	writeVision(t, checkout, "VISION.md")
 
 	if _, _, err := planPreflight(context.Background(), &cfg,
-		&planOptions{vision: "VISION.md", maxIssues: 10}); err != nil {
+		&planOptions{intakeOptions: intakeOptions{maxIssues: 10}, vision: "VISION.md"}); err != nil {
 		t.Fatalf("planPreflight: %v", err)
 	}
 	st, err := readGhState(statePath)
@@ -201,7 +208,10 @@ func TestPlanPreflightDeclaresTheGateForARealRun(t *testing.T) {
 	offCfg, offState, offCheckout := planTestConfig(t, &ghState{})
 	writeVision(t, offCheckout, "VISION.md")
 	if _, _, err := planPreflight(context.Background(), &offCfg,
-		&planOptions{vision: "VISION.md", milestone: "off", maxIssues: 10}); err != nil {
+		&planOptions{
+			intakeOptions: intakeOptions{maxIssues: 10},
+			vision:        "VISION.md", milestone: "off",
+		}); err != nil {
 		t.Fatalf("planPreflight -milestone off: %v", err)
 	}
 	if st, _ = readGhState(offState); len(st.Milestones) != 0 {
@@ -228,7 +238,10 @@ func TestPlanDryRunWritesNothingAndPrintsTheInvocation(t *testing.T) {
 	cfg.shiftID = "planshift"
 	told := notifyLog(t, &cfg)
 
-	opt := planOptions{vision: "docs/VISION.md", focus: "the observability section", maxIssues: 7, dryRun: true}
+	opt := planOptions{
+		intakeOptions: intakeOptions{focus: "the observability section", maxIssues: 7, dryRun: true},
+		vision:        "docs/VISION.md",
+	}
 	buf := captureLog(t)
 	milestone, hierarchical, err := planPreflight(context.Background(), &cfg, &opt)
 	if err != nil {
@@ -469,7 +482,7 @@ func TestPlanRunSpawnsTheSkillAndNormalisesWhatItCreated(t *testing.T) {
 	buf := captureLog(t)
 	cfg, statePath := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plan")
 
-	opt := planOptions{vision: "VISION.md", maxIssues: 10}
+	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10}, vision: "VISION.md"}
 	cfg.maxIssues = opt.maxIssues
 	if err := planRun(context.Background(), cfg, opt, "VISION", io.Discard); err != nil {
 		t.Fatalf("planRun: %v", err)
@@ -512,7 +525,7 @@ func TestPlanRunRecordsAndNotifies(t *testing.T) {
 	cfg.tag = "terse"
 	told := notifyLog(t, &cfg)
 
-	opt := planOptions{vision: "VISION.md", maxIssues: 10}
+	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10}, vision: "VISION.md"}
 	cfg.maxIssues = opt.maxIssues
 	if err := planRun(context.Background(), cfg, opt, "VISION", io.Discard); err != nil {
 		t.Fatalf("planRun: %v", err)
@@ -563,7 +576,7 @@ func TestPlanRunWithNoProposalsRecordsButDoesNotNotify(t *testing.T) {
 	cfg.shiftID = "planshift"
 	told := notifyLog(t, &cfg)
 
-	opt := planOptions{vision: "VISION.md", maxIssues: 10}
+	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10}, vision: "VISION.md"}
 	cfg.maxIssues = opt.maxIssues
 	if err := planRun(context.Background(), cfg, opt, "VISION", io.Discard); err != nil {
 		t.Fatalf("planRun: %v", err)
@@ -588,7 +601,7 @@ func TestPlanRunCapsIssueCreationAndStillNormalises(t *testing.T) {
 	buf := captureLog(t)
 	cfg, statePath := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plancap")
 
-	opt := planOptions{vision: "VISION.md", maxIssues: 3}
+	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 3}, vision: "VISION.md"}
 	cfg.maxIssues = opt.maxIssues
 	if err := planRun(context.Background(), cfg, opt, "", io.Discard); err != nil {
 		t.Fatalf("a cap hit is reported, not raised: %v", err)
@@ -633,7 +646,7 @@ func TestPlanRunInterruptReportsAsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { time.Sleep(100 * time.Millisecond); cancel() }()
 
-	opt := planOptions{vision: "VISION.md", maxIssues: 10}
+	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10}, vision: "VISION.md"}
 	cfg.maxIssues = opt.maxIssues
 	err := planRun(ctx, cfg, opt, "VISION", io.Discard)
 	if !errors.Is(err, context.Canceled) {

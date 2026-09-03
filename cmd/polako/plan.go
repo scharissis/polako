@@ -64,25 +64,26 @@ const planTools = "Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git 
 // so the provenance footer can carry its sha.
 const planBriefMax = 2000
 
+// planOptions is the shared intake flag set plus the three flags that are
+// plan's alone: the vision document (or inline brief) to plan from, and the
+// batch milestone the label pass attaches.
 type planOptions struct {
-	vision         string
-	brief          string
-	focus          string
-	milestone      string
-	maxIssues      int
-	dir            string
-	claudeBin      string
-	skill          string
-	model          string
-	permissionMode string
-	tools          string
-	addTools       string
-	stall          time.Duration
-	maxCost        float64
-	metrics        string
-	tag            string
-	notifyCmd      string
-	dryRun         bool
+	intakeOptions
+	vision    string
+	brief     string
+	milestone string
+}
+
+// planVerb is the per-verb wording and defaults registerIntakeFlags takes for
+// `polako plan`.
+var planVerb = intakeVerb{
+	name:          "plan",
+	skillDefault:  defaultPlanSkill,
+	toolsDefault:  planTools,
+	dirHelp:       "path to the repository's main checkout",
+	focusExample:  "only the observability section",
+	modelCadence:  "happens once per batch",
+	dryRunSubject: "the document",
 }
 
 // runPlan is the `plan` subcommand: parse its own flags, preflight, then either
@@ -96,26 +97,9 @@ func runPlan(ctx context.Context, args []string, out io.Writer) error {
 	var opt planOptions
 	fs.StringVar(&opt.vision, "vision", "", "path (under -dir) to the vision or roadmap document to plan from")
 	fs.StringVar(&opt.brief, "brief", "", "inline vision text, in place of -vision — exactly one of the two is required")
-	fs.StringVar(&opt.focus, "focus", "", "free-text steer for the run, e.g. \"only the observability section\"")
 	fs.StringVar(&opt.milestone, "milestone", "",
 		"batch milestone title, or \"off\" to skip it (default: the vision file's name, or the brief's first words)")
-	fs.IntVar(&opt.maxIssues, "max-issues", 10, "ceiling on the issues a run may create, epics included")
-	fs.StringVar(&opt.dir, "dir", ".", "path to the repository's main checkout")
-	fs.StringVar(&opt.claudeBin, "claude", "claude", "claude binary to invoke")
-	fs.StringVar(&opt.skill, "skill", defaultPlanSkill, "skill to run")
-	fs.StringVar(&opt.model, "model", "opus",
-		"claude --model — an alias, not a pinned id: a plan run happens once per batch and steers every run downstream")
-	fs.StringVar(&opt.permissionMode, "permission-mode", "acceptEdits", "claude --permission-mode")
-	fs.StringVar(&opt.tools, "tools", planTools, "comma-separated --allowedTools for the run (replaces the default plan set)")
-	fs.StringVar(&opt.addTools, "add-tools", "", "extra --allowedTools entries, appended to -tools instead of replacing it")
-	fs.DurationVar(&opt.stall, "stall", 15*time.Minute, "kill a run with no output events for this long (0 disables)")
-	fs.Float64Var(&opt.maxCost, "max-cost", 0, "warn once the run has cost this many dollars (0 disables; advisory — a one-shot run has no next run to bound)")
-	fs.StringVar(&opt.metrics, "metrics", "", `directory for the run-data record, or "off" (default ~/.polako/metrics)`)
-	fs.StringVar(&opt.tag, "run-tag", "", "label recorded with the run, for comparing one batch against another")
-	fs.StringVar(&opt.notifyCmd, "notify", "",
-		"command run when a plan run finishes with proposals to curate (see docs/reference.md)")
-	fs.BoolVar(&opt.dryRun, "dry-run", false,
-		"resolve the document, print the claude invocation the run would get, and exit without running or writing anything")
+	registerIntakeFlags(fs, &opt.intakeOptions, planVerb)
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako plan (-vision <doc> | -brief \"<text>\") [flags]\n\n"+
 			"Propose a curated backlog from a vision document: run the plan-backlog skill\n"+
@@ -290,11 +274,11 @@ func proposedNotifyReason(created, epics int) string {
 	return fmt.Sprintf("%s %s curation — remove the %s label to queue them", s, verb, proposedLabel)
 }
 
-// planConfig validates the vision/brief pair and builds the config the gh
-// helpers take. It never stats -vision to decide whether it was given: a
-// does-the-file-exist heuristic would turn a typo'd path into a silent "no
-// document" instead of a loud failure. Preflight stats it once it is settled
-// that a path was the intent.
+// planConfig validates the vision/brief pair, then hands off to intakeConfig
+// for the config the gh helpers take. It never stats -vision to decide whether
+// it was given: a does-the-file-exist heuristic would turn a typo'd path into a
+// silent "no document" instead of a loud failure. Preflight stats it once it is
+// settled that a path was the intent.
 func planConfig(opt *planOptions) (config, error) {
 	haveVision := strings.TrimSpace(opt.vision) != ""
 	haveBrief := strings.TrimSpace(opt.brief) != ""
@@ -309,39 +293,7 @@ func planConfig(opt *planOptions) (config, error) {
 		return config{}, fmt.Errorf("-brief is %d characters — past %d that is a document: put it in a file and pass -vision",
 			len(strings.TrimSpace(opt.brief)), planBriefMax)
 	}
-	if opt.maxIssues < 1 {
-		return config{}, fmt.Errorf("-max-issues %d makes no sense — a run has to be allowed at least one issue", opt.maxIssues)
-	}
-
-	cfg := config{
-		ghBin:          "gh",
-		ghRetryWait:    ghRetryDelay,
-		claudeBin:      opt.claudeBin,
-		skill:          opt.skill,
-		model:          opt.model,
-		permissionMode: opt.permissionMode,
-		tools:          opt.tools,
-		addTools:       opt.addTools,
-		stall:          opt.stall,
-		maxCost:        opt.maxCost,
-		maxIssues:      opt.maxIssues,
-		tag:            opt.tag,
-		notifyCmd:      opt.notifyCmd,
-		dryRun:         opt.dryRun,
-		queue:          new(queueMemo),
-		// The run leaves the same two traces a drain run does. The shift id
-		// stamps the record so `stats -shift` can single this batch out; the
-		// recorder resolves -metrics exactly as the drain's does, and is a
-		// no-op under "off" or with no home directory.
-		shiftID: newShiftID(),
-		rec:     newRecorder(opt.metrics),
-	}
-	abs, err := filepath.Abs(opt.dir)
-	if err != nil {
-		return cfg, fmt.Errorf("resolving -dir: %w", err)
-	}
-	cfg.dir = abs
-	return cfg, nil
+	return intakeConfig(&opt.intakeOptions)
 }
 
 // planPreflight mirrors the drain's — binaries, a reachable repo, a checked

@@ -29,7 +29,6 @@ import (
 	"io"
 	"log"
 	"os/exec"
-	"path/filepath"
 	"time"
 )
 
@@ -52,22 +51,16 @@ const healthTools = "Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(gi
 	"Bash(gh issue list:*),Bash(gh issue create:*)," +
 	"Read,Glob,Grep,TodoWrite,Write"
 
-type healthOptions struct {
-	focus          string
-	maxIssues      int
-	dir            string
-	claudeBin      string
-	skill          string
-	model          string
-	permissionMode string
-	tools          string
-	addTools       string
-	stall          time.Duration
-	maxCost        float64
-	metrics        string
-	tag            string
-	notifyCmd      string
-	dryRun         bool
+// healthVerb is the per-verb wording and defaults registerIntakeFlags takes for
+// `polako health`. healthOptions itself is the bare shared set — see intake.go.
+var healthVerb = intakeVerb{
+	name:          "health",
+	skillDefault:  defaultHealthSkill,
+	toolsDefault:  healthTools,
+	dirHelp:       "path to the repository to audit",
+	focusExample:  "only cmd/polako",
+	modelCadence:  "happens periodically",
+	dryRunSubject: "the repository",
 }
 
 // runHealth is the `health` subcommand: parse its own flags, preflight, then
@@ -79,24 +72,7 @@ func runHealth(ctx context.Context, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("health", flag.ContinueOnError)
 	fs.SetOutput(out)
 	var opt healthOptions
-	fs.StringVar(&opt.focus, "focus", "", "free-text steer for the run, e.g. \"only cmd/polako\"")
-	fs.IntVar(&opt.maxIssues, "max-issues", 10, "ceiling on the issues a run may create, epics included")
-	fs.StringVar(&opt.dir, "dir", ".", "path to the repository to audit")
-	fs.StringVar(&opt.claudeBin, "claude", "claude", "claude binary to invoke")
-	fs.StringVar(&opt.skill, "skill", defaultHealthSkill, "skill to run")
-	fs.StringVar(&opt.model, "model", "opus",
-		"claude --model — an alias, not a pinned id: a health run happens periodically and steers every run downstream")
-	fs.StringVar(&opt.permissionMode, "permission-mode", "acceptEdits", "claude --permission-mode")
-	fs.StringVar(&opt.tools, "tools", healthTools, "comma-separated --allowedTools for the run (replaces the default health set)")
-	fs.StringVar(&opt.addTools, "add-tools", "", "extra --allowedTools entries, appended to -tools instead of replacing it")
-	fs.DurationVar(&opt.stall, "stall", 15*time.Minute, "kill a run with no output events for this long (0 disables)")
-	fs.Float64Var(&opt.maxCost, "max-cost", 0, "warn once the run has cost this many dollars (0 disables; advisory — a one-shot run has no next run to bound)")
-	fs.StringVar(&opt.metrics, "metrics", "", `directory for the run-data record, or "off" (default ~/.polako/metrics)`)
-	fs.StringVar(&opt.tag, "run-tag", "", "label recorded with the run, for comparing one batch against another")
-	fs.StringVar(&opt.notifyCmd, "notify", "",
-		"command run when a health run finishes with proposals to curate (see docs/reference.md)")
-	fs.BoolVar(&opt.dryRun, "dry-run", false,
-		"resolve the repository, print the claude invocation the run would get, and exit without running or writing anything")
+	registerIntakeFlags(fs, &opt, healthVerb)
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako health [flags]\n\n"+
 			"Propose a curated backlog from the repository's own shape: run the\n"+
@@ -202,39 +178,11 @@ func healthRun(ctx context.Context, cfg config, opt healthOptions, out io.Writer
 	}
 }
 
-// healthConfig builds the config the gh helpers take. Lighter than
-// planConfig: there is no vision/brief pair to validate, since review-health
-// takes only -dir (already required by every verb) and an optional -focus.
+// healthConfig is a thin call to intakeConfig: unlike planConfig there is no
+// vision/brief pair to validate first, since review-health takes only -dir
+// (already required by every verb) and an optional -focus.
 func healthConfig(opt *healthOptions) (config, error) {
-	if opt.maxIssues < 1 {
-		return config{}, fmt.Errorf("-max-issues %d makes no sense — a run has to be allowed at least one issue", opt.maxIssues)
-	}
-
-	cfg := config{
-		ghBin:          "gh",
-		ghRetryWait:    ghRetryDelay,
-		claudeBin:      opt.claudeBin,
-		skill:          opt.skill,
-		model:          opt.model,
-		permissionMode: opt.permissionMode,
-		tools:          opt.tools,
-		addTools:       opt.addTools,
-		stall:          opt.stall,
-		maxCost:        opt.maxCost,
-		maxIssues:      opt.maxIssues,
-		tag:            opt.tag,
-		notifyCmd:      opt.notifyCmd,
-		dryRun:         opt.dryRun,
-		queue:          new(queueMemo),
-		shiftID:        newShiftID(),
-		rec:            newRecorder(opt.metrics),
-	}
-	abs, err := filepath.Abs(opt.dir)
-	if err != nil {
-		return cfg, fmt.Errorf("resolving -dir: %w", err)
-	}
-	cfg.dir = abs
-	return cfg, nil
+	return intakeConfig(opt)
 }
 
 // healthPreflight mirrors planPreflight minus the vision-file check and the
