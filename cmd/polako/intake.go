@@ -168,7 +168,10 @@ func intakePreflight(ctx context.Context, cfg *config, opt *intakeOptions, verb 
 	hierarchical = ghCreatesSubIssues(ctx, *cfg)
 
 	warnClaudeModelEnv()
-	if err := effortFlagGate(ctx, *cfg); err != nil {
+	// Wrapped like the drain's identical gate (main.go): a real run refuses, a
+	// dry run only notes what a real run would refuse and goes on to print the
+	// invocation — "a -dry-run may still look, since it runs nothing".
+	if err := refuseOrNote(effortFlagGate(ctx, *cfg), opt.dryRun); err != nil {
 		return false, err
 	}
 
