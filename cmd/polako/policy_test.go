@@ -93,6 +93,21 @@ func TestRunChoiceApply(t *testing.T) {
 	}
 }
 
+// The six source strings are what a run record's model_source / effort_source
+// carry, and a stats reader keys on them. label/epic/size are unused until
+// #363/#364; pinning the whole set now means those tickets add code, not a
+// vocabulary a record consumer has to relearn.
+func TestSourceConstantsAreStable(t *testing.T) {
+	for got, want := range map[string]string{
+		sourceInherit: "inherit", sourceFlag: "flag", sourceRemediation: "remediation",
+		sourceLabel: "label", sourceEpic: "epic", sourceSize: "size",
+	} {
+		if got != want {
+			t.Errorf("source constant = %q, want %q", got, want)
+		}
+	}
+}
+
 func TestRunChoiceDispatchLine(t *testing.T) {
 	cases := []struct {
 		name   string
