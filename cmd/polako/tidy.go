@@ -381,8 +381,15 @@ func tidySweep(ctx context.Context, cfg config, watched int) {
 				fix = fmt.Sprintf("deal with what is in %s, then clear it with `git worktree remove --force %s`",
 					r.worktreePath, r.worktreePath)
 			}
-			narrate(sevWarning, "%s%d %s but its worktree could not be reclaimed: %s — %s",
-				cfg.branchPrefix, r.issue, r.why, r.reason, fix)
+			// r.why is "" only when GitHub's state could not be read at all — in
+			// which case r.reason already says so, and leading with a merge that
+			// was never confirmed would be wrong.
+			lead := fmt.Sprintf("%s%d could not be reclaimed", cfg.branchPrefix, r.issue)
+			if r.why != "" {
+				lead = fmt.Sprintf("%s%d %s but its worktree could not be reclaimed",
+					cfg.branchPrefix, r.issue, r.why)
+			}
+			narrate(sevWarning, "%s: %s — %s", lead, r.reason, fix)
 		case r.reason == "still open":
 			// The overwhelmingly common verdict — an issue in the queue, in
 			// flight or parked — and it means nothing is wrong. Saying it every
