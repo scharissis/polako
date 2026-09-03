@@ -343,6 +343,22 @@ branch-protection review requirement too, since it reads the reviews
 themselves rather than GitHub's summary `reviewDecision`, empty in that
 case.
 
+## Model and effort per issue
+
+**Two label families let a maintainer steer one issue's run.** `model:<value>`
+— `model:opus`, `model:sonnet`, `model:haiku`, `model:best`, `model:default`,
+or `model:<full id>` — and `effort:<level>`, one of `low`, `medium`, `high`,
+`xhigh`, `max`. They are read once when the issue is picked up and beat the
+`-model` / `-effort` flags: a maintainer who knows one issue is subtle, or
+trivial, outranks the shift default. `model:default` is the explicit "use the
+account's own default here" — it passes no `--model` even when the flag is set.
+
+polako never creates these labels: applying one for the first time creates it
+in the same GitHub gesture, and only someone with triage rights can. The prefix
+matches case-insensitively. Two labels of one family, or a typo like
+`effort:medim`, warns and falls through to the flag rather than guessing. A
+label that fails to read falls through too — it is a preference, not a gate.
+
 ## Account-level stops
 
 **Refused credentials stop the shift immediately.** A resume can't mint a
