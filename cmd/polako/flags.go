@@ -59,7 +59,11 @@ type config struct {
 	addTools       string
 	permissionMode string
 	model          string
-	poll           time.Duration
+	// effort is claude --effort — how hard a run thinks, one of the CLI's
+	// closed set (effortLevels) or empty. Empty omits the flag and lets the
+	// CLI resolve effort the way it would for a terminal session.
+	effort string
+	poll   time.Duration
 	retries        int
 	retryWait      time.Duration
 	stall          time.Duration
@@ -293,6 +297,8 @@ func parseFlags() config {
 		"extra --allowedTools entries, appended to -tools instead of replacing it")
 	flag.StringVar(&cfg.permissionMode, "permission-mode", "acceptEdits", "claude --permission-mode")
 	flag.StringVar(&cfg.model, "model", "", "claude --model for every run (empty = whatever the CLI defaults to)")
+	flag.StringVar(&cfg.effort, "effort", "",
+		"claude --effort for every run — one of "+strings.Join(effortLevels, ", ")+" (empty = whatever the CLI defaults to)")
 	flag.DurationVar(&cfg.poll, "poll", 5*time.Minute, "interval between GitHub checks while waiting")
 	flag.IntVar(&cfg.retries, "retries", 3, "resume attempts after a crashed claude run (nonzero exit)")
 	flag.DurationVar(&cfg.retryWait, "retry-wait", 30*time.Second, "wait before each resume attempt")
@@ -344,6 +350,13 @@ func parseFlags() config {
 		log.Fatalf("%v", err)
 	}
 	flag.Parse()
+
+	// Rejected here, before the process commits to anything: an -effort the CLI
+	// cannot take would otherwise surface as a usage error an hour in, looking
+	// like a crash. Same exit shape as an unparseable env default above.
+	if err := validateEffort(cfg.effort); err != nil {
+		log.Fatalf("%v", err)
+	}
 
 	// Answered before anything else a flag implies, so it stays usable on a
 	// machine where -dir points nowhere: this is the flag an operator reaches

@@ -3,7 +3,7 @@ package main
 // The flags and config `polako plan` and `polako health` share. Both verbs run
 // one skill unattended behind the `proposed` curation gate labelpass.go
 // enforces; they differ in what they plan from and whether a milestone gets
-// attached, not in the 15 knobs they expose or the lightweight config they
+// attached, not in the 16 knobs they expose or the lightweight config they
 // build from them. That common part lives here, the way the shared label pass
 // lives in labelpass.go.
 
@@ -16,6 +16,7 @@ import (
 	"log"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -29,6 +30,7 @@ type intakeOptions struct {
 	claudeBin      string
 	skill          string
 	model          string
+	effort         string
 	permissionMode string
 	tools          string
 	addTools       string
@@ -57,7 +59,7 @@ type intakeVerb struct {
 	dryRunSubject string // -dry-run: "the document" / "the repository"
 }
 
-// registerIntakeFlags registers the 15 flags plan and health share on fs,
+// registerIntakeFlags registers the 16 flags plan and health share on fs,
 // binding them into opt. Each flag's name, default and help string is exactly
 // what the two verbs registered separately before — intakeVerb carries every
 // phrase that differed.
@@ -69,6 +71,8 @@ func registerIntakeFlags(fs *flag.FlagSet, opt *intakeOptions, v intakeVerb) {
 	fs.StringVar(&opt.skill, "skill", v.skillDefault, "skill to run")
 	fs.StringVar(&opt.model, "model", "opus",
 		"claude --model — an alias, not a pinned id: a "+v.name+" run "+v.modelCadence+" and steers every run downstream")
+	fs.StringVar(&opt.effort, "effort", "",
+		"claude --effort — one of "+strings.Join(effortLevels, ", ")+" (empty = whatever the CLI defaults to)")
 	fs.StringVar(&opt.permissionMode, "permission-mode", "acceptEdits", "claude --permission-mode")
 	fs.StringVar(&opt.tools, "tools", v.toolsDefault,
 		"comma-separated --allowedTools for the run (replaces the default "+v.name+" set)")
@@ -90,6 +94,9 @@ func intakeConfig(opt *intakeOptions) (config, error) {
 	if opt.maxIssues < 1 {
 		return config{}, fmt.Errorf("-max-issues %d makes no sense — a run has to be allowed at least one issue", opt.maxIssues)
 	}
+	if err := validateEffort(opt.effort); err != nil {
+		return config{}, err
+	}
 
 	cfg := config{
 		ghBin:          "gh",
@@ -97,6 +104,7 @@ func intakeConfig(opt *intakeOptions) (config, error) {
 		claudeBin:      opt.claudeBin,
 		skill:          opt.skill,
 		model:          opt.model,
+		effort:         opt.effort,
 		permissionMode: opt.permissionMode,
 		tools:          opt.tools,
 		addTools:       opt.addTools,
