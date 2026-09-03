@@ -285,8 +285,76 @@ func (t *tailWriter) String() string { return string(t.buf) }
 // dispatchClaude is one attempt at the invocation execClaude describes: it
 // starts the process, streams it and reports what it did. The split exists for
 // the one caller above, which may have to make the same attempt twice.
+//
+// The four steps read top to bottom: startClaude spawns the child, armWatchdogs
+// arms the stall, budget and heartbeat kills, scanEvents reads the event stream,
+// and claudeVerdict turns what happened into one of nine return values. The
+// teardown order between scanEvents and claudeVerdict is load-bearing too —
+// join the heartbeat before the finish line, kill on a read error before
+// cmd.Wait — so it stays inline here rather than moving into a helper.
 func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes string, limit time.Duration) (runReport, error) {
 	rep := runReport{sessionID: resumeID, turns: -1, exitCode: -1}
+	invokeStart := time.Now()
+
+	proc, err := startClaude(ctx, cfg, prompt, resumeID)
+	if err != nil {
+		return rep, err
+	}
+
+	w := armWatchdogs(cfg, proc.cmd, invokeStart, limit)
+	defer w.stop()
+
+	missing, scanErr := scanEvents(proc.stdout, cfg, proc.cmd, invokes, w, &rep)
+
+	// The stream is over, so the terminal is about to get the finish line and
+	// nothing more from this invocation — stop the heartbeat and wait for it to
+	// return before that line, so it cannot print past "finished (…)".
+	w.stopHeartbeat()
+
+	// A read that failed leaves the child writing into a pipe nobody is
+	// draining, so it blocks and cmd.Wait never returns — which is why the kill
+	// comes before the wait rather than after it. Left to itself the failure
+	// surfaced as a -stall kill up to fifteen minutes later, reported as a stall.
+	if scanErr != nil {
+		_ = proc.cmd.Process.Kill()
+	}
+
+	err = proc.cmd.Wait()
+	// Only ever returned in place of a nil: the process exited cleanly and
+	// something it left behind was still holding the stderr pipe when
+	// WaitDelay ran out. That is a fact about an orphan, not about the run.
+	if errors.Is(err, exec.ErrWaitDelay) {
+		err = nil
+	}
+	// The copier is done once Wait returns, so whatever the child left
+	// unterminated can be rendered now.
+	proc.stderrLines.flush()
+	if proc.cmd.ProcessState != nil {
+		rep.exitCode = proc.cmd.ProcessState.ExitCode()
+	}
+	rep.stalled = w.stalled.Load()
+	rep.interrupted = ctx.Err() != nil
+	rep.overBudget = w.overspent.Load()
+	rep.stderrTail = proc.errTail.String()
+
+	return rep, claudeVerdict(&rep, cfg, prompt, missing, limit, scanErr, err)
+}
+
+// claudeProc is the handle to a started child: the command, its stdout pipe for
+// the scanner, and the two stderr sinks the teardown reads back — stderrLines to
+// flush the child's last unterminated line, errTail for the diagnosis stdout
+// cannot carry.
+type claudeProc struct {
+	cmd         *exec.Cmd
+	stdout      io.ReadCloser
+	stderrLines *lineWriter
+	errTail     *tailWriter
+}
+
+// startClaude builds one headless claude invocation, wires its output, and
+// starts it. On any error dispatchClaude still returns the initialised
+// runReport: its sessionID is what a retry resumes.
+func startClaude(ctx context.Context, cfg config, prompt, resumeID string) (*claudeProc, error) {
 	args := buildArgs(cfg, prompt, resumeID)
 	detail.Printf("running: %s %s", cfg.claudeBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.claudeBin, args...)
@@ -308,34 +376,60 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	cmd.WaitDelay = stderrWaitDelay
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return rep, err
+		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
-		return rep, err
+		return nil, err
 	}
+	return &claudeProc{cmd: cmd, stdout: stdout, stderrLines: stderrLines, errTail: errTail}, nil
+}
+
+// watchdogs bundles the three kills armWatchdogs arms around a running child and
+// the state they share with the scan loop. The atomics are written on one side
+// and read on the other — lastEvent by the scan loop and the stall goroutine,
+// hbTools/hbPhase by the scan loop and the heartbeat, stalled and overspent by a
+// goroutine and the teardown — so the struct is always used by pointer. stop and
+// stopHeartbeat are two shutdown points, kept apart because the heartbeat has to
+// be joined mid-teardown while the other two are torn down on return.
+type watchdogs struct {
+	lastEvent atomic.Int64
+	hbTools   atomic.Int64
+	hbPhase   atomic.Int64
+	stalled   atomic.Bool
+	overspent atomic.Bool
+
+	watchDone chan struct{} // closed by stop to end the stall goroutine
+	hbDone    chan struct{} // closed by stopHeartbeat to end the heartbeat
+	hbStopped chan struct{} // closed by the heartbeat goroutine once it has returned
+	budget    *time.Timer   // nil when limit is 0
+}
+
+// armWatchdogs starts the stall, budget and heartbeat watchdogs for cmd and
+// returns the handle the scan loop feeds and the teardown reads.
+func armWatchdogs(cfg config, cmd *exec.Cmd, invokeStart time.Time, limit time.Duration) *watchdogs {
+	w := &watchdogs{
+		watchDone: make(chan struct{}),
+		hbDone:    make(chan struct{}),
+		hbStopped: make(chan struct{}),
+	}
+	w.lastEvent.Store(invokeStart.UnixNano())
 
 	// Stall watchdog: if no events arrive for cfg.stall, kill the run.
 	// The caller's retry logic then resumes the session, context intact.
-	invokeStart := time.Now()
-	var lastEvent atomic.Int64
-	lastEvent.Store(invokeStart.UnixNano())
-	var stalled atomic.Bool
-	watchDone := make(chan struct{})
-	defer close(watchDone)
 	if cfg.stall > 0 {
 		go func() {
 			t := time.NewTicker(sampleTick(cfg.stall))
 			defer t.Stop()
 			for {
 				select {
-				case <-watchDone:
+				case <-w.watchDone:
 					return
 				case <-t.C:
-					idle := time.Since(time.Unix(0, lastEvent.Load()))
+					idle := time.Since(time.Unix(0, w.lastEvent.Load()))
 					if idle > cfg.stall {
 						narrate(sevWarning, "no activity for %s — killing the run to resume it",
 							idle.Round(time.Millisecond))
-						stalled.Store(true)
+						w.stalled.Store(true)
 						_ = cmd.Process.Kill()
 						return
 					}
@@ -349,15 +443,13 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	// is never silent — it emits events the whole way through the three hours
 	// it spends going nowhere. A timer is all it takes, because unlike idleness
 	// there is nothing to sample.
-	var overspent atomic.Bool
 	if limit > 0 {
-		budget := time.AfterFunc(limit, func() {
+		w.budget = time.AfterFunc(limit, func() {
 			log.Printf("this run has used the %s of -max-issue-time the issue had left — killing it",
 				dur(limit))
-			overspent.Store(true)
+			w.overspent.Store(true)
 			_ = cmd.Process.Kill()
 		})
-		defer budget.Stop()
 	}
 
 	// Heartbeat: while the terminal itself has been quiet for cfg.heartbeat,
@@ -378,25 +470,22 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	// hbTools and hbPhase are the scan loop's publish-only mirror of two
 	// values the goroutine may not read straight from rep/el without racing
 	// the loop that fills them. Nothing branches on any of this.
-	var hbTools, hbPhase atomic.Int64
-	hbDone := make(chan struct{})
-	hbStopped := make(chan struct{}) // closed once the heartbeat goroutine has returned
 	if cfg.heartbeat > 0 {
 		go func() {
-			defer close(hbStopped)
+			defer close(w.hbStopped)
 			t := time.NewTicker(sampleTick(cfg.heartbeat))
 			defer t.Stop()
 			for {
 				select {
-				case <-hbDone:
+				case <-w.hbDone:
 					return
 				case <-t.C:
 					// Closed-channel and tick can both be ready; a second,
 					// non-blocking check keeps a heartbeat from landing after
 					// the finish line, which is emitted once this goroutine has
-					// joined (see the <-hbStopped below).
+					// joined (see stopHeartbeat).
 					select {
-					case <-hbDone:
+					case <-w.hbDone:
 						return
 					default:
 					}
@@ -411,20 +500,46 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 						continue
 					}
 					narrate(sevProgress, "[claude] %s", heartbeatLine(
-						time.Since(invokeStart), int(hbTools.Load()), stage(hbPhase.Load())))
+						time.Since(invokeStart), int(w.hbTools.Load()), stage(w.hbPhase.Load())))
 				}
 			}
 		}()
 	} else {
-		close(hbStopped)
+		close(w.hbStopped)
 	}
+	return w
+}
 
+// stopHeartbeat ends the heartbeat goroutine and waits for it to return. Called
+// from the teardown ahead of claudeVerdict's finish line, so a "still working"
+// line can never print past "finished (…)", and ahead of cmd.Wait, which can
+// block on an orphan holding the stderr pipe.
+func (w *watchdogs) stopHeartbeat() {
+	close(w.hbDone)
+	<-w.hbStopped
+}
+
+// stop tears down the stall goroutine and the budget timer. Deferred in
+// dispatchClaude: the teardown reads w.stalled and w.overspent first, exactly as
+// it read the bare atomics before the two defers this replaces.
+func (w *watchdogs) stop() {
+	close(w.watchDone)
+	if w.budget != nil {
+		w.budget.Stop()
+	}
+}
+
+// scanEvents reads the child's event stream to EOF, updating rep and the
+// watchdog mirrors as it goes and killing the run on the two conditions the
+// reader owns: a prompt whose slash command the session's init inventory does
+// not list, and plan's/health's -max-issues cap. It returns the missing-command
+// diagnosis (empty unless that kill fired) and the scanner's error.
+func scanEvents(stdout io.Reader, cfg config, cmd *exec.Cmd, invokes string, w *watchdogs, rep *runReport) (missing string, scanErr error) {
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 64*1024), maxEventBytes)
-	missing := "" // the diagnosis, once the inventory rules the prompt's command out
 	var el eventLog
 	for sc.Scan() {
-		lastEvent.Store(time.Now().UnixNano())
+		w.lastEvent.Store(time.Now().UnixNano())
 		ev, ok := parseEvent(sc.Bytes())
 		if !ok {
 			// Junk on stdout, or an event whose JSON does not fit the schema
@@ -439,8 +554,8 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 		}
 		rep.observe(ev)
 		el.event(ev)
-		hbTools.Store(int64(rep.toolUses))
-		hbPhase.Store(int64(el.stages.phase()))
+		w.hbTools.Store(int64(rep.toolUses))
+		w.hbPhase.Store(int64(el.stages.phase()))
 		// An unknown slash command no longer shows up as a zero-turn exit:
 		// the CLI (2.1.85) answers it with an ordinary-looking success
 		// result. The init event's command inventory is the early tell, and
@@ -466,40 +581,15 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 			_ = cmd.Process.Kill()
 		}
 	}
+	return missing, sc.Err()
+}
 
-	// The stream is over, so the terminal is about to get the finish line and
-	// nothing more from this invocation — stop the heartbeat and wait for it to
-	// return before that line, so it cannot print past "finished (…)". Kept
-	// ahead of cmd.Wait, which can block on an orphan holding the stderr pipe.
-	close(hbDone)
-	<-hbStopped
-
-	// A read that failed leaves the child writing into a pipe nobody is
-	// draining, so it blocks and cmd.Wait never returns — which is why the kill
-	// comes before the wait rather than after it. Left to itself the failure
-	// surfaced as a -stall kill up to fifteen minutes later, reported as a stall.
-	scanErr := sc.Err()
-	if scanErr != nil {
-		_ = cmd.Process.Kill()
-	}
-
-	err = cmd.Wait()
-	// Only ever returned in place of a nil: the process exited cleanly and
-	// something it left behind was still holding the stderr pipe when
-	// WaitDelay ran out. That is a fact about an orphan, not about the run.
-	if errors.Is(err, exec.ErrWaitDelay) {
-		err = nil
-	}
-	// The copier is done once Wait returns, so whatever the child left
-	// unterminated can be rendered now.
-	stderrLines.flush()
-	if cmd.ProcessState != nil {
-		rep.exitCode = cmd.ProcessState.ExitCode()
-	}
-	rep.stalled = stalled.Load()
-	rep.interrupted = ctx.Err() != nil
-	rep.overBudget = overspent.Load()
-	rep.stderrTail = errTail.String()
+// claudeVerdict emits the run's one finish line and then turns what happened
+// into the caller's outcome. The nine arms are in a deliberate order — each
+// comment says why its arm sits where it does — and every one is load-bearing:
+// skillMissing, overBudget, capped, stalled, scanErr, authFailed, limitMsg,
+// zero-turn, then the bare wait error.
+func claudeVerdict(rep *runReport, cfg config, prompt, missing string, limit time.Duration, scanErr, waitErr error) error {
 	// One finish line for the run, emitted here rather than per result event:
 	// the CLI sends a result per dequeued prompt, so a run that woke on five
 	// background tasks streamed six, and observe has already summed the
@@ -507,26 +597,26 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	// arrived at all — a crash, stall or interrupt reaches this line too, and
 	// each is reported as itself below, not as a finish.
 	if rep.hasResult {
-		sev, line := finishLine(&rep)
+		sev, line := finishLine(rep)
 		narrate(sev, "%s", line)
 	}
 	if rep.skillMissing {
-		return rep, fmt.Errorf("%w: %s", errNoWork, missing)
+		return fmt.Errorf("%w: %s", errNoWork, missing)
 	}
 	// Ahead of the stall and crash reports, because the kill produced both: the
 	// caller has to see the deliberate stop rather than the crash it looks like.
 	if rep.overBudget {
-		return rep, fmt.Errorf("%w: the run used the %s of -max-issue-time this issue had left",
+		return fmt.Errorf("%w: the run used the %s of -max-issue-time this issue had left",
 			errBudget, dur(limit))
 	}
 	// Ahead of the stall report for the same reason overBudget is: the cap kill
 	// also ends the scan, and the caller has to see it as the deliberate stop it
 	// is rather than the stall it would otherwise be read as.
 	if rep.capped {
-		return rep, fmt.Errorf("%w of %d", errIssueCap, cfg.maxIssues)
+		return fmt.Errorf("%w of %d", errIssueCap, cfg.maxIssues)
 	}
 	if rep.stalled {
-		return rep, fmt.Errorf("run stalled: no output events for %s", cfg.stall)
+		return fmt.Errorf("run stalled: no output events for %s", cfg.stall)
 	}
 	// Behind the deliberate kills above, which close the pipe themselves and so
 	// end the scan at EOF rather than in an error, and ahead of the crash report
@@ -534,7 +624,7 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	// rather than a dead end, so the caller resumes: a resumed session re-reads
 	// where it got to and need not produce the same oversized event again.
 	if scanErr != nil {
-		return rep, fmt.Errorf("could not read the event stream: %w — a single event larger than "+
+		return fmt.Errorf("could not read the event stream: %w — a single event larger than "+
 			"%d MB is the likeliest cause, and the run was killed rather than left blocked "+
 			"writing into a pipe nobody was reading", scanErr, maxEventBytes/(1024*1024))
 	}
@@ -543,17 +633,17 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	// worth resuming, but a clean exit carrying the same result would be no
 	// less of a dead end.
 	if rep.authFailed {
-		return rep, errAuth
+		return errAuth
 	}
 	// The same reasoning one wall over, and equally not gated on the exit code:
 	// the refusal is the result text, whatever the exit said. Unlike a refused
 	// token this wall falls on its own, so the caller waits for the reset the
 	// message names rather than stopping the drain.
 	if rep.limitMsg != "" {
-		return rep, fmt.Errorf("%w: %s", errLimit, rep.limitMsg)
+		return fmt.Errorf("%w: %s", errLimit, rep.limitMsg)
 	}
-	if err == nil && rep.turns == 0 {
-		return rep, fmt.Errorf("%w: %q produced no work", errNoWork, prompt)
+	if waitErr == nil && rep.turns == 0 {
+		return fmt.Errorf("%w: %q produced no work", errNoWork, prompt)
 	}
-	return rep, err
+	return waitErr
 }
