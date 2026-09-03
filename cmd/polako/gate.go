@@ -63,17 +63,27 @@ func refuseOrNote(err error, dryRun bool) error {
 // it: a broken CLI has its own louder failure coming, and "your CLI is too
 // old" would be the wrong diagnosis for it.
 func effortFlagGate(ctx context.Context, cfg config) error {
-	if cfg.effort == "" && cfg.remediationEffort == "" {
+	// Both flags map to the same --effort, so both are named — an operator who
+	// set both and gets told to "drop -effort" hits the identical wall on the
+	// other one next.
+	var setFlags []string
+	if cfg.effort != "" {
+		setFlags = append(setFlags, "-effort "+cfg.effort)
+	}
+	if cfg.remediationEffort != "" {
+		setFlags = append(setFlags, "-remediation-effort "+cfg.remediationEffort)
+	}
+	if len(setFlags) == 0 {
 		return nil
 	}
-	set := "-effort " + cfg.effort
-	if cfg.effort == "" {
-		set = "-remediation-effort " + cfg.remediationEffort
+	set, drop := strings.Join(setFlags, " and "), "drop it"
+	if len(setFlags) > 1 {
+		drop = "drop them"
 	}
 	out, err := capture(ctx, cfg.dir, cfg.claudeBin, "--help")
 	if err != nil {
 		log.Printf("could not check whether claude takes --effort (%v) — running anyway; "+
-			"a run that then rejects -effort needs a newer CLI", err)
+			"a run that then rejects %s needs a newer CLI", err, set)
 		return nil
 	}
 	if strings.Contains(string(out), "--effort") {
@@ -87,7 +97,7 @@ func effortFlagGate(ctx context.Context, cfg config) error {
 		v = "unknown version"
 	}
 	return fmt.Errorf("%s is set, but claude (%s) does not list --effort in `claude --help` — "+
-		"update the CLI, or drop the flag", set, v)
+		"update the CLI, or %s", set, v, drop)
 }
 
 // warnClaudeModelEnv says out loud when the operator's environment carries a

@@ -1695,6 +1695,13 @@ func TestEffortFlagGate(t *testing.T) {
 		!strings.Contains(err.Error(), "-remediation-effort") {
 		t.Errorf("the error should name -remediation-effort, got %v", err)
 	}
+	// Both set: name both, so the operator does not fix one and hit the other.
+	both := config{claudeBin: cfg.claudeBin, dir: cfg.dir, effort: "high", remediationEffort: "medium"}
+	err = effortFlagGate(context.Background(), both)
+	if err == nil || !strings.Contains(err.Error(), "-effort high") ||
+		!strings.Contains(err.Error(), "-remediation-effort medium") {
+		t.Errorf("with both effort flags set the error should name both, got %v", err)
+	}
 
 	// A probe that will not run at all is best-effort: warn, don't block —
 	// a broken CLI has its own louder failure coming.
