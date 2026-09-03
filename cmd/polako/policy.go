@@ -1,19 +1,14 @@
 package main
 
 // The policy seam: which model and effort a run gets, and where that choice
-// came from. It sorts the seven run reasons (metrics.go) into two classes —
-// implementation and remediation — and resolves a model, an effort and a
-// source for each.
-//
-// Today it holds one lever the CLI does not: a remediation run — a rebase, a
-// red-check fix, a review reply — is a shorter, narrower task than
-// implementing an issue, so -remediation-model / -remediation-effort can point
-// it somewhere cheaper. Everything else resolves against the -model/-effort
-// cell, then to inherit (the flag omitted, the CLI's own default).
-//
-// #363 and #364 add label, epic and size inputs. The source enum spells them
-// now so a record's model_source / effort_source value set is whole and those
-// tickets add no new spellings.
+// came from. It sorts the seven run reasons (metrics.go) into implementation
+// and remediation classes and resolves a model, an effort and a source for
+// each. Today's one lever the CLI lacks: a remediation run (rebase, red-check
+// fix, review reply) is narrower work, so -remediation-model /
+// -remediation-effort can point it somewhere cheaper; everything else
+// resolves against -model/-effort, then inherit. #363/#364 add label, epic
+// and size inputs — the source enum spells those now so a record's
+// model_source / effort_source value set never has to grow.
 
 import (
 	"fmt"
