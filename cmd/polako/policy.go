@@ -115,12 +115,14 @@ func labelPolicy(labels []ghLabel) labelChoice {
 }
 
 // labelValues returns the suffix of every label whose name begins with prefix,
-// matched case-insensitively on the prefix alone.
+// matched case-insensitively on the prefix alone. The suffix is trimmed, so
+// `model: opus` — the spacing GitHub's label UI nudges toward — resolves like
+// `model:opus` rather than failing the shape check.
 func labelValues(labels []ghLabel, prefix string) []string {
 	var vs []string
 	for _, l := range labels {
 		if len(l.Name) >= len(prefix) && strings.EqualFold(l.Name[:len(prefix)], prefix) {
-			vs = append(vs, l.Name[len(prefix):])
+			vs = append(vs, strings.TrimSpace(l.Name[len(prefix):]))
 		}
 	}
 	return vs

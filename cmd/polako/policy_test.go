@@ -107,6 +107,8 @@ func TestLabelPolicy(t *testing.T) {
 			model: "sonnet", modelSet: true, effort: "high", effortSet: true},
 		{name: "case-insensitive prefix", labels: []string{"MODEL:opus", "Effort:max"},
 			model: "opus", modelSet: true, effort: "max", effortSet: true},
+		{name: "space after the colon is trimmed", labels: []string{"model: sonnet", "effort: high"},
+			model: "sonnet", modelSet: true, effort: "high", effortSet: true},
 		{name: "model:default is set but empty", labels: []string{"model:default"}, modelSet: true},
 		{name: "model:DEFAULT too", labels: []string{"model:DEFAULT"}, modelSet: true},
 		{name: "two model labels drop the pair", labels: []string{"model:opus", "model:sonnet"}},
