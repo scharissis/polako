@@ -15,6 +15,7 @@ import (
 	"io"
 	"log"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -183,6 +184,29 @@ func issueCloseTool(issue int) string {
 	return fmt.Sprintf("Bash(gh issue close %d:*)", issue)
 }
 
+// effortLevels is the closed set `claude --effort` takes. Closed because the
+// CLI's is: a level polako let through that the CLI then rejected would fail a
+// run for a typo. `ultracode`, which the CLI's docs also list, is deliberately
+// not here — it is a multi-agent workflow mode, not a level, and an unattended
+// run has no business fanning out a fleet.
+var effortLevels = []string{"low", "medium", "high", "xhigh", "max"}
+
+// validateEffort checks -effort against effortLevels. Empty passes: the flag is
+// omitted and the CLI resolves effort the way it would for a terminal session.
+// The error says which word to pass instead, because this runs unattended and
+// its output is the only diagnostic.
+func validateEffort(effort string) error {
+	if effort == "" || slices.Contains(effortLevels, effort) {
+		return nil
+	}
+	if effort == "ultracode" {
+		return fmt.Errorf("-effort ultracode is a multi-agent workflow mode, not an effort level — "+
+			"an unattended run must not fan out a fleet; pass one of %s", strings.Join(effortLevels, ", "))
+	}
+	return fmt.Errorf("-effort %q is not a claude effort level — pass one of %s",
+		effort, strings.Join(effortLevels, ", "))
+}
+
 // buildArgs assembles one headless claude invocation.
 func buildArgs(cfg config, prompt, resumeID string) []string {
 	var args []string
@@ -192,6 +216,14 @@ func buildArgs(cfg config, prompt, resumeID string) []string {
 	args = append(args, "-p", prompt, "--permission-mode", cfg.permissionMode)
 	if cfg.model != "" {
 		args = append(args, "--model", cfg.model)
+	}
+	// --effort only on a fresh run: the session already carries the effort it
+	// was started with, so re-passing it on a resume is at best redundant and
+	// at worst a usage error, depending on whether the CLI treats effort as
+	// session-fixed (unverified — see docs/plans/model-and-effort.md). Either
+	// way "a resume keeps its run's choice" holds without the flag.
+	if cfg.effort != "" && resumeID == "" {
+		args = append(args, "--effort", cfg.effort)
 	}
 	// No --remote-control, whether -remote is on or off: today's CLI takes the
 	// flag under -p and ignores it (see config.remote), so passing it buys an

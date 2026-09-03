@@ -163,6 +163,12 @@ func buildFakeCLI() {
 // at all.
 const fakeUsageEnv = "POLAKO_FAKE_USAGE"
 
+// fakeEffortHelpEnv toggles whether fakeClaude's `--help` lists `--effort`.
+// Unset means it does — today's CLI — so effortFlagGate's probe passes wherever
+// a test sets -effort without opting out. Set to "0" to model an older CLI that
+// predates the flag.
+const fakeEffortHelpEnv = "POLAKO_FAKE_EFFORT_HELP"
+
 // fakeClaude stands in for `claude -p ... --output-format stream-json`.
 func fakeClaude(mode string) int {
 	emit := func(line string) {
@@ -185,6 +191,16 @@ func fakeClaude(mode string) int {
 	// for the same reason plugin list is.
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
 		emit("2.1.99 (Claude Code)")
+		return 0
+	}
+	// `claude --help` is effortFlagGate's capability probe — argv-dispatched
+	// like --version, and only ever run when a test sets -effort.
+	if len(os.Args) == 2 && os.Args[1] == "--help" {
+		emit("Usage: claude [options] [command]")
+		emit("  --model <model>   an alias for the latest model")
+		if os.Getenv(fakeEffortHelpEnv) != "0" {
+			emit("  --effort <level>  low, medium, high, xhigh, max")
+		}
 		return 0
 	}
 	// probeUsage's call — `claude -p "/usage" --output-format json` — is a
@@ -1531,6 +1547,81 @@ func TestBuildArgsPassesTheRequestedModel(t *testing.T) {
 	}
 }
 
+// -effort is the other lever a batch comparison varies, and the one Anthropic
+// says to pull before a model cascade — a run that dropped it silently would
+// make every effort comparison a comparison of the same effort.
+func TestBuildArgsPassesTheRequestedEffort(t *testing.T) {
+	cfg := config{permissionMode: "acceptEdits", tools: "Read", effort: "medium"}
+	args := buildArgs(cfg, "p", "")
+	i := slices.Index(args, "--effort")
+	if i < 0 || args[i+1] != "medium" {
+		t.Errorf("-effort should reach the invocation, got %v", args)
+	}
+	if slices.Contains(buildArgs(config{tools: "Read"}, "p", ""), "--effort") {
+		t.Error("an unset -effort must leave the CLI's own default alone")
+	}
+	// Not on a resume: the session already has its effort, and re-passing it
+	// risks a usage error against a CLI that fixes effort at session start.
+	if slices.Contains(buildArgs(cfg, "continue", "sess-1"), "--effort") {
+		t.Error("a resume must not re-pass --effort")
+	}
+}
+
+// The effort enum is closed because the CLI's is: a word polako let through
+// that the CLI then rejected would fail a run for a typo. ultracode is the one
+// the CLI's docs list that is refused on purpose.
+func TestValidateEffort(t *testing.T) {
+	for _, ok := range []string{"", "low", "medium", "high", "xhigh", "max"} {
+		if err := validateEffort(ok); err != nil {
+			t.Errorf("validateEffort(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{"ultracode", "ultra", "medim", "HIGH", "extreme", "5"} {
+		if err := validateEffort(bad); err == nil {
+			t.Errorf("validateEffort(%q) = nil, want it refused", bad)
+		}
+	}
+	if err := validateEffort("ultracode"); err == nil || !strings.Contains(err.Error(), "fleet") {
+		t.Errorf("ultracode should be refused with its own reason, got %v", err)
+	}
+}
+
+// effortFlagGate fails the run before it starts when -effort is set and the
+// installed CLI has no --effort — otherwise the usage error lands an hour in,
+// looks like a crash, and burns every resume. The message names the CLI
+// version so the operator knows which install to update.
+func TestEffortFlagGate(t *testing.T) {
+	t.Setenv(fakeClaudeEnv, "stream") // any mode: --help is argv-dispatched ahead of it
+	cfg := config{claudeBin: fakeCLI(t), dir: t.TempDir()}
+
+	// Unset -effort: no probe, no error, whatever the CLI is.
+	if err := effortFlagGate(context.Background(), cfg); err != nil {
+		t.Errorf("effortFlagGate with no -effort = %v, want nil", err)
+	}
+
+	cfg.effort = "medium"
+	if err := effortFlagGate(context.Background(), cfg); err != nil {
+		t.Errorf("a CLI whose --help lists --effort should pass, got %v", err)
+	}
+
+	t.Setenv(fakeEffortHelpEnv, "0") // model an older CLI
+	err := effortFlagGate(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("effortFlagGate let -effort through against a CLI with no --effort")
+	}
+	if !strings.Contains(err.Error(), "2.1.99") {
+		t.Errorf("the error should name the CLI version, got %v", err)
+	}
+
+	// A probe that will not run at all is best-effort: warn, don't block —
+	// a broken CLI has its own louder failure coming.
+	broken := cfg
+	broken.claudeBin = filepath.Join(t.TempDir(), "no-such-claude")
+	if err := effortFlagGate(context.Background(), broken); err != nil {
+		t.Errorf("a failed --help probe should not block the run, got %v", err)
+	}
+}
+
 // -remote asks for something no CLI delivers in print mode, so the invocation
 // must carry nothing for it either way round — issue #82. Both settings are
 // pinned because only the pair says what the flag means now: on is not "sends
@@ -1683,6 +1774,8 @@ func TestPreflightPairsSaysNothingUnasked(t *testing.T) {
 func TestPreflightPairsGatesAndOrdersEveryRow(t *testing.T) {
 	cfg := config{
 		label:       "ready",
+		model:       "opus",
+		effort:      "medium",
 		dryRun:      true,
 		maxCost:     15,
 		usage:       &usageSnapshot{pools: []usagePool{{name: "session", percent: 10}}},
@@ -1695,7 +1788,7 @@ func TestPreflightPairsGatesAndOrdersEveryRow(t *testing.T) {
 	}
 	got := preflightPairs(cfg)
 	wantLabels := []string{
-		"epics", "queue", "dry-run", "caps", "plan", "post-summary", "notify", "remote", "run data", "shift", "shift log",
+		"epics", "queue", "model", "dry-run", "caps", "plan", "post-summary", "notify", "remote", "run data", "shift", "shift log",
 	}
 	if len(got) != len(wantLabels) {
 		t.Fatalf("preflightPairs with every condition set = %d rows %v, want %d rows %v",
@@ -1709,11 +1802,14 @@ func TestPreflightPairsGatesAndOrdersEveryRow(t *testing.T) {
 	if !strings.Contains(got[1][1], `"ready"`) {
 		t.Errorf("queue row = %q, want it to name the -label value", got[1][1])
 	}
-	if !strings.Contains(got[4][1], "session 10%") {
-		t.Errorf("plan row = %q, want the usage snapshot rendered", got[4][1])
+	if !strings.Contains(got[2][1], "model opus") || !strings.Contains(got[2][1], "effort medium") {
+		t.Errorf("model row = %q, want it to name both dispatch knobs", got[2][1])
 	}
-	if !strings.Contains(got[8][1], "/tmp/metrics") || !strings.Contains(got[9][1], "abc123") {
-		t.Errorf("run data/shift rows = %v, want the recorder dir and shift id named", got[8:10])
+	if !strings.Contains(got[5][1], "session 10%") {
+		t.Errorf("plan row = %q, want the usage snapshot rendered", got[5][1])
+	}
+	if !strings.Contains(got[9][1], "/tmp/metrics") || !strings.Contains(got[10][1], "abc123") {
+		t.Errorf("run data/shift rows = %v, want the recorder dir and shift id named", got[9:11])
 	}
 }
 

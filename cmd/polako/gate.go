@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -47,6 +48,57 @@ func refuseOrNote(err error, dryRun bool) error {
 	}
 	log.Printf("note: a real run would refuse to start here — %v", err)
 	return nil
+}
+
+// effortFlagGate fails preflight when -effort is set and `claude --help`
+// runs but has no --effort: that usage error would otherwise surface an hour
+// in, look like a crash, burn -retries resumes, and park the issue for
+// nothing. The message names the CLI version so the operator knows which
+// install to update.
+//
+// A no-op when -effort is unset — the common path, and the one that keeps
+// this from adding a `claude --help` call to every preflight. A probe that
+// will not run at all (a transient exec error, a wrapper shim mid-setup)
+// only warns and lets the run proceed, the same best-effort stance
+// claudeVersion takes beside it: a broken CLI has its own louder failure
+// coming, and "your CLI is too old" would be the wrong diagnosis for it.
+func effortFlagGate(ctx context.Context, cfg config) error {
+	if cfg.effort == "" {
+		return nil
+	}
+	out, err := capture(ctx, cfg.dir, cfg.claudeBin, "--help")
+	if err != nil {
+		log.Printf("could not check whether claude takes --effort (%v) — running anyway; "+
+			"a run that then rejects -effort needs a newer CLI", err)
+		return nil
+	}
+	if strings.Contains(string(out), "--effort") {
+		return nil
+	}
+	v := cfg.claudeVersion
+	if v == "" {
+		v = claudeVersion(ctx, cfg)
+	}
+	if v == "" {
+		v = "unknown version"
+	}
+	return fmt.Errorf("-effort %s is set, but claude (%s) does not list --effort in `claude --help` — "+
+		"update the CLI, or drop -effort", cfg.effort, v)
+}
+
+// warnClaudeModelEnv says out loud when the operator's environment carries a
+// model or effort override. The CLI's own precedence puts ANTHROPIC_MODEL
+// above --model, and the child inherits this process's environment by design
+// (TestDispatchGivesTheChildTheOperatorsEnvironment pins cmd.Env nil so the
+// egress proxy keeps working), so an exported variable silently beats -model
+// and -effort both — worth a line before an operator wonders why their flag
+// did nothing.
+func warnClaudeModelEnv() {
+	for _, name := range []string{"ANTHROPIC_MODEL", "CLAUDE_CODE_EFFORT_LEVEL"} {
+		if v := os.Getenv(name); v != "" {
+			log.Printf("%s=%s is exported — the CLI reads it, and it can override -model/-effort for every run", name, v)
+		}
+	}
 }
 
 // claudeVersion pins which CLI produced a run's numbers. Best-effort: a

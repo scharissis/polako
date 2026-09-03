@@ -8,7 +8,7 @@ with the repo and issue number, a random shift id, why the run happened and
 what it left behind (a PR, questions, a closed issue, or neither), status,
 exit code, turns, tool-use count, wall and API duration, tokens (in / out /
 cache read / cache write, per model), dollars, and the configuration under
-test (skill, model, permission mode, `-run-tag`, a tool-allowlist hash, the
+test (skill, the model and effort asked for, permission mode, `-run-tag`, a tool-allowlist hash, the
 strategy knobs, and the three versions of binary, skill and Claude CLI in
 play). One more object per issue records how it ended (`merged`,
 `closed_no_change`, `closed_unmerged` or `needs_human`, with a
@@ -463,7 +463,7 @@ exactly the document a `| jq` pipeline expects.
 `-run-tag` labels a batch so you can price one setup against another later:
 
 ```bash
-polako work -model claude-opus-5 -run-tag baseline
+polako work -model opus -run-tag baseline
 ```
 
 Change one thing — model, skill wording, `-stall` — tag the next batch
