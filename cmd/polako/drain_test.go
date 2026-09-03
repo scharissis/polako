@@ -274,8 +274,18 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 	// Ahead of everything, so a test can be flaky about a call whatever it would
 	// otherwise have answered. The countdown has to be persisted even though
 	// nothing else changed, or every invocation would start it over.
-	if n := st.FailReads[call]; n > 0 {
-		st.FailReads[call] = n - 1
+	//
+	// `gh issue view` serves several field sets on the pickup path — the model:/
+	// effort: label read, the state read after a merge — so its FailReads key
+	// names the one it means: "issue view labels", "issue view state".
+	failKey := call
+	if call == "issue view" {
+		if f := flagVal("--json"); f != "" {
+			failKey = "issue view " + f
+		}
+	}
+	if n := st.FailReads[failKey]; n > 0 {
+		st.FailReads[failKey] = n - 1
 		fmt.Fprintf(os.Stderr, "could not connect to api.github.com\n")
 		return "", true, 1
 	}
@@ -1980,6 +1990,85 @@ func TestDrainRemediationFlagsSteerOnlyTheRemediationRun(t *testing.T) {
 		t.Errorf("rebase record = effort_source %q / requested_model %q / requested_effort %q, "+
 			"want remediation / sonnet / medium",
 			rebaseRec.EffortSource, rebaseRec.RequestedModel, rebaseRec.RequestedEffort)
+	}
+}
+
+// A model:/effort: label on the issue (#363) is read once at pickup and beats
+// the -model/-effort flags: the implement run's argv carries the label's
+// values and its record names them as sourceLabel.
+func TestDrainHonoursModelAndEffortLabels(t *testing.T) {
+	captureLog(t)
+	getArgs := watchClaudeArgs(t)
+	cfg, path := drainConfig(t, "implementmerged", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true, Labels: []string{"effort:low", "model:sonnet"}}},
+	})
+	cfg.model, cfg.effort = "opus", "high" // the flags the label must beat
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if finalGhState(t, path).Issues["1"].Open {
+		t.Error("issue 1 should have closed behind its merged PR")
+	}
+
+	argv := getArgs()
+	if len(argv) != 1 {
+		t.Fatalf("claude ran %d times, want 1:\n%s", len(argv), strings.Join(argv, "\n"))
+	}
+	for _, want := range []string{"--effort low", "--model sonnet"} {
+		if !strings.Contains(argv[0], want) {
+			t.Errorf("the implement run's argv is missing %q: %s", want, argv[0])
+		}
+	}
+	if strings.Contains(argv[0], "--effort high") || strings.Contains(argv[0], "--model opus") {
+		t.Errorf("the implement run carried a flag value the label should have beaten: %s", argv[0])
+	}
+
+	for _, line := range readRecords(t, records, cfg.repo) {
+		var rec runRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("record is not JSON: %v\n%s", err, line)
+		}
+		if rec.Reason != reasonImplement {
+			continue
+		}
+		if rec.ModelSource != sourceLabel || rec.RequestedModel != "sonnet" ||
+			rec.EffortSource != sourceLabel || rec.RequestedEffort != "low" {
+			t.Errorf("implement record = model %q (%s) / effort %q (%s), want sonnet/label and low/label",
+				rec.RequestedModel, rec.ModelSource, rec.RequestedEffort, rec.EffortSource)
+		}
+	}
+}
+
+// Two labels of one family are a mistake, not a choice: the run warns and falls
+// through to the flag rather than picking one.
+func TestDrainFallsThroughOnDuplicateModelLabels(t *testing.T) {
+	buf := captureLog(t)
+	getArgs := watchClaudeArgs(t)
+	cfg, path := drainConfig(t, "implementmerged", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true, Labels: []string{"model:opus", "model:sonnet"}}},
+	})
+	cfg.model = "haiku" // the flag the duplicate labels fall through to
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if finalGhState(t, path).Issues["1"].Open {
+		t.Error("issue 1 should have closed behind its merged PR")
+	}
+
+	if !strings.Contains(buf.String(), "model: labels") {
+		t.Errorf("the log should warn about the duplicate model: labels:\n%s", buf.String())
+	}
+	argv := getArgs()
+	if len(argv) != 1 || !strings.Contains(argv[0], "--model haiku") {
+		t.Errorf("the implement run should have used the -model flag: %v", argv)
 	}
 }
 
@@ -3848,9 +3937,10 @@ func TestDrainSurvivesAFlakyGh(t *testing.T) {
 		// every gh call the drain makes is one of the lookups under test.
 		PRs: map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
 		FailReads: map[string]int{
-			"issue list": 1, // deciding what to work
-			"pr list":    1, // restart safety, the first thing an issue is put through
-			"issue view": 1, // reading whether the merge closed the issue
+			"issue list":        1, // deciding what to work
+			"pr list":           1, // restart safety, the first thing an issue is put through
+			"issue view labels": 1, // the model:/effort: label read at pickup
+			"issue view state":  1, // reading whether the merge closed the issue
 		},
 	})
 
@@ -3864,6 +3954,7 @@ func TestDrainSurvivesAFlakyGh(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"transient: listing open issues failed",
+		"transient: reading #1's model/effort labels failed",
 		"transient: looking up the PR on branch issue-1 failed",
 		"transient: reading #1's state failed",
 	} {
