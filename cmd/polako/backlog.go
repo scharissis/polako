@@ -378,11 +378,16 @@ func issueHasLabel(ctx context.Context, cfg config, issue int, name string) (boo
 //
 // Two gh calls at most. The first widens #363's `--json labels` to
 // `--json labels,parent`; a gh that does not serve `parent` on `issue view`
-// retries it with today's field set through unknownJSONField, inside the
-// retryRead attempt like listOpenIssues so the rejection costs no retry
-// allowance, and an epic's labels simply do not reach its children on that
-// install. The second call — a plain `--json labels` on the parent — runs only
-// when the issue settled fewer than both families itself and it has a parent.
+// retries it with today's field set through unknownJSONField — the retry inside
+// the retryRead attempt, like listOpenIssues, so it costs no retry allowance.
+// Unlike listOpenIssues it is not remembered for the shift: this is one read
+// per pickup and a drain works one issue at a time, so the rejected call is
+// paid once per issue rather than once per shift — the issue's design note
+// (docs/plans/model-and-effort.md) keeps this off the queue listing on
+// purpose, where a per-shift memo would matter. On such a gh an epic's labels
+// simply do not reach its children. The second call — a plain `--json labels`
+// on the parent — runs only when the issue settled fewer than both families
+// itself and it has a parent.
 func issueLabelPolicy(ctx context.Context, cfg config, issue int) labelChoice {
 	out, err := retryRead(ctx, cfg, fmt.Sprintf("reading #%d's model/effort labels", issue), func() ([]byte, error) {
 		out, err := gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "labels,parent")
