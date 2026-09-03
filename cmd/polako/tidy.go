@@ -234,8 +234,14 @@ func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply
 		res.reason = "still open"
 		return res
 	}
+	// Set on every path from here down, not just the reclaimed one: a skipped
+	// result feeds tidySweep's warning and renderTidy's skipped table, both of
+	// which need the PR reference and the worktree directory to tell an
+	// operator what to look at and how to clear it.
+	res.why = why
 
 	w := inspectLeftWork(ctx, cfg, issue)
+	res.worktreePath = w.path
 	if w.unreadable {
 		// A worktree is here for this branch but its `git status` would not run.
 		// Whatever a forced removal would discard cannot be checked first, and an
@@ -278,8 +284,6 @@ func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply
 		return res
 	}
 
-	res.worktreePath = w.path
-	res.why = why
 	if !apply {
 		res.reclaimed = true
 		return res
@@ -366,11 +370,16 @@ func tidySweep(ctx context.Context, cfg config, watched int) {
 			// The issue whose merge just advanced the drain, and its worktree
 			// could not be reclaimed — almost always uncommitted work the merge
 			// did not take. That is the operator's to resolve now, not a line to
-			// bury: `git worktree remove --force` is the manual escape once
-			// they have saved or discarded it.
-			narrate(sevWarning, "PR merged but the worktree for %s%d could not be reclaimed: %s — "+
-				"clear it by hand once you have dealt with what is in it",
-				cfg.branchPrefix, r.issue, r.reason)
+			// bury, so it names what a person needs to act: the PR it came from
+			// (r.why), the directory to look in, and the exact command that
+			// clears it once they have saved or discarded what is there.
+			fix := "clear it by hand once you have dealt with what is in it"
+			if r.worktreePath != "" {
+				fix = fmt.Sprintf("deal with what is in %s, then clear it with `git worktree remove --force %s`",
+					r.worktreePath, r.worktreePath)
+			}
+			narrate(sevWarning, "%s%d %s but its worktree could not be reclaimed: %s — %s",
+				cfg.branchPrefix, r.issue, r.why, r.reason, fix)
 		case r.reason == "still open":
 			// The overwhelmingly common verdict — an issue in the queue, in
 			// flight or parked — and it means nothing is wrong. Saying it every
@@ -496,7 +505,13 @@ func renderTidy(w io.Writer, rpt report, cfg config, apply bool, results []tidyR
 				[]string{"#" + strconv.Itoa(r.issue), r.branch, r.why, detail})
 			continue
 		}
-		skippedRows = append(skippedRows, []string{"#" + strconv.Itoa(r.issue), r.branch, r.reason})
+		reason := r.reason
+		if r.worktreePath != "" {
+			// The path is half of what an operator does next — which directory to
+			// look in before `git worktree remove --force` clears it.
+			reason += " — " + r.worktreePath
+		}
+		skippedRows = append(skippedRows, []string{"#" + strconv.Itoa(r.issue), r.branch, reason})
 	}
 
 	reclaimedTitle := "reclaimed"

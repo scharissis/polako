@@ -218,6 +218,14 @@ func TestReclaimSkipsAClosedIssueWithADirtyWorktree(t *testing.T) {
 	if r.reason != "1 uncommitted file" {
 		t.Errorf("reason = %q, want %q", r.reason, "1 uncommitted file")
 	}
+	// A skip carries the path and the PR reference too — tidySweep's warning and
+	// renderTidy's table need both to tell an operator what to look at.
+	if !strings.HasSuffix(r.worktreePath, "issue-3-worktree") {
+		t.Errorf("worktreePath = %q, want it to name the left worktree", r.worktreePath)
+	}
+	if r.why != "closed" {
+		t.Errorf("why = %q, want %q", r.why, "closed")
+	}
 	if _, err := os.Stat(wt); err != nil {
 		t.Errorf("worktree %s should still be there: %v", wt, err)
 	}
@@ -609,7 +617,7 @@ func TestRenderTidyReportsBothHalves(t *testing.T) {
 		{issue: 1, branch: "issue-1", reclaimed: true, why: "closed", worktreePath: "/tmp/issue-1"},
 		{issue: 5, branch: "issue-5", reclaimed: true, why: "merged (PR #9)"},
 		{issue: 2, branch: "issue-2", reason: "still open"},
-		{issue: 3, branch: "issue-3", reason: "2 uncommitted files"},
+		{issue: 3, branch: "issue-3", reason: "2 uncommitted files", worktreePath: "/tmp/issue-3"},
 	}
 	var out strings.Builder
 	renderTidy(&out, report{}, config{repo: "example/repo", branchPrefix: "issue-"}, false, results)
@@ -621,7 +629,8 @@ func TestRenderTidyReportsBothHalves(t *testing.T) {
 		"#5     issue-5  merged (PR #9)  branch deleted",
 		"skipped",
 		"#2     issue-2  still open",
-		"#3     issue-3  2 uncommitted files",
+		// a skip with a live worktree names its directory in the reason cell
+		"#3     issue-3  2 uncommitted files — /tmp/issue-3",
 	} {
 		if !strings.Contains(printed, want) {
 			t.Errorf("report is missing %q\ngot:\n%s", want, printed)
