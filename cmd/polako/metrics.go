@@ -508,9 +508,10 @@ type planFacts struct {
 
 // proposalRunHead is the part of a plan or health record that is a runRecord's
 // self-describing stream numbers and configuration snapshot, verbatim, minus
-// everything that only means something for a drained issue
-// (issue/pr/reason/attempt/session/the strategy knobs). Embedded in both
-// records so a new stream or config field is added here once.
+// every field a run that works no issue has no meaning for — the per-issue
+// ones (issue/pr/reason/attempt/session), requested_model, and the drain's
+// strategy knobs. Embedded in both records so a new stream or config field is
+// added here once.
 //
 // It is split from proposalRunTail rather than being one embed because a plan
 // record slots vision and milestone between the two — health adds nothing
