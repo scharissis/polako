@@ -50,18 +50,29 @@ func refuseOrNote(err error, dryRun bool) error {
 	return nil
 }
 
-// effortFlagGate fails preflight when -effort is set but this claude cannot
-// take it: a `--effort` the CLI rejects surfaces as a usage error an hour in,
-// looks like a crash, burns -retries resumes, and parks the issue for nothing.
-// The message names the CLI version so the operator knows which install to
-// update. A no-op when -effort is unset — the common path, and the one that
-// keeps this from adding a `claude --help` call to every preflight.
+// effortFlagGate fails preflight when -effort is set and `claude --help`
+// runs but has no --effort: that usage error would otherwise surface an hour
+// in, look like a crash, burn -retries resumes, and park the issue for
+// nothing. The message names the CLI version so the operator knows which
+// install to update.
+//
+// A no-op when -effort is unset — the common path, and the one that keeps
+// this from adding a `claude --help` call to every preflight. A probe that
+// will not run at all (a transient exec error, a wrapper shim mid-setup)
+// only warns and lets the run proceed, the same best-effort stance
+// claudeVersion takes beside it: a broken CLI has its own louder failure
+// coming, and "your CLI is too old" would be the wrong diagnosis for it.
 func effortFlagGate(ctx context.Context, cfg config) error {
 	if cfg.effort == "" {
 		return nil
 	}
 	out, err := capture(ctx, cfg.dir, cfg.claudeBin, "--help")
-	if err == nil && strings.Contains(string(out), "--effort") {
+	if err != nil {
+		log.Printf("could not check whether claude takes --effort (%v) — running anyway; "+
+			"a run that then rejects -effort needs a newer CLI", err)
+		return nil
+	}
+	if strings.Contains(string(out), "--effort") {
 		return nil
 	}
 	v := cfg.claudeVersion

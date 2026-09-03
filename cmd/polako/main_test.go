@@ -1612,6 +1612,14 @@ func TestEffortFlagGate(t *testing.T) {
 	if !strings.Contains(err.Error(), "2.1.99") {
 		t.Errorf("the error should name the CLI version, got %v", err)
 	}
+
+	// A probe that will not run at all is best-effort: warn, don't block —
+	// a broken CLI has its own louder failure coming.
+	broken := cfg
+	broken.claudeBin = filepath.Join(t.TempDir(), "no-such-claude")
+	if err := effortFlagGate(context.Background(), broken); err != nil {
+		t.Errorf("a failed --help probe should not block the run, got %v", err)
+	}
 }
 
 // -remote asks for something no CLI delivers in print mode, so the invocation
