@@ -1450,6 +1450,17 @@ func TestDrainWarnsWhenTheMergedWorktreeHoldsUncommittedWork(t *testing.T) {
 	if out := buf.String(); !strings.Contains(out, "could not be reclaimed") || !strings.Contains(out, "uncommitted file") {
 		t.Errorf("the merged worktree's uncommitted work was not surfaced:\n%s", out)
 	}
+	// The warning names the directory and the exact command that clears it —
+	// neither is derivable from the branch name (worktree paths carry a random
+	// suffix). The path is asserted in the form the code prints it — git's own,
+	// which on Windows uses forward slashes where filepath.Join would not.
+	wantPath := worktreeFor(gitAt(t, checkout, "worktree", "list", "--porcelain"), "issue-1")
+	if wantPath == "" {
+		t.Fatal("git no longer lists the worktree for issue-1")
+	}
+	if out := buf.String(); !strings.Contains(out, wantPath) || !strings.Contains(out, "git worktree remove --force") {
+		t.Errorf("the warning did not name the worktree path and the fix command:\n%s", out)
+	}
 }
 
 // A sweep that cannot even run — pointed at a directory that is not a checkout
