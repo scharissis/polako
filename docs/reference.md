@@ -23,6 +23,7 @@ see [`status`](#where-the-backlog-stands-polako-status) and
 | `-permission-mode` | `acceptEdits` | Passed to `claude --permission-mode`. |
 | `-model` / `-effort` | *(the CLI's own defaults)* | Passed to `claude --model` and `--effort` (one of `low`, `medium`, `high`, `xhigh`, `max`). Vary them between batches to compare — see [Run data & cost tracking](run-data.md). |
 | `-remediation-model` / `-remediation-effort` | *(the `-model` / `-effort` cell)* | Model / effort for remediation runs against an open PR only — a rebase, a red-check fix, a review reply. Empty means a remediation run resolves the same as an implementation run. |
+| `-effort-by-size` | *(off)* | `--effort` keyed off the issue body's `Estimate: S\|M\|L` line, e.g. `S=medium,L=max`. Implementation runs only; below an `effort:` label, above `-effort`. Empty reads no body text — the body only picks which cell here applies. Records the size on the terminal issue record. |
 | `-poll` | `5m` | Interval between GitHub checks while waiting. |
 | `-retries` | `3` | Consecutive *fruitless* resume attempts after a crash — one that got real work done resets the count instead of spending it. Also the bound on remediation runs against a conflicting, red, or changes-requested PR. Excludes an auth refusal and a session-limit refusal, which wait instead — see `-max-session-usage` below. |
 | `-retry-wait` | `30s` | Wait before each resume attempt after a *crash*. A clean exit that left work behind resumes right away — nothing about it is transient. |
