@@ -203,8 +203,15 @@ type runContext struct {
 	attempt     int
 	resumedFrom string
 	outcome     string
-	started     time.Time
-	ended       time.Time
+	// What the policy resolved for this run — the record's requested_model /
+	// requested_effort and the source of each. Embedded, and for a remediation
+	// run not necessarily cfg.model / cfg.effort, which is the whole reason it
+	// travels here rather than being read off cfg in newRunRecord. One embed
+	// rather than four fields so a new policy dimension (#363/#364) is threaded
+	// through here once. See policy.go.
+	runChoice
+	started time.Time
+	ended   time.Time
 }
 
 // runRecord is one claude invocation, written when it ends whatever its
@@ -261,10 +268,16 @@ type runRecord struct {
 	Model           string `json:"model"`
 	RequestedModel  string `json:"requested_model"`
 	RequestedEffort string `json:"requested_effort"`
-	Skill           string `json:"skill"`
-	PermissionMode  string `json:"permission_mode"`
-	Tag             string `json:"tag"`
-	ToolsHash       string `json:"tools_hash"`
+	// Where RequestedModel / RequestedEffort came from — one of the source
+	// constants in policy.go (label, epic, remediation, size, flag, inherit).
+	// Drain run records only: proposalRunHead carries neither, so plan and
+	// health records are unchanged.
+	ModelSource    string `json:"model_source"`
+	EffortSource   string `json:"effort_source"`
+	Skill          string `json:"skill"`
+	PermissionMode string `json:"permission_mode"`
+	Tag            string `json:"tag"`
+	ToolsHash      string `json:"tools_hash"`
 
 	PollS      int `json:"poll_s"`
 	Retries    int `json:"retries"`
@@ -444,8 +457,10 @@ func newRunRecord(cfg config, rc runContext, rep runReport) runRecord {
 		ModelUsage:  rep.modelUsage,
 
 		Model:           rep.model,
-		RequestedModel:  cfg.model,
-		RequestedEffort: cfg.effort,
+		RequestedModel:  rc.model,
+		RequestedEffort: rc.effort,
+		ModelSource:     rc.modelSource,
+		EffortSource:    rc.effortSource,
 		Skill:           cfg.skill,
 		PermissionMode:  cfg.permissionMode,
 		Tag:             cfg.tag,
@@ -642,7 +657,14 @@ func proposalTail(base runRecord, pf proposalFacts) proposalRunTail {
 // reported one is shared rather than written twice; only the plan context and
 // the fields a drained issue needs but a plan run does not differ.
 func newPlanRecord(cfg config, rep runReport, pf planFacts) planRecord {
-	base := newRunRecord(cfg, runContext{started: pf.started, ended: pf.ended}, rep)
+	// model/effort so requested_model / requested_effort stay right — plan
+	// takes a real -model/-effort. The sources are left unset: proposalRunHead
+	// carries neither model_source nor effort_source (the AC scopes those to
+	// drain records), so the plan record's JSON is unchanged either way.
+	base := newRunRecord(cfg, runContext{
+		runChoice: runChoice{model: cfg.model, effort: cfg.effort},
+		started:   pf.started, ended: pf.ended,
+	}, rep)
 	return planRecord{
 		proposalRunHead: proposalHead(base, "plan"),
 		Vision:          pf.vision,
@@ -662,7 +684,12 @@ type healthFacts struct {
 // newHealthRecord folds a health run's report together with what `polako
 // health` learned around it, the same way newPlanRecord does for plan.
 func newHealthRecord(cfg config, rep runReport, hf healthFacts) healthRecord {
-	base := newRunRecord(cfg, runContext{started: hf.started, ended: hf.ended}, rep)
+	// model/effort for requested_model / requested_effort, sources left unset —
+	// see newPlanRecord.
+	base := newRunRecord(cfg, runContext{
+		runChoice: runChoice{model: cfg.model, effort: cfg.effort},
+		started:   hf.started, ended: hf.ended,
+	}, rep)
 	return healthRecord{
 		proposalRunHead: proposalHead(base, "health"),
 		proposalRunTail: proposalTail(base, hf.proposalFacts),

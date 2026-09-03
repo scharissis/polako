@@ -604,6 +604,25 @@ func fakeClaude(mode string) int {
 			return 1
 		}
 		return fakeClaude("stream")
+	case "implementthenrebase":
+		// A fresh implement run that opens a CONFLICTING PR, then — dispatched
+		// again with a prose prompt — clears the conflict. Branches on whether
+		// the -p prompt opens with "/" (a skill invocation) or not (the
+		// remediation), the same tell promptIssue's comment describes.
+		var err error
+		if strings.HasPrefix(promptText(), "/") {
+			err = plantPR("OPEN")
+			if err == nil {
+				err = markPRsConflicting()
+			}
+		} else {
+			err = fakeConflictFix()
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		return fakeClaude("stream")
 	}
 	fmt.Fprintf(os.Stderr, "unknown fake claude mode %q\n", mode)
 	return 2
@@ -806,6 +825,52 @@ func plantPR(state string) error {
 		return fmt.Errorf("no issue #%q to work on", n)
 	}
 	plantPRIn(st, n, state)
+	return writeGhState(path, st)
+}
+
+// promptText is the whole -p prompt this invocation was dispatched with, for
+// a fake that branches on its shape rather than on the issue number in it.
+func promptText() string {
+	i := slices.Index(os.Args, "-p")
+	if i < 0 || i+1 >= len(os.Args) {
+		return ""
+	}
+	return os.Args[i+1]
+}
+
+// markPRsConflicting turns every open PR's mergeability CONFLICTING, standing
+// in for the moment a merge onto the default branch made this branch stop
+// applying cleanly. Like fakeCIFix it touches every matching PR rather than
+// the one this prose-prompted invocation was dispatched for, and the tests
+// using it have one.
+func markPRsConflicting() error {
+	path := os.Getenv(fakeGhEnv)
+	st, err := readGhState(path)
+	if err != nil {
+		return err
+	}
+	for _, pr := range st.PRs {
+		if pr.State == "OPEN" {
+			pr.Mergeable = "CONFLICTING"
+		}
+	}
+	return writeGhState(path, st)
+}
+
+// fakeConflictFix stands in for a conflict remediation that rebased and
+// force-pushed: the branch applies cleanly again, and a human merges it two
+// polls later. The CONFLICTING counterpart of fakeCIFix.
+func fakeConflictFix() error {
+	path := os.Getenv(fakeGhEnv)
+	st, err := readGhState(path)
+	if err != nil {
+		return err
+	}
+	for _, pr := range st.PRs {
+		if pr.Mergeable == "CONFLICTING" {
+			pr.Mergeable, pr.Head, pr.MergeOnRead = "MERGEABLE", pr.Head+"+", 2
+		}
+	}
 	return writeGhState(path, st)
 }
 
@@ -1572,17 +1637,23 @@ func TestBuildArgsPassesTheRequestedEffort(t *testing.T) {
 // the CLI's docs list that is refused on purpose.
 func TestValidateEffort(t *testing.T) {
 	for _, ok := range []string{"", "low", "medium", "high", "xhigh", "max"} {
-		if err := validateEffort(ok); err != nil {
+		if err := validateEffort("-effort", ok); err != nil {
 			t.Errorf("validateEffort(%q) = %v, want nil", ok, err)
 		}
 	}
 	for _, bad := range []string{"ultracode", "ultra", "medim", "HIGH", "extreme", "5"} {
-		if err := validateEffort(bad); err == nil {
+		if err := validateEffort("-effort", bad); err == nil {
 			t.Errorf("validateEffort(%q) = nil, want it refused", bad)
 		}
 	}
-	if err := validateEffort("ultracode"); err == nil || !strings.Contains(err.Error(), "fleet") {
+	if err := validateEffort("-effort", "ultracode"); err == nil || !strings.Contains(err.Error(), "fleet") {
 		t.Errorf("ultracode should be refused with its own reason, got %v", err)
+	}
+	// The flag name comes through so the operator knows which one they got
+	// wrong — the two share the enum but not the spelling.
+	if err := validateEffort("-remediation-effort", "medim"); err == nil ||
+		!strings.Contains(err.Error(), "-remediation-effort") {
+		t.Errorf("a bad -remediation-effort should name that flag, got %v", err)
 	}
 }
 
@@ -1604,6 +1675,13 @@ func TestEffortFlagGate(t *testing.T) {
 		t.Errorf("a CLI whose --help lists --effort should pass, got %v", err)
 	}
 
+	// -remediation-effort is the other flag that gates: it maps to the same
+	// --effort, so a CLI that lists it passes with only that one set.
+	remOnly := config{claudeBin: cfg.claudeBin, dir: cfg.dir, remediationEffort: "medium"}
+	if err := effortFlagGate(context.Background(), remOnly); err != nil {
+		t.Errorf("-remediation-effort alone should gate like -effort, got %v", err)
+	}
+
 	t.Setenv(fakeEffortHelpEnv, "0") // model an older CLI
 	err := effortFlagGate(context.Background(), cfg)
 	if err == nil {
@@ -1611,6 +1689,18 @@ func TestEffortFlagGate(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "2.1.99") {
 		t.Errorf("the error should name the CLI version, got %v", err)
+	}
+	// A bad -remediation-effort against an old CLI names that flag, not -effort.
+	if err := effortFlagGate(context.Background(), remOnly); err == nil ||
+		!strings.Contains(err.Error(), "-remediation-effort") {
+		t.Errorf("the error should name -remediation-effort, got %v", err)
+	}
+	// Both set: name both, so the operator does not fix one and hit the other.
+	both := config{claudeBin: cfg.claudeBin, dir: cfg.dir, effort: "high", remediationEffort: "medium"}
+	err = effortFlagGate(context.Background(), both)
+	if err == nil || !strings.Contains(err.Error(), "-effort high") ||
+		!strings.Contains(err.Error(), "-remediation-effort medium") {
+		t.Errorf("with both effort flags set the error should name both, got %v", err)
 	}
 
 	// A probe that will not run at all is best-effort: warn, don't block —
@@ -1892,7 +1982,7 @@ func TestSupervisePRStillWaitsOutAnOverspentPRNobodyHasToFix(t *testing.T) {
 	cfg.maxCost = 1
 	tally := issueTally{runs: 1, costUSD: 9}
 
-	state, err := supervisePR(context.Background(), cfg, 1, 9, &tally)
+	state, err := supervisePR(context.Background(), cfg, 1, 9, &tally, runChoice{})
 	if err != nil {
 		t.Fatalf("an overspent issue whose PR is green must still be waited out: %v", err)
 	}
@@ -1918,7 +2008,7 @@ func TestSupervisePRParksRatherThanRemediateOnAnOverspentIssue(t *testing.T) {
 	cfg.maxIssueTime = time.Minute
 	tally := issueTally{runs: 1, wallMS: (2 * time.Minute).Milliseconds()}
 
-	_, err := supervisePR(context.Background(), cfg, 1, 9, &tally)
+	_, err := supervisePR(context.Background(), cfg, 1, 9, &tally, runChoice{})
 	reason, parked := parkReason(err)
 	if !parked {
 		t.Fatalf("a red PR on an issue past its cap should park, got %v", err)

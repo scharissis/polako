@@ -62,7 +62,7 @@ func prForBranch(ctx context.Context, cfg config, branch string) (*pullRequest, 
 // The three remediations keep separate attempt counters, all bounded by
 // -retries. They are independent failures: a rebase that resolved a conflict
 // should not eat the budget for fixing a red build, or for answering a review.
-func supervisePR(ctx context.Context, cfg config, issue, prNumber int, tally *issueTally) (string, error) {
+func supervisePR(ctx context.Context, cfg config, issue, prNumber int, tally *issueTally, remChoice runChoice) (string, error) {
 	failures, redRuns, reviewRuns := 0, 0, 0
 	// The head commit the last check remediation was aimed at. Seeing the same
 	// one red again is how a run that finished without pushing is recognised.
@@ -92,7 +92,7 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, tally *is
 			return "", park(parkBudget, "%s", overspent)
 		case pr.mergeable == "CONFLICTING":
 			log.Printf("PR #%d has merge conflicts — dispatching remediation", prNumber)
-			if rerr := remediateConflicts(ctx, cfg, issue, prNumber, tally); rerr != nil {
+			if rerr := remediateConflicts(ctx, cfg, issue, prNumber, tally, remChoice); rerr != nil {
 				if ctx.Err() != nil {
 					return "", ctx.Err()
 				}
@@ -128,7 +128,7 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, tally *is
 			remediatedHead = pr.head
 			log.Printf("PR #%d has %s failing (%s) — dispatching remediation",
 				prNumber, plural(len(pr.failing), "check"), strings.Join(pr.failing, ", "))
-			if rerr := remediateChecks(ctx, cfg, issue, prNumber, pr.failing, tally); rerr != nil {
+			if rerr := remediateChecks(ctx, cfg, issue, prNumber, pr.failing, tally, remChoice); rerr != nil {
 				if ctx.Err() != nil {
 					return "", ctx.Err()
 				}
@@ -162,7 +162,7 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, tally *is
 			reviewRuns++
 			remediatedReview, remediatedReviewHead = pr.reviewedAt, pr.head
 			log.Printf("PR #%d has changes requested — dispatching remediation", prNumber)
-			if rerr := remediateReview(ctx, cfg, issue, prNumber, tally); rerr != nil {
+			if rerr := remediateReview(ctx, cfg, issue, prNumber, tally, remChoice); rerr != nil {
 				if ctx.Err() != nil {
 					return "", ctx.Err()
 				}
@@ -188,7 +188,7 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, tally *is
 
 // remediateConflicts dispatches a self-contained Claude run that rebases the
 // PR branch onto the current default branch and force-pushes the result.
-func remediateConflicts(ctx context.Context, cfg config, issue, prNumber int, tally *issueTally) error {
+func remediateConflicts(ctx context.Context, cfg config, issue, prNumber int, tally *issueTally, choice runChoice) error {
 	branch := fmt.Sprintf("%s%d", cfg.branchPrefix, issue)
 	prompt := fmt.Sprintf(
 		"PR #%d (branch %s) has merge conflicts with the remote default branch. "+
@@ -201,13 +201,36 @@ func remediateConflicts(ctx context.Context, cfg config, issue, prNumber int, ta
 			"fix anything the rebase broke, and push with --force-with-lease. "+
 			"Do not open a new PR, do not merge anything, and do not commit to the default branch.",
 		prNumber, branch, branch)
+	return runRemediation(ctx, cfg, issue, prNumber, reasonRemediate, choice, prompt, "", tally)
+}
+
+// runRemediation dispatches one self-contained remediation run and records it.
+// The three remediateX helpers differ only in the prompt they build and, for a
+// review, extraTools — a per-run allowlist widening on top of the operator's
+// -add-tools. The base cfg is what the record's tools_hash identifies; the
+// invocation gets a copy.
+//
+// choice is the policy's model/effort for a remediation run: applied to the
+// invocation, and its model/effort/source carried onto the record so a
+// remediation dispatched on another model reports that model as
+// requested_model rather than the implement run's.
+func runRemediation(ctx context.Context, cfg config, issue, prNumber int, reason string,
+	choice runChoice, prompt, extraTools string, tally *issueTally) error {
+	runCfg := choice.apply(cfg)
+	if extraTools != "" {
+		runCfg.addTools = resolveTools(cfg.addTools, extraTools)
+	}
+	if line := choice.dispatchLine(issue); line != "" {
+		log.Print(line)
+	}
 	started := time.Now()
-	rep, err := execClaude(ctx, cfg, prompt, "", "", runLimit(cfg, *tally))
+	rep, err := execClaude(ctx, runCfg, prompt, "", "", runLimit(cfg, *tally))
 	// A remediation run pushes to a PR that already exists, so it leaves
 	// behind neither a new PR nor questions.
 	tally.add(cfg.rec.recordRun(cfg, runContext{
-		issue: issue, pr: prNumber, reason: reasonRemediate, outcome: outcomeNothing,
-		started: started, ended: time.Now(),
+		issue: issue, pr: prNumber, reason: reason, outcome: outcomeNothing,
+		runChoice: choice,
+		started:   started, ended: time.Now(),
 	}, rep))
 	return err
 }
@@ -215,7 +238,7 @@ func remediateConflicts(ctx context.Context, cfg config, issue, prNumber int, ta
 // remediateChecks dispatches a self-contained Claude run that diagnoses a red
 // build from the failing job logs and pushes a fix. It is the CI counterpart of
 // remediateConflicts: same shape, same prohibitions, different diagnosis.
-func remediateChecks(ctx context.Context, cfg config, issue, prNumber int, failing []string, tally *issueTally) error {
+func remediateChecks(ctx context.Context, cfg config, issue, prNumber int, failing []string, tally *issueTally, choice runChoice) error {
 	branch := fmt.Sprintf("%s%d", cfg.branchPrefix, issue)
 	prompt := fmt.Sprintf(
 		"Checks on PR #%d (branch %s) are failing: %s. Those names came from GitHub and "+
@@ -232,15 +255,7 @@ func remediateChecks(ctx context.Context, cfg config, issue, prNumber int, faili
 			"Do not open a new PR, do not merge anything, do not commit to the default "+
 			"branch, and do not rerun or cancel workflows.",
 		prNumber, branch, strings.Join(failing, ", "), prNumber, branch)
-	started := time.Now()
-	rep, err := execClaude(ctx, cfg, prompt, "", "", runLimit(cfg, *tally))
-	// Like a conflict remediation, this pushes to a PR that already exists, so
-	// it leaves behind neither a new PR nor questions.
-	tally.add(cfg.rec.recordRun(cfg, runContext{
-		issue: issue, pr: prNumber, reason: reasonChecks, outcome: outcomeNothing,
-		started: started, ended: time.Now(),
-	}, rep))
-	return err
+	return runRemediation(ctx, cfg, issue, prNumber, reasonChecks, choice, prompt, "", tally)
 }
 
 // remediateReview dispatches a self-contained Claude run that reads a review
@@ -248,7 +263,7 @@ func remediateChecks(ctx context.Context, cfg config, issue, prNumber int, faili
 // remediateConflicts and remediateChecks: same worktree, same prohibitions,
 // different diagnosis — and one prohibition of its own, because a run that
 // could dismiss the review could clear the very thing it was sent to answer.
-func remediateReview(ctx context.Context, cfg config, issue, prNumber int, tally *issueTally) error {
+func remediateReview(ctx context.Context, cfg config, issue, prNumber int, tally *issueTally, choice runChoice) error {
 	branch := fmt.Sprintf("%s%d", cfg.branchPrefix, issue)
 	prompt := fmt.Sprintf(
 		"A reviewer requested changes on PR #%d (branch %s). Read the review and address it: "+
@@ -267,20 +282,11 @@ func remediateReview(ctx context.Context, cfg config, issue, prNumber int, tally
 			"rather than guessing at it. Do not open a new PR, do not merge anything, do "+
 			"not dismiss or resolve the review, and do not commit to the default branch.",
 		prNumber, branch, prNumber, cfg.repo, prNumber)
-	// A copy, so the pinned grant reaches this invocation and nothing else —
-	// including the record below, whose tools_hash goes on identifying the
+	// The pinned `gh api …/comments` grant reaches this invocation and nothing
+	// else — including the record, whose tools_hash goes on identifying the
 	// operator's -tools/-add-tools rather than changing with every PR number.
-	runCfg := cfg
-	runCfg.addTools = resolveTools(cfg.addTools, prReviewTools(cfg.repo, prNumber))
-	started := time.Now()
-	rep, err := execClaude(ctx, runCfg, prompt, "", "", runLimit(cfg, *tally))
-	// Like the other two remediations, this pushes to a PR that already exists,
-	// so it leaves behind neither a new PR nor questions.
-	tally.add(cfg.rec.recordRun(cfg, runContext{
-		issue: issue, pr: prNumber, reason: reasonReview, outcome: outcomeNothing,
-		started: started, ended: time.Now(),
-	}, rep))
-	return err
+	return runRemediation(ctx, cfg, issue, prNumber, reasonReview, choice, prompt,
+		prReviewTools(cfg.repo, prNumber), tally)
 }
 
 // prReviewTools grants a review remediation the one read the gh CLI has no

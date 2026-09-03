@@ -94,7 +94,7 @@ func intakeConfig(opt *intakeOptions) (config, error) {
 	if opt.maxIssues < 1 {
 		return config{}, fmt.Errorf("-max-issues %d makes no sense — a run has to be allowed at least one issue", opt.maxIssues)
 	}
-	if err := validateEffort(opt.effort); err != nil {
+	if err := validateEffort("-effort", opt.effort); err != nil {
 		return config{}, err
 	}
 

@@ -22,6 +22,7 @@ see [`status`](#where-the-backlog-stands-polako-status) and
 | `-add-tools` | *(none)* | Extra `--allowedTools` entries, **appended** to `-tools`. |
 | `-permission-mode` | `acceptEdits` | Passed to `claude --permission-mode`. |
 | `-model` / `-effort` | *(the CLI's own defaults)* | Passed to `claude --model` and `--effort` (one of `low`, `medium`, `high`, `xhigh`, `max`). Vary them between batches to compare — see [Run data & cost tracking](run-data.md). |
+| `-remediation-model` / `-remediation-effort` | *(the `-model` / `-effort` cell)* | Model / effort for remediation runs against an open PR only — a rebase, a red-check fix, a review reply. Empty means a remediation run resolves the same as an implementation run. |
 | `-poll` | `5m` | Interval between GitHub checks while waiting. |
 | `-retries` | `3` | Consecutive *fruitless* resume attempts after a crash — one that got real work done resets the count instead of spending it. Also the bound on remediation runs against a conflicting, red, or changes-requested PR. Excludes an auth refusal and a session-limit refusal, which wait instead — see `-max-session-usage` below. |
 | `-retry-wait` | `30s` | Wait before each resume attempt after a *crash*. A clean exit that left work behind resumes right away — nothing about it is transient. |
@@ -135,12 +136,7 @@ terminal that started it. `-remote` asks for runs to show up in your session
 list on [claude.ai/code](https://claude.ai/code) and the mobile app instead.
 **It does nothing today**, though: no `claude` CLI registers headless runs
 with Remote Control, so polako never passes the flag — same invocation
-either way, nothing leaves this machine. Startup says so once:
-
-```
-  remote  on, but no claude CLI registers headless runs with Remote Control yet — runs stay on this machine and unwatched, and nothing is sent anywhere (-remote=false silences this line; a later polako lights the flag up once a CLI supports it)
-```
-
+either way, nothing leaves this machine. Startup says so once, and
 `-remote=false` silences that line and changes nothing else. The flag stays
 as interface ([issue #52](https://github.com/scharissis/polako/issues/52),
 see [security.md](security.md) for the trade); until a CLI supports it, [the

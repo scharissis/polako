@@ -136,6 +136,9 @@ type issueLoop struct {
 	// this drain.
 	tally  *issueTally
 	ledger resumeLedger
+	// policy resolves each run's model and effort from the operator's cells —
+	// see policy.go. Set once in processIssue; every dispatch reads it.
+	policy runPolicy
 }
 
 // runAttempt is one trip through dispatchRun: the issueLoop it belongs to,
@@ -193,6 +196,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 		branch: fmt.Sprintf("%s%d", cfg.branchPrefix, issue),
 		st:     st,
 		tally:  &st.tally,
+		policy: newRunPolicy(cfg),
 	}
 
 	// Before the run, not only after the last merge: the gap this closes is also
@@ -289,14 +293,24 @@ func (r *issueLoop) dispatchRun() (*pullRequest, error) {
 
 	resumeTarget, reason := r.nextRunKind()
 
+	// Resolve this run's model and effort from the operator's cells. runLimit
+	// stays on the base cfg — it is a per-issue budget, not a per-run knob.
+	choice := r.policy.choose(reason)
+	if line := choice.dispatchLine(issue); line != "" {
+		log.Print(line)
+	}
+	runCfg := choice.apply(cfg)
+
 	started := time.Now()
-	rep, runErr := runClaude(ctx, cfg, issue, resumeTarget, reason, runLimit(cfg, *r.tally))
+	rep, runErr := runClaude(ctx, runCfg, issue, resumeTarget, reason, runLimit(cfg, *r.tally))
 	a := &runAttempt{
 		issueLoop: r,
 		rep:       rep,
 		rc: runContext{
 			issue: issue, reason: reason, attempt: r.ledger.resumes,
-			resumedFrom: resumeTarget, started: started, ended: time.Now(),
+			resumedFrom: resumeTarget,
+			runChoice:   choice,
+			started:     started, ended: time.Now(),
 		},
 	}
 	if rep.sessionID != "" {
@@ -721,7 +735,11 @@ func (r *issueLoop) superviseToClose(pr *pullRequest) error {
 	switch pr.State {
 	case "OPEN":
 		log.Printf("PR #%d open — waiting for merge (%s)", pr.Number, pr.URL)
-		state, err := supervisePR(ctx, cfg, issue, pr.Number, r.tally)
+		// One choice for all three remediations: reasonRemediate, reasonChecks
+		// and reasonReview resolve identically (remediationReasons), so the
+		// class representative is enough.
+		remChoice := r.policy.choose(reasonRemediate)
+		state, err := supervisePR(ctx, cfg, issue, pr.Number, r.tally, remChoice)
 		if err != nil {
 			if ctx.Err() == nil { // not Ctrl+C: remediation ran out of attempts
 				return r.parked(pr.Number, err)

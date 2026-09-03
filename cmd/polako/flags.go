@@ -62,11 +62,18 @@ type config struct {
 	// effort is claude --effort — how hard a run thinks, one of the CLI's
 	// closed set (effortLevels) or empty. Empty omits the flag and lets the
 	// CLI resolve effort the way it would for a terminal session.
-	effort    string
-	poll      time.Duration
-	retries   int
-	retryWait time.Duration
-	stall     time.Duration
+	effort string
+	// remediationModel and remediationEffort point a remediation run — a
+	// rebase, a red-check fix, a review reply against an open PR — somewhere
+	// other than the -model/-effort cell. Empty (the default) means a
+	// remediation run resolves exactly as an implementation run does, so
+	// nothing about what any run dispatches changes today. See policy.go.
+	remediationModel  string
+	remediationEffort string
+	poll              time.Duration
+	retries           int
+	retryWait         time.Duration
+	stall             time.Duration
 	// heartbeat is how long the terminal may stay quiet before a run says one
 	// "still working" line, repeated every heartbeat of continued silence (0
 	// disables). It watches the terminal, not the event stream: -stall samples
@@ -299,6 +306,10 @@ func parseFlags() config {
 	flag.StringVar(&cfg.model, "model", "", "claude --model for every run (empty = whatever the CLI defaults to)")
 	flag.StringVar(&cfg.effort, "effort", "",
 		"claude --effort for every run — one of "+strings.Join(effortLevels, ", ")+" (empty = whatever the CLI defaults to)")
+	flag.StringVar(&cfg.remediationModel, "remediation-model", "",
+		"claude --model for remediation runs against an open PR — rebase, red-check fix, review reply (empty = the -model cell, then the CLI default)")
+	flag.StringVar(&cfg.remediationEffort, "remediation-effort", "",
+		"claude --effort for remediation runs against an open PR — one of "+strings.Join(effortLevels, ", ")+" (empty = the -effort cell, then the CLI default)")
 	flag.DurationVar(&cfg.poll, "poll", 5*time.Minute, "interval between GitHub checks while waiting")
 	flag.IntVar(&cfg.retries, "retries", 3, "resume attempts after a crashed claude run (nonzero exit)")
 	flag.DurationVar(&cfg.retryWait, "retry-wait", 30*time.Second, "wait before each resume attempt")
@@ -351,10 +362,13 @@ func parseFlags() config {
 	}
 	flag.Parse()
 
-	// Rejected here, before the process commits to anything: an -effort the CLI
+	// Rejected here, before the process commits to anything: an effort the CLI
 	// cannot take would otherwise surface as a usage error an hour in, looking
 	// like a crash. Same exit shape as an unparseable env default above.
-	if err := validateEffort(cfg.effort); err != nil {
+	if err := validateEffort("-effort", cfg.effort); err != nil {
+		log.Fatalf("%v", err)
+	}
+	if err := validateEffort("-remediation-effort", cfg.remediationEffort); err != nil {
 		log.Fatalf("%v", err)
 	}
 
