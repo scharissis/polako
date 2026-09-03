@@ -152,6 +152,77 @@ func TestRunPolicyLabelBeatsFlagAndRemediation(t *testing.T) {
 	}
 }
 
+// inheritFrom fills a family the issue left unset from its parent epic's
+// labels, marking it epic-sourced; a family the issue set itself — model:default
+// included — is its escape from the epic and stays put.
+func TestLabelChoiceInheritFrom(t *testing.T) {
+	epic := labelChoice{model: "sonnet", modelSet: true, effort: "high", effortSet: true}
+
+	got := labelChoice{}.inheritFrom(epic)
+	if got.model != "sonnet" || !got.modelSet || !got.modelFromEpic ||
+		got.effort != "high" || !got.effortSet || !got.effortFromEpic {
+		t.Errorf("empty child inheritFrom epic = %+v, want both families from the epic", got)
+	}
+
+	// The issue set effort itself; only model comes from the epic.
+	got = labelChoice{effort: "low", effortSet: true}.inheritFrom(epic)
+	if got.model != "sonnet" || !got.modelFromEpic {
+		t.Errorf("child model should come from the epic: %+v", got)
+	}
+	if got.effort != "low" || got.effortFromEpic {
+		t.Errorf("child effort was set on the issue and must not be marked epic-sourced: %+v", got)
+	}
+
+	// model:default on the issue is set-but-empty: the epic must not overwrite it.
+	got = labelChoice{modelSet: true}.inheritFrom(epic)
+	if got.model != "" || got.modelFromEpic {
+		t.Errorf("model:default is the child's escape from the epic: %+v", got)
+	}
+
+	// An epic that settled nothing leaves the child untouched.
+	got = labelChoice{}.inheritFrom(labelChoice{})
+	if got != (labelChoice{}) {
+		t.Errorf("inheritFrom an empty epic = %+v, want the empty choice", got)
+	}
+}
+
+// complete is the one-read short-circuit: true only when the issue settled both
+// families itself.
+func TestLabelChoiceComplete(t *testing.T) {
+	for _, tc := range []struct {
+		lc   labelChoice
+		want bool
+	}{
+		{labelChoice{modelSet: true, effortSet: true}, true},
+		{labelChoice{modelSet: true}, false},
+		{labelChoice{effortSet: true}, false},
+		{labelChoice{}, false},
+	} {
+		if got := tc.lc.complete(); got != tc.want {
+			t.Errorf("%+v complete() = %v, want %v", tc.lc, got, tc.want)
+		}
+	}
+}
+
+// A family filled from the epic is named source epic; one the issue carries
+// itself stays source label, and the two resolve independently.
+func TestRunPolicyEpicSource(t *testing.T) {
+	p := runPolicy{
+		model: "opus", effort: "high",
+		labels: labelChoice{
+			model: "sonnet", modelSet: true, modelFromEpic: true,
+			effort: "low", effortSet: true,
+		},
+	}
+	got := p.choose(reasonImplement)
+	if got.model != "sonnet" || got.modelSource != sourceEpic {
+		t.Errorf("choose model = %q (%s), want sonnet/epic", got.model, got.modelSource)
+	}
+	if got.effort != "low" || got.effortSource != sourceLabel {
+		t.Errorf("choose effort = %q (%s), want low/label", got.effort, got.effortSource)
+	}
+}
+
 func TestRunChoiceApply(t *testing.T) {
 	cfg := config{model: "opus", effort: "high", skill: "x"}
 	got := runChoice{model: "sonnet", effort: "medium"}.apply(cfg)
@@ -167,9 +238,9 @@ func TestRunChoiceApply(t *testing.T) {
 }
 
 // The six source strings are what a run record's model_source / effort_source
-// carry, and a stats reader keys on them. epic/size are unused until #364;
-// pinning the whole set now means that ticket adds code, not a vocabulary a
-// record consumer has to relearn.
+// carry, and a stats reader keys on them. size is still unused; pinning the
+// whole set up front means a later ticket adds code, not a vocabulary a record
+// consumer has to relearn.
 func TestSourceConstantsAreStable(t *testing.T) {
 	for got, want := range map[string]string{
 		sourceInherit: "inherit", sourceFlag: "flag", sourceRemediation: "remediation",
