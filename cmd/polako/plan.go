@@ -204,14 +204,16 @@ func planRun(ctx context.Context, cfg config, opt planOptions, milestone string,
 	// run must not be what swallows the record of it or the note that a backlog
 	// is now waiting to be curated.
 	cfg.rec.recordPlan(cfg, rep, planFacts{
-		vision:         planVisionField(opt),
-		milestone:      milestone,
-		issuesCreated:  pass.created,
-		epicsCreated:   pass.epics,
-		cap:            opt.maxIssues,
-		labelsEnforced: pass.labelsEnforced(),
-		started:        started,
-		ended:          ended,
+		proposalFacts: proposalFacts{
+			issuesCreated:  pass.created,
+			epicsCreated:   pass.epics,
+			cap:            opt.maxIssues,
+			labelsEnforced: pass.labelsEnforced(),
+			started:        started,
+			ended:          ended,
+		},
+		vision:    planVisionField(opt),
+		milestone: milestone,
 	})
 	if pass.created > 0 {
 		notify(context.WithoutCancel(ctx), cfg, notification{

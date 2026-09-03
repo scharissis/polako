@@ -73,12 +73,19 @@ func decode(t *testing.T, rec any) map[string]any {
 	return got
 }
 
-func samplePlanFacts() planFacts {
-	return planFacts{
-		vision: "docs/VISION.md", milestone: "VISION 2026-08",
+func sampleProposalFacts() proposalFacts {
+	return proposalFacts{
 		issuesCreated: 7, epicsCreated: 1, cap: 10, labelsEnforced: 2,
 		started: time.Date(2026, 8, 24, 10, 15, 0, 0, time.UTC),
 		ended:   time.Date(2026, 8, 24, 10, 22, 2, 0, time.UTC),
+	}
+}
+
+func samplePlanFacts() planFacts {
+	return planFacts{
+		proposalFacts: sampleProposalFacts(),
+		vision:        "docs/VISION.md",
+		milestone:     "VISION 2026-08",
 	}
 }
 
@@ -161,6 +168,104 @@ func TestPlanRecordFallsBackToObservedUsage(t *testing.T) {
 	}
 	if got["wall_ms"] != float64(422000) {
 		t.Errorf("wall_ms = %v, want it timed from the clock", got["wall_ms"])
+	}
+}
+
+// TestPlanAndHealthRecordsMarshalUnchanged pins what makes the shared embeds
+// safe: proposalRunHead and proposalRunTail inline into the JSON object at the
+// embed position, so both records still marshal to exactly the bytes the old
+// flat structs produced — same keys, same order, same v. Golden strings
+// captured from that flat form; regenerate them only alongside a deliberate
+// schema change, and bump recordVersion when you do.
+func TestPlanAndHealthRecordsMarshalUnchanged(t *testing.T) {
+	cfg := metricsConfig(t, metricsOff)
+	cfg.skill = "skill-x"
+
+	const wantPlan = `{"v":1,"kind":"plan","ts":"2026-08-24T10:15:00Z","ended":"2026-08-24T10:22:02Z","shift":"d1d2d3d4","repo":"scharissis/polako","status":"ok","exit_code":0,"turns":74,"tool_uses":63,"wall_ms":1141000,"api_ms":812000,"cost_usd":4.12,"usage_source":"result","tokens":{"in":2143,"out":48210,"cache_read":8123400,"cache_write":401200},"model_usage":{"claude-opus-5":{"in":2143,"out":47000,"cache_read":0,"cache_write":0,"cost_usd":4.01}},"model":"claude-opus-5","skill":"skill-x","permission_mode":"acceptEdits","tag":"baseline","tools_hash":"68b396fe","vision":"docs/VISION.md","milestone":"VISION 2026-08","issues_created":7,"epics_created":1,"cap":10,"labels_enforced":2,"polako_version":"","claude_version":"2.1.34","plugin_version":"0.3.0"}`
+	const wantHealth = `{"v":1,"kind":"health","ts":"2026-08-24T10:15:00Z","ended":"2026-08-24T10:22:02Z","shift":"d1d2d3d4","repo":"scharissis/polako","status":"ok","exit_code":0,"turns":74,"tool_uses":63,"wall_ms":1141000,"api_ms":812000,"cost_usd":4.12,"usage_source":"result","tokens":{"in":2143,"out":48210,"cache_read":8123400,"cache_write":401200},"model_usage":{"claude-opus-5":{"in":2143,"out":47000,"cache_read":0,"cache_write":0,"cost_usd":4.01}},"model":"claude-opus-5","skill":"skill-x","permission_mode":"acceptEdits","tag":"baseline","tools_hash":"68b396fe","issues_created":7,"epics_created":1,"cap":10,"labels_enforced":2,"polako_version":"","claude_version":"2.1.34","plugin_version":"0.3.0"}`
+
+	plan, err := json.Marshal(newPlanRecord(cfg, sampleReport(), samplePlanFacts()))
+	if err != nil {
+		t.Fatalf("marshalling the plan record: %v", err)
+	}
+	if string(plan) != wantPlan {
+		t.Errorf("plan record JSON changed:\n got %s\nwant %s", plan, wantPlan)
+	}
+
+	health, err := json.Marshal(newHealthRecord(cfg, sampleReport(), healthFacts{sampleProposalFacts()}))
+	if err != nil {
+		t.Fatalf("marshalling the health record: %v", err)
+	}
+	if string(health) != wantHealth {
+		t.Errorf("health record JSON changed:\n got %s\nwant %s", health, wantHealth)
+	}
+}
+
+// The health record carries the same shared base a plan record does, minus
+// vision/milestone, and none of the per-issue fields — the first coverage
+// newHealthRecord has had.
+func TestHealthRecordIsSelfDescribing(t *testing.T) {
+	cfg := metricsConfig(t, metricsOff)
+	cfg.skill = defaultHealthSkill
+	got := decode(t, newHealthRecord(cfg, sampleReport(), healthFacts{sampleProposalFacts()}))
+
+	for key, want := range map[string]any{
+		"v":               float64(recordVersion),
+		"kind":            "health",
+		"ts":              "2026-08-24T10:15:00Z",
+		"ended":           "2026-08-24T10:22:02Z",
+		"shift":           "d1d2d3d4",
+		"repo":            "scharissis/polako",
+		"status":          "ok",
+		"turns":           float64(74),
+		"usage_source":    usageResult,
+		"model":           "claude-opus-5",
+		"skill":           defaultHealthSkill,
+		"permission_mode": "acceptEdits",
+		"tag":             "baseline",
+		"claude_version":  "2.1.34",
+		"plugin_version":  "0.3.0",
+		"issues_created":  float64(7),
+		"epics_created":   float64(1),
+		"cap":             float64(10),
+		"labels_enforced": float64(2),
+	} {
+		if got[key] != want {
+			t.Errorf("record[%q] = %v, want %v", key, got[key], want)
+		}
+	}
+	if tokens, ok := got["tokens"].(map[string]any); !ok || tokens["cache_read"] != float64(8123400) {
+		t.Errorf("tokens = %v, want the four-way split", got["tokens"])
+	}
+	// review-health plans from the repo, not a document: no vision, no
+	// milestone. And a health run works no issue, same as a plan run.
+	for _, forbidden := range []string{"vision", "milestone", "issue", "pr", "reason", "attempt", "session", "outcome", "poll_s"} {
+		if _, ok := got[forbidden]; ok {
+			t.Errorf("health record carries %q — it should not", forbidden)
+		}
+	}
+}
+
+// A health run the cap killed, or one that crashed, never emitted a result
+// event; its record falls back to the streamed tally the same way plan's and
+// a run record's do, because newHealthRecord shares that assembly.
+func TestHealthRecordFallsBackToObservedUsage(t *testing.T) {
+	cfg := metricsConfig(t, metricsOff)
+	rep := runReport{
+		exitCode: -1, turns: -1,
+		observed:      tokenCounts{In: 8, Out: 9, CacheRead: 10, CacheWrite: 11},
+		observedTurns: 5,
+	}
+	got := decode(t, newHealthRecord(cfg, rep, healthFacts{sampleProposalFacts()}))
+
+	if got["usage_source"] != usageObserved {
+		t.Errorf("usage_source = %v, want %q", got["usage_source"], usageObserved)
+	}
+	if tokens := got["tokens"].(map[string]any); tokens["out"] != float64(9) {
+		t.Errorf("tokens = %v, want the observed tally", tokens)
+	}
+	if got["turns"] != float64(5) {
+		t.Errorf("turns = %v, want the observed count, never -1", got["turns"])
 	}
 }
 

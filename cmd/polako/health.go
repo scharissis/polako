@@ -165,14 +165,14 @@ func healthRun(ctx context.Context, cfg config, opt healthOptions, out io.Writer
 		narrate(sevProgress, "health: %s", proposalPricingLine(cfg.rec.metricsDir(), cfg.repo, pass.created, time.Now()))
 	}
 
-	cfg.rec.recordHealth(cfg, rep, healthFacts{
+	cfg.rec.recordHealth(cfg, rep, healthFacts{proposalFacts{
 		issuesCreated:  pass.created,
 		epicsCreated:   pass.epics,
 		cap:            opt.maxIssues,
 		labelsEnforced: pass.labelsEnforced(),
 		started:        started,
 		ended:          ended,
-	})
+	}})
 	if pass.created > 0 {
 		notify(context.WithoutCancel(ctx), cfg, notification{
 			event: notifyProposed, reason: proposedNotifyReason(pass.created, pass.epics)})
