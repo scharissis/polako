@@ -42,9 +42,9 @@ import (
 //     new entry would mean a real regression, not the accretion epic's
 //     leftovers (stats.go, the last of those, was split up by issue #344).
 //   - funcBudget: just over two of the health report's 60-line call-out
-//     screens, plus a signature and braces. Three functions exceed it; the
-//     next-longest (supervisePR) sits a few lines clear, so an ordinary edit
-//     does not trip it.
+//     screens, plus a signature and braces. One function exceeds it today
+//     (drain.go:drain, listed below); main.go:main is next at a line under, so
+//     a change that grows it is expected to split it, not raise the budget.
 const (
 	fileBudget = 1000
 	funcBudget = 130
