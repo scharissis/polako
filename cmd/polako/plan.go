@@ -216,15 +216,13 @@ func planConfig(opt *planOptions) (config, error) {
 
 // planPreflight is intakePreflight plus the two checks that are plan's alone:
 // the -vision document resolves to a file under -dir, and — for a real run —
-// the batch milestone is ensured. A dry run declares nothing: intakePreflight
-// runs the `--parent` probe (a read) but creates no label, and this creates no
+// the batch milestone is ensured. The -vision stat runs first so a mistyped
+// path fails before intakePreflight's real run declares the `proposed` label —
+// a failed `polako plan` must not leave orchestration state on a repo the
+// operator only pointed at. A dry run declares nothing: intakePreflight runs
+// the `--parent` probe (a read) but creates no label, and this creates no
 // milestone.
 func planPreflight(ctx context.Context, cfg *config, opt *planOptions) (milestone string, hierarchical bool, err error) {
-	hierarchical, err = intakePreflight(ctx, cfg, &opt.intakeOptions, "plan")
-	if err != nil {
-		return "", false, err
-	}
-
 	if opt.vision != "" {
 		full := filepath.Join(cfg.dir, opt.vision)
 		info, statErr := os.Stat(full)
@@ -235,6 +233,11 @@ func planPreflight(ctx context.Context, cfg *config, opt *planOptions) (mileston
 		if info.IsDir() {
 			return "", false, fmt.Errorf("-vision %s is a directory, not a document", opt.vision)
 		}
+	}
+
+	hierarchical, err = intakePreflight(ctx, cfg, &opt.intakeOptions, "plan")
+	if err != nil {
+		return "", false, err
 	}
 
 	milestone = planMilestoneTitle(opt)
