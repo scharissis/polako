@@ -158,12 +158,15 @@ listing, deliberately: a third extended field would join the single-flag
 old-gh fallback in `listOpenIssues` (`backlog.go:86-94`), so a gh that knows
 `subIssuesSummary` but not `parent` would lose container detection for the
 whole shift, and the `-label` gate filters the listing so the parent may not
-be in it anyway. A view per pickup ignores both problems. Only when the child
-settles neither key does a second `view <parent> --json labels` follow. A gh
-that rejects `parent` retries with `--json labels` through the existing
-`unknownJSONField` check. A read that fails outright warns and falls through
-to the flags: this is a preference, not orchestration state, and a run on the
-default model beats no run.
+be in it anyway. A view per pickup ignores both problems. A second `view <parent> --json
+labels` follows whenever the child settled fewer than both families itself
+(and has a parent) — the two families resolve independently, so a child with
+`model:sonnet` and no effort label still reads its epic for an effort. A child
+that settled both keys itself costs exactly the one read. A gh that rejects
+`parent` retries with `--json labels` through the existing `unknownJSONField`
+check. A read that fails outright warns and falls through to the flags: this
+is a preference, not orchestration state, and a run on the default model beats
+no run.
 
 ## Per command: the flags
 
@@ -360,9 +363,10 @@ two `model:` labels warns and runs on the flag.
 
 **Shape.** Widen ticket 3's read to `--json labels,parent`, with the
 `unknownJSONField` retry to `labels` alone; a second `view <parent> --json
-labels` only when the child settled neither key; `model:default` on the child
-stops inheritance. `fakeIssue` gains `Parent` and the view handler composes
-it (`drain_test.go:288`). A read failure warns and falls through.
+labels` whenever the child settled fewer than both families itself, each
+family filled from the epic independently; `model:default` on the child stops
+inheritance. `fakeIssue` gains `Parent` and the view handler composes it. A
+read failure warns and falls through.
 
 **Done when.** A child with no labels under a parent labelled `model:sonnet`
 dispatches on `sonnet` and records `model_source` of `epic`; a child carrying
