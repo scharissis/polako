@@ -201,9 +201,11 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 
 	// The issue's model:/effort: labels, resolved once here at pickup: every run
 	// this leg dispatches — implement and the three remediations — reads the
-	// result off r.policy. A label edited while the issue waited on an answer
-	// takes effect on the next leg, at no extra call, since the pickup already
-	// asks GitHub about the issue.
+	// result off r.policy. Resolving per pickup rather than per shift is what
+	// makes a label edited while the issue waited on an answer take effect on
+	// the next leg. Its own read, not folded into dispatchRun's awaiting-answer
+	// check: that one is re-read every loop iteration on purpose, this one is
+	// fixed for the leg.
 	r.policy.labels = issueLabelPolicy(ctx, cfg, issue)
 
 	// Before the run, not only after the last merge: the gap this closes is also
