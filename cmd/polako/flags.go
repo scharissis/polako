@@ -365,13 +365,11 @@ func parseFlags() config {
 	// Rejected here, before the process commits to anything: an effort the CLI
 	// cannot take would otherwise surface as a usage error an hour in, looking
 	// like a crash. Same exit shape as an unparseable env default above.
-	for _, e := range []struct{ flag, value string }{
-		{"-effort", cfg.effort},
-		{"-remediation-effort", cfg.remediationEffort},
-	} {
-		if err := validateEffort(e.flag, e.value); err != nil {
-			log.Fatalf("%v", err)
-		}
+	if err := validateEffort("-effort", cfg.effort); err != nil {
+		log.Fatalf("%v", err)
+	}
+	if err := validateEffort("-remediation-effort", cfg.remediationEffort); err != nil {
+		log.Fatalf("%v", err)
 	}
 
 	// Answered before anything else a flag implies, so it stays usable on a
