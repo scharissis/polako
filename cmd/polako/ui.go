@@ -330,7 +330,7 @@ var attentionMarkers = []string{"failing", "changes requested", "parked", "propo
 // cell styles one printPairs/printTable cell — key or value alike, so a
 // "parked" row label gets the same yellow a "not read" value cell does.
 // Centralised here rather than decided per call site, which is what lets
-// stats.go and status.go pass plain strings and never think about colour.
+// the stats and status renderers pass plain strings and never think about colour.
 func (r report) cell(s string) string {
 	for _, m := range attentionMarkers {
 		if strings.Contains(s, m) {
