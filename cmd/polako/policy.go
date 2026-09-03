@@ -103,37 +103,39 @@ func (lc labelChoice) inheritFrom(epic labelChoice) labelChoice {
 // the CLI's business; a name polako refused would be a list it had to keep.
 var modelLabelValue = regexp.MustCompile(`^[A-Za-z0-9._\[\]-]+$`)
 
-// labelPolicy reads the model: and effort: families off an issue's labels. The
-// prefix matches case-insensitively, the way GitHub treats label names; a
-// model: value is checked only for shape and passed through, an effort: value
-// against the closed level set. A typo or a second label of the same family
-// warns and leaves that pair unset — picking one of two would be guessing
-// which the maintainer meant.
+// labelPolicy reads the model: and effort: families off one issue's labels —
+// the issue being worked or, through inheritFrom, its parent epic. The prefix
+// matches case-insensitively, the way GitHub treats label names; a model: value
+// is checked only for shape and passed through, an effort: value against the
+// closed level set. A typo or a second label of the same family warns and
+// leaves that pair unset — picking one of two would be guessing which the
+// maintainer meant. "Falls through" then means the epic's own label if the
+// issue has a parent that carries one, and the -model/-effort flags otherwise.
 func labelPolicy(labels []ghLabel) labelChoice {
 	var lc labelChoice
 
 	switch model := labelValues(labels, "model:"); {
 	case len(model) == 0:
 	case len(model) > 1:
-		narrate(sevWarning, "issue carries %d model: labels (%s) — model falls through to the flags",
+		narrate(sevWarning, "issue carries %d model: labels (%s) — model falls through",
 			len(model), strings.Join(model, ", "))
 	case strings.EqualFold(model[0], "default"):
 		lc.modelSet = true // set, but empty: the account default
 	case modelLabelValue.MatchString(model[0]):
 		lc.model, lc.modelSet = model[0], true
 	default:
-		narrate(sevWarning, "model:%s is not a valid model name — model falls through to the flags", model[0])
+		narrate(sevWarning, "model:%s is not a valid model name — model falls through", model[0])
 	}
 
 	switch effort := labelValues(labels, "effort:"); {
 	case len(effort) == 0:
 	case len(effort) > 1:
-		narrate(sevWarning, "issue carries %d effort: labels (%s) — effort falls through to the flags",
+		narrate(sevWarning, "issue carries %d effort: labels (%s) — effort falls through",
 			len(effort), strings.Join(effort, ", "))
 	case slices.Contains(effortLevels, effort[0]):
 		lc.effort, lc.effortSet = effort[0], true
 	default:
-		narrate(sevWarning, "effort:%s is not a claude effort level — effort falls through to the flags", effort[0])
+		narrate(sevWarning, "effort:%s is not a claude effort level — effort falls through", effort[0])
 	}
 
 	return lc
