@@ -1560,6 +1560,11 @@ func TestBuildArgsPassesTheRequestedEffort(t *testing.T) {
 	if slices.Contains(buildArgs(config{tools: "Read"}, "p", ""), "--effort") {
 		t.Error("an unset -effort must leave the CLI's own default alone")
 	}
+	// Not on a resume: the session already has its effort, and re-passing it
+	// risks a usage error against a CLI that fixes effort at session start.
+	if slices.Contains(buildArgs(cfg, "continue", "sess-1"), "--effort") {
+		t.Error("a resume must not re-pass --effort")
+	}
 }
 
 // The effort enum is closed because the CLI's is: a word polako let through

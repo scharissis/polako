@@ -217,7 +217,12 @@ func buildArgs(cfg config, prompt, resumeID string) []string {
 	if cfg.model != "" {
 		args = append(args, "--model", cfg.model)
 	}
-	if cfg.effort != "" {
+	// --effort only on a fresh run: the session already carries the effort it
+	// was started with, so re-passing it on a resume is at best redundant and
+	// at worst a usage error, depending on whether the CLI treats effort as
+	// session-fixed (unverified — see docs/plans/model-and-effort.md). Either
+	// way "a resume keeps its run's choice" holds without the flag.
+	if cfg.effort != "" && resumeID == "" {
 		args = append(args, "--effort", cfg.effort)
 	}
 	// No --remote-control, whether -remote is on or off: today's CLI takes the
