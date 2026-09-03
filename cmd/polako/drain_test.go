@@ -61,8 +61,8 @@ type ghState struct {
 
 	// NoParentField is a gh that knows sub-issues on the listing but does not
 	// serve `parent` on `issue view` (#364): it rejects that one field by name,
-	// before asking GitHub anything, so issueLabelPolicy retries with `--json
-	// labels` alone.
+	// before asking GitHub anything, so issuePickupPolicy retries with `parent`
+	// dropped from the field set.
 	NoParentField bool `json:"no_parent_field"`
 
 	// ClaudeRuns counts the invocations a fake CLI has made, for the modes whose

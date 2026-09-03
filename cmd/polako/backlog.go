@@ -289,8 +289,13 @@ func openBlockers(is ghIssue, seenOpen map[int]bool) []int {
 // — absent means no dependency this run can see, so it never holds up a
 // listing that never asked for it.
 type ghIssue struct {
-	Number    int       `json:"number"`
-	Labels    []ghLabel `json:"labels"`
+	Number int       `json:"number"`
+	Labels []ghLabel `json:"labels"`
+	// Body is populated only on the pickup read, and only when -effort-by-size
+	// arms it (issuePickupPolicy) — the listing never asks for it. The one
+	// reader is sizeFromBody's anchored Estimate: match; the rest of the body
+	// is data the drain does not act on.
+	Body      string `json:"body"`
 	SubIssues struct {
 		Total     int `json:"total"`
 		Completed int `json:"completed"`
@@ -299,7 +304,7 @@ type ghIssue struct {
 		Nodes []ghBlocker `json:"nodes"`
 	} `json:"blockedBy"`
 	// Parent is the epic this issue is a sub-issue of, populated only by
-	// issueLabelPolicy's own `issue view --json labels,parent` (#364). nil when
+	// issuePickupPolicy's own `issue view --json labels,parent` (#364). nil when
 	// the issue has no parent, or when the gh serving that view is too old to
 	// report one — either way the issue's own labels are all there is. Only the
 	// number is read; the epic's model:/effort: labels take a second view.
@@ -369,45 +374,54 @@ func issueHasLabel(ctx context.Context, cfg config, issue int, name string) (boo
 	return v.hasLabel(name), nil
 }
 
-// issueLabelPolicy reads the model: and effort: labels that decide one run's
-// model and effort, resolved once at pickup. The issue's own labels come first;
-// any family it leaves unset is filled from its parent epic's own labels
-// (#364), marked epic-sourced. A read or parse that fails outright is not
-// fatal: model and effort are a preference, not orchestration state, and a run
-// on the default beats no run — it warns and falls through to the flags.
+// issuePickupPolicy reads what one issue says about how hard its run should
+// try: the model: and effort: labels, resolved once at pickup. The issue's
+// own labels come first; any family it leaves unset is filled from its parent
+// epic's own labels (#364), marked epic-sourced. When -effort-by-size arms it,
+// the Estimate: line in the body is also read (#366) — off by default, no
+// extra gh call otherwise. A read or parse that fails outright is not fatal:
+// model, effort and size are a preference, not orchestration state, and a run
+// on the flags beats no run — it warns and falls through to them.
 //
-// Two gh calls at most. The first widens #363's `--json labels` to
-// `--json labels,parent`; a gh that does not serve `parent` on `issue view`
-// retries it with today's field set through unknownJSONField — the retry inside
-// the retryRead attempt, like listOpenIssues, so it costs no retry allowance.
-// Unlike listOpenIssues it is not remembered for the shift: this is one read
-// per pickup and a drain works one issue at a time, so the rejected call is
-// paid once per issue rather than once per shift — the issue's design note
+// Up to three gh calls. The first widens #363's `--json labels` (plus `body`
+// when -effort-by-size is armed) to also ask for `parent`; a gh that does not
+// serve `parent` on `issue view` retries it with the same fields minus
+// `parent` through unknownJSONField — the retry inside the retryRead attempt,
+// like listOpenIssues, so it costs no retry allowance. Unlike listOpenIssues
+// it is not remembered for the shift: this is one read per pickup and a drain
+// works one issue at a time, so the rejected call is paid once per issue
+// rather than once per shift — the issue's design note
 // (docs/plans/model-and-effort.md) keeps this off the queue listing on
 // purpose, where a per-shift memo would matter. On such a gh an epic's labels
 // simply do not reach its children. The second call — a plain `--json labels`
 // on the parent — runs only when the issue settled fewer than both families
 // itself and it has a parent.
-func issueLabelPolicy(ctx context.Context, cfg config, issue int) labelChoice {
+func issuePickupPolicy(ctx context.Context, cfg config, issue int) (labelChoice, string) {
+	fields := "labels"
+	if cfg.effortBySize != "" {
+		fields += ",body"
+	}
+	fields += ",parent"
 	out, err := retryRead(ctx, cfg, fmt.Sprintf("reading #%d's model/effort labels", issue), func() ([]byte, error) {
-		out, err := gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "labels,parent")
+		out, err := gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", fields)
 		if unknownJSONField(err) {
-			return gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "labels")
+			return gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", strings.TrimSuffix(fields, ",parent"))
 		}
 		return out, err
 	})
 	if err != nil {
 		narrate(sevWarning, "could not read #%d's labels (%v) — model and effort fall through to the flags", issue, err)
-		return labelChoice{}
+		return labelChoice{}, ""
 	}
 	var v ghIssue
 	if err := json.Unmarshal(out, &v); err != nil {
 		narrate(sevWarning, "could not parse #%d's labels (%v) — model and effort fall through to the flags", issue, err)
-		return labelChoice{}
+		return labelChoice{}, ""
 	}
+	size := sizeFromBody(v.Body)
 	child := labelPolicy(v.Labels)
 	if child.complete() || v.Parent == nil {
-		return child
+		return child, size
 	}
 
 	parent := v.Parent.Number
@@ -417,15 +431,15 @@ func issueLabelPolicy(ctx context.Context, cfg config, issue int) labelChoice {
 	if err != nil {
 		narrate(sevWarning, "could not read epic #%d's labels (%v) — #%d's unset model/effort fall through to the flags",
 			parent, err, issue)
-		return child
+		return child, size
 	}
 	var pv ghIssue
 	if err := json.Unmarshal(out, &pv); err != nil {
 		narrate(sevWarning, "could not parse epic #%d's labels (%v) — #%d's unset model/effort fall through to the flags",
 			parent, err, issue)
-		return child
+		return child, size
 	}
-	return child.inheritFrom(labelPolicy(pv.Labels))
+	return child.inheritFrom(labelPolicy(pv.Labels)), size
 }
 
 // issueComment is the part of one thread comment a wait decides on: which

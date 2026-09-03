@@ -161,7 +161,7 @@ func (r *issueLoop) terminal(prNumber int, outcome, why string) {
 	if r.cfg.rec.enabled() {
 		usage.atTerminal, usage.hasTerminal = sampleWeekUsage(r.ctx, r.cfg)
 	}
-	r.cfg.rec.recordIssue(r.cfg, r.issue, prNumber, outcome, why, lookupPRFacts(r.ctx, r.cfg, prNumber), usage)
+	r.cfg.rec.recordIssue(r.cfg, r.issue, prNumber, outcome, why, lookupPRFacts(r.ctx, r.cfg, prNumber), usage, r.policy.size)
 }
 
 // parked is terminal for the hand-backs, and the reason it files them under is
@@ -199,14 +199,14 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 		policy: newRunPolicy(cfg),
 	}
 
-	// The issue's model:/effort: labels, resolved once here at pickup: every run
-	// this leg dispatches — implement and the three remediations — reads the
-	// result off r.policy. Resolving per pickup rather than per shift is what
-	// makes a label edited while the issue waited on an answer take effect on
-	// the next leg. Its own read, not folded into dispatchRun's awaiting-answer
-	// check: that one is re-read every loop iteration on purpose, this one is
-	// fixed for the leg.
-	r.policy.labels = issueLabelPolicy(ctx, cfg, issue)
+	// The issue's model:/effort: labels and its Estimate: size, resolved once
+	// here at pickup: every run this leg dispatches — implement and the three
+	// remediations — reads the result off r.policy. Resolving per pickup rather
+	// than per shift is what makes a label edited while the issue waited on an
+	// answer take effect on the next leg. Its own read, not folded into
+	// dispatchRun's awaiting-answer check: that one is re-read every loop
+	// iteration on purpose, this one is fixed for the leg.
+	r.policy.labels, r.policy.size = issuePickupPolicy(ctx, cfg, issue)
 
 	// Before the run, not only after the last merge: the gap this closes is also
 	// opened by a teammate's push and by a drain restarted days later, and the
