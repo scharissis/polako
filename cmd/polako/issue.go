@@ -308,12 +308,9 @@ func (r *issueLoop) dispatchRun() (*pullRequest, error) {
 		rep:       rep,
 		rc: runContext{
 			issue: issue, reason: reason, attempt: r.ledger.resumes,
-			resumedFrom:  resumeTarget,
-			model:        choice.model,
-			effort:       choice.effort,
-			modelSource:  choice.modelSource,
-			effortSource: choice.effortSource,
-			started:      started, ended: time.Now(),
+			resumedFrom: resumeTarget,
+			runChoice:   choice,
+			started:     started, ended: time.Now(),
 		},
 	}
 	if rep.sessionID != "" {

@@ -229,9 +229,8 @@ func runRemediation(ctx context.Context, cfg config, issue, prNumber int, reason
 	// behind neither a new PR nor questions.
 	tally.add(cfg.rec.recordRun(cfg, runContext{
 		issue: issue, pr: prNumber, reason: reason, outcome: outcomeNothing,
-		model: choice.model, effort: choice.effort,
-		modelSource: choice.modelSource, effortSource: choice.effortSource,
-		started: started, ended: time.Now(),
+		runChoice: choice,
+		started:   started, ended: time.Now(),
 	}, rep))
 	return err
 }

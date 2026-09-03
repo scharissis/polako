@@ -288,8 +288,10 @@ func TestRunRecordIsSelfDescribing(t *testing.T) {
 		issue: 12, pr: 34, reason: reasonImplement, outcome: outcomeOpenedPR,
 		// What the policy resolved — the record's requested_* and *_source,
 		// carried on rc because for a remediation run they are not cfg's.
-		model: "claude-opus-5", effort: "medium",
-		modelSource: sourceFlag, effortSource: sourceFlag,
+		runChoice: runChoice{
+			model: "claude-opus-5", effort: "medium",
+			modelSource: sourceFlag, effortSource: sourceFlag,
+		},
 		started: time.Date(2026, 8, 24, 10, 15, 0, 0, time.UTC),
 		ended:   time.Date(2026, 8, 24, 10, 34, 2, 0, time.UTC),
 	}

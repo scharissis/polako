@@ -204,15 +204,14 @@ type runContext struct {
 	resumedFrom string
 	outcome     string
 	// What the policy resolved for this run — the record's requested_model /
-	// requested_effort and the source of each. For a remediation run these are
-	// not necessarily cfg.model / cfg.effort, which is the whole reason they
-	// travel here rather than being read off cfg in newRunRecord. See policy.go.
-	model        string
-	effort       string
-	modelSource  string
-	effortSource string
-	started      time.Time
-	ended        time.Time
+	// requested_effort and the source of each. Embedded, and for a remediation
+	// run not necessarily cfg.model / cfg.effort, which is the whole reason it
+	// travels here rather than being read off cfg in newRunRecord. One embed
+	// rather than four fields so a new policy dimension (#363/#364) is threaded
+	// through here once. See policy.go.
+	runChoice
+	started time.Time
+	ended   time.Time
 }
 
 // runRecord is one claude invocation, written when it ends whatever its
@@ -663,8 +662,8 @@ func newPlanRecord(cfg config, rep runReport, pf planFacts) planRecord {
 	// carries neither model_source nor effort_source (the AC scopes those to
 	// drain records), so the plan record's JSON is unchanged either way.
 	base := newRunRecord(cfg, runContext{
-		model: cfg.model, effort: cfg.effort,
-		started: pf.started, ended: pf.ended,
+		runChoice: runChoice{model: cfg.model, effort: cfg.effort},
+		started:   pf.started, ended: pf.ended,
 	}, rep)
 	return planRecord{
 		proposalRunHead: proposalHead(base, "plan"),
@@ -688,8 +687,8 @@ func newHealthRecord(cfg config, rep runReport, hf healthFacts) healthRecord {
 	// model/effort for requested_model / requested_effort, sources left unset —
 	// see newPlanRecord.
 	base := newRunRecord(cfg, runContext{
-		model: cfg.model, effort: cfg.effort,
-		started: hf.started, ended: hf.ended,
+		runChoice: runChoice{model: cfg.model, effort: cfg.effort},
+		started:   hf.started, ended: hf.ended,
 	}, rep)
 	return healthRecord{
 		proposalRunHead: proposalHead(base, "health"),
