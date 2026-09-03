@@ -26,12 +26,15 @@ the last of which may carry `--parent` and `--blocked-by`, and no other write
 flag. Nothing else, including anything that looks like diligence rather than a
 write: do not run `gh label list` to confirm the `proposed` label exists, or
 `gh --version`, or any other pre-flight probe. Assume the label exists — it is
-the label this skill mints every issue with. No shipped skill is granted a
-wider `gh` surface — the `plan` verb that would grant reads like `issue view`
-or `search issues` has not shipped — so a call outside those three shapes
-raises a permission prompt nobody is there to answer under an unattended
-drain, and the run hangs instead of reporting. Improvising one, however
-reasonable it looks, is worse than skipping a check that was never asked for.
+the label this skill mints every issue with. The allowlist is the binary's to
+grant, not this skill's to widen: `polako plan` grants this run its tools,
+`polako health` grants its twin `review-health` only `issue list` and `issue
+create`, and an operator's `-tools` can narrow either verb further. `issue
+list` and `issue create` are the floor every shipped verb grants, so they are
+the only surface this skill can rely on — a call outside them raises a
+permission prompt nobody is there to answer under an unattended drain, and the
+run hangs instead of reporting. Improvising one, however reasonable it looks,
+is worse than skipping a check that was never asked for.
 
 ## The document is required
 
