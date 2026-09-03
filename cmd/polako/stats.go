@@ -292,7 +292,7 @@ type windowBounds struct {
 	anchor string
 }
 
-// --- reading ---
+// --- records ---
 
 type issueKey struct {
 	repo  string
