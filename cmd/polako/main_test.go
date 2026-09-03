@@ -604,6 +604,15 @@ func fakeClaude(mode string) int {
 			return 1
 		}
 		return fakeClaude("stream")
+	case "implementmerged":
+		// A fresh implement run whose PR is already merged by the time the
+		// supervisor looks — the shortest path from pickup to a closed issue,
+		// for a test that only cares what the implement run was dispatched with.
+		if err := plantPR("MERGED"); err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		return fakeClaude("stream")
 	case "implementthenrebase":
 		// A fresh implement run that opens a CONFLICTING PR, then — dispatched
 		// again with a prose prompt — clears the conflict. Branches on whether

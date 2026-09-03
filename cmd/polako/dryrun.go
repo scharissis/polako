@@ -91,12 +91,13 @@ func dryRun(ctx context.Context, cfg config, out io.Writer) error {
 	}
 	runCfg, prompt, _ := issueRun(cfg, issue)
 	// Route the implement dispatch through the same policy seam a real run
-	// uses, so -dry-run keeps its promise of printing the exact invocation. A
-	// no-op for today's implement path — buildArgs reads only cfg.model /
-	// cfg.effort and choose(reasonImplement) resolves those to themselves — but
-	// #363/#364 give the implement class real inputs, and this is where they
-	// land.
-	runCfg = newRunPolicy(cfg).choose(reasonImplement).apply(runCfg)
+	// uses, so -dry-run keeps its promise of printing the exact invocation: the
+	// issue's model:/effort: labels resolve here just as they would at pickup,
+	// so --model and --effort show the value a real run would get. #364 widens
+	// the read to the parent's labels; this is where that lands too.
+	policy := newRunPolicy(cfg)
+	policy.labels = issueLabelPolicy(ctx, cfg, issue)
+	runCfg = policy.choose(reasonImplement).apply(runCfg)
 	log.Printf("issue #%d would be worked next; the invocation follows on stdout", issue)
 	_, err = fmt.Fprintln(out, commandLine(cfg.claudeBin, buildArgs(runCfg, prompt, "")))
 	return err

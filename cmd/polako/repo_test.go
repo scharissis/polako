@@ -1338,6 +1338,21 @@ func TestIssueTemplatesApplyNoOrchestrationLabel(t *testing.T) {
 						e.Name(), label, strings.TrimSpace(line))
 				}
 			}
+			// model:<value> and effort:<level> raise a run's cost, and a
+			// template applies its labels whoever files the issue — so this
+			// repository's own forms must not hand out `model:opus` or
+			// `effort:max` to an outsider (docs/plans/model-and-effort.md). The
+			// bare prefix is enough here: applied() only returns `labels:` lines
+			// and their `- ` items, so it catches every YAML form — quoted,
+			// dash-list, and inline `labels: [model:opus]`.
+			for _, prefix := range []string{"model:", "effort:"} {
+				if strings.Contains(line, prefix) {
+					t.Errorf(".github/ISSUE_TEMPLATE/%s applies a %s label (%s):"+
+						" a template's labels are applied on creation whoever files the issue,"+
+						" so this lets an outsider raise an unattended run's cost",
+						e.Name(), prefix, strings.TrimSpace(line))
+				}
+			}
 		}
 	}
 }

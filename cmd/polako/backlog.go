@@ -361,6 +361,27 @@ func issueHasLabel(ctx context.Context, cfg config, issue int, name string) (boo
 	return v.hasLabel(name), nil
 }
 
+// issueLabelPolicy reads the model: and effort: labels on one issue at pickup,
+// the same view issueHasLabel makes. A read or parse that fails outright is not
+// fatal: model and effort are a preference, not orchestration state, and a run
+// on the default beats no run — it warns and returns the empty choice, which
+// resolves to the flags.
+func issueLabelPolicy(ctx context.Context, cfg config, issue int) labelChoice {
+	out, err := retryRead(ctx, cfg, fmt.Sprintf("reading #%d's model/effort labels", issue), func() ([]byte, error) {
+		return gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "labels")
+	})
+	if err != nil {
+		narrate(sevWarning, "could not read #%d's labels (%v) — model and effort fall through to the flags", issue, err)
+		return labelChoice{}
+	}
+	var v ghIssue
+	if err := json.Unmarshal(out, &v); err != nil {
+		narrate(sevWarning, "could not parse #%d's labels (%v) — model and effort fall through to the flags", issue, err)
+		return labelChoice{}
+	}
+	return labelPolicy(v.Labels)
+}
+
 // issueComment is the part of one thread comment a wait decides on: which
 // comment it is, and whether a person or a machine wrote it.
 type issueComment struct {

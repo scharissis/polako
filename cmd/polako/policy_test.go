@@ -79,6 +79,79 @@ func TestRunPolicyResumesAreImplementationClass(t *testing.T) {
 	}
 }
 
+func labelsFrom(names ...string) []ghLabel {
+	ls := make([]ghLabel, len(names))
+	for i, n := range names {
+		ls[i] = ghLabel{Name: n}
+	}
+	return ls
+}
+
+// labelPolicy reads model:/effort: off an issue's labels: prefix matched
+// case-insensitively, model value passed through if it is shaped like a name,
+// effort checked against the closed set, a typo or a duplicate warned and
+// dropped, model:default set-but-empty.
+func TestLabelPolicy(t *testing.T) {
+	captureLog(t)
+	cases := []struct {
+		name                string
+		labels              []string
+		model, effort       string
+		modelSet, effortSet bool
+	}{
+		{name: "no labels"},
+		{name: "effort:low", labels: []string{"effort:low"}, effort: "low", effortSet: true},
+		{name: "model passed through", labels: []string{"model:opus"}, model: "opus", modelSet: true},
+		{name: "full id passed through", labels: []string{"model:claude-opus-4-1"}, model: "claude-opus-4-1", modelSet: true},
+		{name: "both families", labels: []string{"model:sonnet", "effort:high"},
+			model: "sonnet", modelSet: true, effort: "high", effortSet: true},
+		{name: "case-insensitive prefix", labels: []string{"MODEL:opus", "Effort:max"},
+			model: "opus", modelSet: true, effort: "max", effortSet: true},
+		{name: "space after the colon is trimmed", labels: []string{"model: sonnet", "effort: high"},
+			model: "sonnet", modelSet: true, effort: "high", effortSet: true},
+		{name: "model:default is set but empty", labels: []string{"model:default"}, modelSet: true},
+		{name: "model:DEFAULT too", labels: []string{"model:DEFAULT"}, modelSet: true},
+		{name: "two model labels drop the pair", labels: []string{"model:opus", "model:sonnet"}},
+		{name: "two effort labels drop the pair", labels: []string{"effort:low", "effort:high"}},
+		{name: "effort typo drops the pair", labels: []string{"effort:medim"}},
+		{name: "bad model shape drops the pair", labels: []string{"model:opus!"}},
+		{name: "unrelated labels ignored", labels: []string{"bug", "needs-human"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := labelPolicy(labelsFrom(tc.labels...))
+			if got.model != tc.model || got.modelSet != tc.modelSet ||
+				got.effort != tc.effort || got.effortSet != tc.effortSet {
+				t.Errorf("labelPolicy(%v) = %+v, want model=%q(%v) effort=%q(%v)",
+					tc.labels, got, tc.model, tc.modelSet, tc.effort, tc.effortSet)
+			}
+		})
+	}
+}
+
+// A model:/effort: label is level 1: it beats the -model/-effort flags and the
+// -remediation-* cell alike. model:default stops resolution at inherit rather
+// than falling through to -model.
+func TestRunPolicyLabelBeatsFlagAndRemediation(t *testing.T) {
+	p := runPolicy{
+		model: "opus", effort: "high",
+		remediationModel: "sonnet", remediationEffort: "medium",
+		labels: labelChoice{model: "haiku", modelSet: true, effort: "low", effortSet: true},
+	}
+	for _, reason := range []string{reasonImplement, reasonRemediate} {
+		got := p.choose(reason)
+		if got.model != "haiku" || got.modelSource != sourceLabel ||
+			got.effort != "low" || got.effortSource != sourceLabel {
+			t.Errorf("choose(%q) = %+v, want the label cell for both knobs", reason, got)
+		}
+	}
+
+	def := runPolicy{model: "opus", labels: labelChoice{modelSet: true}}.choose(reasonImplement)
+	if def.model != "" || def.modelSource != sourceInherit {
+		t.Errorf("model:default choose = %+v, want empty model / inherit (no --model)", def)
+	}
+}
+
 func TestRunChoiceApply(t *testing.T) {
 	cfg := config{model: "opus", effort: "high", skill: "x"}
 	got := runChoice{model: "sonnet", effort: "medium"}.apply(cfg)
@@ -94,9 +167,9 @@ func TestRunChoiceApply(t *testing.T) {
 }
 
 // The six source strings are what a run record's model_source / effort_source
-// carry, and a stats reader keys on them. label/epic/size are unused until
-// #363/#364; pinning the whole set now means those tickets add code, not a
-// vocabulary a record consumer has to relearn.
+// carry, and a stats reader keys on them. epic/size are unused until #364;
+// pinning the whole set now means that ticket adds code, not a vocabulary a
+// record consumer has to relearn.
 func TestSourceConstantsAreStable(t *testing.T) {
 	for got, want := range map[string]string{
 		sourceInherit: "inherit", sourceFlag: "flag", sourceRemediation: "remediation",
