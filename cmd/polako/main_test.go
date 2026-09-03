@@ -1247,6 +1247,28 @@ func TestParseSkipIgnoresJunk(t *testing.T) {
 	}
 }
 
+func TestParseEffortBySize(t *testing.T) {
+	got, err := parseEffortBySize(" S=medium , L=max ")
+	if err != nil {
+		t.Fatalf("parseEffortBySize: %v", err)
+	}
+	if want := map[string]string{"S": "medium", "L": "max"}; len(got) != len(want) ||
+		got["S"] != want["S"] || got["L"] != want["L"] {
+		t.Errorf("parseEffortBySize = %v, want %v", got, want)
+	}
+
+	if m, err := parseEffortBySize(""); m != nil || err != nil {
+		t.Errorf("empty -effort-by-size = (%v, %v), want (nil, nil)", m, err)
+	}
+
+	// Unlike -skip, a bad entry stops the run rather than being ignored.
+	for _, bad := range []string{"S", "S=", "=medium", "XL=high", "S=medim", "S=medium,S=max"} {
+		if _, err := parseEffortBySize(bad); err == nil {
+			t.Errorf("parseEffortBySize(%q) = nil error, want a rejection", bad)
+		}
+	}
+}
+
 func TestResolveToolsAppendsWithoutDuplicating(t *testing.T) {
 	got := resolveTools("Read,Write,", " Bash(cargo:*) ,Read")
 	if want := "Read,Write,Bash(cargo:*)"; got != want {
@@ -1691,7 +1713,18 @@ func TestEffortFlagGate(t *testing.T) {
 		t.Errorf("-remediation-effort alone should gate like -effort, got %v", err)
 	}
 
+	// -effort-by-size can put --effort on the argv too, so it gates like the
+	// other two: alone it passes against a CLI that lists --effort.
+	sizeOnly := config{claudeBin: cfg.claudeBin, dir: cfg.dir, effortBySize: "S=medium"}
+	if err := effortFlagGate(context.Background(), sizeOnly); err != nil {
+		t.Errorf("-effort-by-size alone should gate like -effort, got %v", err)
+	}
+
 	t.Setenv(fakeEffortHelpEnv, "0") // model an older CLI
+	if err := effortFlagGate(context.Background(), sizeOnly); err == nil ||
+		!strings.Contains(err.Error(), "-effort-by-size") {
+		t.Errorf("the error should name -effort-by-size, got %v", err)
+	}
 	err := effortFlagGate(context.Background(), cfg)
 	if err == nil {
 		t.Fatal("effortFlagGate let -effort through against a CLI with no --effort")
