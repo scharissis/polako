@@ -298,6 +298,14 @@ type ghIssue struct {
 	BlockedBy struct {
 		Nodes []ghBlocker `json:"nodes"`
 	} `json:"blockedBy"`
+	// Parent is the epic this issue is a sub-issue of, populated only by
+	// issueLabelPolicy's own `issue view --json labels,parent` (#364). nil when
+	// the issue has no parent, or when the gh serving that view is too old to
+	// report one — either way the issue's own labels are all there is. Only the
+	// number is read; the epic's model:/effort: labels take a second view.
+	Parent *struct {
+		Number int `json:"number"`
+	} `json:"parent"`
 }
 
 type ghLabel struct {
@@ -361,14 +369,27 @@ func issueHasLabel(ctx context.Context, cfg config, issue int, name string) (boo
 	return v.hasLabel(name), nil
 }
 
-// issueLabelPolicy reads the model: and effort: labels on one issue at pickup,
-// the same view issueHasLabel makes. A read or parse that fails outright is not
+// issueLabelPolicy reads the model: and effort: labels that decide one run's
+// model and effort, resolved once at pickup. The issue's own labels come first;
+// any family it leaves unset is filled from its parent epic's own labels
+// (#364), marked epic-sourced. A read or parse that fails outright is not
 // fatal: model and effort are a preference, not orchestration state, and a run
-// on the default beats no run — it warns and returns the empty choice, which
-// resolves to the flags.
+// on the default beats no run — it warns and falls through to the flags.
+//
+// Two gh calls at most. The first widens #363's `--json labels` to
+// `--json labels,parent`; a gh that does not serve `parent` on `issue view`
+// retries it with today's field set through unknownJSONField, inside the
+// retryRead attempt like listOpenIssues so the rejection costs no retry
+// allowance, and an epic's labels simply do not reach its children on that
+// install. The second call — a plain `--json labels` on the parent — runs only
+// when the issue settled fewer than both families itself and it has a parent.
 func issueLabelPolicy(ctx context.Context, cfg config, issue int) labelChoice {
 	out, err := retryRead(ctx, cfg, fmt.Sprintf("reading #%d's model/effort labels", issue), func() ([]byte, error) {
-		return gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "labels")
+		out, err := gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "labels,parent")
+		if unknownJSONField(err) {
+			return gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "labels")
+		}
+		return out, err
 	})
 	if err != nil {
 		narrate(sevWarning, "could not read #%d's labels (%v) — model and effort fall through to the flags", issue, err)
@@ -379,7 +400,27 @@ func issueLabelPolicy(ctx context.Context, cfg config, issue int) labelChoice {
 		narrate(sevWarning, "could not parse #%d's labels (%v) — model and effort fall through to the flags", issue, err)
 		return labelChoice{}
 	}
-	return labelPolicy(v.Labels)
+	child := labelPolicy(v.Labels)
+	if child.complete() || v.Parent == nil {
+		return child
+	}
+
+	parent := v.Parent.Number
+	out, err = retryRead(ctx, cfg, fmt.Sprintf("reading epic #%d's model/effort labels", parent), func() ([]byte, error) {
+		return gh(ctx, cfg, "issue", "view", strconv.Itoa(parent), "--json", "labels")
+	})
+	if err != nil {
+		narrate(sevWarning, "could not read epic #%d's labels (%v) — #%d's unset model/effort fall through to the flags",
+			parent, err, issue)
+		return child
+	}
+	var pv ghIssue
+	if err := json.Unmarshal(out, &pv); err != nil {
+		narrate(sevWarning, "could not parse epic #%d's labels (%v) — #%d's unset model/effort fall through to the flags",
+			parent, err, issue)
+		return child
+	}
+	return child.inheritFrom(labelPolicy(pv.Labels))
 }
 
 // issueComment is the part of one thread comment a wait decides on: which
