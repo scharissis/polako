@@ -167,6 +167,11 @@ func intakePreflight(ctx context.Context, cfg *config, opt *intakeOptions, verb 
 	// from its own `gh issue create` error (see planPrompt).
 	hierarchical = ghCreatesSubIssues(ctx, *cfg)
 
+	warnClaudeModelEnv()
+	if err := effortFlagGate(ctx, *cfg); err != nil {
+		return false, err
+	}
+
 	if !opt.dryRun {
 		// The record pins which CLI and which installed skill produced the
 		// run's numbers, the same two the drain's preflight reads. Best-effort:

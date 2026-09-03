@@ -21,7 +21,7 @@ see [`status`](#where-the-backlog-stands-polako-status) and
 | `-tools` | *(see below)* | `--allowedTools` for unattended runs. **Replaces** the default set. |
 | `-add-tools` | *(none)* | Extra `--allowedTools` entries, **appended** to `-tools`. |
 | `-permission-mode` | `acceptEdits` | Passed to `claude --permission-mode`. |
-| `-model` | *(the CLI's own default)* | Passed to `claude --model`. Vary it between batches to compare models — see [Run data & cost tracking](run-data.md). |
+| `-model` / `-effort` | *(the CLI's own defaults)* | Passed to `claude --model` and `--effort` (one of `low`, `medium`, `high`, `xhigh`, `max`). Vary them between batches to compare — see [Run data & cost tracking](run-data.md). |
 | `-poll` | `5m` | Interval between GitHub checks while waiting. |
 | `-retries` | `3` | Consecutive *fruitless* resume attempts after a crash — one that got real work done resets the count instead of spending it. Also the bound on remediation runs against a conflicting, red, or changes-requested PR. Excludes an auth refusal and a session-limit refusal, which wait instead — see `-max-session-usage` below. |
 | `-retry-wait` | `30s` | Wait before each resume attempt after a *crash*. A clean exit that left work behind resumes right away — nothing about it is transient. |
@@ -273,7 +273,7 @@ polako plan -vision docs/VISION.md            # the real thing
 | `-focus` | *(none)* | Free-text steer for the run, e.g. `-focus "only the observability section"`. |
 | `-milestone` | *(derived)* | Batch milestone title, created idempotently at preflight and attached to every issue the run files by the label pass. Defaults to the vision file's name, or the brief capped at 50 characters, cut at a word boundary. `-milestone off` skips the milestone entirely. |
 | `-max-issues` | `10` | Ceiling on the issues a run may create, epics included. A ceiling, not a target — fewer, sharper issues beat coverage. |
-| `-model` | `opus` | Passed to `claude --model`. An alias, not a pinned id: a plan run happens once per batch and steers every run downstream, so it defaults to the strongest tier. |
+| `-model` / `-effort` | `opus` / *(CLI default)* | Passed to `claude --model` / `--effort`. `-model` is an alias, not a pinned id: a plan run happens once per batch and steers every run downstream, so it defaults to the strongest tier. |
 | `-skill` | `polako:plan-backlog` | Slash command the run invokes. |
 | `-tools` / `-add-tools` | *(the plan allowlist)* | `--allowedTools` for the run. The default is a fraction of `work`'s: repo reads, `gh issue list` / `view` / `search`, `Write`, and `gh issue create` — nothing that commits, pushes, opens a PR, edits a thread, or reaches `gh api`. |
 | `-stall` | `15m` | Kill a run with no output events for this long — the same silence watchdog `polako work` uses. `0` disables it. |
@@ -310,7 +310,7 @@ polako health -dir ~/code/some-repo            # the real thing
 | --- | --- | --- |
 | `-focus` | *(none)* | Free-text steer for the run, e.g. `-focus "only cmd/polako"`. |
 | `-max-issues` | `10` | Ceiling on the issues a run may create, epics included. |
-| `-model` | `opus` | Passed to `claude --model` — a health run happens periodically and steers every run downstream, so it defaults to the strongest tier, the same reasoning `plan` uses. |
+| `-model` / `-effort` | `opus` / *(CLI default)* | Passed to `claude --model` / `--effort` — a health run happens periodically and steers every run downstream, so `-model` defaults to the strongest tier, the same reasoning `plan` uses. |
 | `-skill` | `polako:review-health` | Slash command the run invokes. |
 | `-tools` / `-add-tools` | *(the health allowlist)* | `--allowedTools` for the run — see above. |
 | `-stall` | `15m` | Kill a run with no output events for this long. `0` disables it. |

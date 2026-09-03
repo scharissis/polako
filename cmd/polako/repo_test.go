@@ -1272,6 +1272,43 @@ func TestDocsDocumentEveryFlag(t *testing.T) {
 	}
 }
 
+// The binary spells a model as a tier alias and passes the operator's own
+// string through untouched; a versioned id baked into the source is a default
+// that reads right for one generation and silently wrong for the next, with
+// nothing to notice. This is the test the CLAUDE.md invariant names, guarding
+// the non-test Go — fixtures and golden records in _test.go files quote real
+// ids on purpose and are out of scope.
+func TestNoVersionedModelIDsInSource(t *testing.T) {
+	sources, err := filepath.Glob(filepath.Join(repoRoot(), "cmd", "polako", "*.go"))
+	if err != nil {
+		t.Fatalf("listing sources: %v", err)
+	}
+	versioned := regexp.MustCompile(`claude-[a-z]+-[0-9]`)
+	checked := 0
+	for _, src := range sources {
+		if strings.HasSuffix(src, "_test.go") {
+			continue
+		}
+		checked++
+		b, err := os.ReadFile(src)
+		if err != nil {
+			t.Fatalf("reading %s: %v", src, err)
+		}
+		if m := versioned.FindString(string(b)); m != "" {
+			t.Errorf("%s carries a versioned model id (%q) — spell a tier alias (opus, sonnet, haiku) "+
+				"or pass the operator's string through", filepath.Base(src), m)
+		}
+	}
+	if checked < 10 {
+		t.Fatalf("only scanned %d non-test sources — the glob has gone stale", checked)
+	}
+
+	const marker = "Model names are tier aliases, never ids"
+	if !strings.Contains(readRepoFile(t, "CLAUDE.md"), marker) {
+		t.Errorf("CLAUDE.md is missing the model-alias invariant (%q) this test enforces", marker)
+	}
+}
+
 // A queue is derived by excluding orchestration labels, and the -label gate is
 // the one thing standing between "anyone can open an issue" and "anyone can
 // queue work for an unattended agent". An issue form's `labels:` key is applied

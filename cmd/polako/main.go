@@ -314,6 +314,10 @@ func preflight(ctx context.Context, cfg *config) error {
 	}
 	cfg.claudeVersion = claudeVersion(ctx, *cfg)
 	cfg.pluginVersion, cfg.pluginID = pluginVersion(ctx, *cfg)
+	warnClaudeModelEnv()
+	if err := refuseOrNote(effortFlagGate(ctx, *cfg), cfg.dryRun); err != nil {
+		return err
+	}
 	if snap, ok := probeUsage(ctx, *cfg); ok {
 		cfg.usage = &snap
 	}
@@ -372,6 +376,13 @@ func preflightPairs(cfg config) [][2]string {
 		// disclose about it that -ungated's own warning does not already say.
 		pairs = append(pairs, [2]string{"queue", fmt.Sprintf("label %q", cfg.label)})
 	}
+	if line := modelEffortLine(cfg); line != "" {
+		// One row for both dispatch knobs. The environment can set either
+		// (POLAKO_MODEL, POLAKO_EFFORT), so an operator who forgot the export
+		// should not have to work out why every run is on a model they did not
+		// type — the same reason -post-summary earns a row.
+		pairs = append(pairs, [2]string{"model", line})
+	}
 	if cfg.dryRun {
 		pairs = append(pairs, [2]string{"dry-run",
 			"resolving the next issue only — no claude run, no GitHub write, no run data"})
@@ -425,6 +436,20 @@ func preflightPairs(cfg config) [][2]string {
 			fmt.Sprintf("%s — the whole claude transcript stream, kept on this machine (-log off to disable)", cfg.logPath)})
 	}
 	return pairs
+}
+
+// modelEffortLine renders the settings-block value for -model and -effort:
+// whichever were set, "" when neither was so the row is skipped. "inherit" is
+// not spelled — an omitted flag adds nothing to disclose.
+func modelEffortLine(cfg config) string {
+	var parts []string
+	if cfg.model != "" {
+		parts = append(parts, "model "+cfg.model)
+	}
+	if cfg.effort != "" {
+		parts = append(parts, "effort "+cfg.effort)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // settingsBlock narrates the startup recap as one aligned block: every row at

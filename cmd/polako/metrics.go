@@ -258,12 +258,13 @@ type runRecord struct {
 	Tokens      tokenCounts            `json:"tokens"`
 	ModelUsage  map[string]modelTokens `json:"model_usage,omitempty"`
 
-	Model          string `json:"model"`
-	RequestedModel string `json:"requested_model"`
-	Skill          string `json:"skill"`
-	PermissionMode string `json:"permission_mode"`
-	Tag            string `json:"tag"`
-	ToolsHash      string `json:"tools_hash"`
+	Model           string `json:"model"`
+	RequestedModel  string `json:"requested_model"`
+	RequestedEffort string `json:"requested_effort"`
+	Skill           string `json:"skill"`
+	PermissionMode  string `json:"permission_mode"`
+	Tag             string `json:"tag"`
+	ToolsHash       string `json:"tools_hash"`
 
 	PollS      int `json:"poll_s"`
 	Retries    int `json:"retries"`
@@ -442,12 +443,13 @@ func newRunRecord(cfg config, rc runContext, rep runReport) runRecord {
 		Tokens:      rep.usage,
 		ModelUsage:  rep.modelUsage,
 
-		Model:          rep.model,
-		RequestedModel: cfg.model,
-		Skill:          cfg.skill,
-		PermissionMode: cfg.permissionMode,
-		Tag:            cfg.tag,
-		ToolsHash:      toolsHash(resolveTools(cfg.tools, cfg.addTools)),
+		Model:           rep.model,
+		RequestedModel:  cfg.model,
+		RequestedEffort: cfg.effort,
+		Skill:           cfg.skill,
+		PermissionMode:  cfg.permissionMode,
+		Tag:             cfg.tag,
+		ToolsHash:       toolsHash(resolveTools(cfg.tools, cfg.addTools)),
 
 		PollS:      seconds(cfg.poll),
 		Retries:    cfg.retries,
@@ -509,9 +511,11 @@ type planFacts struct {
 // proposalRunHead is the part of a plan or health record that is a runRecord's
 // self-describing stream numbers and configuration snapshot, verbatim, minus
 // every field a run that works no issue has no meaning for — the per-issue
-// ones (issue/pr/reason/attempt/session), requested_model, and the drain's
-// strategy knobs. Embedded in both records so a new stream or config field is
-// added here once.
+// ones (issue/pr/reason/attempt/session) and the drain's strategy knobs.
+// requested_model and requested_effort are kept: plan and health take a real
+// -model/-effort (defaulting to opus), so what they asked for is worth pricing
+// a batch by, same as for a drain run. Embedded in both records so a new stream
+// or config field is added here once.
 //
 // It is split from proposalRunTail rather than being one embed because a plan
 // record slots vision and milestone between the two — health adds nothing
@@ -540,11 +544,13 @@ type proposalRunHead struct {
 	Tokens      tokenCounts            `json:"tokens"`
 	ModelUsage  map[string]modelTokens `json:"model_usage,omitempty"`
 
-	Model          string `json:"model"`
-	Skill          string `json:"skill"`
-	PermissionMode string `json:"permission_mode"`
-	Tag            string `json:"tag"`
-	ToolsHash      string `json:"tools_hash"`
+	Model           string `json:"model"`
+	RequestedModel  string `json:"requested_model"`
+	RequestedEffort string `json:"requested_effort"`
+	Skill           string `json:"skill"`
+	PermissionMode  string `json:"permission_mode"`
+	Tag             string `json:"tag"`
+	ToolsHash       string `json:"tools_hash"`
 }
 
 // proposalRunTail is the part both records share after their own middle
@@ -605,11 +611,13 @@ func proposalHead(base runRecord, kind string) proposalRunHead {
 		Tokens:      base.Tokens,
 		ModelUsage:  base.ModelUsage,
 
-		Model:          base.Model,
-		Skill:          base.Skill,
-		PermissionMode: base.PermissionMode,
-		Tag:            base.Tag,
-		ToolsHash:      base.ToolsHash,
+		Model:           base.Model,
+		RequestedModel:  base.RequestedModel,
+		RequestedEffort: base.RequestedEffort,
+		Skill:           base.Skill,
+		PermissionMode:  base.PermissionMode,
+		Tag:             base.Tag,
+		ToolsHash:       base.ToolsHash,
 	}
 }
 

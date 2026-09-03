@@ -62,11 +62,11 @@ type config struct {
 	// effort is claude --effort — how hard a run thinks, one of the CLI's
 	// closed set (effortLevels) or empty. Empty omits the flag and lets the
 	// CLI resolve effort the way it would for a terminal session.
-	effort string
-	poll   time.Duration
-	retries        int
-	retryWait      time.Duration
-	stall          time.Duration
+	effort    string
+	poll      time.Duration
+	retries   int
+	retryWait time.Duration
+	stall     time.Duration
 	// heartbeat is how long the terminal may stay quiet before a run says one
 	// "still working" line, repeated every heartbeat of continued silence (0
 	// disables). It watches the terminal, not the event stream: -stall samples
