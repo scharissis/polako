@@ -199,6 +199,13 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 		policy: newRunPolicy(cfg),
 	}
 
+	// The issue's model:/effort: labels, resolved once here at pickup: every run
+	// this leg dispatches — implement and the three remediations — reads the
+	// result off r.policy. A label edited while the issue waited on an answer
+	// takes effect on the next leg, at no extra call, since the pickup already
+	// asks GitHub about the issue.
+	r.policy.labels = issueLabelPolicy(ctx, cfg, issue)
+
 	// Before the run, not only after the last merge: the gap this closes is also
 	// opened by a teammate's push and by a drain restarted days later, and the
 	// moment that matters is the one just before a branch is cut and a review

@@ -3,20 +3,24 @@ package main
 // The policy seam: which model and effort a run gets, and where that choice
 // came from. It sorts the seven run reasons (metrics.go) into implementation
 // and remediation classes and resolves a model, an effort and a source for
-// each. Today's one lever the CLI lacks: a remediation run (rebase, red-check
-// fix, review reply) is narrower work, so -remediation-model /
-// -remediation-effort can point it somewhere cheaper; everything else
-// resolves against -model/-effort, then inherit. #363/#364 add label, epic
-// and size inputs — the source enum spells those now so a record's
-// model_source / effort_source value set never has to grow.
+// each. Two levers on top of -model/-effort: a model:/effort: label on the
+// issue (#363), a maintainer's judgement about this one ticket, which beats
+// everything below it; and -remediation-model / -remediation-effort, which
+// point a narrower remediation run (rebase, red-check fix, review reply)
+// somewhere cheaper. Everything else resolves against -model/-effort, then
+// inherit. #364 adds the epic's labels; size is still to be argued for — the
+// source enum spells both now so a record's model_source / effort_source
+// value set never has to grow.
 
 import (
 	"fmt"
+	"regexp"
+	"slices"
 	"strings"
 )
 
-// Where a run's model or effort was decided. label, epic and size are declared
-// now but unused until #363/#364 — see the file comment.
+// Where a run's model or effort was decided. epic and size are declared now
+// but unused until #364 — see the file comment.
 const (
 	sourceInherit     = "inherit"
 	sourceFlag        = "flag"
@@ -46,12 +50,80 @@ type runChoice struct {
 }
 
 // runPolicy is the operator's cells: the -model/-effort pair every run falls
-// back to, and the -remediation-* pair a remediation run prefers.
+// back to, and the -remediation-* pair a remediation run prefers — plus the
+// model:/effort: labels on the issue, resolved once at pickup (issue.go) and
+// beating both.
 type runPolicy struct {
 	model             string
 	effort            string
 	remediationModel  string
 	remediationEffort string
+	labels            labelChoice
+}
+
+// labelChoice is what an issue's model: and effort: labels resolved to. A
+// family with no label, an unreadable value, or two labels leaves its pair
+// unset, and choose falls through to the flags. model:default is the one set
+// value that is empty — an explicit "use the account default", which still
+// stops resolution rather than letting -model through.
+type labelChoice struct {
+	model     string
+	effort    string
+	modelSet  bool
+	effortSet bool
+}
+
+// modelLabelValue is the shape a model: label's value must match to be passed
+// to the CLI — the CLI's own alias/id charset. Whether the name resolves is
+// the CLI's business; a name polako refused would be a list it had to keep.
+var modelLabelValue = regexp.MustCompile(`^[A-Za-z0-9._\[\]-]+$`)
+
+// labelPolicy reads the model: and effort: families off an issue's labels. The
+// prefix matches case-insensitively, the way GitHub treats label names; a
+// model: value is checked only for shape and passed through, an effort: value
+// against the closed level set. A typo or a second label of the same family
+// warns and leaves that pair unset — picking one of two would be guessing
+// which the maintainer meant.
+func labelPolicy(labels []ghLabel) labelChoice {
+	var lc labelChoice
+
+	switch model := labelValues(labels, "model:"); {
+	case len(model) == 0:
+	case len(model) > 1:
+		narrate(sevWarning, "issue carries %d model: labels (%s) — model falls through to the flags",
+			len(model), strings.Join(model, ", "))
+	case strings.EqualFold(model[0], "default"):
+		lc.modelSet = true // set, but empty: the account default
+	case modelLabelValue.MatchString(model[0]):
+		lc.model, lc.modelSet = model[0], true
+	default:
+		narrate(sevWarning, "model:%s is not a valid model name — model falls through to the flags", model[0])
+	}
+
+	switch effort := labelValues(labels, "effort:"); {
+	case len(effort) == 0:
+	case len(effort) > 1:
+		narrate(sevWarning, "issue carries %d effort: labels (%s) — effort falls through to the flags",
+			len(effort), strings.Join(effort, ", "))
+	case slices.Contains(effortLevels, effort[0]):
+		lc.effort, lc.effortSet = effort[0], true
+	default:
+		narrate(sevWarning, "effort:%s is not a claude effort level — effort falls through to the flags", effort[0])
+	}
+
+	return lc
+}
+
+// labelValues returns the suffix of every label whose name begins with prefix,
+// matched case-insensitively on the prefix alone.
+func labelValues(labels []ghLabel, prefix string) []string {
+	var vs []string
+	for _, l := range labels {
+		if len(l.Name) >= len(prefix) && strings.EqualFold(l.Name[:len(prefix)], prefix) {
+			vs = append(vs, l.Name[len(prefix):])
+		}
+	}
+	return vs
 }
 
 func newRunPolicy(cfg config) runPolicy {
@@ -63,12 +135,21 @@ func newRunPolicy(cfg config) runPolicy {
 	}
 }
 
-// choose resolves the model and effort for a run of the given reason.
-// Remediation run: -remediation-* if set, else -model/-effort, else inherit.
-// Implementation run: -model/-effort if set, else inherit.
+// choose resolves the model and effort for a run of the given reason. The
+// issue's model:/effort: label wins if it is set — a maintainer's call about
+// this ticket outranks the operator's flags and the remediation cell alike.
+// model:default lands here as set-but-empty: it stops resolution at inherit
+// rather than falling through to -model. Then, for a remediation run,
+// -remediation-* if set; then -model/-effort; then inherit.
 func (p runPolicy) choose(reason string) runChoice {
 	remediation := remediationReasons[reason]
-	pick := func(remediationCell, baseCell string) (string, string) {
+	pick := func(labelVal string, labelSet bool, remediationCell, baseCell string) (string, string) {
+		if labelSet {
+			if labelVal == "" {
+				return "", sourceInherit // model:default
+			}
+			return labelVal, sourceLabel
+		}
 		if remediation && remediationCell != "" {
 			return remediationCell, sourceRemediation
 		}
@@ -77,8 +158,8 @@ func (p runPolicy) choose(reason string) runChoice {
 		}
 		return "", sourceInherit
 	}
-	m, ms := pick(p.remediationModel, p.model)
-	e, es := pick(p.remediationEffort, p.effort)
+	m, ms := pick(p.labels.model, p.labels.modelSet, p.remediationModel, p.model)
+	e, es := pick(p.labels.effort, p.labels.effortSet, p.remediationEffort, p.effort)
 	return runChoice{model: m, effort: e, modelSource: ms, effortSource: es}
 }
 
