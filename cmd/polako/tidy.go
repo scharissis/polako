@@ -374,7 +374,10 @@ func tidySweep(ctx context.Context, cfg config, watched int) {
 			// (r.why), the directory to look in, and the exact command that
 			// clears it once they have saved or discarded what is there.
 			fix := "clear it by hand once you have dealt with what is in it"
-			if r.worktreePath != "" {
+			// Some skip reasons already spell out the path and the fix (the
+			// checkout-tidy-runs-from refusal, a failed `worktree remove`) —
+			// don't repeat it after them.
+			if r.worktreePath != "" && !strings.Contains(r.reason, r.worktreePath) {
 				fix = fmt.Sprintf("deal with what is in %s, then clear it with `git worktree remove --force %s`",
 					r.worktreePath, r.worktreePath)
 			}
@@ -506,9 +509,10 @@ func renderTidy(w io.Writer, rpt report, cfg config, apply bool, results []tidyR
 			continue
 		}
 		reason := r.reason
-		if r.worktreePath != "" {
+		if r.worktreePath != "" && !strings.Contains(reason, r.worktreePath) {
 			// The path is half of what an operator does next — which directory to
-			// look in before `git worktree remove --force` clears it.
+			// look in before `git worktree remove --force` clears it. Some
+			// reasons already name it themselves; don't print it twice.
 			reason += " — " + r.worktreePath
 		}
 		skippedRows = append(skippedRows, []string{"#" + strconv.Itoa(r.issue), r.branch, reason})
