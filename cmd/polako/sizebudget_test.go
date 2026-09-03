@@ -63,7 +63,7 @@ const (
 // Keys: base filename for fileDebt, "file.go:funcName" for funcDebt (the
 // receiver-qualified name for methods, as scripts/health prints it).
 var fileDebt = map[string]int{
-	"stats.go": 1920, // the report builders and the record loaders are separable; deferred by issue #149
+	"stats.go": 1450, // the renderer and the shared format helpers are separable; deferred by issue #149
 }
 
 var funcDebt = map[string]int{
