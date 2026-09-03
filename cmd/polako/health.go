@@ -22,14 +22,11 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
-	"os/exec"
-	"time"
 )
 
 // healthSkillDir is the intake-side skill under skills/, the twin of
@@ -110,72 +107,21 @@ func runHealth(ctx context.Context, args []string, out io.Writer) error {
 	return healthRun(ctx, cfg, opt, out)
 }
 
-// healthRun is a real `polako health`: snapshot the open backlog, spawn the
-// skill through execClaude, then — whatever the run's own outcome —
-// normalise every issue this account created since. Mirrors planRun, minus
-// the milestone half of the label pass: review-health attaches none.
-func healthRun(ctx context.Context, cfg config, opt healthOptions, out io.Writer) error {
-	before, err := openIssuesBefore(ctx, cfg)
-	if err != nil {
-		return fmt.Errorf("could not read the backlog before the run (is gh authenticated for %s?): %w",
-			cfg.repo, err)
-	}
-
-	prompt := healthPrompt(cfg, opt)
-	log.Printf("running %s against %s — capped at %s", cfg.skill, cfg.dir, plural(opt.maxIssues, "issue"))
-	started := time.Now()
-	rep, runErr := execClaude(ctx, cfg, prompt, "", cfg.skill, 0)
-	ended := time.Now()
-
-	// The label pass runs no matter how the run ended — see planRun's own
-	// comment on this same shape in plan.go.
-	passCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
-	defer cancel()
-	if ctx.Err() != nil {
-		narrate(sevWarning, "the run was interrupted — still normalising anything it created before exiting")
-	}
-	pass := normaliseProposals(passCtx, cfg, before, "", "health")
-	pass.report("health", opt.maxCost, rep)
-
-	if pass.created > 0 {
-		narrate(sevProgress, "health: %s", proposalPricingLine(cfg.rec.metricsDir(), cfg.repo, pass.created, time.Now()))
-	}
-
-	cfg.rec.recordHealth(cfg, rep, healthFacts{proposalFacts: proposalFacts{
-		issuesCreated:  pass.created,
-		epicsCreated:   pass.epics,
-		cap:            opt.maxIssues,
-		labelsEnforced: pass.labelsEnforced(),
-		started:        started,
-		ended:          ended,
-	}})
-	if pass.created > 0 {
-		notify(context.WithoutCancel(ctx), cfg, notification{
-			event: notifyProposed, reason: proposedNotifyReason(pass.created, pass.epics)})
-	}
-
-	// Same exit-condition order planRun uses: a failed label pass outranks an
-	// interrupt, which outranks the run's own failure.
-	if perr := pass.err(); perr != nil {
-		return perr
-	}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	switch {
-	case runErr == nil:
-		return nil
-	case errors.Is(runErr, errIssueCap):
-		return nil
-	case errors.Is(runErr, errNoWork):
-		return fmt.Errorf("%w — check that -skill %q names a skill this installation has; "+
-			"plugin skills are namespaced <plugin>:<skill>", runErr, cfg.skill)
-	case errors.Is(runErr, errAuth):
-		return authAdvice(runErr)
-	default:
-		return fmt.Errorf("the health run did not finish cleanly: %w — any %s it did create are labelled; "+
-			"rerun `polako health` to continue, the skill deduplicates from GitHub", runErr, proposedLabel)
-	}
+// healthRun is a real `polako health`: the shared intakeRun body (snapshot,
+// spawn, label pass, price, record, notify, exit ladder — all in intake.go)
+// fed health's own pieces: the review-health prompt, no milestone, the
+// "against <dir>" announce, and a healthFacts record. Mirrors planRun minus
+// the milestone half.
+func healthRun(ctx context.Context, cfg config, opt healthOptions, _ io.Writer) error {
+	return intakeRun(ctx, cfg, opt, intakeRunSpec{
+		verb:           "health",
+		milestone:      "",
+		announceTarget: "against " + cfg.dir,
+		prompt:         healthPrompt(cfg, opt),
+		record: func(cfg config, rep runReport, pf proposalFacts) {
+			cfg.rec.recordHealth(cfg, rep, healthFacts{proposalFacts: pf})
+		},
+	})
 }
 
 // healthConfig is a thin call to intakeConfig: unlike planConfig there is no
@@ -185,47 +131,11 @@ func healthConfig(opt *healthOptions) (config, error) {
 	return intakeConfig(opt)
 }
 
-// healthPreflight mirrors planPreflight minus the vision-file check and the
-// milestone half: binaries, a reachable repo, a checked notify command, the
-// `--parent` capability probe, and — for a real run only — the `proposed`
-// label declared.
+// healthPreflight is a thin call to intakePreflight: unlike planPreflight there
+// is no vision-file check and no milestone half — review-health plans from the
+// repository in front of it and attaches nothing.
 func healthPreflight(ctx context.Context, cfg *config, opt *healthOptions) (hierarchical bool, err error) {
-	for _, bin := range []string{cfg.claudeBin, cfg.ghBin, "git"} {
-		if _, err := exec.LookPath(bin); err != nil {
-			return false, fmt.Errorf("%q not found on PATH: %w — health needs it to run the skill and read GitHub", bin, err)
-		}
-	}
-	if err := checkNotifyCommand(cfg.notifyCmd); err != nil {
-		return false, err
-	}
-	if _, err := git(ctx, *cfg, "rev-parse", "--git-dir"); err != nil {
-		return false, fmt.Errorf("-dir %s is not a git checkout: %w", cfg.dir, err)
-	}
-	raw, err := gh(ctx, *cfg, "repo", "view", "--json", "nameWithOwner")
-	if err != nil {
-		return false, fmt.Errorf("no GitHub repository reachable from %s (is gh authenticated?): %w", cfg.dir, err)
-	}
-	var repoView struct {
-		NameWithOwner string `json:"nameWithOwner"`
-	}
-	if err := json.Unmarshal(raw, &repoView); err != nil {
-		return false, fmt.Errorf("unreadable `gh repo view` reply (is gh current?): %w", err)
-	}
-	cfg.repo, cfg.ghRepo = repoView.NameWithOwner, repoView.NameWithOwner
-
-	// Probed here so a dry run can report the shape a real run would take, the
-	// same reason planPreflight probes it.
-	hierarchical = ghCreatesSubIssues(ctx, *cfg)
-
-	if !opt.dryRun {
-		cfg.claudeVersion = claudeVersion(ctx, *cfg)
-		cfg.pluginVersion, cfg.pluginID = pluginVersion(ctx, *cfg)
-
-		// Best-effort like plan's: an "already exists" is the healthy repeat
-		// case, not a failure.
-		_ = ensureLabel(ctx, *cfg, proposedLabel, proposedLabelColor, proposedLabelDesc)
-	}
-	return hierarchical, nil
+	return intakePreflight(ctx, cfg, opt, "health")
 }
 
 // healthDryRun narrates what a run would do — to the log, i.e. stderr — and

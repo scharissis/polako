@@ -33,10 +33,8 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // planSkillDir is the intake-side skill under skills/, the twin of skillDir.
@@ -136,104 +134,24 @@ func runPlan(ctx context.Context, args []string, out io.Writer) error {
 	return planRun(ctx, cfg, opt, milestone, out)
 }
 
-// planRun is a real `polako plan`: snapshot the open backlog, spawn the skill
-// through execClaude, then — whatever the run's own outcome — normalise every
-// issue this account created since. The snapshot has to be taken here rather
-// than inside normaliseProposals, before the run rather than after, so an
-// issue a person files by hand mid-run is told apart from one the skill
-// created.
-func planRun(ctx context.Context, cfg config, opt planOptions, milestone string, out io.Writer) error {
-	before, err := openIssuesBefore(ctx, cfg)
-	if err != nil {
-		return fmt.Errorf("could not read the backlog before the run (is gh authenticated for %s?): %w",
-			cfg.repo, err)
-	}
-
-	prompt := planPrompt(cfg, opt)
-	log.Printf("running %s from %s — capped at %s", cfg.skill, planPromptLabel(opt), plural(opt.maxIssues, "issue"))
-	started := time.Now()
-	rep, runErr := execClaude(ctx, cfg, prompt, "", cfg.skill, 0)
-	// Timed here, before the label pass, so the record's wall time is the run's
-	// own — the same boundary the drain draws around runClaude. The pass that
-	// follows is supervisor overhead and can spend up to two minutes on gh.
-	ended := time.Now()
-
-	// The label pass runs no matter how the run ended — a clean finish, the cap
-	// kill, a crash, a Ctrl+C. The curation gate is the whole point of the verb,
-	// and an issue the run filed but this process never labelled is an
-	// unguarded proposal an unattended drain would pick up. So it always gets
-	// its own context, detached from the parent's cancellation and bounded on
-	// its own — a shutdown signal that lands mid-pass must not be what strands
-	// a proposal unlabelled.
-	passCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
-	defer cancel()
-	if ctx.Err() != nil {
-		narrate(sevWarning, "the run was interrupted — still normalising anything it created before exiting")
-	}
-	pass := normaliseProposals(passCtx, cfg, before, milestone, "plan")
-	pass.report("plan", opt.maxCost, rep)
-
-	// The pricing line: what the operator's own history says this batch will
-	// cost to implement. After the label pass, because it prices the proposals
-	// the pass just counted; only when there are proposals, because a batch of
-	// nothing has nothing to price and nothing to curate.
-	if pass.created > 0 {
-		narrate(sevProgress, "plan: %s", proposalPricingLine(cfg.rec.metricsDir(), cfg.repo, pass.created, time.Now()))
-	}
-
-	// The two traces the run leaves, both after the label pass so they carry
-	// what it found: one record whatever the run's status, and — only when the
-	// run actually proposed something — one notification. Both detached from
-	// the parent context for the same reason the pass is: a Ctrl+C during the
-	// run must not be what swallows the record of it or the note that a backlog
-	// is now waiting to be curated.
-	cfg.rec.recordPlan(cfg, rep, planFacts{
-		proposalFacts: proposalFacts{
-			issuesCreated:  pass.created,
-			epicsCreated:   pass.epics,
-			cap:            opt.maxIssues,
-			labelsEnforced: pass.labelsEnforced(),
-			started:        started,
-			ended:          ended,
+// planRun is a real `polako plan`: the shared intakeRun body (snapshot, spawn,
+// label pass, price, record, notify, exit ladder — all in intake.go) fed plan's
+// own pieces: the plan-backlog prompt, the batch milestone, the "from <doc>"
+// announce, and a planFacts record carrying what it planned from.
+func planRun(ctx context.Context, cfg config, opt planOptions, milestone string, _ io.Writer) error {
+	return intakeRun(ctx, cfg, opt.intakeOptions, intakeRunSpec{
+		verb:           "plan",
+		milestone:      milestone,
+		announceTarget: "from " + planPromptLabel(opt),
+		prompt:         planPrompt(cfg, opt),
+		record: func(cfg config, rep runReport, pf proposalFacts) {
+			cfg.rec.recordPlan(cfg, rep, planFacts{
+				proposalFacts: pf,
+				vision:        planVisionField(opt),
+				milestone:     milestone,
+			})
 		},
-		vision:    planVisionField(opt),
-		milestone: milestone,
 	})
-	if pass.created > 0 {
-		notify(context.WithoutCancel(ctx), cfg, notification{
-			event: notifyProposed, reason: proposedNotifyReason(pass.created, pass.epics)})
-	}
-
-	// Order of the exit conditions: a failed label pass is the loudest, because
-	// it means a proposal may be sitting unguarded. Then an interrupt — the
-	// operator's own doing, reported as itself and not as a crash. Then the
-	// run's own failure.
-	if perr := pass.err(); perr != nil {
-		return perr
-	}
-	if ctx.Err() != nil {
-		// dispatchClaude returns the raw "signal: killed" wait error on a
-		// context kill, not context.Canceled, so the interrupt has to be read
-		// from the context itself — the same check processIssue makes.
-		return ctx.Err()
-	}
-	switch {
-	case runErr == nil:
-		return nil
-	case errors.Is(runErr, errIssueCap):
-		// Not an error to the operator: the cap is a setting they chose, the
-		// run did what it was told, and the pass above already normalised
-		// everything. Reported, not raised.
-		return nil
-	case errors.Is(runErr, errNoWork):
-		return fmt.Errorf("%w — check that -skill %q names a skill this installation has; "+
-			"plugin skills are namespaced <plugin>:<skill>", runErr, cfg.skill)
-	case errors.Is(runErr, errAuth):
-		return authAdvice(runErr)
-	default:
-		return fmt.Errorf("the plan run did not finish cleanly: %w — any %s it did create are labelled; "+
-			"rerun `polako plan` to continue, the skill deduplicates from GitHub", runErr, proposedLabel)
-	}
 }
 
 // planPromptLabel names what a run is planning from, for the one log line that
@@ -296,35 +214,16 @@ func planConfig(opt *planOptions) (config, error) {
 	return intakeConfig(&opt.intakeOptions)
 }
 
-// planPreflight mirrors the drain's — binaries, a reachable repo, a checked
-// notify command — plus what a plan run needs: the document resolves to a file
-// under -dir, the `--parent` capability probe decides flat vs. hierarchical
-// before a permission prompt can, and — for a real run only — the `proposed`
-// label and the batch milestone are ensured. A dry run declares nothing: it
-// runs the probe (a read) but creates no label and no milestone.
+// planPreflight is intakePreflight plus the two checks that are plan's alone:
+// the -vision document resolves to a file under -dir, and — for a real run —
+// the batch milestone is ensured. A dry run declares nothing: intakePreflight
+// runs the `--parent` probe (a read) but creates no label, and this creates no
+// milestone.
 func planPreflight(ctx context.Context, cfg *config, opt *planOptions) (milestone string, hierarchical bool, err error) {
-	for _, bin := range []string{cfg.claudeBin, cfg.ghBin, "git"} {
-		if _, err := exec.LookPath(bin); err != nil {
-			return "", false, fmt.Errorf("%q not found on PATH: %w — plan needs it to run the skill and read GitHub", bin, err)
-		}
-	}
-	if err := checkNotifyCommand(cfg.notifyCmd); err != nil {
+	hierarchical, err = intakePreflight(ctx, cfg, &opt.intakeOptions, "plan")
+	if err != nil {
 		return "", false, err
 	}
-	if _, err := git(ctx, *cfg, "rev-parse", "--git-dir"); err != nil {
-		return "", false, fmt.Errorf("-dir %s is not a git checkout: %w", cfg.dir, err)
-	}
-	raw, err := gh(ctx, *cfg, "repo", "view", "--json", "nameWithOwner")
-	if err != nil {
-		return "", false, fmt.Errorf("no GitHub repository reachable from %s (is gh authenticated?): %w", cfg.dir, err)
-	}
-	var repoView struct {
-		NameWithOwner string `json:"nameWithOwner"`
-	}
-	if err := json.Unmarshal(raw, &repoView); err != nil {
-		return "", false, fmt.Errorf("unreadable `gh repo view` reply (is gh current?): %w", err)
-	}
-	cfg.repo, cfg.ghRepo = repoView.NameWithOwner, repoView.NameWithOwner
 
 	if opt.vision != "" {
 		full := filepath.Join(cfg.dir, opt.vision)
@@ -338,29 +237,11 @@ func planPreflight(ctx context.Context, cfg *config, opt *planOptions) (mileston
 		}
 	}
 
-	// Probed here so a dry run can report the shape a real run would take. The
-	// run itself does not need telling: the skill derives flat-vs-hierarchical
-	// from its own `gh issue create` error (see planPrompt).
-	hierarchical = ghCreatesSubIssues(ctx, *cfg)
-
 	milestone = planMilestoneTitle(opt)
-
-	if !opt.dryRun {
-		// The record pins which CLI and which installed skill produced the
-		// run's numbers, the same two the drain's preflight reads. Best-effort:
-		// a version that will not answer leaves the field empty rather than
-		// stopping a plan run over telemetry.
-		cfg.claudeVersion = claudeVersion(ctx, *cfg)
-		cfg.pluginVersion, cfg.pluginID = pluginVersion(ctx, *cfg)
-
-		// Best-effort like the drain's awaiting-answer declaration: an
-		// "already exists" is the healthy repeat case, not a failure.
-		_ = ensureLabel(ctx, *cfg, proposedLabel, proposedLabelColor, proposedLabelDesc)
-		if milestone != "" {
-			if err := ensureMilestone(ctx, *cfg, milestone); err != nil {
-				return "", false, fmt.Errorf("could not ensure the %q milestone: %w — "+
-					"pass -milestone off to skip it", milestone, err)
-			}
+	if !opt.dryRun && milestone != "" {
+		if err := ensureMilestone(ctx, *cfg, milestone); err != nil {
+			return "", false, fmt.Errorf("could not ensure the %q milestone: %w — "+
+				"pass -milestone off to skip it", milestone, err)
 		}
 	}
 	return milestone, hierarchical, nil
