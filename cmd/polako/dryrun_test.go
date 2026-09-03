@@ -173,6 +173,33 @@ func TestDryRunPrintsTheInvocationARunWouldMake(t *testing.T) {
 	}
 }
 
+// The dry run routes through the policy seam, so an implement run's -effort
+// reaches the printed invocation and the -remediation-* cell — which steers
+// only remediation runs — does not.
+func TestDryRunRoutesThroughThePolicySeam(t *testing.T) {
+	base := &ghState{Issues: map[string]*fakeIssue{"1": {Open: true}}}
+
+	cfg, _ := drainConfig(t, "stream", base)
+	cfg.effort = "medium"
+	var withEffort strings.Builder
+	if err := dryRun(context.Background(), cfg, &withEffort); err != nil {
+		t.Fatalf("dryRun: %v", err)
+	}
+	if !strings.Contains(withEffort.String(), "--effort medium") {
+		t.Errorf("-effort should reach the printed invocation, got:\n%s", withEffort.String())
+	}
+
+	cfg, _ = drainConfig(t, "stream", base)
+	cfg.remediationEffort, cfg.remediationModel = "medium", "sonnet"
+	var remOnly strings.Builder
+	if err := dryRun(context.Background(), cfg, &remOnly); err != nil {
+		t.Fatalf("dryRun: %v", err)
+	}
+	if strings.Contains(remOnly.String(), "--effort") || strings.Contains(remOnly.String(), "--model") {
+		t.Errorf("the -remediation-* cell must not leak into the implement invocation, got:\n%s", remOnly.String())
+	}
+}
+
 // Restart safety is the first thing an issue is put through, so it is the first
 // thing a dry run has to report: an issue whose branch already carries a PR
 // gets no claude run at all, and printing one would be a lie.

@@ -1921,6 +1921,68 @@ func TestDrainRemediatesAFailingCheck(t *testing.T) {
 	}
 }
 
+// The policy seam (#362): -remediation-model / -remediation-effort steer a
+// remediation run without touching the implement run beside it. The implement
+// run's argv carries no --model/--effort and its record inherits; the rebase
+// run's argv carries both and its record names them as the remediation cell.
+func TestDrainRemediationFlagsSteerOnlyTheRemediationRun(t *testing.T) {
+	captureLog(t)
+	getArgs := watchClaudeArgs(t)
+	cfg, path := drainConfig(t, "implementthenrebase", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	cfg.remediationModel, cfg.remediationEffort = "sonnet", "medium"
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if finalGhState(t, path).Issues["1"].Open {
+		t.Error("issue 1 should have merged once the rebase cleared the conflict")
+	}
+
+	argv := getArgs()
+	if len(argv) != 2 {
+		t.Fatalf("claude ran %d times, want 2 (implement, then rebase):\n%s", len(argv), strings.Join(argv, "\n"))
+	}
+	implement, rebase := argv[0], argv[1]
+	if strings.Contains(implement, "--effort") || strings.Contains(implement, "--model") {
+		t.Errorf("the implement run must carry neither --effort nor --model: %s", implement)
+	}
+	for _, want := range []string{"--effort medium", "--model sonnet"} {
+		if !strings.Contains(rebase, want) {
+			t.Errorf("the rebase run's argv is missing %q: %s", want, rebase)
+		}
+	}
+
+	var implementRec, rebaseRec runRecord
+	for _, line := range readRecords(t, records, cfg.repo) {
+		var rec runRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("record is not JSON: %v\n%s", err, line)
+		}
+		switch rec.Reason {
+		case reasonImplement:
+			implementRec = rec
+		case reasonRemediate:
+			rebaseRec = rec
+		}
+	}
+	if implementRec.EffortSource != sourceInherit || implementRec.RequestedModel != "" {
+		t.Errorf("implement record = effort_source %q / requested_model %q, want inherit / empty",
+			implementRec.EffortSource, implementRec.RequestedModel)
+	}
+	if rebaseRec.EffortSource != sourceRemediation || rebaseRec.RequestedModel != "sonnet" ||
+		rebaseRec.RequestedEffort != "medium" {
+		t.Errorf("rebase record = effort_source %q / requested_model %q / requested_effort %q, "+
+			"want remediation / sonnet / medium",
+			rebaseRec.EffortSource, rebaseRec.RequestedModel, rebaseRec.RequestedEffort)
+	}
+}
+
 // A remediation that finishes without pushing has diagnosed all it is going to.
 // Running it again reads the same logs against the same commit and lands in the
 // same place, so the issue parks rather than looping until someone notices.

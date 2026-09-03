@@ -284,9 +284,12 @@ func TestHealthRecordFallsBackToObservedUsage(t *testing.T) {
 
 func TestRunRecordIsSelfDescribing(t *testing.T) {
 	cfg := metricsConfig(t, metricsOff)
-	cfg.effort = "medium"
 	rc := runContext{
 		issue: 12, pr: 34, reason: reasonImplement, outcome: outcomeOpenedPR,
+		// What the policy resolved — the record's requested_* and *_source,
+		// carried on rc because for a remediation run they are not cfg's.
+		model: "claude-opus-5", effort: "medium",
+		modelSource: sourceFlag, effortSource: sourceFlag,
 		started: time.Date(2026, 8, 24, 10, 15, 0, 0, time.UTC),
 		ended:   time.Date(2026, 8, 24, 10, 34, 2, 0, time.UTC),
 	}
@@ -314,6 +317,8 @@ func TestRunRecordIsSelfDescribing(t *testing.T) {
 		"model":            "claude-opus-5",
 		"requested_model":  "claude-opus-5",
 		"requested_effort": "medium",
+		"model_source":     sourceFlag,
+		"effort_source":    sourceFlag,
 		"permission_mode":  "acceptEdits",
 		"tag":              "baseline",
 		"claude_version":   "2.1.34",

@@ -191,20 +191,21 @@ func issueCloseTool(issue int) string {
 // run has no business fanning out a fleet.
 var effortLevels = []string{"low", "medium", "high", "xhigh", "max"}
 
-// validateEffort checks -effort against effortLevels. Empty passes: the flag is
-// omitted and the CLI resolves effort the way it would for a terminal session.
-// The error says which word to pass instead, because this runs unattended and
-// its output is the only diagnostic.
-func validateEffort(effort string) error {
+// validateEffort checks an effort flag's value against effortLevels. Empty
+// passes: the flag is omitted and the CLI resolves effort the way it would for
+// a terminal session. flagName is the flag being checked — -effort or
+// -remediation-effort — so the error names the one the operator got wrong,
+// because this runs unattended and its output is the only diagnostic.
+func validateEffort(flagName, effort string) error {
 	if effort == "" || slices.Contains(effortLevels, effort) {
 		return nil
 	}
 	if effort == "ultracode" {
-		return fmt.Errorf("-effort ultracode is a multi-agent workflow mode, not an effort level — "+
-			"an unattended run must not fan out a fleet; pass one of %s", strings.Join(effortLevels, ", "))
+		return fmt.Errorf("%s ultracode is a multi-agent workflow mode, not an effort level — "+
+			"an unattended run must not fan out a fleet; pass one of %s", flagName, strings.Join(effortLevels, ", "))
 	}
-	return fmt.Errorf("-effort %q is not a claude effort level — pass one of %s",
-		effort, strings.Join(effortLevels, ", "))
+	return fmt.Errorf("%s %q is not a claude effort level — pass one of %s",
+		flagName, effort, strings.Join(effortLevels, ", "))
 }
 
 // buildArgs assembles one headless claude invocation.
