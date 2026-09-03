@@ -175,8 +175,8 @@ func TestPlanRecordFallsBackToObservedUsage(t *testing.T) {
 // safe: proposalRunHead and proposalRunTail inline into the JSON object at the
 // embed position, so both records still marshal to exactly the bytes the old
 // flat structs produced — same keys, same order, same v. Golden strings
-// captured from that flat form; regenerate them only alongside a deliberate
-// schema change, and bump recordVersion when you do.
+// captured from that flat form; regenerate them only for a deliberate change
+// to what these records emit, never to make an accidental one pass.
 func TestPlanAndHealthRecordsMarshalUnchanged(t *testing.T) {
 	cfg := metricsConfig(t, metricsOff)
 	cfg.skill = "skill-x"
