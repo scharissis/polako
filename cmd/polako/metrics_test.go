@@ -192,7 +192,7 @@ func TestPlanAndHealthRecordsMarshalUnchanged(t *testing.T) {
 		t.Errorf("plan record JSON changed:\n got %s\nwant %s", plan, wantPlan)
 	}
 
-	health, err := json.Marshal(newHealthRecord(cfg, sampleReport(), healthFacts{sampleProposalFacts()}))
+	health, err := json.Marshal(newHealthRecord(cfg, sampleReport(), healthFacts{proposalFacts: sampleProposalFacts()}))
 	if err != nil {
 		t.Fatalf("marshalling the health record: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestPlanAndHealthRecordsMarshalUnchanged(t *testing.T) {
 func TestHealthRecordIsSelfDescribing(t *testing.T) {
 	cfg := metricsConfig(t, metricsOff)
 	cfg.skill = defaultHealthSkill
-	got := decode(t, newHealthRecord(cfg, sampleReport(), healthFacts{sampleProposalFacts()}))
+	got := decode(t, newHealthRecord(cfg, sampleReport(), healthFacts{proposalFacts: sampleProposalFacts()}))
 
 	for key, want := range map[string]any{
 		"v":               float64(recordVersion),
@@ -263,7 +263,7 @@ func TestHealthRecordFallsBackToObservedUsage(t *testing.T) {
 		observed:      tokenCounts{In: 8, Out: 9, CacheRead: 10, CacheWrite: 11},
 		observedTurns: 5,
 	}
-	got := decode(t, newHealthRecord(cfg, rep, healthFacts{sampleProposalFacts()}))
+	got := decode(t, newHealthRecord(cfg, rep, healthFacts{proposalFacts: sampleProposalFacts()}))
 
 	if got["usage_source"] != usageObserved {
 		t.Errorf("usage_source = %v, want %q", got["usage_source"], usageObserved)
