@@ -82,6 +82,8 @@ func TestSizeFromBody(t *testing.T) {
 		{"XL is not a size", "Estimate: XL", ""},
 		{"a word starting with a size letter", "Estimate: SMALL", ""},
 		{"not at line start", "see Estimate: M above", ""},
+		{"letter on the next line does not count", "Estimate:\n\nL", ""},
+		{"tab after the colon", "Estimate:\tM", "M"},
 		{"empty", "", ""},
 	}
 	for _, tc := range cases {

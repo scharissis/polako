@@ -175,8 +175,10 @@ func newRunPolicy(cfg config) runPolicy {
 // is the only issue body text the supervisor reads, docs/hardening.md lists
 // bodies as attacker-editable, and the match only picks which operator-set
 // -effort-by-size cell applies. A hand-written issue owes no line, so no match
-// is silent, not a warning.
-var estimateLine = regexp.MustCompile(`(?m)^Estimate:\s*([SML])\b`)
+// is silent, not a warning. `[ \t]*` rather than the AC's `\s*`: \s spans
+// newlines, which would let `Estimate:` and the letter sit on different lines
+// and is not "a line of its own".
+var estimateLine = regexp.MustCompile(`(?m)^Estimate:[ \t]*([SML])\b`)
 
 func sizeFromBody(body string) string {
 	if m := estimateLine.FindStringSubmatch(body); m != nil {
