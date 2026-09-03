@@ -119,7 +119,7 @@ func groupTotals(ds dataset, by string) (groups map[string]*statGroup, order []s
 		case byShift:
 			name = r.Shift
 		case byReason:
-			// label(), not the raw value: the run log (stats.go) and the
+			// label(), not the raw value: the run log (statsrender.go) and the
 			// "reasons" summary line render reason this same way, and a group
 			// name is exactly the kind of place that convention exists for.
 			name = label(r.Reason)

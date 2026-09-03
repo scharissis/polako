@@ -431,7 +431,7 @@ func preflightPairs(cfg config, logPath string) [][2]string {
 // settingsBlock narrates the startup recap as one aligned block: every row at
 // settings severity — dim on a TTY, plain piped — through narrate, so each
 // still gets its own timestamp and its own copy in the shift log exactly like
-// any other narration. printPairs (stats.go) cannot be reused directly here:
+// any other narration. printPairs (statsrender.go) cannot be reused directly here:
 // it writes straight to an io.Writer, bypassing emit() entirely, which would
 // lose both of those. pairWidth is what the two share, so the startup block
 // lines up the same way status and stats already do.

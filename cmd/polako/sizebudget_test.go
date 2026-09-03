@@ -37,9 +37,10 @@ import (
 // whole tree already clears them and the allowlists below stay short — the
 // entries are then the real outliers, not a census.
 //
-//   - fileBudget: every non-test file but stats.go is already under 1,000
-//     lines, and stats.go is what is left of the accretion epic. The
-//     next-largest file (plan.go) sits ~140 lines clear.
+//   - fileBudget: every non-test file is already under 1,000 lines — the
+//     largest, metrics.go, sits ~60 lines clear — so fileDebt is empty and a
+//     new entry would mean a real regression, not the accretion epic's
+//     leftovers (stats.go, the last of those, was split up by issue #344).
 //   - funcBudget: just over two of the health report's 60-line call-out
 //     screens, plus a signature and braces. Three functions exceed it; the
 //     next-longest (supervisePR) sits a few lines clear, so an ordinary edit
@@ -62,9 +63,7 @@ const (
 //
 // Keys: base filename for fileDebt, "file.go:funcName" for funcDebt (the
 // receiver-qualified name for methods, as scripts/health prints it).
-var fileDebt = map[string]int{
-	"stats.go": 1450, // the renderer and the shared format helpers are separable; deferred by issue #149
-}
+var fileDebt = map[string]int{}
 
 var funcDebt = map[string]int{
 	"claude.go:dispatchClaude": 273, // arg assembly, spawn, and stream handling are three functions
