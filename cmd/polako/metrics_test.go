@@ -218,6 +218,10 @@ func TestHealthRecordIsSelfDescribing(t *testing.T) {
 		"repo":            "scharissis/polako",
 		"status":          "ok",
 		"turns":           float64(74),
+		"tool_uses":       float64(63),
+		"wall_ms":         float64(1141000),
+		"api_ms":          float64(812000),
+		"cost_usd":        4.12,
 		"usage_source":    usageResult,
 		"model":           "claude-opus-5",
 		"skill":           defaultHealthSkill,
@@ -236,6 +240,9 @@ func TestHealthRecordIsSelfDescribing(t *testing.T) {
 	}
 	if tokens, ok := got["tokens"].(map[string]any); !ok || tokens["cache_read"] != float64(8123400) {
 		t.Errorf("tokens = %v, want the four-way split", got["tokens"])
+	}
+	if models, ok := got["model_usage"].(map[string]any); !ok || len(models) != 1 {
+		t.Errorf("model_usage = %v, want the per-model split carried through", got["model_usage"])
 	}
 	// review-health plans from the repo, not a document: no vision, no
 	// milestone. And a health run works no issue, same as a plan run.
