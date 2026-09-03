@@ -102,8 +102,12 @@ past it:
 
 ```
   parked  #16 ($2.27) — the run stopped to ask for a permission this allowlist
-  does not grant — add the missing tool with -add-tools, or fix the skill that
-  reached for it, then remove needs-human to retry
+  does not grant. To fix it: find the tool it reached for — named in the
+  terminal right after this park, and saved in the shift log named right
+  after that — then either grant it with -add-tools (for a Bash command, add
+  an entry shaped like `-add-tools "Bash(<command>:*)"`) and remove
+  needs-human to retry, or, if the skill should not have reached for that
+  tool at all, fix the skill instead
 ```
 
 When the ask was only an earlier turn, polako resumes first if there's work

@@ -278,13 +278,12 @@ func preflight(ctx context.Context, cfg *config) error {
 	// As soon as the repository is known, because the file is named after it.
 	// Everything logged from here on lands in the shift log too — including a
 	// preflight refusal below, which is often the diagnosis an operator wants.
-	logPath := ""
 	if cfg.logDir != "" {
 		path, err := sinks.openShiftLog(cfg.logDir, cfg.repo, cfg.shiftID)
 		if err != nil {
 			narrate(sevWarning, logLostFmt, err)
 		} else {
-			logPath = path
+			cfg.logPath = path
 		}
 	}
 	// A dry run may still look past either gate below: it runs nothing and
@@ -342,7 +341,7 @@ func preflight(ctx context.Context, cfg *config) error {
 		// worded line about the same skew.
 		warnOnVersionSkew(polakoVersion(), *cfg)
 	}
-	settingsBlock(preflightPairs(*cfg, logPath))
+	settingsBlock(preflightPairs(*cfg))
 	return nil
 }
 
@@ -357,7 +356,7 @@ func preflight(ctx context.Context, cfg *config) error {
 // being interleaved with -dry-run the way the two sentences used to be — a
 // real, if cosmetic, reordering worth knowing about before trusting this
 // comment too literally.
-func preflightPairs(cfg config, logPath string) [][2]string {
+func preflightPairs(cfg config) [][2]string {
 	var pairs [][2]string
 	// Unconditional, unlike every row below it: a shift closes a finished
 	// container (every child closed) on its own, writing to human-curated state
@@ -418,12 +417,12 @@ func preflightPairs(cfg config, logPath string) [][2]string {
 		pairs = append(pairs, [2]string{"shift",
 			fmt.Sprintf("%s — `polako stats -shift %s` reports on it alone", cfg.shiftID, cfg.shiftID)})
 	}
-	if logPath != "" {
+	if cfg.logPath != "" {
 		// The disclosure, said every time like the recorder's line: unlike the
 		// run-data records this file holds transcript text, so where it lives
 		// and that it stays local is worth a line per shift.
 		pairs = append(pairs, [2]string{"shift log",
-			fmt.Sprintf("%s — the whole claude transcript stream, kept on this machine (-log off to disable)", logPath)})
+			fmt.Sprintf("%s — the whole claude transcript stream, kept on this machine (-log off to disable)", cfg.logPath)})
 	}
 	return pairs
 }

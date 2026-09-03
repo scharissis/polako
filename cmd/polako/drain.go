@@ -98,6 +98,15 @@ func resumeHint(cfg config, issue int, st *issueState) {
 		log.Printf("issue #%d: `polako stats -shift %s` reports on this shift alone",
 			issue, cfg.shiftID)
 	}
+	// A permission park's reason names "this shift's log" but cannot carry its
+	// path — the path is exactly the kind of local detail that belongs beside
+	// the resume id, not on the issue thread — so it is repeated here, at the
+	// one park-adjacent line an operator reading only the terminal (or its
+	// scrollback later) is guaranteed to see.
+	if cfg.logPath != "" {
+		log.Printf("issue #%d: %s has the full transcript, including any refused tool call",
+			issue, cfg.logPath)
+	}
 }
 
 // drain works the queue until it empties, an issue proves fatal, or -once says
@@ -396,7 +405,8 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string) {
 	// owes it. Best-effort and silent: the issue is already parked either way.
 	_, _ = gh(ctx, cfg, "issue", "edit", n, "--remove-label", awaitingAnswerLabel)
 	body := fmt.Sprintf("**polako parked this issue.** %s\n\n"+
-		"Nothing will run on it again until the `%s` label is removed.", reason, needsHumanLabel)
+		"Nothing will run on it again until the `%s` label is removed — "+
+		"`gh issue edit %s --remove-label %s`.", reason, needsHumanLabel, n, needsHumanLabel)
 	if _, cerr := gh(ctx, cfg, "issue", "comment", n, "--body", body); cerr != nil {
 		narrate(sevWarning, "could not comment on issue #%d (%v) — the reason is in this log and in the exit summary",
 			issue, cerr)

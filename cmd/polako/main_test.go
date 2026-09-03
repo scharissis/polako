@@ -1667,7 +1667,7 @@ func TestCapNotesNameEveryCapInForce(t *testing.T) {
 // unconditional epics disclosure — and nothing else. Every other row earns its
 // keep only when there is something to disclose.
 func TestPreflightPairsSaysNothingUnasked(t *testing.T) {
-	got := preflightPairs(config{}, "")
+	got := preflightPairs(config{})
 	if len(got) != 1 || got[0][0] != "epics" {
 		t.Errorf("preflightPairs(zero value) = %v, want only the epics row", got)
 	}
@@ -1691,8 +1691,9 @@ func TestPreflightPairsGatesAndOrdersEveryRow(t *testing.T) {
 		remote:      true,
 		rec:         &recorder{dir: "/tmp/metrics"},
 		shiftID:     "abc123",
+		logPath:     "/tmp/logs/shift.log",
 	}
-	got := preflightPairs(cfg, "/tmp/logs/shift.log")
+	got := preflightPairs(cfg)
 	wantLabels := []string{
 		"epics", "queue", "dry-run", "caps", "plan", "post-summary", "notify", "remote", "run data", "shift", "shift log",
 	}

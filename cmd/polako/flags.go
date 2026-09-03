@@ -168,6 +168,12 @@ type config struct {
 	// opened by preflight, which learns the repository it is named after.
 	logDir  string
 	verbose bool
+	// logPath is that file's full path, filled in by preflight once it is
+	// opened (empty when -log is off or opening it failed). A park needs it
+	// to point an operator back at the one place the exact refused tool call
+	// survives — the reason posted to the issue thread cannot carry it, since
+	// the tool detail can hold a local absolute path (see permissionRefusedDetail).
+	logPath string
 
 	// Filled in by preflight, recorded with every run: which repository this
 	// is, which CLI produced its numbers, and which release of the skill it

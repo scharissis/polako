@@ -123,11 +123,19 @@ func limitRefusal(result string) bool {
 // permissionRefused, where the result text itself was the ask and the issue
 // parks without a resume, and permissionAsked, where an earlier turn was and
 // the issue parks after any resume has run its course. Either way the lever is
-// the operator's, so it names -add-tools and the skill rather than only
-// reporting that something was refused.
+// the operator's, so this spells out where to find the specific tool (the
+// terminal, right after this park, and the shift log resumeHint names beside
+// it — never here, since the tool detail can carry a local absolute path) and
+// what to do with it once found, rather than only reporting that something
+// was refused.
 const permissionParkReason = "the run stopped to ask for a permission this " +
-	"allowlist does not grant — add the missing tool with -add-tools, or fix " +
-	"the skill that reached for it, then remove needs-human to retry"
+	"allowlist does not grant. To fix it: find the tool it reached for — " +
+	"named in the terminal right after this park, and saved in the shift " +
+	"log named right after that — then either grant it with -add-tools " +
+	"(for a Bash command, add an entry shaped like " +
+	"`-add-tools \"Bash(<command>:*)\"`) and remove needs-human to retry, " +
+	"or, if the skill should not have reached for that tool at all, fix the " +
+	"skill instead"
 
 // permissionRefusal reports whether a clean run's final text is the run itself
 // asking the operator to approve a tool it was refused — the shape observed on

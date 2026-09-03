@@ -1060,6 +1060,7 @@ func TestDrainParksAPermissionRefusalWithoutResuming(t *testing.T) {
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 	})
 	cfg.shiftID = "shift99"
+	cfg.logPath = "/tmp/fake-shift.log"
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
 	t.Setenv(fakeGhLogEnv, calls)
 	records := t.TempDir()
@@ -1082,6 +1083,7 @@ func TestDrainParksAPermissionRefusalWithoutResuming(t *testing.T) {
 		// the checks against the fake gh call log below.
 		"issue #1: `claude --resume sess-blocked` reopens what the last skill run on it did",
 		"issue #1: `polako stats -shift shift99` reports on this shift alone",
+		"issue #1: /tmp/fake-shift.log has the full transcript, including any refused tool call",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log is missing %q\ngot:\n%s", want, out)
@@ -1099,7 +1101,10 @@ func TestDrainParksAPermissionRefusalWithoutResuming(t *testing.T) {
 	if want := "the run stopped to ask for a permission"; !strings.Contains(string(posted), want) {
 		t.Errorf("no gh call carried the reason to the thread\ngot:\n%s", posted)
 	}
-	for _, unwanted := range []string{"sess-blocked", "shift99"} {
+	if want := "gh issue edit 1 --remove-label needs-human"; !strings.Contains(string(posted), want) {
+		t.Errorf("the park comment should give the exact command to un-park the issue\ngot:\n%s", posted)
+	}
+	for _, unwanted := range []string{"sess-blocked", "shift99", "/tmp/fake-shift.log"} {
 		if strings.Contains(string(posted), unwanted) {
 			t.Errorf("a gh call carried an operator-only identifier %q to the thread\ngot:\n%s", unwanted, posted)
 		}
