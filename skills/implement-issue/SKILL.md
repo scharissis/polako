@@ -35,11 +35,12 @@ Backgrounding the slow thing is fine; what is not is the turn ending while it
 is still outstanding.
 
 That polling is only for work you backgrounded yourself — a `run_in_background`
-job. A synchronous call — a `Skill` invocation, a foreground `Bash` command — is
-never polled: the harness holds the turn until it returns, then hands you the
-result. Nothing to keep alive, nothing to check on, so `ListAgents` or a
-`Bash: true` heartbeat beside a call that hasn't returned yet is pure waste.
-Issues #217 and #372 are both runs that hand-polled the review gate that way.
+job. Invoking a `Skill` is not that: it runs as a forked agent whose own
+activity keeps the run alive, and the harness holds the turn until it returns
+and hands you the result. Nothing to keep alive, nothing to check on, so
+`ListAgents` or a `Bash: true` heartbeat beside a `Skill` call that hasn't
+returned yet is pure waste. Issues #217 and #372 are both runs that hand-polled
+the review gate that way.
 
 Stopping on purpose is a different thing from stopping to wait. An unanswered
 question ends the run deliberately, flagged with `awaiting-answer` for a human
