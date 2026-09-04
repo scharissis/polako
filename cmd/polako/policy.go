@@ -8,9 +8,10 @@ package main
 // everything below it; and -remediation-model / -remediation-effort, which
 // point a narrower remediation run (rebase, red-check fix, review reply)
 // somewhere cheaper. Everything else resolves against -model/-effort, then
-// inherit. #364 adds the epic's labels; size is still to be argued for — the
-// source enum spells both now so a record's model_source / effort_source
-// value set never has to grow.
+// inherit. #364 added the epic's labels — a family an issue leaves unset is
+// filled from its parent's own model:/effort: labels; size is still to be
+// argued for, and the source enum spelled both from the start so a record's
+// model_source / effort_source value set never has to grow.
 
 import (
 	"fmt"
@@ -19,8 +20,8 @@ import (
 	"strings"
 )
 
-// Where a run's model or effort was decided. epic and size are declared now
-// but unused until #364 — see the file comment.
+// Where a run's model or effort was decided. size is declared but still
+// unused — see the file comment.
 const (
 	sourceInherit     = "inherit"
 	sourceFlag        = "flag"
@@ -66,11 +67,35 @@ type runPolicy struct {
 // unset, and choose falls through to the flags. model:default is the one set
 // value that is empty — an explicit "use the account default", which still
 // stops resolution rather than letting -model through.
+//
+// modelFromEpic / effortFromEpic mark a family the issue left unset that its
+// parent epic's own labels filled (#364) — choose names that source epic
+// rather than label.
 type labelChoice struct {
-	model     string
-	effort    string
-	modelSet  bool
-	effortSet bool
+	model          string
+	effort         string
+	modelSet       bool
+	effortSet      bool
+	modelFromEpic  bool
+	effortFromEpic bool
+}
+
+// complete reports whether the issue settled both families itself, so its
+// parent epic need not be read at all.
+func (lc labelChoice) complete() bool { return lc.modelSet && lc.effortSet }
+
+// inheritFrom fills any family the issue left unset from its parent epic's own
+// model:/effort: labels, marking it epic-sourced. A family the issue settled
+// itself — model:default included, which is the child's deliberate escape from
+// the epic — is left untouched.
+func (lc labelChoice) inheritFrom(epic labelChoice) labelChoice {
+	if !lc.modelSet && epic.modelSet {
+		lc.model, lc.modelSet, lc.modelFromEpic = epic.model, true, true
+	}
+	if !lc.effortSet && epic.effortSet {
+		lc.effort, lc.effortSet, lc.effortFromEpic = epic.effort, true, true
+	}
+	return lc
 }
 
 // modelLabelValue is the shape a model: label's value must match to be passed
@@ -78,37 +103,39 @@ type labelChoice struct {
 // the CLI's business; a name polako refused would be a list it had to keep.
 var modelLabelValue = regexp.MustCompile(`^[A-Za-z0-9._\[\]-]+$`)
 
-// labelPolicy reads the model: and effort: families off an issue's labels. The
-// prefix matches case-insensitively, the way GitHub treats label names; a
-// model: value is checked only for shape and passed through, an effort: value
-// against the closed level set. A typo or a second label of the same family
-// warns and leaves that pair unset — picking one of two would be guessing
-// which the maintainer meant.
+// labelPolicy reads the model: and effort: families off one issue's labels —
+// the issue being worked or, through inheritFrom, its parent epic. The prefix
+// matches case-insensitively, the way GitHub treats label names; a model: value
+// is checked only for shape and passed through, an effort: value against the
+// closed level set. A typo or a second label of the same family warns and
+// leaves that pair unset — picking one of two would be guessing which the
+// maintainer meant. "Falls through" then means the epic's own label if the
+// issue has a parent that carries one, and the -model/-effort flags otherwise.
 func labelPolicy(labels []ghLabel) labelChoice {
 	var lc labelChoice
 
 	switch model := labelValues(labels, "model:"); {
 	case len(model) == 0:
 	case len(model) > 1:
-		narrate(sevWarning, "issue carries %d model: labels (%s) — model falls through to the flags",
+		narrate(sevWarning, "issue carries %d model: labels (%s) — model falls through",
 			len(model), strings.Join(model, ", "))
 	case strings.EqualFold(model[0], "default"):
 		lc.modelSet = true // set, but empty: the account default
 	case modelLabelValue.MatchString(model[0]):
 		lc.model, lc.modelSet = model[0], true
 	default:
-		narrate(sevWarning, "model:%s is not a valid model name — model falls through to the flags", model[0])
+		narrate(sevWarning, "model:%s is not a valid model name — model falls through", model[0])
 	}
 
 	switch effort := labelValues(labels, "effort:"); {
 	case len(effort) == 0:
 	case len(effort) > 1:
-		narrate(sevWarning, "issue carries %d effort: labels (%s) — effort falls through to the flags",
+		narrate(sevWarning, "issue carries %d effort: labels (%s) — effort falls through",
 			len(effort), strings.Join(effort, ", "))
 	case slices.Contains(effortLevels, effort[0]):
 		lc.effort, lc.effortSet = effort[0], true
 	default:
-		narrate(sevWarning, "effort:%s is not a claude effort level — effort falls through to the flags", effort[0])
+		narrate(sevWarning, "effort:%s is not a claude effort level — effort falls through", effort[0])
 	}
 
 	return lc
@@ -137,18 +164,23 @@ func newRunPolicy(cfg config) runPolicy {
 	}
 }
 
-// choose resolves the model and effort for a run of the given reason. The
-// issue's model:/effort: label wins if it is set — a maintainer's call about
-// this ticket outranks the operator's flags and the remediation cell alike.
-// model:default lands here as set-but-empty: it stops resolution at inherit
-// rather than falling through to -model. Then, for a remediation run,
-// -remediation-* if set; then -model/-effort; then inherit.
+// choose resolves the model and effort for a run of the given reason. A
+// model:/effort: label wins if it is set — a maintainer's call about this
+// ticket outranks the operator's flags and the remediation cell alike — and
+// is named source label when the issue carries it, source epic when it came
+// from the issue's parent (#364). model:default lands here as set-but-empty:
+// it stops resolution at inherit rather than falling through to -model. Then,
+// for a remediation run, -remediation-* if set; then -model/-effort; then
+// inherit.
 func (p runPolicy) choose(reason string) runChoice {
 	remediation := remediationReasons[reason]
-	pick := func(labelVal string, labelSet bool, remediationCell, baseCell string) (string, string) {
+	pick := func(labelVal string, labelSet, fromEpic bool, remediationCell, baseCell string) (string, string) {
 		if labelSet {
 			if labelVal == "" {
-				return "", sourceInherit // model:default
+				return "", sourceInherit // model:default, the issue's or the epic's
+			}
+			if fromEpic {
+				return labelVal, sourceEpic
 			}
 			return labelVal, sourceLabel
 		}
@@ -160,8 +192,8 @@ func (p runPolicy) choose(reason string) runChoice {
 		}
 		return "", sourceInherit
 	}
-	m, ms := pick(p.labels.model, p.labels.modelSet, p.remediationModel, p.model)
-	e, es := pick(p.labels.effort, p.labels.effortSet, p.remediationEffort, p.effort)
+	m, ms := pick(p.labels.model, p.labels.modelSet, p.labels.modelFromEpic, p.remediationModel, p.model)
+	e, es := pick(p.labels.effort, p.labels.effortSet, p.labels.effortFromEpic, p.remediationEffort, p.effort)
 	return runChoice{model: m, effort: e, modelSource: ms, effortSource: es}
 }
 

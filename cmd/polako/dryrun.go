@@ -93,8 +93,8 @@ func dryRun(ctx context.Context, cfg config, out io.Writer) error {
 	// Route the implement dispatch through the same policy seam a real run
 	// uses, so -dry-run keeps its promise of printing the exact invocation: the
 	// issue's model:/effort: labels resolve here just as they would at pickup,
-	// so --model and --effort show the value a real run would get. #364 widens
-	// the read to the parent's labels; this is where that lands too.
+	// so --model and --effort show the value a real run would get — the epic's
+	// labels (#364) included, since issueLabelPolicy reads them.
 	policy := newRunPolicy(cfg)
 	policy.labels = issueLabelPolicy(ctx, cfg, issue)
 	runCfg = policy.choose(reasonImplement).apply(runCfg)

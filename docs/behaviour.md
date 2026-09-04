@@ -353,11 +353,19 @@ or `model:<full id>` — and `effort:<level>`, one of `low`, `medium`, `high`,
 trivial, outranks the shift default. `model:default` is the explicit "use the
 account's own default here" — it passes no `--model` even when the flag is set.
 
+**An epic's labels reach its children.** A child issue that carries no label
+of a family takes its parent epic's — so `model:sonnet` on the epic runs all
+ten children on sonnet, and its record names the source `epic`. The two
+families resolve on their own: a child with `effort:high` and no model label
+still takes the epic's model. A child overrides with its own label, or with
+`model:default` to escape the epic and use the account default. One hop only,
+no grandparents.
+
 polako never creates these labels: applying one for the first time creates it
 in the same GitHub gesture, and only someone with triage rights can. The prefix
 matches case-insensitively. Two labels of one family, or a typo like
-`effort:medim`, warns and falls through to the flag rather than guessing. A
-label that fails to read falls through too — it is a preference, not a gate.
+`effort:medim`, warns and falls through rather than guessing. A label that
+fails to read falls through too — it is a preference, not a gate.
 
 ## Account-level stops
 

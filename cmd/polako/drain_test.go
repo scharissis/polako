@@ -59,6 +59,12 @@ type ghState struct {
 	// one the repository sees.
 	OldGh bool `json:"old_gh"`
 
+	// NoParentField is a gh that knows sub-issues on the listing but does not
+	// serve `parent` on `issue view` (#364): it rejects that one field by name,
+	// before asking GitHub anything, so issueLabelPolicy retries with `--json
+	// labels` alone.
+	NoParentField bool `json:"no_parent_field"`
+
 	// ClaudeRuns counts the invocations a fake CLI has made, for the modes whose
 	// answer depends on how far the supervisor has got. See countClaudeRun.
 	ClaudeRuns int `json:"claude_runs"`
@@ -77,6 +83,10 @@ type fakeIssue struct {
 	// the queue reads to tell a finished epic from a live one.
 	SubIssues          int `json:"sub_issues"`
 	SubIssuesCompleted int `json:"sub_issues_completed"`
+	// Parent is the epic this issue is a sub-issue of, as `issue view --json
+	// labels,parent` reports it on the pickup path (#364). 0 stands for no
+	// parent, rendered "parent":null the way real gh does.
+	Parent int `json:"parent"`
 	// Comments is how many comments the thread has; they carry ids 1..Comments
 	// in the order they were written, the way GitHub hands them out. Bots holds
 	// the ids of the ones a GitHub App wrote rather than a person. Bodies holds
@@ -276,8 +286,10 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 	// nothing else changed, or every invocation would start it over.
 	//
 	// `gh issue view` serves several field sets on the pickup path — the model:/
-	// effort: label read, the state read after a merge — so its FailReads key
-	// names the one it means: "issue view labels", "issue view state".
+	// effort: label read ("issue view labels,parent", and "issue view labels" for
+	// the parent epic's own read), the state read after a merge — so its
+	// FailReads key names the one it means: "issue view labels,parent", "issue
+	// view state".
 	failKey := call
 	if call == "issue view" {
 		if f := flagVal("--json"); f != "" {
@@ -313,6 +325,12 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 		return listIssues(st, flagVal("--label"), flagVal("--author"), flagVal("--json"))
 
 	case "issue view":
+		if strings.Contains(flagVal("--json"), "parent") && st.NoParentField {
+			// Checked against gh's own field table, before the repository is
+			// asked anything — the same shape as OldGh on the listing.
+			fmt.Fprintf(os.Stderr, "unknown JSON field: %q\nAvailable fields:\n  labels\n  number\n", "parent")
+			return "", false, 1
+		}
 		is := issue()
 		if is == nil {
 			fmt.Fprintf(os.Stderr, "no issue #%s\n", at(2))
@@ -343,6 +361,16 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 				labels = append(labels, fmt.Sprintf(`{"name":%q}`, l))
 			}
 			fields = append(fields, `"labels":[`+strings.Join(labels, ",")+`]`)
+		}
+		if strings.Contains(want, "parent") {
+			// gh 2.98.0 serves parent as {number,state,title}; only the number
+			// is read. null when the issue has no parent.
+			if is.Parent == 0 {
+				fields = append(fields, `"parent":null`)
+			} else {
+				fields = append(fields, fmt.Sprintf(`"parent":{"number":%d,"state":"OPEN","title":"epic #%d"}`,
+					is.Parent, is.Parent))
+			}
 		}
 		if strings.Contains(want, "body") {
 			// retire.go's own read of a container that just closed, checking
@@ -2069,6 +2097,177 @@ func TestDrainFallsThroughOnDuplicateModelLabels(t *testing.T) {
 	argv := getArgs()
 	if len(argv) != 1 || !strings.Contains(argv[0], "--model haiku") {
 		t.Errorf("the implement run should have used the -model flag: %v", argv)
+	}
+}
+
+// An epic's model:/effort: label reaches a child that carries none of its own
+// (#364): the implement run dispatches on the parent's model and its record
+// names the source epic.
+func TestDrainInheritsModelFromEpic(t *testing.T) {
+	captureLog(t)
+	getArgs := watchClaudeArgs(t)
+	cfg, path := drainConfig(t, "implementmerged", &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true, Parent: 2},
+			"2": {Open: true, SubIssues: 2, Labels: []string{"model:sonnet"}},
+		},
+	})
+	cfg.model = "opus" // the flag the epic's label must beat
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if finalGhState(t, path).Issues["1"].Open {
+		t.Error("issue 1 should have closed behind its merged PR")
+	}
+
+	argv := getArgs()
+	if len(argv) != 1 {
+		t.Fatalf("claude ran %d times, want 1:\n%s", len(argv), strings.Join(argv, "\n"))
+	}
+	if !strings.Contains(argv[0], "--model sonnet") || strings.Contains(argv[0], "--model opus") {
+		t.Errorf("the implement run should have taken the epic's model: %s", argv[0])
+	}
+	if strings.Contains(argv[0], "--effort") {
+		t.Errorf("the epic set no effort, so none should be passed: %s", argv[0])
+	}
+
+	for _, line := range readRecords(t, records, cfg.repo) {
+		var rec runRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("record is not JSON: %v\n%s", err, line)
+		}
+		if rec.Reason != reasonImplement {
+			continue
+		}
+		if rec.ModelSource != sourceEpic || rec.RequestedModel != "sonnet" {
+			t.Errorf("implement record = model %q (%s), want sonnet/epic",
+				rec.RequestedModel, rec.ModelSource)
+		}
+	}
+}
+
+// The child's own model:default is its deliberate escape from the epic: it
+// stops resolution at inherit rather than taking the epic's model.
+func TestDrainChildModelDefaultBeatsEpic(t *testing.T) {
+	captureLog(t)
+	getArgs := watchClaudeArgs(t)
+	cfg, path := drainConfig(t, "implementmerged", &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true, Parent: 2, Labels: []string{"model:default"}},
+			"2": {Open: true, SubIssues: 2, Labels: []string{"model:sonnet"}},
+		},
+	})
+	cfg.model = "opus"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if finalGhState(t, path).Issues["1"].Open {
+		t.Error("issue 1 should have closed behind its merged PR")
+	}
+
+	argv := getArgs()
+	if len(argv) != 1 || strings.Contains(argv[0], "--model") {
+		t.Errorf("model:default should pass no --model at all: %v", argv)
+	}
+}
+
+// The two families resolve independently: a child with effort:high under a
+// parent with model:sonnet gets both.
+func TestDrainEpicAndChildLabelsResolveIndependently(t *testing.T) {
+	captureLog(t)
+	getArgs := watchClaudeArgs(t)
+	cfg, path := drainConfig(t, "implementmerged", &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true, Parent: 2, Labels: []string{"effort:high"}},
+			"2": {Open: true, SubIssues: 2, Labels: []string{"model:sonnet"}},
+		},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if finalGhState(t, path).Issues["1"].Open {
+		t.Error("issue 1 should have closed behind its merged PR")
+	}
+
+	argv := getArgs()
+	if len(argv) != 1 {
+		t.Fatalf("claude ran %d times, want 1", len(argv))
+	}
+	for _, want := range []string{"--effort high", "--model sonnet"} {
+		if !strings.Contains(argv[0], want) {
+			t.Errorf("the implement run is missing %q: %s", want, argv[0])
+		}
+	}
+}
+
+// A gh that does not serve `parent` on `issue view` retries with `--json
+// labels` alone: the child's own labels still resolve and the shift keeps
+// working, an epic's labels just do not reach it.
+func TestDrainSurvivesGhWithoutParentField(t *testing.T) {
+	captureLog(t)
+	getArgs := watchClaudeArgs(t)
+	cfg, path := drainConfig(t, "implementmerged", &ghState{
+		NoParentField: true,
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true, Parent: 2},
+			"2": {Open: true, SubIssues: 2, Labels: []string{"model:sonnet"}},
+		},
+	})
+	cfg.model = "haiku" // the flag the child falls through to
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if finalGhState(t, path).Issues["1"].Open {
+		t.Error("issue 1 should have closed behind its merged PR")
+	}
+
+	argv := getArgs()
+	if len(argv) != 1 || !strings.Contains(argv[0], "--model haiku") {
+		t.Errorf("without a readable parent the child should use the -model flag: %v", argv)
+	}
+}
+
+// A parent read that fails outright warns and the child's unset families fall
+// through to the flags rather than the shift ending.
+func TestDrainParentLabelReadFailureFallsThrough(t *testing.T) {
+	buf := captureLog(t)
+	getArgs := watchClaudeArgs(t)
+	cfg, path := drainConfig(t, "implementmerged", &ghState{
+		Issues: map[string]*fakeIssue{
+			// #99 is named as the parent but does not exist, so its view fails.
+			"1": {Open: true, Parent: 99},
+		},
+	})
+	cfg.model = "haiku"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if finalGhState(t, path).Issues["1"].Open {
+		t.Error("issue 1 should have closed behind its merged PR")
+	}
+	if !strings.Contains(buf.String(), "could not read epic #99's labels") {
+		t.Errorf("a failed parent read should warn:\n%s", buf.String())
+	}
+	argv := getArgs()
+	if len(argv) != 1 || !strings.Contains(argv[0], "--model haiku") {
+		t.Errorf("the child should fall through to the -model flag: %v", argv)
 	}
 }
 
@@ -3937,10 +4136,10 @@ func TestDrainSurvivesAFlakyGh(t *testing.T) {
 		// every gh call the drain makes is one of the lookups under test.
 		PRs: map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
 		FailReads: map[string]int{
-			"issue list":        1, // deciding what to work
-			"pr list":           1, // restart safety, the first thing an issue is put through
-			"issue view labels": 1, // the model:/effort: label read at pickup
-			"issue view state":  1, // reading whether the merge closed the issue
+			"issue list":               1, // deciding what to work
+			"pr list":                  1, // restart safety, the first thing an issue is put through
+			"issue view labels,parent": 1, // the model:/effort: label read at pickup
+			"issue view state":         1, // reading whether the merge closed the issue
 		},
 	})
 
