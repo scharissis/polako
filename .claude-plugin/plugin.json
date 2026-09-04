@@ -1,6 +1,6 @@
 {
   "name": "polako",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "description": "Work a GitHub issue backlog to zero, one issue at a time: /plan-backlog proposes the backlog from a vision document, /review-health proposes it from the repo's own shape, /implement-issue takes a single issue from plan to PR, and `polako work` supervises the whole queue unattended.",
   "author": {
     "name": "Stefano Charissis"
