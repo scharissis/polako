@@ -13,6 +13,27 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.21.0]
+
+### What's Changed
+* fix: -max-issues kills the Nth create in flight, so N files N-1 by @scharissis in https://github.com/scharissis/polako/pull/350 (closes #340)
+* docs: plan-backlog's gh ceiling no longer rests on a false claim by @scharissis in https://github.com/scharissis/polako/pull/351 (closes #341)
+* refactor: move record loading and window resolution out of stats.go by @scharissis in https://github.com/scharissis/polako/pull/352 (closes #343)
+* refactor: split the stats renderer and format helpers out of stats.go by @scharissis in https://github.com/scharissis/polako/pull/353 (closes #344)
+* refactor: split dispatchClaude into setup, watchdogs, scan and verdict by @scharissis in https://github.com/scharissis/polako/pull/354 (closes #345)
+* fix: give a permission park concrete, path-safe remediation steps by @scharissis in https://github.com/scharissis/polako/pull/355
+* refactor: planRecord and healthRecord share one embedded base by @scharissis in https://github.com/scharissis/polako/pull/356 (closes #347)
+* docs: plan how a run's model and effort are chosen, and what the default is by @scharissis in https://github.com/scharissis/polako/pull/357
+* refactor: plan and health share one intake options struct and config builder by @scharissis in https://github.com/scharissis/polako/pull/359 (closes #348)
+* refactor: plan and health share one preflight and one exit path by @scharissis in https://github.com/scharissis/polako/pull/367 (closes #349)
+* fix: tidy's skip message names the worktree path, PR and fix command by @scharissis in https://github.com/scharissis/polako/pull/368 (closes #358)
+* feat: -effort on work, plan and health, recorded by @scharissis in https://github.com/scharissis/polako/pull/369 (closes #361)
+* feat: a policy seam, and the remediation model and effort flags by @scharissis in https://github.com/scharissis/polako/pull/370 (closes #362)
+* feat: model: and effort: labels on an issue by @scharissis in https://github.com/scharissis/polako/pull/371 (closes #363)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.20.0...v0.21.0
+
 ## [0.20.0]
 
 ### What's Changed
