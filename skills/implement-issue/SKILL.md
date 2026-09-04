@@ -34,6 +34,13 @@ run spent an eighth of its tool calls on `sleep` and status polls (issue #217).
 Backgrounding the slow thing is fine; what is not is the turn ending while it
 is still outstanding.
 
+That polling is only for work you backgrounded yourself — a `run_in_background`
+job. A synchronous call — a `Skill` invocation, a foreground `Bash` command — is
+never polled: the harness holds the turn until it returns, then hands you the
+result. Nothing to keep alive, nothing to check on, so `ListAgents` or a
+`Bash: true` heartbeat beside a call that hasn't returned yet is pure waste.
+Issues #217 and #372 are both runs that hand-polled the review gate that way.
+
 Stopping on purpose is a different thing from stopping to wait. An unanswered
 question ends the run deliberately, flagged with `awaiting-answer` for a human
 to answer and a later run to fold in — that is this run's result, not a
@@ -442,11 +449,19 @@ don't post again, and stop.
       merged — and the finder subagents it fans out open that checkout's
       copy of every file your commits touched, the default-branch version
       rather than yours, so a finding lands against the wrong body and a fix
-      written there lands outside the branch entirely (issue #219). The
-      Skill call blocks until the review hands back its findings — those
-      finder subagents are the review's own to await, not something this
-      run watches with `ListAgents` or a poll loop beside it, and issue #217
-      is a run that did exactly that on this gate.
+      written there lands outside the branch entirely (issue #219).
+      Invoking the review is one blocking call: control returns to this run
+      only when it has finished and its findings are in hand, with nothing for
+      this run to do until then. The finder subagents it fans out are the
+      review's own — this run neither starts nor awaits nor watches them, and
+      `ListAgents`, a `Bash: true` filler or a `Monitor` heartbeat beside the
+      call is pure waste, because a blocking call does not return sooner for
+      being polled. Issue #217 is a run that hand-polled it once a second;
+      issue #372 is a later one that polled every few seconds between `Monitor`
+      timers after #217's floor landed — the floor slowed the polling without
+      stopping it, because the poll had nothing to wait on. If `ListAgents`
+      shows finder subagents running, they are the review's: leave them, and
+      let the review call return.
       Leaving `--fix` off is deliberate: applying fixes is
       the slow part after the review itself returns, and a run
       that dies during it is exactly what left issue #216's gate with
