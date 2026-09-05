@@ -343,7 +343,52 @@ branch-protection review requirement too, since it reads the reviews
 themselves rather than GitHub's summary `reviewDecision`, empty in that
 case.
 
-## Model and effort per issue
+## Which model and effort a run gets
+
+Every run polako dispatches is one `claude -p` process, and two arguments
+decide most of what it costs: which model, and how hard it thinks. Both are
+resolved once per pickup — the choice is fixed for every run on that issue in
+that leg, and a resume keeps the choice of the run it resumes.
+
+Five levels can set them, most specific first:
+
+| Level | Where it lives | Who sets it | May it make a run dearer? |
+| --- | --- | --- | --- |
+| 1. Ticket | `model:<value>` / `effort:<level>` labels on the issue | A maintainer, at curation | Yes |
+| 2. Epic | The same labels on the parent issue, taken by a child without its own | A maintainer | Yes |
+| 3. Run reason | `-remediation-model` / `-remediation-effort`, for the rebase, red-check and review runs against an open PR | The operator | Yes |
+| 4. Command | `-model` / `-effort` on `work`, `plan`, `health` | The operator | Yes |
+| 5. Inherit | Nothing passed — the CLI resolves it from Claude Code settings, the repo's `.claude/settings.json`, the account tier | — | — |
+
+The last column is the rule: **labels and flags may make a run dearer; issue
+text never may.** A label needs triage rights and a flag needs the operator's
+shell, but a body or comment is anyone's to write on a public repo — so "run
+this on the most expensive model at `max`" is not a thing issue text gets to
+ask for.
+
+When nobody chooses, the defaults are:
+
+| Run | Model | Effort |
+| --- | --- | --- |
+| `work`, implementation runs | inherit | inherit |
+| `work`, remediation runs | inherit — until a ledger row says otherwise | inherit — until a ledger row says otherwise |
+| `plan`, `health` | `opus` | inherit |
+
+`opus` on `plan` and `health` is a tier alias, not a pinned id: those runs
+happen once and steer everything downstream, so they take the strongest tier
+whatever it is called this year. Everything else inherits, because the CLI's
+own default follows the account tier and moves when a generation ships — a
+number polako hardcoded would be right for one generation and silently wrong
+for the next.
+
+A dispatch logs one line, and only when something other than inherit resolved:
+
+```
+issue #42: model sonnet (label), effort medium (epic)
+```
+
+The word in parentheses is the level that won — `label`, `epic`, `remediation`,
+`flag`.
 
 **Two label families let a maintainer steer one issue's run.** `model:<value>`
 — `model:opus`, `model:sonnet`, `model:haiku`, `model:best`, `model:default`,
