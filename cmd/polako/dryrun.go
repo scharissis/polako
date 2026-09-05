@@ -92,11 +92,12 @@ func dryRun(ctx context.Context, cfg config, out io.Writer) error {
 	runCfg, prompt, _ := issueRun(cfg, issue)
 	// Route the implement dispatch through the same policy seam a real run
 	// uses, so -dry-run keeps its promise of printing the exact invocation: the
-	// issue's model:/effort: labels resolve here just as they would at pickup,
-	// so --model and --effort show the value a real run would get — the epic's
-	// labels (#364) included, since issueLabelPolicy reads them.
+	// issue's model:/effort: labels and its Estimate: size resolve here just as
+	// they would at pickup, so --model and --effort show the value a real run
+	// would get — the epic's labels (#364) included, since issuePickupPolicy
+	// reads them.
 	policy := newRunPolicy(cfg)
-	policy.labels = issueLabelPolicy(ctx, cfg, issue)
+	policy.labels, policy.size = issuePickupPolicy(ctx, cfg, issue)
 	runCfg = policy.choose(reasonImplement).apply(runCfg)
 	log.Printf("issue #%d would be worked next; the invocation follows on stdout", issue)
 	_, err = fmt.Fprintln(out, commandLine(cfg.claudeBin, buildArgs(runCfg, prompt, "")))

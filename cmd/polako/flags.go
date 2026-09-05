@@ -70,10 +70,16 @@ type config struct {
 	// nothing about what any run dispatches changes today. See policy.go.
 	remediationModel  string
 	remediationEffort string
-	poll              time.Duration
-	retries           int
-	retryWait         time.Duration
-	stall             time.Duration
+	// effortBySize is -effort-by-size verbatim — comma-separated SIZE=LEVEL
+	// pairs — kept for the CLI-capability gate and -h. sizeEffort is it parsed
+	// into size→level, what the policy reads. Both empty (the default) means
+	// nothing reads an issue body and no run's effort changes. See policy.go.
+	effortBySize string
+	sizeEffort   map[string]string
+	poll         time.Duration
+	retries      int
+	retryWait    time.Duration
+	stall        time.Duration
 	// heartbeat is how long the terminal may stay quiet before a run says one
 	// "still working" line, repeated every heartbeat of continued silence (0
 	// disables). It watches the terminal, not the event stream: -stall samples
@@ -310,6 +316,8 @@ func parseFlags() config {
 		"claude --model for remediation runs against an open PR — rebase, red-check fix, review reply (empty = the -model cell, then the CLI default)")
 	flag.StringVar(&cfg.remediationEffort, "remediation-effort", "",
 		"claude --effort for remediation runs against an open PR — one of "+strings.Join(effortLevels, ", ")+" (empty = the -effort cell, then the CLI default)")
+	flag.StringVar(&cfg.effortBySize, "effort-by-size", "",
+		"claude --effort by the issue's Estimate: line, e.g. S=medium,L=max — SIZE one of S,M,L, level one of "+strings.Join(effortLevels, ", ")+"; below an effort: label, above -effort; implementation runs only (empty = off, no body read)")
 	flag.DurationVar(&cfg.poll, "poll", 5*time.Minute, "interval between GitHub checks while waiting")
 	flag.IntVar(&cfg.retries, "retries", 3, "resume attempts after a crashed claude run (nonzero exit)")
 	flag.DurationVar(&cfg.retryWait, "retry-wait", 30*time.Second, "wait before each resume attempt")
@@ -370,6 +378,12 @@ func parseFlags() config {
 	}
 	if err := validateEffort("-remediation-effort", cfg.remediationEffort); err != nil {
 		log.Fatalf("%v", err)
+	}
+	// Same stance as the two above: a typo in a size cell would otherwise
+	// surface as a claude usage error an hour into the first matching issue.
+	var sizeErr error
+	if cfg.sizeEffort, sizeErr = parseEffortBySize(cfg.effortBySize); sizeErr != nil {
+		log.Fatalf("%v", sizeErr)
 	}
 
 	// Answered before anything else a flag implies, so it stays usable on a
@@ -463,6 +477,37 @@ func applyEnvDefaults(fs *flag.FlagSet) error {
 // envVarName is the variable that sets one flag's default.
 func envVarName(flagName string) string {
 	return envPrefix + strings.ToUpper(strings.ReplaceAll(flagName, "-", "_"))
+}
+
+// parseEffortBySize reads -effort-by-size: comma-separated SIZE=LEVEL pairs,
+// SIZE one of S/M/L, LEVEL one of effortLevels. Empty yields a nil map — the
+// off state the policy and the body read both key on. Unlike parseSkip a bad
+// entry is fatal, not ignored: an unattended run must not discover the typo
+// when the first S issue rejects `--effort medim` an hour in.
+func parseEffortBySize(spec string) (map[string]string, error) {
+	if strings.TrimSpace(spec) == "" {
+		return nil, nil
+	}
+	m := map[string]string{}
+	for _, pair := range strings.Split(spec, ",") {
+		k, v, ok := strings.Cut(pair, "=")
+		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+		if !ok || k == "" || v == "" {
+			return nil, fmt.Errorf("-effort-by-size %q: each entry is SIZE=LEVEL, e.g. S=medium,L=max", spec)
+		}
+		if k != "S" && k != "M" && k != "L" {
+			return nil, fmt.Errorf("-effort-by-size %q: %q is not a size — use S, M or L", spec, k)
+		}
+		if !slices.Contains(effortLevels, v) {
+			return nil, fmt.Errorf("-effort-by-size %q: %q is not a claude effort level — one of %s",
+				spec, v, strings.Join(effortLevels, ", "))
+		}
+		if _, dup := m[k]; dup {
+			return nil, fmt.Errorf("-effort-by-size %q: size %q set twice", spec, k)
+		}
+		m[k] = v
+	}
+	return m, nil
 }
 
 // parseSkip reads a comma-separated issue list. Unparseable entries are

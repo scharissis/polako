@@ -61,8 +61,8 @@ type ghState struct {
 
 	// NoParentField is a gh that knows sub-issues on the listing but does not
 	// serve `parent` on `issue view` (#364): it rejects that one field by name,
-	// before asking GitHub anything, so issueLabelPolicy retries with `--json
-	// labels` alone.
+	// before asking GitHub anything, so issuePickupPolicy retries with `parent`
+	// dropped from the field set.
 	NoParentField bool `json:"no_parent_field"`
 
 	// ClaudeRuns counts the invocations a fake CLI has made, for the modes whose
@@ -286,10 +286,11 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 	// nothing else changed, or every invocation would start it over.
 	//
 	// `gh issue view` serves several field sets on the pickup path — the model:/
-	// effort: label read ("issue view labels,parent", and "issue view labels" for
-	// the parent epic's own read), the state read after a merge — so its
-	// FailReads key names the one it means: "issue view labels,parent", "issue
-	// view state".
+	// effort: label read ("issue view labels,parent", or
+	// "issue view labels,body,parent" once -effort-by-size adds the Estimate:
+	// read, and "issue view labels" for the parent epic's own read), the state
+	// read after a merge — so its FailReads key is "issue view " + the exact
+	// --json value: "issue view labels,parent", "issue view state".
 	failKey := call
 	if call == "issue view" {
 		if f := flagVal("--json"); f != "" {
@@ -373,8 +374,9 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			}
 		}
 		if strings.Contains(want, "body") {
-			// retire.go's own read of a container that just closed, checking
-			// for a plan footer.
+			// retire.go's read of a container that just closed (the plan
+			// footer), and the pickup policy read under -effort-by-size (the
+			// Estimate: line).
 			fields = append(fields, fmt.Sprintf(`"body":%q`, is.Body))
 		}
 		return "{" + strings.Join(fields, ",") + "}", changed, 0
@@ -2069,6 +2071,57 @@ func TestDrainHonoursModelAndEffortLabels(t *testing.T) {
 			t.Errorf("implement record = model %q (%s) / effort %q (%s), want sonnet/label and low/label",
 				rec.RequestedModel, rec.ModelSource, rec.RequestedEffort, rec.EffortSource)
 		}
+	}
+}
+
+// -effort-by-size (#366) keys the implement run's effort off the issue body's
+// Estimate: line: an S issue dispatches at the S cell, the run record names
+// the source as size, and the terminal issue record carries the size letter.
+func TestDrainEffortBySizeFromTheEstimateLine(t *testing.T) {
+	captureLog(t)
+	getArgs := watchClaudeArgs(t)
+	cfg, path := drainConfig(t, "implementmerged", &ghState{
+		Issues: map[string]*fakeIssue{"1": {
+			Open: true,
+			Body: "## Summary\n\nDo the thing.\n\nEstimate: S — likely one run\n",
+		}},
+	})
+	cfg.effort = "high" // the flag the S cell must beat
+	cfg.effortBySize = "S=medium,L=max"
+	cfg.sizeEffort = map[string]string{"S": "medium", "L": "max"}
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if finalGhState(t, path).Issues["1"].Open {
+		t.Error("issue 1 should have closed behind its merged PR")
+	}
+
+	argv := getArgs()
+	if len(argv) != 1 {
+		t.Fatalf("claude ran %d times, want 1:\n%s", len(argv), strings.Join(argv, "\n"))
+	}
+	if !strings.Contains(argv[0], "--effort medium") || strings.Contains(argv[0], "--effort high") {
+		t.Errorf("the implement run should have dispatched at the S cell's effort: %s", argv[0])
+	}
+
+	for _, line := range readRecords(t, records, cfg.repo) {
+		var rec runRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("record is not JSON: %v\n%s", err, line)
+		}
+		if rec.Reason == reasonImplement &&
+			(rec.EffortSource != sourceSize || rec.RequestedEffort != "medium") {
+			t.Errorf("implement record = effort %q (%s), want medium (size)", rec.RequestedEffort, rec.EffortSource)
+		}
+	}
+	recs := terminalRecords(t, records, cfg.repo)
+	if len(recs) != 1 || recs[0].Size != "S" {
+		t.Errorf("terminal record = %+v, want size S", recs)
 	}
 }
 

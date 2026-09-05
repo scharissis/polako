@@ -68,6 +68,77 @@ func TestRunPolicyChoose(t *testing.T) {
 	}
 }
 
+// sizeFromBody reads the one anchored Estimate: line and nothing else: S/M/L
+// on a line of its own, and no match for anything that is not exactly that.
+func TestSizeFromBody(t *testing.T) {
+	cases := []struct {
+		name, body, want string
+	}{
+		{"plain letter", "Estimate: M", "M"},
+		{"plan-backlog's own wording", "Estimate: M — likely 1–2 runs", "M"},
+		{"mid-body line", "## Summary\n\nblah\n\nEstimate: L\n\nmore", "L"},
+		{"no colon space", "Estimate:S", "S"},
+		{"no line", "just a description, no estimate", ""},
+		{"XL is not a size", "Estimate: XL", ""},
+		{"a word starting with a size letter", "Estimate: SMALL", ""},
+		{"not at line start", "see Estimate: M above", ""},
+		{"letter on the next line does not count", "Estimate:\n\nL", ""},
+		{"tab after the colon", "Estimate:\tM", "M"},
+		{"empty", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sizeFromBody(tc.body); got != tc.want {
+				t.Errorf("sizeFromBody(%q) = %q, want %q", tc.body, got, tc.want)
+			}
+		})
+	}
+}
+
+// -effort-by-size is one rung below an effort: label and above -effort, and
+// only on an implementation-class run.
+func TestRunPolicyEffortBySize(t *testing.T) {
+	cells := map[string]string{"S": "medium", "L": "max"}
+
+	// The S body hits the S cell; the record's effort_source says so.
+	got := runPolicy{effort: "high", sizeEffort: cells, size: "S"}.choose(reasonImplement)
+	if got.effort != "medium" || got.effortSource != sourceSize {
+		t.Errorf("S issue = %+v, want effort medium (size)", got)
+	}
+	// Model is untouched by size.
+	if got.model != "" || got.modelSource != sourceInherit {
+		t.Errorf("S issue model = %+v, want size to leave the model alone", got)
+	}
+
+	// A size with no cell falls through to -effort.
+	got = runPolicy{effort: "high", sizeEffort: cells, size: "M"}.choose(reasonImplement)
+	if got.effort != "high" || got.effortSource != sourceFlag {
+		t.Errorf("M issue (no M cell) = %+v, want the -effort flag", got)
+	}
+
+	// No size at all: the flag, as before the feature.
+	got = runPolicy{effort: "high", sizeEffort: cells}.choose(reasonImplement)
+	if got.effort != "high" || got.effortSource != sourceFlag {
+		t.Errorf("issue with no Estimate line = %+v, want the -effort flag", got)
+	}
+
+	// A remediation run keeps whatever the remediation/flag cell gave it.
+	got = runPolicy{effort: "high", remediationEffort: "low", sizeEffort: cells, size: "S"}.choose(reasonReview)
+	if got.effort != "low" || got.effortSource != sourceRemediation {
+		t.Errorf("remediation run = %+v, want -effort-by-size ignored", got)
+	}
+
+	// An effort: label beats the cell.
+	got = runPolicy{
+		effort:     "high",
+		sizeEffort: cells, size: "S",
+		labels: labelChoice{effort: "xhigh", effortSet: true},
+	}.choose(reasonImplement)
+	if got.effort != "xhigh" || got.effortSource != sourceLabel {
+		t.Errorf("effort: label + S issue = %+v, want the label to win", got)
+	}
+}
+
 // resume, unfinished and answers are implementation class: a resumed
 // implement run must not suddenly get the remediation cell.
 func TestRunPolicyResumesAreImplementationClass(t *testing.T) {

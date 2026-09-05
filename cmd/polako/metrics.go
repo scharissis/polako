@@ -317,6 +317,12 @@ type issueRecord struct {
 	// why parkUnknown is a value rather than an omission.
 	ParkReason string `json:"park_reason,omitempty"`
 
+	// Size is the issue body's Estimate: letter (S/M/L), on drain records where
+	// -effort-by-size armed the pickup body read and the body carried a line.
+	// Absent otherwise — the per-size pricing docs/plans/backlog-fill.md
+	// deferred reads it, and no line means no size, not a zero.
+	Size string `json:"size,omitempty"`
+
 	// What GitHub knew about the PR when the issue ended, folded in at
 	// terminal state. Absent when there was no PR, when -metrics is off, or
 	// when the lookup failed: the outcome is recorded either way, since
@@ -840,7 +846,7 @@ func (r *recorder) recordHealth(cfg config, rep runReport, hf healthFacts) {
 // nowhere else, and a hand-back that named nothing records parkUnknown — so a
 // missing field can only ever mean a record older than the field, and never a
 // park nobody categorised.
-func (r *recorder) recordIssue(cfg config, issue, pr int, outcome, why string, facts prFacts, usage issueUsageSamples) {
+func (r *recorder) recordIssue(cfg config, issue, pr int, outcome, why string, facts prFacts, usage issueUsageSamples, size string) {
 	if outcome != issueNeedsHuman {
 		why = ""
 	} else if why == "" {
@@ -857,6 +863,7 @@ func (r *recorder) recordIssue(cfg config, issue, pr int, outcome, why string, f
 		Outcome:    outcome,
 		Tag:        cfg.tag,
 		ParkReason: why,
+		Size:       size,
 
 		Additions:    facts.Additions,
 		Deletions:    facts.Deletions,

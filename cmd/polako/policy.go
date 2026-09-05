@@ -9,9 +9,9 @@ package main
 // point a narrower remediation run (rebase, red-check fix, review reply)
 // somewhere cheaper. Everything else resolves against -model/-effort, then
 // inherit. #364 added the epic's labels — a family an issue leaves unset is
-// filled from its parent's own model:/effort: labels; size is still to be
-// argued for, and the source enum spelled both from the start so a record's
-// model_source / effort_source value set never has to grow.
+// filled from its parent's own model:/effort: labels. Below the label and
+// above the flag sits -effort-by-size (#366): an implementation run's effort
+// keyed off the issue body's Estimate: line, off by default.
 
 import (
 	"fmt"
@@ -20,8 +20,7 @@ import (
 	"strings"
 )
 
-// Where a run's model or effort was decided. size is declared but still
-// unused — see the file comment.
+// Where a run's model or effort was decided — see the file comment.
 const (
 	sourceInherit     = "inherit"
 	sourceFlag        = "flag"
@@ -60,6 +59,12 @@ type runPolicy struct {
 	remediationModel  string
 	remediationEffort string
 	labels            labelChoice
+	// size is the issue body's Estimate: letter (S/M/L, or "" when the flag is
+	// off or the body carries no line); sizeEffort is -effort-by-size parsed
+	// into size→level. An implementation-class run whose size has a cell takes
+	// that cell's effort — below an effort: label, above the -effort flag.
+	size       string
+	sizeEffort map[string]string
 }
 
 // labelChoice is what an issue's model: and effort: labels resolved to. A
@@ -161,7 +166,25 @@ func newRunPolicy(cfg config) runPolicy {
 		effort:            cfg.effort,
 		remediationModel:  cfg.remediationModel,
 		remediationEffort: cfg.remediationEffort,
+		sizeEffort:        cfg.sizeEffort,
 	}
+}
+
+// estimateLine is plan-backlog's per-ticket size signal: `Estimate:` then one
+// of S/M/L on a line of its own. Anchored and enum-bounded on purpose — this
+// is the only issue body text the supervisor reads, docs/hardening.md lists
+// bodies as attacker-editable, and the match only picks which operator-set
+// -effort-by-size cell applies. A hand-written issue owes no line, so no match
+// is silent, not a warning. `[ \t]*` rather than the AC's `\s*`: \s spans
+// newlines, which would let `Estimate:` and the letter sit on different lines
+// and is not "a line of its own".
+var estimateLine = regexp.MustCompile(`(?m)^Estimate:[ \t]*([SML])\b`)
+
+func sizeFromBody(body string) string {
+	if m := estimateLine.FindStringSubmatch(body); m != nil {
+		return m[1]
+	}
+	return ""
 }
 
 // choose resolves the model and effort for a run of the given reason. A
@@ -171,7 +194,7 @@ func newRunPolicy(cfg config) runPolicy {
 // from the issue's parent (#364). model:default lands here as set-but-empty:
 // it stops resolution at inherit rather than falling through to -model. Then,
 // for a remediation run, -remediation-* if set; then -model/-effort; then
-// inherit.
+// -effort-by-size (#366, effort only); then inherit.
 func (p runPolicy) choose(reason string) runChoice {
 	remediation := remediationReasons[reason]
 	pick := func(labelVal string, labelSet, fromEpic bool, remediationCell, baseCell string) (string, string) {
@@ -194,6 +217,16 @@ func (p runPolicy) choose(reason string) runChoice {
 	}
 	m, ms := pick(p.labels.model, p.labels.modelSet, p.labels.modelFromEpic, p.remediationModel, p.model)
 	e, es := pick(p.labels.effort, p.labels.effortSet, p.labels.effortFromEpic, p.remediationEffort, p.effort)
+	// Effort by size: one rung below a maintainer's effort: label (the issue's
+	// own or its epic's), above the -effort flag, and only on an
+	// implementation-class run — a remediation run keeps the cell pick() just
+	// gave it (#362's seam). The issue body chooses which -effort-by-size cell
+	// applies, never a level directly.
+	if !remediation && !p.labels.effortSet {
+		if cell, ok := p.sizeEffort[p.size]; ok {
+			e, es = cell, sourceSize
+		}
+	}
 	return runChoice{model: m, effort: e, modelSource: ms, effortSource: es}
 }
 
