@@ -135,8 +135,12 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, tally *is
 				if errors.Is(rerr, errAuth) {
 					return "", authAdvice(rerr)
 				}
-				// A run that died never reached the push, so an unchanged head is
-				// not evidence that trying again is pointless.
+				// Either this run died before reaching the push, or runRemediation
+				// already confirmed it finished without one (errNoPush) — both are
+				// spent budget already, via redRuns above, so there is nothing left
+				// for the cross-poll comparison below to add by remembering this
+				// head; clearing it just avoids a stale match against whatever the
+				// next dispatch's own head turns out to be.
 				remediatedHead = ""
 				log.Printf("check remediation %d/%d failed (%v)", redRuns, max(cfg.retries, 1), rerr)
 			} else {
@@ -169,8 +173,11 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, tally *is
 				if errors.Is(rerr, errAuth) {
 					return "", authAdvice(rerr)
 				}
-				// A run that died never reached the push, so an untouched branch is
-				// not evidence that trying again is pointless.
+				// Either this run died before reaching the push, or runRemediation
+				// already confirmed it finished without one (errNoPush) — both are
+				// spent budget already, via reviewRuns above, so there is nothing
+				// left for the cross-poll comparison above to add by remembering
+				// this review/head pair.
 				remediatedReview, remediatedReviewHead = time.Time{}, ""
 				log.Printf("review remediation %d/%d failed (%v)", reviewRuns, max(cfg.retries, 1), rerr)
 			} else {
@@ -228,12 +235,15 @@ func remediateConflicts(ctx context.Context, cfg config, issue, prNumber int, be
 //
 // beforeHead is the branch head the PR was at when this run was dispatched.
 // A clean exit (err == nil) is not enough to call the run a success: it only
-// promises the branch is not where the caller found it, so this checks that
-// directly rather than trusting the transcript's own account of itself
+// promises the branch moved from where the caller found it, so this checks
+// that directly rather than trusting the transcript's own account of itself
 // (issue #381) — a run can edit files, hit a blocker before pushing, and
-// still exit 0. A read that fails here is not treated as a push: pretending
-// success on an unanswerable question is the wrong direction to guess in,
-// and the cross-poll comparisons in supervisePR remain as a backstop.
+// still exit 0. A read that fails here (perr != nil) is left ambiguous
+// rather than guessed at either way: err is neither forced to errNoPush nor
+// confirmed clean, so supervisePR's own cross-poll comparisons — reading
+// the PR fresh on the very next scheduled poll — are what actually catch a
+// genuine non-push in that case, the same way they did before this check
+// existed.
 func runRemediation(ctx context.Context, cfg config, issue, prNumber int, reason string,
 	choice runChoice, prompt, extraTools, beforeHead string, tally *issueTally) error {
 	runCfg := choice.apply(cfg)
