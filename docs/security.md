@@ -151,7 +151,7 @@ nothing to decline.
 ### The evidence ref, and what it's staged for
 
 The destination isn't new — the operator's own repo, where the code and the
-PR body already go. The content is: pixels. A screenshot can render whatever
+PR body already go. The content is pixels. A screenshot can render whatever
 a rendered page reads, and a sha-pinned image on a public repo is, in
 practice, not retractable once pushed. `skills/implement-issue/SKILL.md`
 carries the channel and the skill's own `evidence` argument today; nothing
