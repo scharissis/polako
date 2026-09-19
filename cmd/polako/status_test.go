@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -908,6 +909,59 @@ func TestStatusNextRespectsRestartSafetyOnAFlaggedIssue(t *testing.T) {
 	}
 	if got, want := nextLine(snap), "#4 — its branch already has PR #20"; !strings.Contains(got, want) {
 		t.Errorf("nextLine = %q, want it to start %q", got, want)
+	}
+}
+
+// status never refuses — it reads only — so a -label the repository has
+// never defined gets the same message `work`'s preflight would refuse with,
+// downgraded to a note, and status carries on regardless.
+func TestStatusLabelNoteWarnsOnAMissingLabel(t *testing.T) {
+	cfg, _ := statusConfigFor(t, &ghState{})
+	cfg.label = "typo"
+
+	var logged strings.Builder
+	log.SetOutput(&logged)
+	defer log.SetOutput(os.Stderr)
+
+	statusLabelNote(context.Background(), cfg)
+
+	if !strings.Contains(logged.String(), "gh label create typo") {
+		t.Error("status should note that -label names a label the repository does not have")
+	}
+}
+
+func TestStatusLabelNoteIsSilentWhenTheLabelExists(t *testing.T) {
+	cfg, _ := statusConfigFor(t, &ghState{Labels: []string{"ready-for-claude"}})
+	cfg.label = "ready-for-claude"
+
+	var logged strings.Builder
+	log.SetOutput(&logged)
+	defer log.SetOutput(os.Stderr)
+
+	statusLabelNote(context.Background(), cfg)
+
+	if logged.Len() != 0 {
+		t.Errorf("status noted a label the repository has: %s", logged.String())
+	}
+}
+
+// A lookup that cannot answer at all is best-effort here, the same tolerance
+// the usage and plan-doc reads get: it must not be reported as a missing
+// label, whatever retryRead's own transient-retry narration says along the way.
+func TestStatusLabelNoteIsSilentWhenTheLookupFails(t *testing.T) {
+	cfg, _ := statusConfigFor(t, &ghState{
+		FailReads: map[string]int{"api label": ghReads},
+	})
+	cfg.label = "ready-for-claude"
+
+	var logged strings.Builder
+	log.SetOutput(&logged)
+	defer log.SetOutput(os.Stderr)
+
+	statusLabelNote(context.Background(), cfg)
+
+	if strings.Contains(logged.String(), "gh label create") {
+		t.Errorf("a failed lookup was reported as a missing label: %s", logged.String())
 	}
 }
 

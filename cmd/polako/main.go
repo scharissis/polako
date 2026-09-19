@@ -294,6 +294,19 @@ func preflight(ctx context.Context, cfg *config) error {
 	if err := refuseOrNote(queueGate(repoView.Visibility, cfg.label, cfg.ungated), cfg.dryRun); err != nil {
 		return err
 	}
+	// A -label the repository has never defined would otherwise pass the gate
+	// above and drain an empty queue all shift, reported as success. A real
+	// lookup failure (not a definitive "no") is not this gate's business — it
+	// fails preflight outright, the same as any other gh call above.
+	if cfg.label != "" {
+		exists, err := labelExists(ctx, *cfg, cfg.label)
+		if err != nil {
+			return fmt.Errorf("checking whether the %s label exists: %w", cfg.label, err)
+		}
+		if err := refuseOrNote(labelGate(cfg.label, exists), cfg.dryRun); err != nil {
+			return err
+		}
+	}
 	if cfg.ungated && strings.EqualFold(repoView.Visibility, "PUBLIC") {
 		// Said out loud like -remote and -post-summary are, and for the same
 		// reason: the environment can set this too, and it is the one flag that

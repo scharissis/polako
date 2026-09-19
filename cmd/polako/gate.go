@@ -33,6 +33,23 @@ func queueGate(visibility, label string, ungated bool) error {
 		"or -ungated to work every open issue anyway")
 }
 
+// labelGate refuses a -label the repository has never defined. Without it,
+// `-label typo` passes queueGate (it is, after all, a label) and then drains
+// an empty queue all shift, reported as success — the same silent-nothing
+// failure queueGate exists to catch, one flag over. exists is the answer
+// #412's labelExists lookup already gave; a lookup failure that is not a
+// definitive "no" is the call site's problem, not this gate's — it must
+// never be misread as a missing label, which would send an operator to
+// create one gh already has.
+func labelGate(label string, exists bool) error {
+	if exists {
+		return nil
+	}
+	return fmt.Errorf("this repository has no %q label — -label only scopes the queue to issues that carry it, "+
+		"and one the repository doesn't have scopes it to nothing. Create it (`gh label create %s`) "+
+		"or point -label at a label that exists", label, label)
+}
+
 // refuseOrNote is the dry-run carve-out every preflight gate shares: nil
 // passes straight through, and anything else refuses a real run but only
 // narrates what a real run would have refused on -dry-run, which runs

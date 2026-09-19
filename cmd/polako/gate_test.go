@@ -53,7 +53,7 @@ func TestQueueGateRefusesOnlyThePublicUnlabelledQueue(t *testing.T) {
 // names the repository, and refuses before anything is written or run.
 func TestPreflightRefusesAnUngatedPublicQueue(t *testing.T) {
 	_, checkout := upstream(t)
-	cfg, _ := drainConfig(t, "stream", &ghState{Visibility: "PUBLIC"})
+	cfg, _ := drainConfig(t, "stream", &ghState{Visibility: "PUBLIC", Labels: []string{"ready-for-claude"}})
 	cfg.dir = checkout
 
 	if err := preflight(context.Background(), &cfg); err == nil {
@@ -93,6 +93,90 @@ func TestPreflightLetsADryRunLookThroughTheGate(t *testing.T) {
 	}
 	if !strings.Contains(logged.String(), "-label") {
 		t.Error("a dry run through the gate should still say a real run would refuse")
+	}
+}
+
+// --- the -label gate: a label the repository has never defined ---
+
+// The gate itself: only a missing label refuses, and the refusal names both
+// the label and the fix.
+func TestLabelGateRefusesOnlyAMissingLabel(t *testing.T) {
+	if err := labelGate("ready-for-claude", true); err != nil {
+		t.Errorf("labelGate refused a label the repository has: %v", err)
+	}
+	err := labelGate("typo", false)
+	if err == nil {
+		t.Fatal("labelGate let a label the repository does not have through")
+	}
+	for _, want := range []string{"typo", "gh label create typo"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal does not mention %q:\n%s", want, err)
+		}
+	}
+}
+
+// The wiring: preflight looks the label up and refuses before anything runs,
+// naming the fix — and lets a run through once the label is one the
+// repository actually has.
+func TestPreflightRefusesALabelTheRepoDoesNotHave(t *testing.T) {
+	_, checkout := upstream(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{Labels: []string{"ready-for-claude"}})
+	cfg.dir = checkout
+	cfg.label = "typo"
+
+	if err := preflight(context.Background(), &cfg); err == nil {
+		t.Fatal("preflight started a drain scoped to a label the repository does not have")
+	} else if !strings.Contains(err.Error(), "gh label create typo") {
+		t.Fatalf("refusal does not name the fix: %v", err)
+	}
+
+	gated := cfg
+	gated.label = "ready-for-claude"
+	if err := preflight(context.Background(), &gated); err != nil {
+		t.Fatalf("a label the repository has should satisfy preflight: %v", err)
+	}
+}
+
+// A dry run still says a real run would refuse — the same carve-out
+// queueGate gets, through the same refuseOrNote.
+func TestPreflightLetsADryRunLookThroughTheLabelGate(t *testing.T) {
+	_, checkout := upstream(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{})
+	cfg.dir = checkout
+	cfg.label = "typo"
+	cfg.dryRun = true
+
+	var logged strings.Builder
+	log.SetOutput(&logged)
+	defer log.SetOutput(os.Stderr)
+
+	if err := preflight(context.Background(), &cfg); err != nil {
+		t.Fatalf("the label gate stopped a dry run, which changes nothing: %v", err)
+	}
+	if !strings.Contains(logged.String(), "gh label create typo") {
+		t.Error("a dry run through the label gate should still say a real run would refuse")
+	}
+}
+
+// A lookup that never gets a definitive answer is not a refusal — it must
+// not be reported as a missing label, and it must fail preflight outright
+// rather than being carved around by -dry-run the way a real refusal is.
+func TestPreflightFailsOutrightWhenTheLabelLookupCannotAnswer(t *testing.T) {
+	_, checkout := upstream(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Labels:    []string{"ready-for-claude"},
+		FailReads: map[string]int{"api label": ghReads},
+	})
+	cfg.dir = checkout
+	cfg.label = "ready-for-claude"
+	cfg.dryRun = true
+
+	err := preflight(context.Background(), &cfg)
+	if err == nil {
+		t.Fatal("preflight should fail when the label lookup cannot answer at all, dry run or not")
+	}
+	if strings.Contains(err.Error(), "gh label create") {
+		t.Errorf("a lookup failure was reported as a missing label: %v", err)
 	}
 }
 

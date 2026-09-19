@@ -15,7 +15,7 @@ see [`status`](#where-the-backlog-stands-polako-status) and
 | `-claude` | `claude` | The Claude Code binary to invoke. No pass-through for extra `claude` arguments — point this at a wrapper script instead; see [Running both halves from a working tree](../CONTRIBUTING.md#running-both-halves-from-a-working-tree). |
 | `-skill` | `polako:implement-issue` | Slash command run once per issue. Plugin skills are namespaced `<plugin>:<skill>`; pass `-skill implement-issue` if you copied the skill into `~/.claude/skills` instead. |
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how PRs are matched back to issues. |
-| `-label` | *(none)* | Only process issues carrying this label. Doubles as an access control — see [Security](security.md). |
+| `-label` | *(none)* | Only process issues carrying this label. Doubles as an access control — see [Security](security.md). A label the repository has never defined refuses at preflight, naming the fix, rather than draining an empty queue and reporting success. |
 | `-ungated` | `false` | Work a public repository without a `-label` gate. Without one or the other, `polako work` refuses to start on a public repo — see [Security](security.md). |
 | `-ignore-skew` | `false` | Start even when the installed skill is older than this binary. Without it, that mismatch refuses to start — a stale skill risks missing fixes and the shared branch-name contract ([issue #239](https://github.com/scharissis/polako/issues/239)); see [Getting updates](install.md#getting-updates). |
 | `-tools` | *(see below)* | `--allowedTools` for unattended runs. **Replaces** the default set. |
@@ -365,7 +365,7 @@ it: that's still polako's job.
 | --- | --- | --- |
 | `-repo` | *(whatever `-dir` is a checkout of)* | Repository to report on, `owner/name`. Naming it is what lets the command run from anywhere — no checkout needed, just a `gh` authenticated for the repo. |
 | `-dir` | `.` | Path to the repository's main checkout, used to resolve the repository when `-repo` is not given. |
-| `-label` | *(none)* | Only count issues carrying this label, the same scoping `polako work`'s `-label` applies. |
+| `-label` | *(none)* | Only count issues carrying this label, the same scoping `polako work`'s `-label` applies. `status` never refuses — it reads only — so a label the repository has never defined prints the same note `work`'s preflight would refuse with, above the counts, and carries on. |
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how open PRs are matched back to issues. |
 | `-strict-order` | `false` | Report as a work run with `-strict-order` would: an issue awaiting an answer keeps its place, so `next` can name it rather than the ready issue behind it. |
 | `-json` | `false` | Print one JSON document to stdout instead of the text report — see [As JSON](#as-json--json) below. |

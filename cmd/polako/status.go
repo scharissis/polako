@@ -103,6 +103,7 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 	if err != nil {
 		return err
 	}
+	statusLabelNote(ctx, cfg)
 	snap, err := readStatus(ctx, cfg, now)
 	if err != nil {
 		return err
@@ -112,6 +113,23 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 	}
 	renderStatus(out, rpt, cfg, snap)
 	return nil
+}
+
+// statusLabelNote calls out a -label the repository has never defined —
+// the same thing preflight refuses `work` for, downgraded to a note here
+// because status only ever reads: it says what a real run would refuse
+// (labelGate, via refuseOrNote forced "dry"), then carries on regardless.
+// Best-effort like the usage and plan-doc reads below: a lookup that fails
+// for a real reason says nothing rather than failing the whole snapshot.
+func statusLabelNote(ctx context.Context, cfg config) {
+	if cfg.label == "" {
+		return
+	}
+	exists, err := labelExists(ctx, cfg, cfg.label)
+	if err != nil {
+		return
+	}
+	_ = refuseOrNote(labelGate(cfg.label, exists), true)
 }
 
 // statusConfig builds the config the shared GitHub readers take, and settles
