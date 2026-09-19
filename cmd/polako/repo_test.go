@@ -771,6 +771,46 @@ func TestReviewGateRefreshesTheBaseBeforeReviewing(t *testing.T) {
 	}
 }
 
+// A `--ff-only` merge against a stale local `origin/…` ref is a silent
+// no-op: it looks like it succeeded and the run carries on against a base
+// nobody actually checked upstream (issue #420). Phase 1 and Phase 3 step 2a
+// both resolve that ref, so both need their own fetch, and both need to stop
+// the run — not just skip a step — when the fetch itself fails. A refused
+// `--ff-only` merge is a different, survivable case (the checkout just isn't
+// fast-forwardable) and must stay that way.
+func TestSkillStopsWhenFetchFails(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	phase1 := strings.Index(skill, "## Phase 1")
+	phase2a := strings.Index(skill, "Bring the local default branch up to date")
+	if phase1 < 0 || phase2a < 0 {
+		t.Fatal("SKILL.md is missing Phase 1 or the step 2a base refresh — can't check the" +
+			" fetch-failure stop against either")
+	}
+	if n := strings.Count(skill, "fetch origin"); n < 2 {
+		t.Errorf("SKILL.md spells `fetch origin` only %d time(s) — Phase 1 and Phase 3 step 2a"+
+			" each need their own explicit fetch, not just the `--ff-only` merge", n)
+	}
+
+	// Flattened: these markers read across line wraps in SKILL.md's prose.
+	phase1Section := strings.Join(strings.Fields(skill[phase1:phase2a]), " ")
+	if !strings.Contains(phase1Section, "stop") {
+		t.Error("Phase 1 no longer stops the run when `git fetch origin` fails — without that," +
+			" a run with a dead remote branches and works from a base of unknown age")
+	}
+
+	afterA := strings.Join(strings.Fields(skill[phase2a:]), " ")
+	idx := strings.Index(afterA, "the fetch fails, stop")
+	if idx < 0 {
+		t.Error("Phase 3 step 2a no longer stops the run when its own `fetch origin` fails —" +
+			" without that, the review and the eventual push run against a base of unknown age")
+	} else if refusalIdx := strings.Index(afterA, "the merge refuses"); refusalIdx < 0 || refusalIdx < idx {
+		t.Error("Phase 3 step 2a no longer distinguishes a failed fetch (stop) from a refused" +
+			" `--ff-only` merge (skip and carry on) — collapsing them either stops on a harmless" +
+			" refusal or, worse, carries on past a dead remote")
+	}
+}
+
 // The gate's resumability (issue #216) depends on the review returning before
 // any fix is applied, so it can be checkpointed on its own — a death while
 // --fix is still editing files is what left #216's gate with nothing to
