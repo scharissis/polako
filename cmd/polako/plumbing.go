@@ -19,6 +19,27 @@ func gh(ctx context.Context, cfg config, args ...string) ([]byte, error) {
 	return capture(ctx, cfg.dir, cfg.env, cfg.ghBin, ghArgs(cfg.ghRepo, args)...)
 }
 
+// parseRepoFlag validates -repo's shape: owner/name, both halves non-empty.
+// tidyConfig, statusConfig and setupConfig each let -repo name the
+// repository outright instead of resolving it from -dir, and all three
+// checked it the same way independently before this — one copy means the
+// rule and its wording can't drift between them. Empty in, empty out with no
+// error: an unset -repo is not this function's business, only the caller's
+// (fall back to -dir, most often). "owner/" alone is checked apart from a
+// bare missing slash — it reaches gh as a repository with no name and comes
+// back as a lookup failure nobody can trace to the flag that caused it.
+func parseRepoFlag(repo string) (string, error) {
+	repo = strings.TrimSpace(repo)
+	if repo == "" {
+		return "", nil
+	}
+	owner, name, _ := strings.Cut(repo, "/")
+	if strings.Count(repo, "/") != 1 || owner == "" || name == "" {
+		return "", fmt.Errorf("-repo %q is not owner/name — e.g. -repo %s", repo, "octocat/hello-world")
+	}
+	return repo, nil
+}
+
 // ghArgs names the repository on a call that would otherwise be resolved from
 // the working directory. Two spellings, because gh has two: every subcommand
 // here takes --repo, and `gh api` takes none — it substitutes {owner} and

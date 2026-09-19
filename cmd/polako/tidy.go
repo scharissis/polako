@@ -98,11 +98,11 @@ func tidyConfig(ctx context.Context, opt tidyOptions) (config, error) {
 	}
 	cfg.dir = abs
 
-	if repo := strings.TrimSpace(opt.repo); repo != "" {
-		owner, name, _ := strings.Cut(repo, "/")
-		if strings.Count(repo, "/") != 1 || owner == "" || name == "" {
-			return cfg, fmt.Errorf("-repo %q is not owner/name — e.g. -repo %s", repo, "octocat/hello-world")
-		}
+	repo, err := parseRepoFlag(opt.repo)
+	if err != nil {
+		return cfg, err
+	}
+	if repo != "" {
 		cfg.repo, cfg.ghRepo = repo, repo
 		return cfg, nil
 	}
