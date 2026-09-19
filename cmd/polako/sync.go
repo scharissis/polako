@@ -21,6 +21,13 @@ import (
 // name, and holds for the same reason: the two halves ship from one commit.
 const planFile = "PLAN.md"
 
+// evidenceDir is the scratch directory the visual-evidence capture flow
+// writes shots to between capture and publish (docs/plans/visual-evidence.md,
+// ticket 1). Untracked by design, so left-work counting has to know to
+// ignore it the same way it already ignores planFile — a dead run's shots
+// would otherwise make tidy refuse the worktree and pad a park message.
+const evidenceDir = ".polako-evidence"
+
 // porcelainPath is the path out of one `git status --porcelain` line, or "" for
 // a blank one. The format is two status columns and a space, then the path.
 func porcelainPath(line string) string {
