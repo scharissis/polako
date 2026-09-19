@@ -54,6 +54,16 @@ type ghState struct {
 	// `update`'s own tests have a reason to set it.
 	PublishedRef string `json:"published_ref"`
 
+	// IssuesEnabled is what `hasIssuesEnabled` reports on `repo view`, read
+	// only by `setup`. nil stands for true — the common case, and the one
+	// every fixture predating this field describes without setting it.
+	IssuesEnabled *bool `json:"issues_enabled"`
+	// NoIssuesEnabledField is a gh too old for `hasIssuesEnabled`: it rejects
+	// the whole `repo view --json` set that names it, before it asks GitHub
+	// anything, the same shape OldGh and NoParentField already take for their
+	// own fields.
+	NoIssuesEnabledField bool `json:"no_issues_enabled_field"`
+
 	// FailReads is a network that has not come back yet after the host woke:
 	// the next N calls of a kind ("issue list", "pr list") fail the way gh does
 	// when it cannot reach GitHub, and then it answers normally again. Keyed by
@@ -327,16 +337,28 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 		return answerReleaseDownload(st, args)
 
 	case "repo view":
-		// Two shapes: status resolves the name alone through --jq, preflight
-		// asks for plain JSON so visibility comes back with it.
+		// Three shapes: status resolves the name alone through --jq, preflight
+		// asks for plain JSON so visibility comes back with it, and setup adds
+		// hasIssuesEnabled to that same pair.
 		if flagVal("--jq") != "" {
 			return st.Repo + "\n", false, 0
+		}
+		fields := flagVal("--json")
+		if st.NoIssuesEnabledField && strings.Contains(fields, "hasIssuesEnabled") {
+			// Checked against gh's own field table, before the repository is
+			// asked anything — the same shape NoParentField takes on `issue view`.
+			fmt.Fprintf(os.Stderr, "unknown JSON field: %q\n", "hasIssuesEnabled")
+			return "", false, 1
 		}
 		vis := st.Visibility
 		if vis == "" {
 			vis = "PRIVATE"
 		}
-		return fmt.Sprintf(`{"nameWithOwner":%q,"visibility":%q}`, st.Repo, vis), false, 0
+		if !strings.Contains(fields, "hasIssuesEnabled") {
+			return fmt.Sprintf(`{"nameWithOwner":%q,"visibility":%q}`, st.Repo, vis), false, 0
+		}
+		enabled := st.IssuesEnabled == nil || *st.IssuesEnabled
+		return fmt.Sprintf(`{"nameWithOwner":%q,"visibility":%q,"hasIssuesEnabled":%v}`, st.Repo, vis, enabled), false, 0
 
 	case "issue list":
 		if flagVal("--search") != "" {
