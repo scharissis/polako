@@ -143,6 +143,17 @@ func TestResolvePluginPlanFrom(t *testing.T) {
 		        {"id":"polako@a-mirror","version":"0.6.1","scope":"user"}]`,
 		wantState:   pluginAmbiguous,
 		wantVersion: "0.6.1",
+	}, {
+		// A --plugin-dir load: session-scope, replacing the installed copy for
+		// this session alone. "session" isn't a --scope `plugin update` takes,
+		// and its marketplace half ("inline" here) isn't a real marketplace —
+		// nothing for update to run `plugin marketplace update` against.
+		name:        "a --plugin-dir session load",
+		list:        `[{"id":"polako@inline","version":"0.6.1","scope":"session"}]`,
+		wantState:   pluginSessionLoad,
+		wantVersion: "0.6.1",
+		wantID:      "polako@inline",
+		wantScope:   "session",
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := resolvePluginPlanFrom([]byte(tc.list), pluginName)
@@ -181,6 +192,11 @@ func TestPluginSummary(t *testing.T) {
 		plan:      pluginPlan{state: pluginAmbiguous, version: "0.23.0"},
 		published: "0.24.0",
 		want:      []string{"0.23.0", "more than one"},
+	}, {
+		name:      "a --plugin-dir session load",
+		plan:      pluginPlan{state: pluginSessionLoad, version: "0.6.1", id: "polako@inline", scope: "session"},
+		published: "0.24.0",
+		want:      []string{"polako@inline", "--plugin-dir", "session load"},
 	}, {
 		name:      "found and current",
 		plan:      pluginPlan{state: pluginFound, version: "0.24.0"},

@@ -190,6 +190,15 @@ const (
 	// pluginAmbiguous is a version but no id: more than one installed copy
 	// agreeing on a version, with no single `plugin update` target.
 	pluginAmbiguous
+	// pluginSessionLoad is a --plugin-dir copy: a session-scope dev load
+	// that replaces the installed one for this Claude Code session alone
+	// (installedVersion's own doc comment — "the way anyone testing a tip
+	// skill against a tip binary runs"). "session" isn't one of the three
+	// scopes `claude plugin install`/`update` accept (docs/install.md's own
+	// table: user/project/local), so there is no real marketplace behind it
+	// to run `plugin marketplace update` against — a dev load, not
+	// something this verb manages.
+	pluginSessionLoad
 	pluginFound
 )
 
@@ -225,6 +234,8 @@ func resolvePluginPlanFrom(list []byte, plugin string) pluginPlan {
 		return pluginPlan{state: pluginNotInstalled}
 	case id == "":
 		return pluginPlan{state: pluginAmbiguous, version: version}
+	case scope == "session":
+		return pluginPlan{state: pluginSessionLoad, version: version, id: id, scope: scope}
 	default:
 		_, marketplace, _ := strings.Cut(id, "@")
 		return pluginPlan{state: pluginFound, version: version, id: id, scope: scope, marketplace: marketplace}
@@ -381,6 +392,9 @@ func pluginSummary(p pluginPlan, published string) (line string, action bool) {
 	case pluginAmbiguous:
 		return fmt.Sprintf("plugin: installed more than once (version %s), from more than one "+
 			"marketplace — no single copy to update; resolve the duplicate install by hand", p.version), false
+	case pluginSessionLoad:
+		return fmt.Sprintf("plugin: %s (%s) is a --plugin-dir session load — not something update "+
+			"manages; stop overriding it to get the marketplace copy back", p.version, p.id), false
 	default: // pluginFound
 		if p.version == published {
 			return fmt.Sprintf("plugin: %s, already current", p.version), false
