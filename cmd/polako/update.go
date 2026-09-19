@@ -436,21 +436,42 @@ func binarySummary(ctx context.Context, cfg config, b binaryPlan, published stri
 // ahead of either half — the only way a release reaches an operator who
 // never runs `update` by hand.
 
-// readPublishedVersion is the notice's own read, gated the way
-// skewComparison already gates a binary/plugin comparison: only this
-// repo's own plugin shares a version line with the binary, so -skill
-// naming another one has nothing here to compare against. false on that
-// gate or on a failed or timed-out read — both are the same silence a
-// passive notice keeps, never a refusal.
-func readPublishedVersion(ctx context.Context, cfg config) (string, bool) {
-	if name, _, _ := strings.Cut(cfg.skill, ":"); name != pluginName {
-		return "", false
-	}
+// publishedVersionQuiet is publishedVersion best-effort: "" on a failed or
+// timed-out read rather than an error, the same tolerance probeUsage has —
+// what a passive notice needs, never a refusal. Ungated: status calls this
+// directly, since it carries no -skill of its own and always means this
+// repo's own plugin (readStatus, status.go).
+func publishedVersionQuiet(ctx context.Context, cfg config) (string, bool) {
 	published, err := publishedVersion(ctx, cfg)
 	if err != nil {
 		return "", false
 	}
 	return published, true
+}
+
+// readPublishedVersion is the notice's read as work's preflight makes it:
+// gated by namesThisPlugin, since -skill may point anywhere and another
+// plugin's installed version has nothing here to compare against — the same
+// gate skewComparison applies, for the same reason.
+func readPublishedVersion(ctx context.Context, cfg config) (string, bool) {
+	if !namesThisPlugin(cfg.skill) {
+		return "", false
+	}
+	return publishedVersionQuiet(ctx, cfg)
+}
+
+// versionBehind reports whether current names a release strictly behind
+// target, the releaseVersion + semverLess pair skewComparison already
+// applies once, used here for both halves of the notice's own comparison.
+// isRelease false (current carries no release version at all) always comes
+// back with behind false: an unreleased or absent version is not "behind",
+// it is nothing to compare.
+func versionBehind(current string, target [3]int) (norm string, isRelease, behind bool) {
+	norm, parts, isRelease := releaseVersion(current)
+	if !isRelease {
+		return "", false, false
+	}
+	return norm, true, semverLess(parts, target)
 }
 
 // updateAvailableLine is the notice's comparison, pure so work's preflight
@@ -464,17 +485,15 @@ func readPublishedVersion(ctx context.Context, cfg config) (string, bool) {
 // not release-shaped just drops out of the comparison rather than silencing
 // the whole line — the binary alone may still be worth a notice.
 func updateAvailableLine(binary, plugin, published string) string {
-	self, selfParts, selfIsRelease := releaseVersion(binary)
-	if !selfIsRelease || published == "" {
-		return ""
-	}
 	publishedParts, err := parseSemver(published)
 	if err != nil {
 		return ""
 	}
-	pluginNorm, pluginParts, pluginIsRelease := releaseVersion(plugin)
-	behindSelf := semverLess(selfParts, publishedParts)
-	behindPlugin := pluginIsRelease && semverLess(pluginParts, publishedParts)
+	self, selfIsRelease, behindSelf := versionBehind(binary, publishedParts)
+	if !selfIsRelease {
+		return ""
+	}
+	pluginNorm, pluginIsRelease, behindPlugin := versionBehind(plugin, publishedParts)
 	if !behindSelf && !behindPlugin {
 		return ""
 	}

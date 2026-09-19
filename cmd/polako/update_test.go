@@ -114,6 +114,21 @@ func TestPublishedVersionIsARealErrorOnFailure(t *testing.T) {
 	}
 }
 
+func TestPublishedVersionQuietSilentOnFailure(t *testing.T) {
+	cfg := updateGhCfg(t, &ghState{})
+	if _, ok := publishedVersionQuiet(context.Background(), cfg); ok {
+		t.Error("publishedVersionQuiet should stay silent, not error, on a failed read")
+	}
+}
+
+func TestPublishedVersionQuietReadsTheMarketplaceFile(t *testing.T) {
+	cfg := updateGhCfg(t, &ghState{PublishedRef: "polako--v0.24.0"})
+	got, ok := publishedVersionQuiet(context.Background(), cfg)
+	if !ok || got != "0.24.0" {
+		t.Errorf("publishedVersionQuiet = %q, %v, want 0.24.0, true", got, ok)
+	}
+}
+
 // --- the passive notice (docs/plans/update.md ticket 2) ---
 
 func TestUpdateAvailableLine(t *testing.T) {
