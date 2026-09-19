@@ -115,6 +115,14 @@ polako update
 `-gh`/`-claude` point it at a `gh`/`claude` binary that isn't on PATH under
 those names. Then `/reload-plugins`, or restart.
 
+Running a prebuilt release binary rather than a `go install`? `update`
+replaces that too: it downloads the release asset for your GOOS/GOARCH and
+`checksums.txt`, verifies the download, and swaps it in over the running
+binary. A checksum mismatch or a release with no `checksums.txt` refuses and
+leaves the old binary in place. On macOS, if the new binary refuses to run
+citing an unidentified developer, clear the quarantine attribute yourself:
+`xattr -d com.apple.quarantine <path>`.
+
 By hand, that's the same two commands as always — `update` wants the full
 `plugin@marketplace` id; the bare name it reports as not found, even
 installed — followed by the binary, pinned to the published version rather

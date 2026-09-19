@@ -29,7 +29,7 @@ const fakeGhEnv = "POLAKO_FAKE_GH"
 // ghSubcommands are the first arguments that mean "this invocation is gh".
 // The test process exports both fake-CLI variables at once and children
 // inherit them, so argv is what tells the two impersonations apart.
-var ghSubcommands = []string{"repo", "issue", "pr", "label", "api"}
+var ghSubcommands = []string{"repo", "issue", "pr", "label", "api", "release"}
 
 // ghState is the whole of a pretend repository.
 type ghState struct {
@@ -71,6 +71,10 @@ type ghState struct {
 	// before asking GitHub anything, so issuePickupPolicy retries with `parent`
 	// dropped from the field set.
 	NoParentField bool `json:"no_parent_field"`
+
+	// Release is the fake `gh release download` targets — ticket 4's own test
+	// seam. nil means no release exists (a real gh: "release not found").
+	Release *fakeRelease `json:"release,omitempty"`
 
 	// ClaudeRuns counts the invocations a fake CLI has made, for the modes whose
 	// answer depends on how far the supervisor has got. See countClaudeRun.
@@ -319,6 +323,9 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 	}
 
 	switch call {
+	case "release download":
+		return answerReleaseDownload(st, args)
+
 	case "repo view":
 		// Two shapes: status resolves the name alone through --jq, preflight
 		// asks for plain JSON so visibility comes back with it.
