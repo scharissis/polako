@@ -53,13 +53,14 @@ type issueState struct {
 	// once an answer lands, and then dying before it reports a session of its
 	// own, still has one to resume rather than starting over from nothing.
 	session string
-	// remediationSession is the last remediation run's session (conflict,
-	// checks or review, dispatched from supervisePR while a PR is open) —
-	// tracked separately from session because a park raised there follows the
-	// remediation, not the implement run session belongs to, and pointing the
-	// operator at the wrong transcript is what issue #388 was filed over.
-	// Remediation runs never resume, so unlike session this is never reset —
-	// each dispatch simply overwrites it with its own session.
+	// remediationSession is the session of the last remediation run (conflict,
+	// checks or review, dispatched from supervisePR while a PR is open) that
+	// gave up — set on failure, cleared on a successful push (runRemediation),
+	// so it is only ever non-empty when there is genuinely a "run that gave
+	// up" to point at. Tracked separately from session because a park raised
+	// here follows the remediation, not the implement run session belongs to,
+	// and pointing the operator at the wrong transcript is what issue #388
+	// was filed over.
 	remediationSession string
 	// closedNoChange is set when this issue's run took the fourth ending
 	// (#210): verified evidence the issue needed no code change, and closed it
@@ -80,11 +81,6 @@ type issueState struct {
 	hasWeekUsageAtPickup bool
 }
 
-// remediationParkCategories are the park kinds supervisePR raises after a
-// remediation run gave up — the ones resumeHint should point at that run's
-// session rather than, or as well as, the implement run's.
-var remediationParkCategories = map[string]bool{parkConflicts: true, parkChecks: true, parkReview: true}
-
 // resumeHint points the operator at the local handles for an issue a shift
 // left mid-flight: the last relevant run's transcript, and this shift's slice
 // of the run data. Both are machine-local — the transcript lives under
@@ -92,22 +88,27 @@ var remediationParkCategories = map[string]bool{parkConflicts: true, parkChecks:
 // never posted to the issue thread: the same reasoning that keeps the session
 // id out of a park's reason, which reaches the thread verbatim.
 //
-// parkCategory picks which session led: a checks, review or conflict park
-// (remediationParkCategories) happened right after a remediation run gave up,
-// not the implement run from earlier, so that session prints first, worded
-// "the remediation run that gave up" — the implement session still prints
-// second, since it is where the branch itself came from (issue #388; before
-// this, only the implement session was ever tracked, so a remediation park
-// sent the operator to resume the wrong transcript).
+// remediationSession prints first, worded "the remediation run that gave
+// up", whenever one is recorded — it is only ever set on a failed
+// remediation dispatch and cleared on a successful one (see its doc comment
+// on issueState), so its mere presence means there is a run to point at, with
+// no need to also check which park category just fired (checking the
+// category instead of the field's own state was tried first and dropped: the
+// interrupt/fatal exit below never carries a parkedError, so a category check
+// there could never match, and the field could otherwise go stale across two
+// different remediation kinds). The implement session still prints second,
+// since it is where the branch itself came from (issue #388; before this,
+// only the implement session was ever tracked, so a remediation park sent the
+// operator to resume the wrong transcript).
 //
 // Printed on a park, and — since #218 — on the interrupt and fatal exits too: a
 // Ctrl+C during a usage-limit wait used to drop a resumable 32-minute session,
 // review gate included, and say nothing.
-func resumeHint(cfg config, issue int, st *issueState, parkCategory string) {
+func resumeHint(cfg config, issue int, st *issueState) {
 	if st == nil {
 		return
 	}
-	if remediationParkCategories[parkCategory] && st.remediationSession != "" {
+	if st.remediationSession != "" {
 		log.Printf("issue #%d: `claude --resume %s` reopens the remediation run that gave up",
 			issue, st.remediationSession)
 	}
@@ -300,7 +301,7 @@ func drain(ctx context.Context, cfg config) error {
 			// resume hint, yet both leave a run's transcript on disk that
 			// somebody will want to reopen — and the id is dropped on exit
 			// otherwise (#218).
-			resumeHint(cfg, issue, st, parkCategoryOf(err))
+			resumeHint(cfg, issue, st)
 			return finish(fmt.Errorf("issue #%d: %w", issue, err))
 		default:
 			results = append(results, spend(st, issueResult{issue: issue, closedNoChange: st.closedNoChange}))
@@ -447,7 +448,7 @@ func parkAndMoveOn(ctx context.Context, cfg config, issue int, st *issueState, r
 	}
 	// A park is exactly when somebody wants to read what the run actually did,
 	// and the session is the whole transcript of it.
-	resumeHint(cfg, issue, st, parkCategoryOf(err))
+	resumeHint(cfg, issue, st)
 	parkIssue(ctx, cfg, issue, reason)
 	// After the park, not before: by now the label and the comment saying why
 	// are on the issue, so somebody following the notification finds the whole

@@ -103,22 +103,22 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, st *issue
 				log.Printf("remediation attempt %d/%d failed (%v)", failures, cfg.retries, rerr)
 				if failures >= cfg.retries {
 					return "", park(parkConflicts,
-						"conflict remediation for PR #%d failed %d times — needs a human. The "+
-							"remediation run's comment on PR #%d says why.", prNumber, failures, prNumber)
+						"conflict remediation for PR #%d failed %d times — needs a human."+
+							remediationMaySayWhy(prNumber), prNumber, failures)
 				}
 			} else {
 				failures = 0
 				log.Printf("remediation pushed — GitHub will recompute mergeability")
 			}
 		case pr.checks == checksFailing:
-			if result, herr, done := handleFailingChecks(ctx, cfg, issue, prNumber, pr, st, tally,
-				remChoice, &redRuns, &remediatedHead); done {
-				return result, herr
+			if err := handleFailingChecks(ctx, cfg, issue, prNumber, pr, st, tally,
+				remChoice, &redRuns, &remediatedHead); err != nil {
+				return "", err
 			}
 		case pr.reviewOutstanding():
-			if result, herr, done := handleReviewOutstanding(ctx, cfg, issue, prNumber, pr, st, tally,
-				remChoice, &reviewRuns, &remediatedReview, &remediatedReviewHead); done {
-				return result, herr
+			if err := handleReviewOutstanding(ctx, cfg, issue, prNumber, pr, st, tally,
+				remChoice, &reviewRuns, &remediatedReview, &remediatedReviewHead); err != nil {
+				return "", err
 			}
 		default:
 			log.Printf("PR #%d still open (mergeable: %s, checks: %s%s) — next check in %s",
@@ -132,27 +132,25 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, st *issue
 
 // handleFailingChecks is supervisePR's red-checks case, split out to keep
 // that function under the repo's size budget. redRuns and remediatedHead
-// persist across polls, so they're threaded through by pointer; done reports
-// whether supervisePR should return (result, err) immediately rather than
-// loop again.
+// persist across polls, so they're threaded through by pointer. A non-nil
+// return means supervisePR should return it immediately rather than loop
+// again.
 func handleFailingChecks(ctx context.Context, cfg config, issue, prNumber int, pr prView,
 	st *issueState, tally *issueTally, remChoice runChoice,
-	redRuns *int, remediatedHead *string) (result string, err error, done bool) {
+	redRuns *int, remediatedHead *string) error {
 	if pr.head != "" && pr.head == *remediatedHead {
 		// The last run finished and left the branch where it was, so the
 		// same checks are red against the same code. Reading the same
 		// logs again lands in the same place.
-		return "", park(parkChecks, "CI on PR #%d is still red and the remediation run made no "+
-			"change — needs a human. The remediation run's comment on PR #%d says why.",
-			prNumber, prNumber), true
+		return park(parkChecks, "CI on PR #%d is still red and the remediation run made no "+
+			"change — needs a human."+remediationMaySayWhy(prNumber), prNumber)
 	}
 	// -retries is a crash-resume budget; borrowing it bounds the runs
 	// dispatched here. The floor is 1 because the first attempt at a red
 	// build is not a retry, so -retries=0 must not skip it.
 	if budget := max(cfg.retries, 1); *redRuns >= budget {
-		return "", park(parkChecks, "CI on PR #%d is still red after %d remediation runs — "+
-			"needs a human. The remediation run's comment on PR #%d says why.",
-			prNumber, *redRuns, prNumber), true
+		return park(parkChecks, "CI on PR #%d is still red after %d remediation runs — "+
+			"needs a human."+remediationMaySayWhy(prNumber), prNumber, *redRuns)
 	}
 	*redRuns++
 	*remediatedHead = pr.head
@@ -160,10 +158,10 @@ func handleFailingChecks(ctx context.Context, cfg config, issue, prNumber int, p
 		prNumber, plural(len(pr.failing), "check"), strings.Join(pr.failing, ", "))
 	if rerr := remediateChecks(ctx, cfg, issue, prNumber, pr.failing, pr.head, st, tally, remChoice); rerr != nil {
 		if ctx.Err() != nil {
-			return "", ctx.Err(), true
+			return ctx.Err()
 		}
 		if errors.Is(rerr, errAuth) {
-			return "", authAdvice(rerr), true
+			return authAdvice(rerr)
 		}
 		// Either this run died before reaching the push, or runRemediation
 		// already confirmed it finished without one (errNoPush) — both are
@@ -176,44 +174,43 @@ func handleFailingChecks(ctx context.Context, cfg config, issue, prNumber int, p
 	} else {
 		log.Printf("remediation finished — GitHub will re-run the checks")
 	}
-	return "", nil, false
+	return nil
 }
 
 // handleReviewOutstanding is supervisePR's changes-requested case — the
 // review counterpart of handleFailingChecks, split out for the same reason
 // and with the same shape: reviewRuns, remediatedReview and
 // remediatedReviewHead persist across polls, so they're threaded through by
-// pointer, and done reports whether supervisePR should return immediately.
+// pointer, and a non-nil return means supervisePR should return it
+// immediately.
 func handleReviewOutstanding(ctx context.Context, cfg config, issue, prNumber int, pr prView,
 	st *issueState, tally *issueTally, remChoice runChoice,
-	reviewRuns *int, remediatedReview *time.Time, remediatedReviewHead *string) (result string, err error, done bool) {
+	reviewRuns *int, remediatedReview *time.Time, remediatedReviewHead *string) error {
 	if !remediatedReview.IsZero() && remediatedReview.Equal(pr.reviewedAt) &&
 		pr.head != "" && pr.head == *remediatedReviewHead {
 		// The last run finished and left the branch where it was, so the
 		// same review still asks for the same changes. Sending another run
 		// at the same words lands in the same place.
-		return "", park(parkReview, "changes are still requested on PR #%d and the remediation "+
-			"run made no change — needs a human. The remediation run's comment on PR #%d "+
-			"says why.", prNumber, prNumber), true
+		return park(parkReview, "changes are still requested on PR #%d and the remediation "+
+			"run made no change — needs a human."+remediationMaySayWhy(prNumber), prNumber)
 	}
 	// Bounded like the red-build budget, and for the same reason: -retries
 	// is the crash-resume allowance, borrowed here to cap the runs one open
 	// PR can consume. The floor is 1 because the first attempt at a review
 	// is not a retry.
 	if budget := max(cfg.retries, 1); *reviewRuns >= budget {
-		return "", park(parkReview, "changes requested on PR #%d are still outstanding after %d "+
-			"remediation runs — needs a human. The remediation run's comment on PR #%d says why.",
-			prNumber, *reviewRuns, prNumber), true
+		return park(parkReview, "changes requested on PR #%d are still outstanding after %d "+
+			"remediation runs — needs a human."+remediationMaySayWhy(prNumber), prNumber, *reviewRuns)
 	}
 	*reviewRuns++
 	*remediatedReview, *remediatedReviewHead = pr.reviewedAt, pr.head
 	log.Printf("PR #%d has changes requested — dispatching remediation", prNumber)
 	if rerr := remediateReview(ctx, cfg, issue, prNumber, pr.head, st, tally, remChoice); rerr != nil {
 		if ctx.Err() != nil {
-			return "", ctx.Err(), true
+			return ctx.Err()
 		}
 		if errors.Is(rerr, errAuth) {
-			return "", authAdvice(rerr), true
+			return authAdvice(rerr)
 		}
 		// Either this run died before reaching the push, or runRemediation
 		// already confirmed it finished without one (errNoPush) — both are
@@ -225,7 +222,7 @@ func handleReviewOutstanding(ctx context.Context, cfg config, issue, prNumber in
 	} else {
 		log.Printf("remediation finished — waiting for the reviewer to look again")
 	}
-	return "", nil, false
+	return nil
 }
 
 // errNoPush marks a remediation run that exited cleanly but never moved the
@@ -290,16 +287,22 @@ func runRemediation(ctx context.Context, cfg config, issue, prNumber int, reason
 	}
 	started := time.Now()
 	rep, err := execClaude(ctx, runCfg, prompt, "", "", runLimit(cfg, *tally))
-	// Recorded even when the run also turns out to be errNoPush below: a run
-	// that gave up without pushing is exactly the one a park sends the
-	// operator to resume and look at, same as a run that died outright.
-	if rep.sessionID != "" {
-		st.remediationSession = rep.sessionID
-	}
 	if err == nil && beforeHead != "" {
 		if after, perr := prStatus(ctx, cfg, prNumber); perr == nil && after.head == beforeHead {
 			err = errNoPush
 		}
+	}
+	// remediationSession means "the last remediation run that gave up" (see
+	// its doc comment on issueState) — set only on failure, and cleared on a
+	// clean push, so a later remediation of a different kind that dies
+	// before streaming a session id never inherits an earlier, unrelated
+	// one, and resumeHint can print it whenever it is set without also
+	// checking which park just fired.
+	switch {
+	case err != nil && rep.sessionID != "":
+		st.remediationSession = rep.sessionID
+	case err == nil:
+		st.remediationSession = ""
 	}
 	// A remediation run pushes to a PR that already exists, so it leaves
 	// behind neither a new PR nor questions.
@@ -396,6 +399,15 @@ func prCommentHow(prNumber int) string {
 	return fmt.Sprintf("To comment, write the text to a file in the worktree, run "+
 		"`gh pr comment %d --body-file <file>` — PR number first, that spelling, the "+
 		"only form this run is granted — then delete the file. ", prNumber)
+}
+
+// remediationMaySayWhy is the clause every remediation park reason ends
+// with — the same shape as prCommentHow above, for the park text rather than
+// the prompt. "May", not "does": prCommentHow only asks the dispatched run
+// to leave a PR comment, nothing here confirms it reached that step before
+// dying or refusing.
+func remediationMaySayWhy(prNumber int) string {
+	return fmt.Sprintf(" The remediation run's comment on PR #%d may say why.", prNumber)
 }
 
 // prReviewTools grants a review remediation the one read the gh CLI has no
