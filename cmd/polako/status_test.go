@@ -30,11 +30,13 @@ func statusConfigFor(t *testing.T, st *ghState) (config, string) {
 	t.Helper()
 	drainCfg, path := drainConfig(t, "stream", st)
 	return config{
-		dir:          drainCfg.dir,
-		ghBin:        drainCfg.ghBin,
-		claudeBin:    drainCfg.claudeBin,
-		repo:         drainCfg.repo,
-		ghRepo:       drainCfg.repo,
+		dir:       drainCfg.dir,
+		ghBin:     drainCfg.ghBin,
+		claudeBin: drainCfg.claudeBin,
+		repo:      drainCfg.repo,
+		ghRepo:    drainCfg.repo,
+		// status takes no -skill of its own — same default statusConfig sets.
+		skill:        defaultSkill,
 		branchPrefix: "issue-",
 		ghRetryWait:  time.Millisecond,
 		usageTimeout: 5 * time.Second,
@@ -557,8 +559,13 @@ func TestStatusMakesOnlyReadCalls(t *testing.T) {
 		seen++
 		fields := strings.Fields(line)
 		if len(fields) > 0 && fields[0] == "api" {
-			if !strings.HasPrefix(fields[1], "repos/") || !strings.HasSuffix(fields[1], "/comments?per_page=100") {
-				t.Errorf("status called `gh %s`, which is not the comments read", line)
+			isComments := strings.HasPrefix(fields[1], "repos/") && strings.HasSuffix(fields[1], "/comments?per_page=100")
+			// The published-version read the update notice makes — same
+			// path publishedVersion itself reads, gh api's -H flag trailing
+			// after it.
+			isMarketplace := fields[1] == updateMarketplacePath
+			if !isComments && !isMarketplace {
+				t.Errorf("status called `gh %s`, which is not the comments or marketplace read", line)
 			}
 			continue
 		}
@@ -1032,6 +1039,111 @@ func TestStatusOmitsThePlanLineWhenTheProbeCannotAnswer(t *testing.T) {
 	}
 	if strings.Contains(jsonOut.String(), `"plan"`) {
 		t.Errorf("JSON has a plan field with no usage snapshot:\n%s", jsonOut.String())
+	}
+}
+
+// --- the update notice (docs/plans/update.md ticket 2) ---
+
+func TestStatusReportsTheUpdateNoticeWhenAheadOfEitherHalf(t *testing.T) {
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues:       map[string]*fakeIssue{"1": {Open: true}},
+		PublishedRef: "polako--v0.24.0",
+	})
+	cfg.pluginVersion = "0.23.0"
+
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	if snap.published != "0.24.0" {
+		t.Fatalf("snap.published = %q, want 0.24.0", snap.published)
+	}
+	// The test binary itself carries no release version (go test -c is
+	// never a module- or stamped-tier build), so the comparison needs a
+	// literal self to drive it — the same reason updateNoticeLine takes
+	// binary as a parameter rather than reading polakoVersion() itself.
+	snap.selfVersion = "0.23.0"
+
+	var out strings.Builder
+	renderStatus(&out, report{}, cfg, snap)
+	if !strings.Contains(out.String(), "update available: polako 0.24.0 is out") {
+		t.Errorf("text report missing the update notice:\n%s", out.String())
+	}
+
+	var jsonOut strings.Builder
+	if err := renderStatusJSON(&jsonOut, cfg, snap); err != nil {
+		t.Fatalf("renderStatusJSON: %v", err)
+	}
+	var doc statusDoc
+	if err := json.Unmarshal([]byte(jsonOut.String()), &doc); err != nil {
+		t.Fatalf("output did not parse as JSON: %v\n%s", err, jsonOut.String())
+	}
+	if doc.Published == nil || *doc.Published != "0.24.0" {
+		t.Errorf("doc.Published = %v, want 0.24.0", doc.Published)
+	}
+}
+
+// The read can succeed and still carry nothing to say — the binary and the
+// plugin are both current. -json still names the release, unlike the text
+// notice, since a caller may want to know the current release either way.
+func TestStatusJSONCarriesThePublishedVersionEvenWhenCurrent(t *testing.T) {
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues:       map[string]*fakeIssue{"1": {Open: true}},
+		PublishedRef: "polako--v0.23.0",
+	})
+	cfg.pluginVersion = "0.23.0"
+
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	snap.selfVersion = "0.23.0"
+
+	var out strings.Builder
+	renderStatus(&out, report{}, cfg, snap)
+	if strings.Contains(out.String(), "update available") {
+		t.Errorf("text report has a notice with both halves current:\n%s", out.String())
+	}
+
+	var jsonOut strings.Builder
+	if err := renderStatusJSON(&jsonOut, cfg, snap); err != nil {
+		t.Fatalf("renderStatusJSON: %v", err)
+	}
+	var doc statusDoc
+	if err := json.Unmarshal([]byte(jsonOut.String()), &doc); err != nil {
+		t.Fatalf("output did not parse as JSON: %v\n%s", err, jsonOut.String())
+	}
+	if doc.Published == nil || *doc.Published != "0.23.0" {
+		t.Errorf("doc.Published = %v, want 0.23.0 even though it is current", doc.Published)
+	}
+}
+
+// The default fixture: no PublishedRef, the fake's "could not read this"
+// shape — the same silence the text notice keeps, absent rather than a
+// fake empty string, in -json too.
+func TestStatusOmitsThePublishedVersionWhenTheReadFails(t *testing.T) {
+	cfg, _ := statusConfigFor(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: true}}})
+
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	if snap.published != "" {
+		t.Fatalf("snap.published = %q, want empty on a failed read", snap.published)
+	}
+
+	var out strings.Builder
+	renderStatus(&out, report{}, cfg, snap)
+	if strings.Contains(out.String(), "update available") {
+		t.Errorf("text report has a notice with no published version:\n%s", out.String())
+	}
+
+	var jsonOut strings.Builder
+	if err := renderStatusJSON(&jsonOut, cfg, snap); err != nil {
+		t.Fatalf("renderStatusJSON: %v", err)
+	}
+	if strings.Contains(jsonOut.String(), `"published"`) {
+		t.Errorf("JSON has a published field with no readable version:\n%s", jsonOut.String())
 	}
 }
 

@@ -103,6 +103,10 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 	if err != nil {
 		return err
 	}
+	// Best-effort, like every claude-CLI read this binary makes: read here so
+	// both renderStatus and renderStatusJSON see the same cfg.pluginVersion the
+	// update notice compares against, mirroring work's own preflight call.
+	cfg.pluginVersion, _, _ = pluginVersion(ctx, cfg)
 	statusLabelNote(ctx, cfg)
 	snap, err := readStatus(ctx, cfg, now)
 	if err != nil {
@@ -149,6 +153,9 @@ func statusConfig(ctx context.Context, opt statusOptions) (config, error) {
 		label:        opt.label,
 		branchPrefix: opt.branchPrefix,
 		strictOrder:  opt.strictOrder,
+		// status takes no -skill of its own — it reports on this project's
+		// own plugin, the same default `update` uses.
+		skill: defaultSkill,
 		// The same memo a shift carries, so a snapshot that ever grows a second
 		// listing pays for an old gh once rather than once per call.
 		queue: new(queueMemo),
@@ -211,6 +218,16 @@ type statusSnapshot struct {
 	// above: a failed read leaves it zero-valued rather than failing the
 	// whole snapshot.
 	plans planDocsSnapshot
+	// published is the release polako has actually published, the same read
+	// `update -check` makes — "" when the read failed or timed out, the same
+	// silence updateAvailableLine keeps for the text notice it also drives.
+	published string
+	// selfVersion is this running binary's own polakoVersion(), read once
+	// here rather than by the renderers themselves — the same "read once,
+	// render from the snapshot" shape usage and plans already follow, and
+	// what lets a test drive the comparison without needing a real release
+	// build to run the suite from.
+	selfVersion string
 }
 
 // statusPR is one open PR on a branch the skill named, and what GitHub says
@@ -228,7 +245,7 @@ type statusPR struct {
 }
 
 func readStatus(ctx context.Context, cfg config, now time.Time) (statusSnapshot, error) {
-	snap := statusSnapshot{quiet: map[int]time.Duration{}}
+	snap := statusSnapshot{quiet: map[int]time.Duration{}, selfVersion: polakoVersion()}
 
 	// The drain's own listing, exclusions and all: what `status` says a drain
 	// would work has to be derived the way the drain derives it, or the two
@@ -283,6 +300,9 @@ func readStatus(ctx context.Context, cfg config, now time.Time) (statusSnapshot,
 		snap.plans = plans
 	} else if ctx.Err() != nil {
 		return snap, ctx.Err()
+	}
+	if published, ok := readPublishedVersion(ctx, cfg); ok {
+		snap.published = published
 	}
 	return snap, nil
 }
@@ -422,6 +442,9 @@ func issueForBranch(branch, prefix string) (int, bool) {
 
 func renderStatus(w io.Writer, rpt report, cfg config, snap statusSnapshot) {
 	fmt.Fprintf(w, "%s\n", rpt.bold(fmt.Sprintf("%s%s", cfg.repo, statusScope(cfg))))
+	if line := updateAvailableLine(snap.selfVersion, cfg.pluginVersion, snap.published); line != "" {
+		fmt.Fprintf(w, "%s\n", line)
+	}
 	printPairs(w, rpt, "", queuePairs(snap))
 	printStatusPRs(w, rpt, snap)
 	printPlanDocs(w, rpt, snap.plans)
@@ -743,6 +766,11 @@ type statusDoc struct {
 	// probe could not answer — never an empty string standing in for "no
 	// usage", which would be indistinguishable from a genuine 0%.
 	Plan *string `json:"plan,omitempty"`
+	// Published is the release polako has actually published — the same read
+	// the text report's own notice makes, carried here whether or not that
+	// notice fires, since a caller may want to know the current release
+	// either way. Nil when the read failed, timed out, or could not run.
+	Published *string `json:"published,omitempty"`
 }
 
 type statusDocScope struct {
@@ -894,6 +922,10 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 	}
 	if line := statusPlanLine(snap); line != "" {
 		doc.Plan = &line
+	}
+	if snap.published != "" {
+		published := snap.published
+		doc.Published = &published
 	}
 	return doc
 }
