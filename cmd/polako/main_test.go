@@ -77,6 +77,9 @@ func TestMain(m *testing.M) {
 	if gitFixtureDir != "" {
 		os.RemoveAll(gitFixtureDir)
 	}
+	if fakeSSHDenyDir != "" {
+		os.RemoveAll(fakeSSHDenyDir)
+	}
 	os.Exit(code)
 }
 

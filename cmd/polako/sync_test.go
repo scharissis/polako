@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -144,7 +145,7 @@ func TestSyncDefaultBranchFastForwardsOntoOrigin(t *testing.T) {
 	if head := gitAt(t, checkout, "rev-parse", "HEAD"); head == want {
 		t.Fatal("checkout is already current, so this proves nothing")
 	}
-	if err := syncDefaultBranch(context.Background(), config{dir: checkout}); err != nil {
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout}, nil); err != nil {
 		t.Fatalf("a reachable origin must never stop a pickup: %v", err)
 	}
 
@@ -165,7 +166,7 @@ func TestSyncDefaultBranchLeavesAnotherBranchAlone(t *testing.T) {
 	gitAt(t, checkout, "checkout", "-b", "operators-own-work")
 	want := commit(t, checkout, "not-yours-to-move")
 
-	if err := syncDefaultBranch(context.Background(), config{dir: checkout}); err != nil {
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout}, nil); err != nil {
 		t.Fatalf("a reachable origin must never stop a pickup: %v", err)
 	}
 
@@ -188,7 +189,7 @@ func TestSyncDefaultBranchRefusesRatherThanRewriteALocalCommit(t *testing.T) {
 
 	want := commit(t, checkout, "mine-committed-straight-to-main")
 
-	if err := syncDefaultBranch(context.Background(), config{dir: checkout}); err != nil {
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout}, nil); err != nil {
 		t.Fatalf("a reachable origin must never stop a pickup: %v", err)
 	}
 
@@ -216,7 +217,7 @@ func TestSyncDefaultBranchReportsAnUnreachableOrigin(t *testing.T) {
 	_, checkout := upstream(t)
 	unreachableOrigin(t, checkout)
 
-	err := syncDefaultBranch(context.Background(), config{dir: checkout, ghRetryWait: 1})
+	err := syncDefaultBranch(context.Background(), config{dir: checkout, ghRetryWait: 1}, nil)
 	if err == nil {
 		t.Fatal("err = nil, want the failed fetch reported so the pickup can stop on it")
 	}
@@ -231,6 +232,109 @@ func TestSyncDefaultBranchReportsAnUnreachableOrigin(t *testing.T) {
 	}
 }
 
+var (
+	fakeSSHDenyOnce sync.Once
+	fakeSSHDenyDir  string
+	fakeSSHDenyBin  string
+	fakeSSHDenyErr  error
+)
+
+// fakeGitSSHDeny builds the binary denyGitAuth points GIT_SSH_COMMAND at: a
+// standalone program, not another fakeCLI mode, because GIT_SSH_COMMAND is
+// inherited by every child a drain test's git, gh and claude calls spawn —
+// gating this by an env var the way fakeGh/fakeClaude gate on argv would
+// make it fire for those too, since ssh's own argv gives nothing recognisable
+// to gate on. A dedicated binary that always answers the same way, regardless
+// of env or argv, sidesteps that: it is never asked to be anything else.
+func fakeGitSSHDeny(t *testing.T) string {
+	t.Helper()
+	fakeSSHDenyOnce.Do(buildFakeGitSSHDeny)
+	if fakeSSHDenyErr != nil {
+		t.Fatal(fakeSSHDenyErr)
+	}
+	return fakeSSHDenyBin
+}
+
+func buildFakeGitSSHDeny() {
+	dir, err := os.MkdirTemp("", "polako-fake-ssh-deny")
+	if err != nil {
+		fakeSSHDenyErr = fmt.Errorf("fake ssh deny: %v", err)
+		return
+	}
+	fakeSSHDenyDir = dir
+	src := filepath.Join(dir, "main.go")
+	const source = `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	fmt.Fprintln(os.Stderr, "git@github.com: Permission denied (publickey).")
+	os.Exit(1)
+}
+`
+	if err := os.WriteFile(src, []byte(source), 0o644); err != nil {
+		fakeSSHDenyErr = fmt.Errorf("fake ssh deny: %v", err)
+		return
+	}
+	bin := filepath.Join(dir, "fake-ssh-deny")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
+	if out, err := exec.Command("go", "build", "-o", bin, src).CombinedOutput(); err != nil {
+		fakeSSHDenyErr = fmt.Errorf("fake ssh deny: building it needs a working `go` on PATH: %v\n%s", err, out)
+		return
+	}
+	fakeSSHDenyBin = bin
+}
+
+// denyGitAuth points checkout's origin at an ssh URL and swaps in a fake ssh
+// command (GIT_SSH_COMMAND) that always refuses with a publickey rejection —
+// a real `git fetch` failing this specific way, hermetically: no network, no
+// real sshd, no real key. example.invalid is never looked up at all: the fake
+// answers before git gets far enough to resolve it.
+func denyGitAuth(t *testing.T, checkout string) {
+	t.Helper()
+	gitAt(t, checkout, "remote", "set-url", "origin", "ssh://git@example.invalid/repo.git")
+	t.Setenv("GIT_SSH_COMMAND", fakeGitSSHDeny(t))
+}
+
+// Issue #425: git's own credentials being refused is a narrower, likelier-
+// transient case than a dead remote, so it must not stop the caller the way
+// TestSyncDefaultBranchReportsAnUnreachableOrigin's does — the run this
+// precedes still goes on, with st remembering why for the park that might
+// follow (see parkCleanExit).
+func TestSyncDefaultBranchDoesNotStopOnAnAuthFailure(t *testing.T) {
+	buf := captureLog(t)
+	_, checkout := upstream(t)
+	denyGitAuth(t, checkout)
+
+	st := &issueState{}
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout, ghRetryWait: 1}, st); err != nil {
+		t.Fatalf("an auth failure must not stop the caller: %v", err)
+	}
+	if !st.fetchAuthFailed {
+		t.Error("st.fetchAuthFailed = false, want true — the park that follows needs it to lead with the real cause")
+	}
+	if !strings.Contains(buf.String(), "could not authenticate") {
+		t.Errorf("log does not say the fetch could not authenticate:\n%s", buf)
+	}
+}
+
+// A nil st is what the tidy sweep passes — it isn't about any one about-to-run
+// issue — and must not panic just because there is nothing to remember this
+// against.
+func TestSyncDefaultBranchDoesNotStopOnAnAuthFailureWithNilState(t *testing.T) {
+	_, checkout := upstream(t)
+	denyGitAuth(t, checkout)
+
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout, ghRetryWait: 1}, nil); err != nil {
+		t.Fatalf("an auth failure must not stop the caller: %v", err)
+	}
+}
+
 // No origin at all is not an unreachable one: there is no mirror to keep, which
 // is a warning today and stays one. It is also what every drain test relies on,
 // running as they do in a directory that is not a checkout.
@@ -239,7 +343,7 @@ func TestSyncDefaultBranchWithoutAnOriginIsNotFatal(t *testing.T) {
 	_, checkout := upstream(t)
 	gitAt(t, checkout, "remote", "remove", "origin")
 
-	if err := syncDefaultBranch(context.Background(), config{dir: checkout}); err != nil {
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout}, nil); err != nil {
 		t.Fatalf("err = %v, want a warning and nothing more", err)
 	}
 	if !strings.Contains(buf.String(), "no origin remote to fetch") {
