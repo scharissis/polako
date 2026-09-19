@@ -344,22 +344,23 @@ func goInstallDir(ctx context.Context, cfg config) (string, error) {
 }
 
 // goInstallWarning says so when `go install` would land beside the running
-// copy rather than over it — os.Executable() isn't under the directory
-// goInstallDir names. "" when there's nothing to warn about, including
-// every case goInstallDir or os.Executable() couldn't answer: a warning
-// built on an unknown is worse than none.
-func goInstallWarning(ctx context.Context, cfg config) string {
+// copy rather than over it — exe isn't under the directory goInstallDir
+// names. "" when there's nothing to warn about, including an empty exe or
+// every case goInstallDir couldn't answer: a warning built on an unknown is
+// worse than none. exe is resolveBinaryPlan's own resolved path, threaded
+// through rather than read again here — the second of two places in this
+// file that would otherwise each call os.Executable() + EvalSymlinks within
+// one `update` run.
+func goInstallWarning(ctx context.Context, cfg config, exe string) string {
+	if exe == "" {
+		return ""
+	}
 	installDir, err := goInstallDir(ctx, cfg)
 	if err != nil {
 		return ""
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	running, err1 := filepath.EvalSymlinks(filepath.Dir(exe))
-	want, err2 := filepath.EvalSymlinks(installDir)
-	if err1 != nil || err2 != nil || running == want {
+	want, err := filepath.EvalSymlinks(installDir)
+	if err != nil || filepath.Dir(exe) == want {
 		return ""
 	}
 	return fmt.Sprintf("this binary is running from %s, but `go install` would put the new one in %s — "+
@@ -558,7 +559,7 @@ func binarySummary(ctx context.Context, cfg config, b binaryPlan, published stri
 			return fmt.Sprintf("binary: go-installed, %s, already current", b.current), false, ""
 		}
 		return fmt.Sprintf("binary: go-installed, %s -> %s — `go install %s@v%s`",
-			b.current, published, updateModulePath, published), true, goInstallWarning(ctx, cfg)
+			b.current, published, updateModulePath, published), true, goInstallWarning(ctx, cfg, b.exe)
 	case tierStamped:
 		if b.current == published {
 			return fmt.Sprintf("binary: release build, %s, already current", b.current), false, ""

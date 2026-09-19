@@ -455,6 +455,51 @@ func TestGoInstallDirFallsBackToGOPATHBin(t *testing.T) {
 	}
 }
 
+func TestGoInstallWarningSilentWhenRunningFromTheInstallDir(t *testing.T) {
+	// resolveBinaryPlan hands goInstallWarning an already-EvalSymlinks'd exe
+	// (t.TempDir() itself can be a symlink, e.g. macOS's /var -> /private/var),
+	// so the fixture resolves it too rather than assuming it's already clean.
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config{dir: t.TempDir(), goBin: fakeCLI(t)}
+	t.Setenv(fakeGoEnv, "1")
+	t.Setenv(fakeGoGOBINEnv, dir)
+
+	exe := filepath.Join(dir, exeBaseName())
+	if got := goInstallWarning(context.Background(), cfg, exe); got != "" {
+		t.Errorf("goInstallWarning = %q, want silence when exe is already under GOBIN", got)
+	}
+}
+
+func TestGoInstallWarningNamesBothDirsWhenTheyDiffer(t *testing.T) {
+	running, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	installDir := t.TempDir()
+	cfg := config{dir: t.TempDir(), goBin: fakeCLI(t)}
+	t.Setenv(fakeGoEnv, "1")
+	t.Setenv(fakeGoGOBINEnv, installDir)
+
+	exe := filepath.Join(running, exeBaseName())
+	got := goInstallWarning(context.Background(), cfg, exe)
+	if !strings.Contains(got, running) || !strings.Contains(got, installDir) {
+		t.Errorf("goInstallWarning = %q, want it to name both %s and %s", got, running, installDir)
+	}
+}
+
+func TestGoInstallWarningSilentWithNoExe(t *testing.T) {
+	cfg := config{dir: t.TempDir(), goBin: fakeCLI(t)}
+	t.Setenv(fakeGoEnv, "1")
+	t.Setenv(fakeGoGOBINEnv, t.TempDir())
+
+	if got := goInstallWarning(context.Background(), cfg, ""); got != "" {
+		t.Errorf("goInstallWarning = %q, want silence with no known exe path", got)
+	}
+}
+
 // --- applyStampedBinary / swapBinary (ticket 4) ---
 
 // exeBaseName is the running-binary name applyStampedBinary and swapBinary
