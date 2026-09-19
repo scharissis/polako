@@ -16,7 +16,7 @@ anything itself. The Github issues and pull requests are reviewed by humans.
 
 *Polako* is Croatian for "take it easy" or "slow and steady", which is the philosophy we follow here. We have engineered for correctness over speed. Polako takes its time so reviewers don't waste theirs.
 
-![polako status printing the state of a backlog, then polako work -dry-run resolving the next issue and printing the exact claude invocation it would run](docs/demo.gif)
+![A bare polako printing its seven verbs, polako status printing the state of a backlog, then polako plan -dry-run and polako work -dry-run each printing the exact claude invocation they would run](docs/demo.gif)
 
 ## How it works
 
@@ -28,7 +28,7 @@ from research to a plan to a pull request, on its own or driven by the
 PR, repairs it when CI goes red, advances when you merge. Stdlib-only Go, no
 dependencies.
 
-Three verbs:
+Seven verbs. Three start Claude runs:
 
 - **`work`** — works the backlog to zero, one issue at a time, never merging.
 - **`plan`** — turns a vision document into a curated backlog of proposals.
@@ -37,6 +37,18 @@ Three verbs:
 
 `plan` and `health` file everything behind a `proposed` label a human has to
 lift — see [Planning a backlog](#planning-a-backlog).
+
+Four look after the shift, and run no model:
+
+- **`status`** — where the backlog stands and what is waiting on you, read
+  from GitHub.
+- **`stats`** — what your runs cost and how they went, read from local run
+  data.
+- **`tidy`** — reclaims the worktrees and branches of finished issues. It only
+  previews until you pass `-apply`.
+- **`update`** — brings the plugin and the binary to the published release.
+
+A bare `polako` prints this table; `polako <verb> -h` prints that verb's flags.
 
 
 ```
@@ -159,6 +171,23 @@ needs you: reply on #9; review and merge PR #61; decide what to do about #5 (dro
 A shift ends the same way — merged, parked and why, dollars spent — see
 [docs/behaviour.md](docs/behaviour.md) for a worked example.
 
+See what the runs cost, from the records every run leaves on your machine:
+
+```bash
+polako stats
+```
+
+A shift cleans up after itself. After a killed shift or a run by hand, preview
+which finished worktrees and branches are safe to reclaim, then do it:
+
+```bash
+polako tidy
+polako tidy -apply
+```
+
+`tidy` names whatever it refuses to touch and why — see
+[docs/reference.md](docs/reference.md#reclaiming-finished-issues-polako-tidy).
+
 ## Planning a backlog
 
 Somebody still has to write the issues polako works. `plan` runs
@@ -276,9 +305,12 @@ retro checklist, the tagging rule, and the recipes for reading run data back.
 
 ## Flags
 
-`polako work` takes around two dozen flags, and `status` and `stats` have their own
-smaller sets. They are all in [docs/reference.md](docs/reference.md), together
-with `-dry-run`, `-notify`, `-remote` and the `POLAKO_*` environment defaults.
+`polako work` takes around two dozen flags, and the other six verbs have their
+own smaller sets. [docs/reference.md](docs/reference.md) has `work`, `plan`,
+`health`, `status` and `tidy`, together with `-dry-run`, `-notify`, `-remote`
+and the `POLAKO_*` environment defaults; `stats` is in
+[docs/run-data.md](docs/run-data.md) and `update` in
+[docs/install.md](docs/install.md#update), each beside what it describes.
 Any flag can take its default from the environment, so a preference you always
 want can live in your shell profile.
 
@@ -313,7 +345,7 @@ happens when it breaks something at 3am.
 | Page | What is in it |
 | --- | --- |
 | [docs/behaviour.md](docs/behaviour.md) | What polako does when a run crashes, an issue stalls, a PR goes red, or it needs a human. FAQ at the bottom. |
-| [docs/install.md](docs/install.md) | Every install path, updates, pinning, and using it on another project. |
+| [docs/install.md](docs/install.md) | Every install path, `polako update` and its flags, pinning, and using it on another project. |
 | [docs/reference.md](docs/reference.md) | Every flag for `work`, `plan`, `health`, `status` and `tidy`, plus `-dry-run`, `-notify`, `-remote` and environment defaults. |
 | [docs/run-data.md](docs/run-data.md) | What each run records (`work`, `plan` and `health` alike), spending caps, and the `polako stats` report. |
 | [docs/security.md](docs/security.md) | The threat model, the tool allowlist, the `-label` gate, and what leaves your machine. |

@@ -2,7 +2,8 @@
 
 Both halves install separately: the skill as a Claude Code plugin, the binary
 with `go install` or a prebuilt release. The binary is one install for all
-three verbs — `work`, `plan`, `health` — nothing here repeats per verb. The
+seven verbs — `work`, `plan`, `health`, `status`, `stats`, `tidy`, `update` —
+nothing here repeats per verb. The
 [README](../README.md#install) has the short version of the first two.
 
 ## Install
@@ -73,9 +74,18 @@ lands one merge after the release tag itself exists
 between those two merges, `@latest` and the plugin can resolve to different
 releases — the gap `polako update` reads around instead of falling into.
 
-`polako update -check` prints the same plan without changing anything;
-`-gh`/`-claude` point it at a `gh`/`claude` binary that isn't on PATH under
-those names. Then `/reload-plugins`, or restart.
+`polako update -check` prints the same plan without changing anything. Then
+`/reload-plugins`, or restart.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `-check` | `false` | Print the plan and change nothing. |
+| `-skill` | `polako:implement-issue` | Skill `polako work` would run, so `update` knows whether that's the plugin or a hand-copied skill. A hand-copied one isn't `update`'s to manage. |
+| `-claude` | `claude` | `claude` binary to invoke, when it isn't on PATH under that name. |
+| `-gh` | `gh` | `gh` binary to invoke, same reason. |
+
+Each takes its default from the
+[environment](reference.md#setting-defaults-from-the-environment) too.
 
 Running a prebuilt release binary rather than a `go install`? `update`
 replaces that too: it downloads the release asset for your GOOS/GOARCH and

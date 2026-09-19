@@ -1,13 +1,13 @@
 # Reference
 
-Every flag `polako` takes, and the two read-only reports. Flags also take
+Every flag `polako` takes, verb by verb. Flags also take
 defaults from the [environment](#setting-defaults-from-the-environment).
 
 ## Flags
 
-These are `polako work`'s own; the two report subcommands take smaller sets —
-see [`status`](#where-the-backlog-stands-polako-status) and
-[`stats`](run-data.md#reading-it-back-polako-stats).
+These are `polako work`'s own; the other six verbs take smaller sets —
+[`plan`](#planning-a-backlog-unattended-polako-plan), [`health`](#auditing-repository-health-unattended-polako-health), [`status`](#where-the-backlog-stands-polako-status) and [`tidy`](#reclaiming-finished-issues-polako-tidy) below,
+[`stats`](run-data.md#reading-it-back-polako-stats) and [`update`](install.md#update) beside what they describe.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
