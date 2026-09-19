@@ -210,6 +210,36 @@ func TestPluginSummary(t *testing.T) {
 
 // --- the binary half ---
 
+// A go-installed binary's module version, and a release's -ldflags stamp,
+// both carry the "v" prefix (a Go module version always does; release.yml
+// stamps the `vX.Y.Z` tag verbatim) — but publishedVersion's own answer is
+// already stripped (releaseVersion, inside parseMarketplaceVersion). Without
+// this normalization binarySummary's `current == published` never matches
+// even when they name the same release: exactly the bug the high-level
+// review of this branch (PLAN.md) caught, since every other test here
+// hand-builds binaryPlan.current without the prefix.
+func TestNormalizeBuildVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tier buildTier
+		v    string
+		want string
+	}{
+		{name: "module version keeps the v stripped", tier: tierModule, v: "v0.23.0", want: "0.23.0"},
+		{name: "stamped release keeps the v stripped", tier: tierStamped, v: "v0.23.0", want: "0.23.0"},
+		{name: "vcs revision is untouched", tier: tierVCS, v: "a1b2c3d4e5f6", want: "a1b2c3d4e5f6"},
+		{name: "unknown tier is untouched", tier: tierUnknown, v: "", want: ""},
+		{name: "a pseudo-version doesn't parse as a release, so it passes through",
+			tier: tierModule, v: "v0.23.1-0.20240101120000-abcdef123456", want: "v0.23.1-0.20240101120000-abcdef123456"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizeBuildVersion(tc.tier, tc.v); got != tc.want {
+				t.Errorf("normalizeBuildVersion(%v, %q) = %q, want %q", tc.tier, tc.v, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestBinarySummary(t *testing.T) {
 	cfg := config{dir: t.TempDir(), goBin: fakeCLI(t)}
 	t.Setenv(fakeGoEnv, "1")

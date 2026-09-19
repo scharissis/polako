@@ -256,7 +256,30 @@ type binaryPlan struct {
 
 func resolveBinaryPlan() binaryPlan {
 	tier, v := polakoBuildTier()
-	return binaryPlan{tier: tier, current: v}
+	return binaryPlan{tier: tier, current: normalizeBuildVersion(tier, v)}
+}
+
+// normalizeBuildVersion strips a release tag's "v" prefix for the two tiers
+// whose version is release-shaped — a go-installed module version and a
+// release's -ldflags stamp are both "vX.Y.Z" (a Go module version always
+// carries the v, and release.yml stamps the `vX.Y.Z` tag verbatim), while
+// publishedVersion's own answer is already stripped (releaseVersion, inside
+// parseMarketplaceVersion). Comparing the two unnormalized never matches
+// even when they name the same release. releaseVersion is the same
+// normalization skewComparison already applies to both sides of its own
+// comparison; a version that isn't release-shaped (a pseudo-version, an
+// unparseable stamp) is left exactly as it was, which then correctly
+// compares as "behind" rather than silently matching nothing. A VCS
+// revision or an unknown build is never release-shaped, so it passes
+// through untouched.
+func normalizeBuildVersion(tier buildTier, v string) string {
+	if tier != tierModule && tier != tierStamped {
+		return v
+	}
+	if norm, _, ok := releaseVersion(v); ok {
+		return norm
+	}
+	return v
 }
 
 // updateModulePath is the binary's own module, the same one docs/install.md
