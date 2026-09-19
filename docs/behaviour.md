@@ -135,6 +135,16 @@ business but yours.
 Parking preserves the no-conflict guarantee: only one issue is ever in
 flight, and a parked issue isn't in flight.
 
+**To re-run a parked issue on a stronger tier, relabel it.** Add
+`model:opus` (or any `model:` value) or an `effort:` level, then remove
+`needs-human`. Both are ordinary ticket labels — see [Which model and effort
+a run gets](#which-model-and-effort-a-run-gets) — read fresh at pickup, so
+the next drain picks the new one up on its own; nothing in the binary
+triggers this for you. There's no escalate-on-park trigger in polako itself,
+on purpose: a clean park with no work done isn't evidence the model was too
+weak, a crash is infrastructure, and a run stopped by a spend cap has
+nothing left to retry with anyway.
+
 ## The `proposed` and container gates
 
 **A `proposed` issue is one nobody has approved yet, and it's never
