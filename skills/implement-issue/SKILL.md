@@ -188,11 +188,16 @@ prefixes, no stdin, all of which fall outside `Bash(git:*)`'s prefix match:
    is ever checked out into it. If this fails because a run died between
    this step and step 8's cleanup on an earlier attempt, `worktree remove
    --force` the leftover `evidence-tmp` first, then retry this step once.
-4. If P: `read-tree P`.
-5. Per PNG: `hash-object -w <abs.png>`, then `update-index --add
-   --cacheinfo 100644,<blob>,<path>`.
-6. `write-tree`, then `commit-tree <tree> [-p P] -m "<subject>"`. With no
-   parent, that commit is the orphan root.
+4. If P: `-C <main-checkout>/.worktrees/evidence-tmp read-tree P`.
+5. Per PNG: `-C <main-checkout>/.worktrees/evidence-tmp hash-object -w
+   <abs.png>`, then `-C <main-checkout>/.worktrees/evidence-tmp
+   update-index --add --cacheinfo 100644,<blob>,<path>`.
+6. `-C <main-checkout>/.worktrees/evidence-tmp write-tree`, then
+   `-C <main-checkout>/.worktrees/evidence-tmp commit-tree <tree> [-p P]
+   -m "<subject>"`. With no parent, that commit is the orphan root. Steps
+   4 to 6 all run `-C` the private worktree step 3 made — never
+   `<worktree>`, issue-$issue's own checkout, or a stray PNG ends up staged
+   in the branch actually under review.
 7. `push origin <commit>:refs/heads/polako-evidence`. Never `--force` — a
    non-fast-forward push means a concurrent pusher. Refetch once: the
    commit from step 6 is parented on the old P, so pushing it again fails
