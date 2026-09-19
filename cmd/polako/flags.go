@@ -76,10 +76,16 @@ type config struct {
 	// nothing reads an issue body and no run's effort changes. See policy.go.
 	effortBySize string
 	sizeEffort   map[string]string
-	poll         time.Duration
-	retries      int
-	retryWait    time.Duration
-	stall        time.Duration
+	// modelBySize / sizeModel mirror effortBySize / sizeEffort for -model:
+	// comma-separated SIZE=MODEL pairs, parsed into size→model. No
+	// CLI-capability gate needed — unlike -effort, -model has always been a
+	// plain claude flag. See policy.go.
+	modelBySize string
+	sizeModel   map[string]string
+	poll        time.Duration
+	retries     int
+	retryWait   time.Duration
+	stall       time.Duration
 	// heartbeat is how long the terminal may stay quiet before a run says one
 	// "still working" line, repeated every heartbeat of continued silence (0
 	// disables). It watches the terminal, not the event stream: -stall samples
@@ -402,7 +408,7 @@ func parseFlags() config {
 	return cfg
 }
 
-// registerPolicyFlags registers the five flags that steer which model and how
+// registerPolicyFlags registers the six flags that steer which model and how
 // much effort a run gets — split out of parseFlags to keep it under
 // sizebudget_test.go's funcBudget. Called before applyEnvDefaults, which
 // needs every flag already registered to set its default from the
@@ -417,13 +423,16 @@ func registerPolicyFlags(cfg *config) {
 		"claude --effort for remediation runs against an open PR — one of "+strings.Join(effortLevels, ", ")+" (empty = the -effort cell, then the CLI default)")
 	flag.StringVar(&cfg.effortBySize, "effort-by-size", "",
 		"claude --effort by the issue's Estimate: line, e.g. S=medium,L=max — SIZE one of S,M,L, level one of "+strings.Join(effortLevels, ", ")+"; below an effort: label, above -effort; implementation runs only (empty = off, no body read)")
+	flag.StringVar(&cfg.modelBySize, "model-by-size", "",
+		"claude --model by the issue's Estimate: line, e.g. S=sonnet,L=opus — SIZE one of S,M,L; below a model: label, above -model; implementation runs only (empty = off, no body read)")
 }
 
-// validatePolicyFlags checks the five flags registerPolicyFlags registers,
+// validatePolicyFlags checks the six flags registerPolicyFlags registers,
 // once Parse has filled cfg from the command line and the environment, and
-// fills cfg.sizeEffort. Split out of parseFlags alongside registerPolicyFlags;
-// the caller turns a non-nil error into the same log.Fatalf parseFlags always
-// used, before the process commits to anything else.
+// fills cfg.sizeEffort / cfg.sizeModel. Split out of parseFlags alongside
+// registerPolicyFlags; the caller turns a non-nil error into the same
+// log.Fatalf parseFlags always used, before the process commits to anything
+// else.
 func validatePolicyFlags(cfg *config) error {
 	if err := validateEffort("-effort", cfg.effort); err != nil {
 		return err
@@ -432,7 +441,10 @@ func validatePolicyFlags(cfg *config) error {
 		return err
 	}
 	var err error
-	cfg.sizeEffort, err = parseEffortBySize(cfg.effortBySize)
+	if cfg.sizeEffort, err = parseEffortBySize(cfg.effortBySize); err != nil {
+		return err
+	}
+	cfg.sizeModel, err = parseModelBySize(cfg.modelBySize)
 	return err
 }
 
@@ -536,6 +548,18 @@ func parseEffortBySize(spec string) (map[string]string, error) {
 			return nil
 		}
 		return fmt.Errorf("%q is not a claude effort level — one of %s", v, strings.Join(effortLevels, ", "))
+	})
+}
+
+// parseModelBySize reads -model-by-size, shape-checking each value the same
+// way a model: label is checked (modelLabelValue, policy.go) — whether the
+// name resolves is the CLI's business. See parseBySize for the shared shape.
+func parseModelBySize(spec string) (map[string]string, error) {
+	return parseBySize("model-by-size", spec, func(v string) error {
+		if modelLabelValue.MatchString(v) {
+			return nil
+		}
+		return fmt.Errorf("%q is not a valid model name", v)
 	})
 }
 

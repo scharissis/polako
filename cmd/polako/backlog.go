@@ -295,9 +295,9 @@ type ghIssue struct {
 	Number int       `json:"number"`
 	Labels []ghLabel `json:"labels"`
 	// Body is populated only on the pickup read, and only when -effort-by-size
-	// arms it (issuePickupPolicy) — the listing never asks for it. The one
-	// reader is sizeFromBody's anchored Estimate: match; the rest of the body
-	// is data the drain does not act on.
+	// or -model-by-size arms it (issuePickupPolicy) — the listing never asks
+	// for it. The one reader is sizeFromBody's anchored Estimate: match; the
+	// rest of the body is data the drain does not act on.
 	Body      string `json:"body"`
 	SubIssues struct {
 		Total     int `json:"total"`
@@ -380,9 +380,10 @@ func issueHasLabel(ctx context.Context, cfg config, issue int, name string) (boo
 // issuePickupPolicy reads what one issue says about how hard its run should
 // try: the model: and effort: labels, resolved once at pickup. The issue's
 // own labels come first; any family it leaves unset is filled from its parent
-// epic's own labels (#364), marked epic-sourced. When -effort-by-size arms it,
-// the Estimate: line in the body is also read (#366) — off by default, no
-// extra gh call otherwise. A read or parse that fails outright is not fatal:
+// epic's own labels (#364), marked epic-sourced. When -effort-by-size or
+// -model-by-size arms it, the Estimate: line in the body is also read (#366,
+// #395) — off by default, no extra gh call otherwise. A read or parse that
+// fails outright is not fatal:
 // model, effort and size are a preference, not orchestration state, and a run
 // on the flags beats no run — it warns and falls through to them.
 //
@@ -400,7 +401,7 @@ func issueHasLabel(ctx context.Context, cfg config, issue int, name string) (boo
 // itself and it has a parent.
 func issuePickupPolicy(ctx context.Context, cfg config, issue int) (labelChoice, string) {
 	fields := "labels"
-	if cfg.effortBySize != "" {
+	if cfg.effortBySize != "" || cfg.modelBySize != "" {
 		fields += ",body"
 	}
 	fields += ",parent"

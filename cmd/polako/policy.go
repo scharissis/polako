@@ -10,8 +10,9 @@ package main
 // somewhere cheaper. Everything else resolves against -model/-effort, then
 // inherit. #364 added the epic's labels — a family an issue leaves unset is
 // filled from its parent's own model:/effort: labels. Below the label and
-// above the flag sits -effort-by-size (#366): an implementation run's effort
-// keyed off the issue body's Estimate: line, off by default.
+// above the flag sits -effort-by-size (#366) and -model-by-size (#395): an
+// implementation run's effort or model keyed off the issue body's Estimate:
+// line, off by default.
 
 import (
 	"fmt"
@@ -59,12 +60,15 @@ type runPolicy struct {
 	remediationModel  string
 	remediationEffort string
 	labels            labelChoice
-	// size is the issue body's Estimate: letter (S/M/L, or "" when the flag is
-	// off or the body carries no line); sizeEffort is -effort-by-size parsed
-	// into size→level. An implementation-class run whose size has a cell takes
-	// that cell's effort — below an effort: label, above the -effort flag.
+	// size is the issue body's Estimate: letter (S/M/L, or "" when both by-size
+	// flags are off or the body carries no line); sizeEffort and sizeModel are
+	// -effort-by-size and -model-by-size parsed into size→level and
+	// size→model. An implementation-class run whose size has a cell in either
+	// map takes that cell — below the matching model:/effort: label, above the
+	// -model/-effort flag.
 	size       string
 	sizeEffort map[string]string
+	sizeModel  map[string]string
 }
 
 // labelChoice is what an issue's model: and effort: labels resolved to. A
@@ -167,6 +171,7 @@ func newRunPolicy(cfg config) runPolicy {
 		remediationModel:  cfg.remediationModel,
 		remediationEffort: cfg.remediationEffort,
 		sizeEffort:        cfg.sizeEffort,
+		sizeModel:         cfg.sizeModel,
 	}
 }
 
@@ -193,8 +198,11 @@ func sizeFromBody(body string) string {
 // is named source label when the issue carries it, source epic when it came
 // from the issue's parent (#364). model:default lands here as set-but-empty:
 // it stops resolution at inherit rather than falling through to -model. Then,
-// for a remediation run, -remediation-* if set; then -model/-effort; then
-// -effort-by-size (#366, effort only); then inherit.
+// for a remediation run: -remediation-* if set, else -model/-effort, then
+// inherit. For an implementation run: -model-by-size / -effort-by-size beats
+// -model/-effort when the issue's size hits a cell — above the flag, not
+// below, since the cell exists to override it — else -model/-effort, then
+// inherit either way.
 func (p runPolicy) choose(reason string) runChoice {
 	remediation := remediationReasons[reason]
 	pick := func(labelVal string, labelSet, fromEpic bool, remediationCell, baseCell string) (string, string) {
@@ -225,6 +233,12 @@ func (p runPolicy) choose(reason string) runChoice {
 	if !remediation && !p.labels.effortSet {
 		if cell, ok := p.sizeEffort[p.size]; ok {
 			e, es = cell, sourceSize
+		}
+	}
+	// Model by size: the same rung, mirrored (#395).
+	if !remediation && !p.labels.modelSet {
+		if cell, ok := p.sizeModel[p.size]; ok {
+			m, ms = cell, sourceSize
 		}
 	}
 	return runChoice{model: m, effort: e, modelSource: ms, effortSource: es}
