@@ -509,13 +509,16 @@ func envVarName(flagName string) string {
 }
 
 // parseBySize reads one of the policy-by-size flags: comma-separated
-// SIZE=VALUE pairs, SIZE one of S/M/L. validate checks VALUE against the
-// flag's own closed set — effortLevels for -effort-by-size, a model's for the
-// map that reuses this. Empty yields a nil map — the off state the policy and
-// the body read both key on. Unlike parseSkip a bad entry is fatal, not
-// ignored: an unattended run must not discover the typo when the first S
-// issue rejects a bad value an hour in.
-func parseBySize(flagName, spec string, validate func(string) error) (map[string]string, error) {
+// SIZE=VALUE pairs, SIZE one of S/M/L. example is a valid spec in that flag's
+// own flavor, shown in the malformed-entry error — S=medium,L=max for
+// -effort-by-size, S=sonnet,L=opus for -model-by-size, never the other
+// flag's wording. validate checks VALUE against the flag's own closed set —
+// effortLevels for -effort-by-size, modelLabelValue for -model-by-size.
+// Empty yields a nil map — the off state the policy and the body read both
+// key on. Unlike parseSkip a bad entry is fatal, not ignored: an unattended
+// run must not discover the typo when the first S issue rejects a bad value
+// an hour in.
+func parseBySize(flagName, spec, example string, validate func(string) error) (map[string]string, error) {
 	if strings.TrimSpace(spec) == "" {
 		return nil, nil
 	}
@@ -524,7 +527,7 @@ func parseBySize(flagName, spec string, validate func(string) error) (map[string
 		k, v, ok := strings.Cut(pair, "=")
 		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
 		if !ok || k == "" || v == "" {
-			return nil, fmt.Errorf("-%s %q: each entry is SIZE=LEVEL, e.g. S=medium,L=max", flagName, spec)
+			return nil, fmt.Errorf("-%s %q: each entry is SIZE=VALUE, e.g. %s", flagName, spec, example)
 		}
 		if k != "S" && k != "M" && k != "L" {
 			return nil, fmt.Errorf("-%s %q: %q is not a size — use S, M or L", flagName, spec, k)
@@ -543,7 +546,7 @@ func parseBySize(flagName, spec string, validate func(string) error) (map[string
 // parseEffortBySize reads -effort-by-size, validating each value against
 // effortLevels. See parseBySize for the shared shape.
 func parseEffortBySize(spec string) (map[string]string, error) {
-	return parseBySize("effort-by-size", spec, func(v string) error {
+	return parseBySize("effort-by-size", spec, "S=medium,L=max", func(v string) error {
 		if slices.Contains(effortLevels, v) {
 			return nil
 		}
@@ -555,7 +558,7 @@ func parseEffortBySize(spec string) (map[string]string, error) {
 // way a model: label is checked (modelLabelValue, policy.go) — whether the
 // name resolves is the CLI's business. See parseBySize for the shared shape.
 func parseModelBySize(spec string) (map[string]string, error) {
-	return parseBySize("model-by-size", spec, func(v string) error {
+	return parseBySize("model-by-size", spec, "S=sonnet,L=opus", func(v string) error {
 		if modelLabelValue.MatchString(v) {
 			return nil
 		}
