@@ -185,7 +185,9 @@ prefixes, no stdin, all of which fall outside `Bash(git:*)`'s prefix match:
    parent P.
 3. `worktree add --no-checkout --detach
    <main-checkout>/.worktrees/evidence-tmp [P]` — a private index; nothing
-   is ever checked out into it.
+   is ever checked out into it. If this fails because a run died between
+   this step and step 8's cleanup on an earlier attempt, `worktree remove
+   --force` the leftover `evidence-tmp` first, then retry this step once.
 4. If P: `read-tree P`.
 5. Per PNG: `hash-object -w <abs.png>`, then `update-index --add
    --cacheinfo 100644,<blob>,<path>`.
