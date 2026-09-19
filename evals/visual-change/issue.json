@@ -1,0 +1,7 @@
+{
+  "number": 1,
+  "title": "The hero button uses last year's blue",
+  "state": "OPEN",
+  "body": "## Problem\n\n`index.html`'s hero button is styled in `style.css` with `.hero-button { background: #2196f3; }` — last year's blue. Brand guidelines moved to `#0B5FFD` in Q2 and this page never got the memo.\n\n## What to do\n\nChange `.hero-button`'s `background` in `style.css` to `#0B5FFD`. Nothing else on the page changes.\n\n## Done when\n\n- `style.css`'s `.hero-button` rule reads `background: #0B5FFD;`.\n- `npm run dev` (`python3 -m http.server 4173`, per `package.json`) still serves `index.html` with no errors.\n",
+  "comments": []
+}
