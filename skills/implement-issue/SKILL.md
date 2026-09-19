@@ -288,12 +288,22 @@ elsewhere); do any text extraction yourself — no awk/sed/head pipelines.
 Detect the current phase from what you found and resume from there.
 
 ## Phase 1 — Workspace
-Fetch first, then find out whether branch issue-$issue already exists before
-you create anything: `git branch --list issue-$issue` for a local one left by a
-run that was killed, and `git branch -r --list '*/issue-$issue'` for a remote
-one pushed by a run that died before `gh pr create`. If either finds it, build
-on the commits already there — never recreate the branch from the default
-branch, which would discard them. Then, by case:
+Fetch first: `git fetch origin`. If it fails, say so in your final message
+and stop — don't create the worktree or the branch, and don't implement.
+Every ref this phase and Phase 3 step 2a resolve against `origin/…` is a
+local read; an unfetched one is exactly as stale as the local branch, so a
+merge against it is a no-op that looks like it worked, and issue-$issue
+would branch, get reviewed and get pushed against a base nobody actually
+checked against upstream. A dead remote also means the eventual
+`gh pr create` push fails, so nothing salvages a run that presses on past
+this.
+
+Once the fetch succeeds, find out whether branch issue-$issue already exists
+before you create anything: `git branch --list issue-$issue` for a local one
+left by a run that was killed, and `git branch -r --list '*/issue-$issue'`
+for a remote one pushed by a run that died before `gh pr create`. If either
+finds it, build on the commits already there — never recreate the branch
+from the default branch, which would discard them. Then, by case:
 
 - If this session is already inside a Claude-managed worktree (cwd contains
   `.claude/worktrees/`): stay here — this is the one case with nowhere else
@@ -459,13 +469,19 @@ don't post again, and stop.
    first and unconditionally, before the decision in b, so there is no branch
    of this step that can reach c, d or e without it having run.
    a. Bring the local default branch up to date: `git -C <main-checkout>
-      merge --ff-only` against the `origin/…` ref Phase 1 resolved, where
-      `<main-checkout>` is the first line of `git worktree list` — a
-      different absolute path from issue-$issue's own, and not necessarily
-      the session's cwd (Phase 1's "already inside a Claude-managed
-      worktree" case leaves cwd there instead). Skip the merge if that
-      checkout is not on the default branch, or if it refuses; never force
-      it. Having branched issue-$issue off `origin/…` in Phase 1 is not a
+      fetch origin`, then `git -C <main-checkout> merge --ff-only` against
+      the `origin/…` ref Phase 1 resolved, where `<main-checkout>` is the
+      first line of `git worktree list` — a different absolute path from
+      issue-$issue's own, and not necessarily the session's cwd (Phase 1's
+      "already inside a Claude-managed worktree" case leaves cwd there
+      instead). A failed fetch is not the same as a refused merge: if the
+      fetch fails, stop the run and report why, the same as a failed fetch
+      in Phase 1 — this diff, this review and the eventual push all depend
+      on knowing origin is reachable, and pressing on would review and push
+      against a base of unknown age. If the fetch succeeds but the merge
+      refuses — that checkout isn't on the default branch, or the merge
+      isn't a fast-forward — skip the merge and carry on; never force it.
+      Having branched issue-$issue off `origin/…` in Phase 1 is not a
       reason to skip this — that refreshed only this branch's starting
       point, not the main checkout's local ref, and those are two different
       refs. The review resolves this branch's base from that local ref, and
