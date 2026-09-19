@@ -5,18 +5,13 @@ with `go install` or a prebuilt release. The binary is one install for all
 three verbs — `work`, `plan`, `health` — nothing here repeats per verb. The
 [README](../README.md#install) has the short version of the first two.
 
-## The skill, as a plugin (recommended)
+## Install
 
 The repo doubles as its own marketplace, so there's no clone step. Register
-the marketplace once:
+the marketplace once, then install the plugin from it:
 
 ```bash
 claude plugin marketplace add scharissis/polako
-```
-
-Then install the plugin from it:
-
-```bash
 claude plugin install polako@scharissis
 ```
 
@@ -33,56 +28,14 @@ available.
 
 Note the namespace. Claude prefixes plugin skills with the plugin name, so the
 command is *not* `/implement-issue` on this path. The supervisor's `-skill`
-default matches the plugin form; see [the hand install](#the-skill-by-hand) for
-the other one. To see what a session actually has, the `init` event lists them:
+default matches the plugin form; see [By hand](#by-hand) for the other one. To
+see what a session actually has, the `init` event lists them:
 
 ```bash
 claude -p "hi" --output-format stream-json --verbose | head -1
 ```
 
-Both commands take a `--scope`:
-
-| Scope | Where it is declared | Use it for |
-| --- | --- | --- |
-| `user` *(default)* | `~/.claude/settings.json` | Your own machine, every project. |
-| `project` | the repo's `.claude/settings.json` | Committing the marketplace + plugin so collaborators on *that* repo get the skill automatically. |
-| `local` | the repo's git-ignored local settings | Trying it on one project without committing anything. |
-
-So to make every contributor to some project pick the skill up, run both
-commands with `--scope project` inside that project and commit the resulting
-`.claude/settings.json`. They still each need read access to this repo.
-
-To update, see [Getting updates](#getting-updates). To remove:
-
-```bash
-claude plugin uninstall polako && claude plugin marketplace remove scharissis
-```
-
-## The skill, by hand
-
-If you'd rather not involve the plugin system, copy the skill directories in.
-They behave identically; they just won't update themselves. Take all three,
-or only `implement-issue` if you don't want the planning half.
-
-```bash
-cp -r skills/implement-issue skills/plan-backlog skills/review-health ~/.claude/skills/
-```
-
-```powershell
-Copy-Item -Recurse skills\implement-issue,skills\plan-backlog,skills\review-health $HOME\.claude\skills\
-```
-
-A skill installed this way is invoked bare, with no plugin prefix — so
-`/plan-backlog`, not `/polako:plan-backlog` — and the supervisor needs telling:
-
-```bash
-polako work -skill implement-issue
-```
-
-Do one or the other, not both — two copies of the same skill drift apart
-silently.
-
-## The binary
+Then the binary:
 
 ```bash
 go install github.com/scharissis/polako/cmd/polako@latest
@@ -98,18 +51,27 @@ Prebuilt binaries for Linux, macOS and Windows are attached to each tagged
 release, and are the easiest option on a machine without Go. They're stamped
 with their tag, so `polako -version` tells you what you're running.
 
-## Getting updates
+## Update
 
 **Nothing updates on its own by default.** Auto-update is off for third-party
 marketplaces, so an installed plugin stays exactly where it is until you ask.
 `polako update` brings both halves to the release this project has actually
 published — never `@latest`, which can land the binary ahead of what the
-plugin side resolves to, in the window between the release tag landing and
-the publish PR merging (docs/releasing.md):
+plugin side resolves to:
 
 ```bash
 polako update
 ```
+
+Run it between shifts, not during one — `work` never updates itself, so
+there's no point mid-shift where swapping the binary or the plugin under it
+would be safe.
+
+"Published" means the tag the publish PR's `marketplace.json` names, which
+lands one merge after the release tag itself exists
+([Publishing and versioning](releasing.md#cutting-a-release)). In the window
+between those two merges, `@latest` and the plugin can resolve to different
+releases — the gap `polako update` reads around instead of falling into.
 
 `polako update -check` prints the same plan without changing anything;
 `-gh`/`-claude` point it at a `gh`/`claude` binary that isn't on PATH under
@@ -146,6 +108,8 @@ ran a plugin three releases stale and paid for the pre-#225 review gate on
 every issue, with neither #216's resume point nor #217's polling floor — so
 `polako work` refuses to start on it. `-ignore-skew` overrules that, out loud,
 the same way `-ungated` overrules the public-repo label gate.
+
+## Auto-update, pinning and uninstall
 
 To let it happen automatically instead: `/plugin` → **Marketplaces** →
 `scharissis` → **Enable auto-update**. Claude Code then checks after a session
@@ -186,6 +150,47 @@ PR merges, so the SHA is the handle that keeps working. To stop holding, remove
 the marketplace and add it back bare — a pinned marketplace doesn't move when
 the next release ships, and says nothing about it.
 
+To remove the plugin entirely:
+
+```bash
+claude plugin uninstall polako && claude plugin marketplace remove scharissis
+```
+
+## By hand
+
+Both commands under [Install](#install) take a `--scope`:
+
+| Scope | Where it is declared | Use it for |
+| --- | --- | --- |
+| `user` *(default)* | `~/.claude/settings.json` | Your own machine, every project. |
+| `project` | the repo's `.claude/settings.json` | Committing the marketplace + plugin so collaborators on *that* repo get the skill automatically. |
+| `local` | the repo's git-ignored local settings | Trying it on one project without committing anything. |
+
+So to make every contributor to some project pick the skill up, run both
+commands with `--scope project` inside that project and commit the resulting
+`.claude/settings.json`. They still each need read access to this repo.
+
+If you'd rather not involve the plugin system at all, copy the skill
+directories in. They behave identically; they just won't update themselves.
+Take all three, or only `implement-issue` if you don't want the planning half.
+
+```bash
+cp -r skills/implement-issue skills/plan-backlog skills/review-health ~/.claude/skills/
+```
+
+```powershell
+Copy-Item -Recurse skills\implement-issue,skills\plan-backlog,skills\review-health $HOME\.claude\skills\
+```
+
+A skill installed this way is invoked bare, with no plugin prefix — so
+`/plan-backlog`, not `/polako:plan-backlog` — and the supervisor needs telling:
+
+```bash
+polako work -skill implement-issue
+```
+
+Do one or the other, not both — two copies of the same skill drift apart
+silently.
 
 ## Using it on another project
 

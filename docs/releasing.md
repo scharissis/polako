@@ -77,7 +77,9 @@ refreshing the secret is the fix.
 2. **Read the notes, add what only a person can, then merge.** The linked
    list is complete on its own; what it can't say is what a change means for
    an unattended machine, so add an **Operator impact** line when the release
-   changes what a run does (the changelog's own preamble says why). Merging
+   changes what a run does (the changelog's own preamble says why) — say what
+   an operator should do about it, which is almost always `polako update`.
+   Merging
    the release PR is the act that cuts the release: *Cut a release* sees the
    new version, refuses while the changelog section is missing or
    `claude plugin validate` objects — before either tag exists — then pushes

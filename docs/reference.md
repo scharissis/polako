@@ -17,7 +17,7 @@ see [`status`](#where-the-backlog-stands-polako-status) and
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how PRs are matched back to issues. |
 | `-label` | *(none)* | Only process issues carrying this label. Doubles as an access control — see [Security](security.md). A label the repository has never defined refuses at preflight, naming the fix, rather than draining an empty queue and reporting success. |
 | `-ungated` | `false` | Work a public repository without a `-label` gate. Without one or the other, `polako work` refuses to start on a public repo — see [Security](security.md). |
-| `-ignore-skew` | `false` | Start even when the installed skill is older than this binary. Without it, that mismatch refuses to start — a stale skill risks missing fixes and the shared branch-name contract ([issue #239](https://github.com/scharissis/polako/issues/239)); see [Getting updates](install.md#getting-updates). |
+| `-ignore-skew` | `false` | Start even when the installed skill is older than this binary. Without it, that mismatch refuses to start — a stale skill risks missing fixes and the shared branch-name contract ([issue #239](https://github.com/scharissis/polako/issues/239)); see [Update](install.md#update). |
 | `-tools` | *(see below)* | `--allowedTools` for unattended runs. **Replaces** the default set. |
 | `-add-tools` | *(none)* | Extra `--allowedTools` entries, **appended** to `-tools`. |
 | `-permission-mode` | `acceptEdits` | Passed to `claude --permission-mode`. |
@@ -45,7 +45,7 @@ see [`status`](#where-the-backlog-stands-polako-status) and
 | `-log` | `~/.polako/logs` | Directory for the full per-shift log, or `off` to write none — see [The shift log](#the-shift-log--log). |
 | `-verbose` | `false` | Mirror the full `[claude]` event stream to the terminal as well as the shift log. The default terminal shows milestones only. |
 | `-post-summary` | `false` | Comment one line of run numbers on each merged PR. The only thing that shows run data to anybody but you — see [Run data & cost tracking](run-data.md). |
-| `-version` | `false` | Print which release this binary is, then exit. Use it when startup warns that the binary and the skill disagree — see [Getting updates](install.md#getting-updates). |
+| `-version` | `false` | Print which release this binary is, then exit. Use it when startup warns that the binary and the skill disagree — see [Update](install.md#update). |
 
 ### Looking before you leap: `-dry-run`
 

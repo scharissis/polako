@@ -103,6 +103,16 @@ Both halves come from the same release and are meant to move together.
 Installing the skill by hand, updating, pinning a version and setting a project
 up for your team are all in [docs/install.md](docs/install.md).
 
+## Update
+
+```bash
+polako update
+```
+
+Run it between shifts, never during one — see
+[docs/install.md#update](docs/install.md#update) for `-check`, pinning, and
+the by-hand commands.
+
 ## Try it
 
 Look first — `-dry-run` resolves the next issue and prints the command it
