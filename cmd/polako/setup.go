@@ -76,8 +76,8 @@ func runSetup(ctx context.Context, args []string, in io.Reader, out io.Writer, r
 }
 
 // errSetupNotReady marks a report that found a required row missing, so
-// main's runReport exits nonzero. The report itself already said which row
-// and what to do about it, so nothing more needs saying here.
+// dispatchVerb's runReport exits nonzero. The report itself already said
+// which row and what to do about it, so nothing more needs saying here.
 var errSetupNotReady = errors.New("one or more required checks failed — see the rows above")
 
 // setupConfig resolves -dir and, when named, validates -repo's shape. Unlike
