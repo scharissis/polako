@@ -240,16 +240,18 @@ ends — clean finish, cap, crash, or Ctrl+C — a plan run leaves one
 `kind:"plan"` line in [run data](run-data.md), and, if it proposed something,
 one `proposed` [notification](#being-told-when-it-needs-you--notify).
 
-After the label pass, a run that proposed something prints one line pricing
-the batch from your own history — median cost and run time of a merged
-issue here, times the number of proposals:
+A run names each issue as `gh` confirms it (`[claude] filed #399`), and one
+that proposed something ends on three lines — what, what it costs, where:
 
 ```
-plan: your last 14 merged issues ran $2.70 and 38m median — 7 proposals ≈ $19 and 4½h of run time, before curation cuts
+plan: filed 7 issues — #399–#405, all labelled proposed, 1 epic, milestone "visual-evidence"
+plan: working the 6 that aren't epics would cost about $16 and 4h — a merged issue here runs $2.70 and 38m (median of your last 14)
+plan: review them at https://github.com/you/repo/issues?q=is%3Aopen+label%3Aproposed+milestone%3A%22visual-evidence%22 — remove the proposed label to queue them
 ```
 
-Rounded coarse on purpose — curation fuel, not a quote, and the only place
-`polako plan` states a dollar figure. With no history, or none ever priced
+The estimate is your own history — a merged issue's median cost and run
+time — times the issues a drain would work; epics never are. Rounded coarse
+on purpose: curation fuel, not a quote. With no history, or none ever priced
 (`-metrics off`, or only crashed runs), it says so instead:
 
 ```

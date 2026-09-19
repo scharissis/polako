@@ -1834,6 +1834,7 @@ func TestHeartbeatLine(t *testing.T) {
 		{6 * time.Minute, 59, stageStudy, "still working — 6m in, 59 tool calls, reading the code"},
 		{12*time.Minute + 20*time.Second, 118, stageImplement, "still working — 12m in, 118 tool calls, implementing"},
 		{5 * time.Minute, 1, stageReview, "still working — 5m in, 1 tool call, running the review gate"},
+		{2 * time.Minute, 14, stageFiling, "still working — 2m in, 14 tool calls, filing proposals"},
 		// No stage recognised yet: no clause, not an empty one.
 		{5 * time.Minute, 3, stageNone, "still working — 5m in, 3 tool calls"},
 	}

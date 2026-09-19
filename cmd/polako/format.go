@@ -48,6 +48,29 @@ func plural(n int, unit string) string {
 	return fmt.Sprintf("%d %ss", n, unit)
 }
 
+// issueRanges names a set of issues the short way a batch earns: a run files
+// its issues back to back, so "#399–#405" says what seven numbers would. Runs
+// of two or more collapse, anything else is listed, ascending either way.
+func issueRanges(nums []int) string {
+	sorted := slices.Clone(nums)
+	slices.Sort(sorted)
+	sorted = slices.Compact(sorted)
+	var parts []string
+	for i := 0; i < len(sorted); {
+		j := i
+		for j+1 < len(sorted) && sorted[j+1] == sorted[j]+1 {
+			j++
+		}
+		if j > i {
+			parts = append(parts, fmt.Sprintf("#%d–#%d", sorted[i], sorted[j]))
+		} else {
+			parts = append(parts, fmt.Sprintf("#%d", sorted[i]))
+		}
+		i = j + 1
+	}
+	return strings.Join(parts, ", ")
+}
+
 // split renders a token block's four ways, divided by n — the same helper for
 // a total (n = 1) and a per-issue mean. divideTokens is the division itself,
 // its own function so statsDocIssuesFrom (statsjson.go) can read the same

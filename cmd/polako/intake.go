@@ -242,11 +242,16 @@ func intakeRun(ctx context.Context, cfg config, opt intakeOptions, spec intakeRu
 
 	// The pricing line: what the operator's own history says this batch will
 	// cost to implement. After the label pass, because it prices the proposals
-	// the pass just counted; only when there are proposals, because a batch of
-	// nothing has nothing to price and nothing to curate.
-	if pass.created > 0 {
+	// the pass just counted; only what a drain would work, because an epic is a
+	// container and costs nothing to skip. Then where to curate them — only
+	// when there are proposals, because a batch of nothing has nothing to
+	// price and nothing to curate.
+	if workable := pass.created - pass.epics; workable > 0 {
 		narrate(sevProgress, "%s: %s", spec.verb,
-			proposalPricingLine(cfg.rec.metricsDir(), cfg.repo, pass.created, time.Now()))
+			proposalPricingLine(cfg.rec.metricsDir(), cfg.repo, workable, pass.epics, time.Now()))
+	}
+	if pass.created > 0 {
+		narrate(sevProgress, "%s: %s", spec.verb, curationLine(cfg.repo, spec.milestone))
 	}
 
 	// The two traces the run leaves, both after the label pass so they carry

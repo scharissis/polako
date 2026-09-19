@@ -234,8 +234,10 @@ func TestHealthRunSpawnsTheSkillAndNormalisesWhatItCreated(t *testing.T) {
 	if mine != 3 {
 		t.Errorf("the run created %d issues, want 3", mine)
 	}
-	if !strings.Contains(buf.String(), "3 issues created, 3 normalised to "+proposedLabel) {
-		t.Errorf("the pass summary is missing from the log:\n%s", buf.String())
+	for _, want := range []string{"filed 3 issues — #", "all labelled " + proposedLabel, "review them "} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("the run's report is missing %q:\n%s", want, buf.String())
+		}
 	}
 }
 
