@@ -309,15 +309,7 @@ func parseFlags() config {
 	flag.StringVar(&cfg.addTools, "add-tools", "",
 		"extra --allowedTools entries, appended to -tools instead of replacing it")
 	flag.StringVar(&cfg.permissionMode, "permission-mode", "acceptEdits", "claude --permission-mode")
-	flag.StringVar(&cfg.model, "model", "", "claude --model for every run (empty = whatever the CLI defaults to)")
-	flag.StringVar(&cfg.effort, "effort", "",
-		"claude --effort for every run — one of "+strings.Join(effortLevels, ", ")+" (empty = whatever the CLI defaults to)")
-	flag.StringVar(&cfg.remediationModel, "remediation-model", "",
-		"claude --model for remediation runs against an open PR — rebase, red-check fix, review reply (empty = the -model cell, then the CLI default)")
-	flag.StringVar(&cfg.remediationEffort, "remediation-effort", "",
-		"claude --effort for remediation runs against an open PR — one of "+strings.Join(effortLevels, ", ")+" (empty = the -effort cell, then the CLI default)")
-	flag.StringVar(&cfg.effortBySize, "effort-by-size", "",
-		"claude --effort by the issue's Estimate: line, e.g. S=medium,L=max — SIZE one of S,M,L, level one of "+strings.Join(effortLevels, ", ")+"; below an effort: label, above -effort; implementation runs only (empty = off, no body read)")
+	registerPolicyFlags(&cfg)
 	flag.DurationVar(&cfg.poll, "poll", 5*time.Minute, "interval between GitHub checks while waiting")
 	flag.IntVar(&cfg.retries, "retries", 3, "resume attempts after a crashed claude run (nonzero exit)")
 	flag.DurationVar(&cfg.retryWait, "retry-wait", 30*time.Second, "wait before each resume attempt")
@@ -370,20 +362,11 @@ func parseFlags() config {
 	}
 	flag.Parse()
 
-	// Rejected here, before the process commits to anything: an effort the CLI
-	// cannot take would otherwise surface as a usage error an hour in, looking
-	// like a crash. Same exit shape as an unparseable env default above.
-	if err := validateEffort("-effort", cfg.effort); err != nil {
+	// Rejected here, before the process commits to anything: a bad policy
+	// value would otherwise surface as a usage error an hour in, looking like
+	// a crash. Same exit shape as an unparseable env default above.
+	if err := validatePolicyFlags(&cfg); err != nil {
 		log.Fatalf("%v", err)
-	}
-	if err := validateEffort("-remediation-effort", cfg.remediationEffort); err != nil {
-		log.Fatalf("%v", err)
-	}
-	// Same stance as the two above: a typo in a size cell would otherwise
-	// surface as a claude usage error an hour into the first matching issue.
-	var sizeErr error
-	if cfg.sizeEffort, sizeErr = parseEffortBySize(cfg.effortBySize); sizeErr != nil {
-		log.Fatalf("%v", sizeErr)
 	}
 
 	// Answered before anything else a flag implies, so it stays usable on a
@@ -417,6 +400,40 @@ func parseFlags() config {
 	}
 	cfg.dir = abs
 	return cfg
+}
+
+// registerPolicyFlags registers the five flags that steer which model and how
+// much effort a run gets — split out of parseFlags to keep it under
+// sizebudget_test.go's funcBudget. Called before applyEnvDefaults, which
+// needs every flag already registered to set its default from the
+// environment.
+func registerPolicyFlags(cfg *config) {
+	flag.StringVar(&cfg.model, "model", "", "claude --model for every run (empty = whatever the CLI defaults to)")
+	flag.StringVar(&cfg.effort, "effort", "",
+		"claude --effort for every run — one of "+strings.Join(effortLevels, ", ")+" (empty = whatever the CLI defaults to)")
+	flag.StringVar(&cfg.remediationModel, "remediation-model", "",
+		"claude --model for remediation runs against an open PR — rebase, red-check fix, review reply (empty = the -model cell, then the CLI default)")
+	flag.StringVar(&cfg.remediationEffort, "remediation-effort", "",
+		"claude --effort for remediation runs against an open PR — one of "+strings.Join(effortLevels, ", ")+" (empty = the -effort cell, then the CLI default)")
+	flag.StringVar(&cfg.effortBySize, "effort-by-size", "",
+		"claude --effort by the issue's Estimate: line, e.g. S=medium,L=max — SIZE one of S,M,L, level one of "+strings.Join(effortLevels, ", ")+"; below an effort: label, above -effort; implementation runs only (empty = off, no body read)")
+}
+
+// validatePolicyFlags checks the five flags registerPolicyFlags registers,
+// once Parse has filled cfg from the command line and the environment, and
+// fills cfg.sizeEffort. Split out of parseFlags alongside registerPolicyFlags;
+// the caller turns a non-nil error into the same log.Fatalf parseFlags always
+// used, before the process commits to anything else.
+func validatePolicyFlags(cfg *config) error {
+	if err := validateEffort("-effort", cfg.effort); err != nil {
+		return err
+	}
+	if err := validateEffort("-remediation-effort", cfg.remediationEffort); err != nil {
+		return err
+	}
+	var err error
+	cfg.sizeEffort, err = parseEffortBySize(cfg.effortBySize)
+	return err
 }
 
 // envPrefix namespaces the variables that set flag defaults: -post-summary
@@ -479,12 +496,14 @@ func envVarName(flagName string) string {
 	return envPrefix + strings.ToUpper(strings.ReplaceAll(flagName, "-", "_"))
 }
 
-// parseEffortBySize reads -effort-by-size: comma-separated SIZE=LEVEL pairs,
-// SIZE one of S/M/L, LEVEL one of effortLevels. Empty yields a nil map — the
-// off state the policy and the body read both key on. Unlike parseSkip a bad
-// entry is fatal, not ignored: an unattended run must not discover the typo
-// when the first S issue rejects `--effort medim` an hour in.
-func parseEffortBySize(spec string) (map[string]string, error) {
+// parseBySize reads one of the policy-by-size flags: comma-separated
+// SIZE=VALUE pairs, SIZE one of S/M/L. validate checks VALUE against the
+// flag's own closed set — effortLevels for -effort-by-size, a model's for the
+// map that reuses this. Empty yields a nil map — the off state the policy and
+// the body read both key on. Unlike parseSkip a bad entry is fatal, not
+// ignored: an unattended run must not discover the typo when the first S
+// issue rejects a bad value an hour in.
+func parseBySize(flagName, spec string, validate func(string) error) (map[string]string, error) {
 	if strings.TrimSpace(spec) == "" {
 		return nil, nil
 	}
@@ -493,21 +512,31 @@ func parseEffortBySize(spec string) (map[string]string, error) {
 		k, v, ok := strings.Cut(pair, "=")
 		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
 		if !ok || k == "" || v == "" {
-			return nil, fmt.Errorf("-effort-by-size %q: each entry is SIZE=LEVEL, e.g. S=medium,L=max", spec)
+			return nil, fmt.Errorf("-%s %q: each entry is SIZE=LEVEL, e.g. S=medium,L=max", flagName, spec)
 		}
 		if k != "S" && k != "M" && k != "L" {
-			return nil, fmt.Errorf("-effort-by-size %q: %q is not a size — use S, M or L", spec, k)
+			return nil, fmt.Errorf("-%s %q: %q is not a size — use S, M or L", flagName, spec, k)
 		}
-		if !slices.Contains(effortLevels, v) {
-			return nil, fmt.Errorf("-effort-by-size %q: %q is not a claude effort level — one of %s",
-				spec, v, strings.Join(effortLevels, ", "))
+		if err := validate(v); err != nil {
+			return nil, fmt.Errorf("-%s %q: %s", flagName, spec, err)
 		}
 		if _, dup := m[k]; dup {
-			return nil, fmt.Errorf("-effort-by-size %q: size %q set twice", spec, k)
+			return nil, fmt.Errorf("-%s %q: size %q set twice", flagName, spec, k)
 		}
 		m[k] = v
 	}
 	return m, nil
+}
+
+// parseEffortBySize reads -effort-by-size, validating each value against
+// effortLevels. See parseBySize for the shared shape.
+func parseEffortBySize(spec string) (map[string]string, error) {
+	return parseBySize("effort-by-size", spec, func(v string) error {
+		if slices.Contains(effortLevels, v) {
+			return nil
+		}
+		return fmt.Errorf("%q is not a claude effort level — one of %s", v, strings.Join(effortLevels, ", "))
+	})
 }
 
 // parseSkip reads a comma-separated issue list. Unparseable entries are
