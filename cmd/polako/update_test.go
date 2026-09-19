@@ -114,6 +114,116 @@ func TestPublishedVersionIsARealErrorOnFailure(t *testing.T) {
 	}
 }
 
+func TestPublishedVersionQuietSilentOnFailure(t *testing.T) {
+	cfg := updateGhCfg(t, &ghState{})
+	if _, ok := publishedVersionQuiet(context.Background(), cfg); ok {
+		t.Error("publishedVersionQuiet should stay silent, not error, on a failed read")
+	}
+}
+
+func TestPublishedVersionQuietReadsTheMarketplaceFile(t *testing.T) {
+	cfg := updateGhCfg(t, &ghState{PublishedRef: "polako--v0.24.0"})
+	got, ok := publishedVersionQuiet(context.Background(), cfg)
+	if !ok || got != "0.24.0" {
+		t.Errorf("publishedVersionQuiet = %q, %v, want 0.24.0, true", got, ok)
+	}
+}
+
+// --- the passive notice (docs/plans/update.md ticket 2) ---
+
+func TestUpdateAvailableLine(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		binary, plugin, pub string
+		wantLine            bool
+	}{
+		{name: "both current", binary: "0.23.0", plugin: "0.23.0", pub: "0.23.0"},
+		{name: "binary behind", binary: "0.23.0", plugin: "0.24.0", pub: "0.24.0", wantLine: true},
+		{name: "plugin behind", binary: "0.24.0", plugin: "0.23.0", pub: "0.24.0", wantLine: true},
+		{name: "both behind", binary: "0.23.0", plugin: "0.23.0", pub: "0.24.0", wantLine: true},
+		{name: "module v prefix normalizes", binary: "v0.23.0", plugin: "0.23.0", pub: "0.23.0"},
+		// A clone build reports a revision, not a release — not staleness,
+		// an unreleased binary, the same rule skewComparison applies.
+		{name: "unreleased binary", binary: "a1b2c3d4e5f6", plugin: "0.23.0", pub: "0.24.0"},
+		{name: "no binary version at all", binary: "", plugin: "0.23.0", pub: "0.24.0"},
+		// The plugin not being installed doesn't silence a binary that is
+		// itself behind.
+		{name: "plugin not installed, binary behind", binary: "0.23.0", plugin: "", pub: "0.24.0", wantLine: true},
+		{name: "plugin not installed, binary current", binary: "0.24.0", plugin: "", pub: "0.24.0"},
+		{name: "no published version read", binary: "0.23.0", plugin: "0.23.0", pub: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := updateAvailableLine(tc.binary, tc.plugin, tc.pub)
+			if (got != "") != tc.wantLine {
+				t.Fatalf("updateAvailableLine(%q, %q, %q) = %q, want a line: %v",
+					tc.binary, tc.plugin, tc.pub, got, tc.wantLine)
+			}
+			if !tc.wantLine {
+				return
+			}
+			if !strings.Contains(got, tc.pub) || !strings.Contains(got, tc.binary) {
+				t.Errorf("line does not name the published and binary versions: %s", got)
+			}
+			if !strings.Contains(got, "polako update") {
+				t.Errorf("line does not point at `polako update`: %s", got)
+			}
+		})
+	}
+}
+
+func TestUpdateAvailableLineNamesPluginNotInstalled(t *testing.T) {
+	got := updateAvailableLine("0.23.0", "", "0.24.0")
+	if !strings.Contains(got, "plugin not installed") {
+		t.Errorf("line = %q, want it to say the plugin is not installed", got)
+	}
+}
+
+func TestReadPublishedVersionSilentWhenSkillNamesAnotherPlugin(t *testing.T) {
+	cfg := updateGhCfg(t, &ghState{PublishedRef: "polako--v0.24.0"})
+	cfg.skill = "my-fork:implement-issue"
+	if _, ok := readPublishedVersion(context.Background(), cfg); ok {
+		t.Error("readPublishedVersion should stay silent when -skill names another plugin")
+	}
+}
+
+func TestReadPublishedVersionSilentOnAFailedRead(t *testing.T) {
+	cfg := updateGhCfg(t, &ghState{})
+	cfg.skill = defaultSkill
+	if _, ok := readPublishedVersion(context.Background(), cfg); ok {
+		t.Error("readPublishedVersion should stay silent, not error, on a failed read")
+	}
+}
+
+func TestReadPublishedVersionReadsTheSameFilePublishedVersionDoes(t *testing.T) {
+	cfg := updateGhCfg(t, &ghState{PublishedRef: "polako--v0.24.0"})
+	cfg.skill = defaultSkill
+	got, ok := readPublishedVersion(context.Background(), cfg)
+	if !ok || got != "0.24.0" {
+		t.Errorf("readPublishedVersion = %q, %v, want 0.24.0, true", got, ok)
+	}
+}
+
+func TestUpdateNoticeLineEndToEnd(t *testing.T) {
+	cfg := updateGhCfg(t, &ghState{PublishedRef: "polako--v0.24.0"})
+	cfg.skill = defaultSkill
+	cfg.pluginVersion = "0.23.0"
+
+	got := updateNoticeLine(context.Background(), "0.23.0", cfg)
+	if !strings.Contains(got, "update available: polako 0.24.0 is out (binary 0.23.0, plugin 0.23.0)") {
+		t.Errorf("updateNoticeLine = %q, want it to name all three versions", got)
+	}
+}
+
+func TestUpdateNoticeLineSilentWhenCurrent(t *testing.T) {
+	cfg := updateGhCfg(t, &ghState{PublishedRef: "polako--v0.23.0"})
+	cfg.skill = defaultSkill
+	cfg.pluginVersion = "0.23.0"
+
+	if got := updateNoticeLine(context.Background(), "0.23.0", cfg); got != "" {
+		t.Errorf("updateNoticeLine = %q, want silence when both halves are current", got)
+	}
+}
+
 // --- the plugin half ---
 
 func TestResolvePluginPlanFrom(t *testing.T) {

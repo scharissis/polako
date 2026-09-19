@@ -164,6 +164,16 @@ func pluginVersion(ctx context.Context, cfg config) (version, id, scope string) 
 	if !ok || plugin == "" {
 		return "", "", ""
 	}
+	return installedPluginVersion(ctx, cfg, plugin)
+}
+
+// installedPluginVersion is pluginVersion's own read, taking the plugin name
+// directly rather than deriving it from cfg.skill — for a caller asking
+// about a specific plugin by name rather than by an operator's -skill.
+// status is exactly this: it carries no -skill of its own, and wants this
+// repo's own plugin (pluginName) rather than a value manufactured to look
+// like one.
+func installedPluginVersion(ctx context.Context, cfg config, plugin string) (version, id, scope string) {
 	out, err := capture(ctx, cfg.dir, cfg.claudeBin, "plugin", "list", "--json")
 	if err != nil {
 		return "", "", ""
@@ -268,6 +278,18 @@ func warnOnVersionSkew(binary string, cfg config) {
 		"branch name the skill chooses. To fix, %s", self, pluginName, plugin, skewRemedy())
 }
 
+// namesThisPlugin reports whether -skill names this repo's own plugin —
+// the gate skewComparison and the published-version notice (update.go) both
+// need, and for the same reason: -skill is documented as pointing anywhere,
+// and another plugin's version means nothing to compare against this
+// binary's own release. Comparing it anyway would warn (or notice) on every
+// run of a deliberate configuration, and name the wrong plugin while doing
+// it.
+func namesThisPlugin(skill string) bool {
+	name, _, _ := strings.Cut(skill, ":")
+	return name == pluginName
+}
+
 // skewComparison is the one place that decides whether a binary and an
 // installed skill are a comparable, differing pair of releases — shared by
 // warnOnVersionSkew (any direction) and versionSkewGate (behind only), so the
@@ -275,11 +297,7 @@ func warnOnVersionSkew(binary string, cfg config) {
 // there is nothing safe to compare: another plugin's skill, a build that
 // carries no release version on either side, or two releases that agree.
 func skewComparison(binary string, cfg config) (self, plugin string, behind, ok bool) {
-	// Only this repo's own plugin shares a version line with this binary.
-	// -skill is documented as pointing anywhere, and another plugin's versions
-	// mean nothing here — comparing them would warn on every run of a
-	// deliberate configuration, and name the wrong plugin while doing it.
-	if name, _, _ := strings.Cut(cfg.skill, ":"); name != pluginName {
+	if !namesThisPlugin(cfg.skill) {
 		return "", "", false, false
 	}
 	self, selfParts, selfIsRelease := releaseVersion(binary)

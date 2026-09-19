@@ -376,6 +376,12 @@ func preflight(ctx context.Context, cfg *config) error {
 		// worded line about the same skew.
 		warnOnVersionSkew(polakoVersion(), *cfg)
 	}
+	// Independent of the skew block above — this compares against what's
+	// published, not the binary against the plugin — so it runs whether or
+	// not skewErr is nil, including a dry run whose skew gate just refused.
+	if line := updateNoticeLine(ctx, polakoVersion(), *cfg); line != "" {
+		narrate(sevWarning, "%s", line)
+	}
 	settingsBlock(preflightPairs(*cfg))
 	return nil
 }

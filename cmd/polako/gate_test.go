@@ -198,6 +198,38 @@ func TestPluginVersionReadsTheInstalledPlugin(t *testing.T) {
 	}
 }
 
+// installedPluginVersion is pluginVersion's own read, taking the plugin name
+// directly — what status uses, since it carries no -skill to derive one
+// from.
+func TestInstalledPluginVersionReadsByExplicitName(t *testing.T) {
+	cfg := fakeClaudeConfig(t, "stream")
+	t.Setenv(fakePluginEnv, "0.3.0")
+
+	got, id, scope := installedPluginVersion(context.Background(), cfg, pluginName)
+	if got != "0.3.0" || id != "polako@scharissis" || scope != "user" {
+		t.Errorf("installedPluginVersion = %q, %q, %q, want the installed copy's version, id and scope",
+			got, id, scope)
+	}
+}
+
+func TestNamesThisPlugin(t *testing.T) {
+	for _, tc := range []struct {
+		name, skill string
+		want        bool
+	}{
+		{name: "this plugin", skill: defaultSkill, want: true},
+		{name: "another plugin", skill: "my-fork:implement-issue"},
+		{name: "hand-installed skill, no plugin prefix", skill: skillDir},
+		{name: "empty", skill: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := namesThisPlugin(tc.skill); got != tc.want {
+				t.Errorf("namesThisPlugin(%q) = %v, want %v", tc.skill, got, tc.want)
+			}
+		})
+	}
+}
+
 // A -skill with no plugin prefix names a skill copied into ~/.claude/skills.
 // It carries no version, and asking the CLI about a plugin by that name would
 // answer about something else.
