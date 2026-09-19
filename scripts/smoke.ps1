@@ -272,6 +272,32 @@ try {
             Bad "the downloaded binary reports ""$got"", not ""$want""" `
                 'the -ldflags stamp in the release workflow is wrong; every recorded run would be misattributed'
         }
+
+        # Separate from the asset download above so a missing checksums.txt
+        # and a missing binary fail with two different, correctly-named lines.
+        gh release download $semverTag --pattern checksums.txt --dir "$tmp\dl" 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Bad "checksums.txt is not attached to $semverTag" `
+                "the checksums step of the release workflow did not run; cannot verify $asset"
+        } else {
+            $line = Get-Content "$tmp\dl\checksums.txt" `
+            | Where-Object { ($_ -split '\s+')[1] -eq $asset } | Select-Object -First 1
+            $wantSum = if ($line) { ($line -split '\s+')[0] } else { '' }
+            if (-not $wantSum) {
+                Bad "checksums.txt has no line for $asset" `
+                    'the checksums step ran before this asset was built, or its format changed'
+            } else {
+                # Get-FileHash prints uppercase hex; sha256sum's format is
+                # lowercase, and that's what checksums.txt carries.
+                $gotSum = (Get-FileHash "$tmp\dl\$asset" -Algorithm SHA256).Hash.ToLower()
+                if ($gotSum -eq $wantSum) {
+                    Ok "$asset matches checksums.txt"
+                } else {
+                    Bad "$asset does not match checksums.txt" `
+                        'the download is corrupt, or checksums.txt does not match the uploaded binaries'
+                }
+            }
+        }
     }
 
     if ($drain) {

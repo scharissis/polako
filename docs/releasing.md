@@ -82,16 +82,18 @@ refreshing the secret is the fix.
    new version, refuses while the changelog section is missing or
    `claude plugin validate` objects — before either tag exists — then pushes
    both tags on the merge commit and hands `vX.Y.Z` to *Release*, which
-   cross-compiles the five targets with the tag stamped in, publishes the
-   GitHub release with the changelog section as its body, starts a *Smoke*
-   run, and opens the publish PR.
+   cross-compiles the five targets with the tag stamped in, writes a
+   `checksums.txt` over them, publishes the GitHub release with the
+   changelog section as its body and all six assets attached, starts a
+   *Smoke* run, and opens the publish PR.
 
 3. **Merge the publish PR.** It moves the `ref` in
    [`marketplace.json`](../.claude-plugin/marketplace.json) to the new tag, and
    merging that one line is the moment anybody is exposed to the release. Its
    body says what to check first: the *Smoke* run — every check CI can't make
-   before the tags exist, from the five attached binaries and the `-ldflags`
-   version stamp, through `go install ...@vX.Y.Z` resolving, to the plugin
+   before the tags exist, from the five attached binaries' sizes, the
+   downloaded one's `checksums.txt` sum and `-ldflags` version stamp,
+   through `go install ...@vX.Y.Z` resolving, to the plugin
    installing with the ref moved and a session listing the skill, all against
    a throwaway `CLAUDE_CONFIG_DIR` so no machine moves onto the release early
    (it runs [`smoke.sh`](../scripts/smoke.sh); `./scripts/smoke.sh` asks the same
