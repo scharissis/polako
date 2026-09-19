@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -274,12 +275,17 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 	// `gh api` names its target in a URL path, so the second word is no use as a
 	// call name. The drain makes exactly one api call; give it a readable name so
 	// a FailReads entry can be flaky about it like any other. `plan` preflight
-	// adds a second — the milestone find-or-create — routed on the path.
+	// adds a second — the milestone find-or-create — routed on the path, and
+	// labelExists a third — the label-exists lookup, routed the same way.
 	if at(0) == "api" {
 		if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "milestones") }) {
 			return answerMilestones(st, args)
 		}
-		call = "api comments"
+		if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "/labels/") }) {
+			call = "api label"
+		} else {
+			call = "api comments"
+		}
 	}
 	// Ahead of everything, so a test can be flaky about a call whatever it would
 	// otherwise have answered. The countdown has to be persisted even though
@@ -413,6 +419,30 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 				id, author, is.CommentedAt, is.Bodies[id]))
 		}
 		return "[" + strings.Join(comments, ",") + "]", counting, 0
+
+	case "api label":
+		// labelExists's own call: repos/{owner}/{repo}/labels/<name>, name
+		// url.PathEscape'd the way the real call encodes it (a colon in
+		// "model:opus" among them) — decoded back here the same way gh's own
+		// server side would.
+		var path string
+		for _, a := range args {
+			if strings.Contains(a, "/labels/") {
+				path = a
+				break
+			}
+		}
+		_, enc, _ := strings.Cut(path, "/labels/")
+		name, err := url.PathUnescape(enc)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fake gh: unreadable label path %q: %v\n", path, err)
+			return "", false, 1
+		}
+		if !slices.Contains(st.Labels, name) {
+			fmt.Fprintf(os.Stderr, "gh: Label not found (HTTP 404)\n")
+			return "", false, 1
+		}
+		return fmt.Sprintf(`{"name":%q}`, name), false, 0
 
 	case "issue create":
 		// `plan` preflight makes the `--parent` capability probe; a real plan
