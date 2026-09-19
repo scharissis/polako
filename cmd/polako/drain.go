@@ -236,7 +236,7 @@ func drain(ctx context.Context, cfg config) error {
 			}
 			continue
 		}
-		ready, blocked, heldBack, containers, err := openIssues(ctx, cfg)
+		ready, blocked, parkedIssues, heldBack, containers, err := openIssues(ctx, cfg)
 		if err != nil {
 			return finish(err)
 		}
@@ -252,15 +252,8 @@ func drain(ctx context.Context, cfg config) error {
 		if issue == 0 {
 			blocked = slices.DeleteFunc(blocked, func(n int) bool { return skip[n] })
 			if len(blocked) == 0 {
-				// Nothing open and unparked means nothing is waiting on a reply
-				// either: a flag this drain raised and can no longer see was
-				// closed, parked or cleared by hand while it worked elsewhere.
-				// Naming those in the summary would send an operator to a thread
-				// with nothing left to do on it.
 				clear(states)
-				narrate(sevSuccess, "no open issues — backlog cleared")
-				notify(ctx, cfg, notification{event: notifyCleared,
-					reason: "no open issues left to work"})
+				reportNothingLeftToWork(ctx, cfg, parkedIssues)
 				return finish(nil)
 			}
 			// Nothing else is workable, so the only way forward is an issue
@@ -724,6 +717,30 @@ func pickLowest(numbers []int, skip map[int]bool) int {
 		}
 	}
 	return lowest
+}
+
+// reportNothingLeftToWork ends the drain's "nothing ready, nothing awaiting
+// an answer" branch: a genuinely empty backlog reads as success, one that
+// still holds a parked issue does not — the fresh listing this pass already
+// made reflects any park this same pass just did, needs-human landing on the
+// issue before the next loop iteration re-reads the queue, so there is no
+// separate "parked this shift" state to track here (issue #389).
+func reportNothingLeftToWork(ctx context.Context, cfg config, parked []int) {
+	if len(parked) > 0 {
+		// The backlog is not empty, only unworkable — an operator reading only
+		// the notification must not think the work is done.
+		reason := fmt.Sprintf("nothing left to work — %s, waiting on a human",
+			plural(len(parked), "parked issue"))
+		narrate(sevWarning, "%s", reason)
+		notify(ctx, cfg, notification{event: notifyStuck, reason: reason})
+		return
+	}
+	// Nothing open and unparked means nothing is waiting on a reply either: a
+	// flag this drain raised and can no longer see was closed, parked or
+	// cleared by hand while it worked elsewhere. Naming those in the summary
+	// would send an operator to a thread with nothing left to do on it.
+	narrate(sevSuccess, "no open issues — backlog cleared")
+	notify(ctx, cfg, notification{event: notifyCleared, reason: "no open issues left to work"})
 }
 
 // logHeldBack narrates every issue this pass is putting down for an open

@@ -909,6 +909,56 @@ func TestDrainParksADeadIssueAndKeepsGoing(t *testing.T) {
 	}
 }
 
+// Issue #389: a shift that parks its only issue must not report the backlog
+// as cleared. The issue is still open — only parked — and "cleared" is the
+// success line, so an operator reading just that would think the work was
+// done.
+func TestDrainDoesNotCallAParkedBacklogCleared(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("one parked issue must not end the drain in error: %v", err)
+	}
+
+	if got := finalGhState(t, path).Issues["1"].Labels; !slices.Contains(got, needsHumanLabel) {
+		t.Errorf("issue 1 labels = %v, want %s", got, needsHumanLabel)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "backlog cleared") {
+		t.Errorf("issue 1 is still open, only parked — this is not cleared\ngot:\n%s", out)
+	}
+	if want := "nothing left to work — 1 parked issue, waiting on a human"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+}
+
+// The other half of #389: a backlog that truly has nothing open left still
+// says "cleared" — the split must not eat the case it was already right
+// about.
+func TestDrainStillCallsAGenuinelyEmptyBacklogCleared(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		PRs:    map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "no open issues — backlog cleared") {
+		t.Errorf("a merged, closed issue leaves nothing open — this is cleared\ngot:\n%s", out)
+	}
+	if strings.Contains(out, "nothing left to work") {
+		t.Errorf("nothing was parked, so the stuck wording must not appear\ngot:\n%s", out)
+	}
+}
+
 // Issue #210: a run that verifies an issue needs no code change closes it
 // directly instead of opening a PR. The supervisor has to read that as
 // finished, not as "produced nothing" — no needs-human label, no park
@@ -3504,7 +3554,7 @@ func TestOpenIssuesKeepsAHeldBackIssueOutUnderStrictOrder(t *testing.T) {
 	})
 	cfg.strictOrder = true
 
-	ready, blocked, heldBack, _, err := openIssues(context.Background(), cfg)
+	ready, blocked, _, heldBack, _, err := openIssues(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("openIssues: %v", err)
 	}

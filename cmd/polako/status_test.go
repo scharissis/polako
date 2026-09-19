@@ -483,6 +483,33 @@ func TestStatusDoesNotCallAGatedBacklogCleared(t *testing.T) {
 	}
 }
 
+// Issue #389: the same split on the drain's own exit — a parked issue is
+// still an open one, so a backlog holding only that is not a cleared one
+// either. This is already true structurally (queuePairs only says "cleared"
+// when q.open() is empty, and parked issues are counted in it), so this is a
+// regression guard rather than a fix.
+func TestStatusDoesNotCallAParkedBacklogCleared(t *testing.T) {
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true, Labels: []string{needsHumanLabel}},
+		},
+	})
+
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	var out strings.Builder
+	renderStatus(&out, report{}, cfg, snap)
+	printed := out.String()
+	if strings.Contains(printed, "backlog cleared") {
+		t.Errorf("one parked issue is still open, not a cleared backlog:\n%s", printed)
+	}
+	if want := "next    nothing — every open issue is parked"; !strings.Contains(printed, want) {
+		t.Errorf("report is missing %q\ngot:\n%s", want, printed)
+	}
+}
+
 // The one promise that makes it safe to run against a repository somebody else
 // is draining: every call is a read, and nothing on GitHub moves.
 func TestStatusMakesOnlyReadCalls(t *testing.T) {

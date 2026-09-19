@@ -26,7 +26,7 @@ import (
 	"unicode"
 )
 
-// The states that need a human. Three of them end an issue's turn, one ends
+// The states that need a human. Three of them end an issue's turn, two end
 // the drain, and one is a `polako plan` run finishing with a backlog to
 // curate; nothing else fires, because a hook that goes off on every ordinary
 // event is one an operator mutes.
@@ -36,6 +36,12 @@ const (
 	// thread when they go and look.
 	notifyAwaiting = "awaiting-answer"
 	notifyCleared  = "cleared"
+	// notifyStuck is notifyCleared's twin for the exit that used to be
+	// misreported as it: nothing left to work this pass, but the backlog is
+	// not empty — every remaining open issue needs a human, whether parked
+	// this shift or an earlier one. An operator polling only for "cleared"
+	// must not read this as the work being done (issue #389).
+	notifyStuck = "stuck"
 	// notifyStopped is the drain ending before the backlog did — a fatal error,
 	// or a session budget spent. Not on the issue's list, but it is the 2am
 	// case the flag exists for: a refused token stops everything, and without

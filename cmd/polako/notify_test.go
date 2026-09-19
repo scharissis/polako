@@ -205,10 +205,13 @@ func TestCheckNotifyCommandFailsFastOnAMissingProgram(t *testing.T) {
 
 // --- the states a hook fires on, end to end ---
 
-// Two of them at once: an issue that parks, and a backlog that empties. Both
-// are quiet — the drain carries on either way — which is exactly why an
-// operator who is not watching the terminal needs telling.
-func TestNotifyFiresWhenAnIssueParksAndWhenTheBacklogDrains(t *testing.T) {
+// Two of them at once: an issue that parks, and the drain then finding
+// nothing left to work. Both are quiet — the drain carries on either way —
+// which is exactly why an operator who is not watching the terminal needs
+// telling. The second one is `stuck`, not `cleared` — the only issue is
+// still open, parked, and a hook watching only for `cleared` must not read
+// this as the backlog having drained (issue #389).
+func TestNotifyFiresWhenAnIssueParksAndThenNothingIsLeftToWork(t *testing.T) {
 	captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -222,7 +225,7 @@ func TestNotifyFiresWhenAnIssueParksAndWhenTheBacklogDrains(t *testing.T) {
 
 	got := told()
 	if len(got) != 2 {
-		t.Fatalf("notifications = %v, want a park and then a drained", got)
+		t.Fatalf("notifications = %v, want a park and then a stuck drain", got)
 	}
 	for _, want := range []string{
 		notifyPrefix + "EVENT=parked",
@@ -234,8 +237,13 @@ func TestNotifyFiresWhenAnIssueParksAndWhenTheBacklogDrains(t *testing.T) {
 			t.Errorf("the park notification is missing %q\ngot: %s", want, got[0])
 		}
 	}
-	if !strings.Contains(got[1], notifyPrefix+"EVENT=cleared") {
-		t.Errorf("second notification = %s, want the backlog draining", got[1])
+	for _, want := range []string{
+		notifyPrefix + "EVENT=stuck",
+		"1 parked issue", // names the count, so a hook can quote it too
+	} {
+		if !strings.Contains(got[1], want) {
+			t.Errorf("second notification = %s, want it to name the stuck backlog: missing %q", got[1], want)
+		}
 	}
 }
 
