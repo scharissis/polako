@@ -429,6 +429,77 @@ func binarySummary(ctx context.Context, cfg config, b binaryPlan, published stri
 	}
 }
 
+// --- the passive notice ---
+//
+// docs/plans/update.md ticket 2: work's preflight and status make the same
+// published-version read `update -check` does, and say one line when it is
+// ahead of either half — the only way a release reaches an operator who
+// never runs `update` by hand.
+
+// readPublishedVersion is the notice's own read, gated the way
+// skewComparison already gates a binary/plugin comparison: only this
+// repo's own plugin shares a version line with the binary, so -skill
+// naming another one has nothing here to compare against. false on that
+// gate or on a failed or timed-out read — both are the same silence a
+// passive notice keeps, never a refusal.
+func readPublishedVersion(ctx context.Context, cfg config) (string, bool) {
+	if name, _, _ := strings.Cut(cfg.skill, ":"); name != pluginName {
+		return "", false
+	}
+	published, err := publishedVersion(ctx, cfg)
+	if err != nil {
+		return "", false
+	}
+	return published, true
+}
+
+// updateAvailableLine is the notice's comparison, pure so work's preflight
+// and status can both call it over whatever they already read rather than
+// repeating it. "" unless published is ahead of the binary or the
+// installed plugin. Silent (not merely unmatched) when the binary carries
+// no release version — a clone build or a stripped one, releaseVersion's
+// own rule, the same one skewComparison applies for the same reason: an
+// unreleased binary is not skew, and warning about it every time would
+// train an operator to ignore the notice that matters. plugin missing or
+// not release-shaped just drops out of the comparison rather than silencing
+// the whole line — the binary alone may still be worth a notice.
+func updateAvailableLine(binary, plugin, published string) string {
+	self, selfParts, selfIsRelease := releaseVersion(binary)
+	if !selfIsRelease || published == "" {
+		return ""
+	}
+	publishedParts, err := parseSemver(published)
+	if err != nil {
+		return ""
+	}
+	pluginNorm, pluginParts, pluginIsRelease := releaseVersion(plugin)
+	behindSelf := semverLess(selfParts, publishedParts)
+	behindPlugin := pluginIsRelease && semverLess(pluginParts, publishedParts)
+	if !behindSelf && !behindPlugin {
+		return ""
+	}
+	pluginDisplay := plugin
+	if pluginIsRelease {
+		pluginDisplay = pluginNorm
+	}
+	if pluginDisplay == "" {
+		pluginDisplay = "not installed"
+	}
+	return fmt.Sprintf("update available: polako %s is out (binary %s, plugin %s) — run `polako update`",
+		published, self, pluginDisplay)
+}
+
+// updateNoticeLine is the notice as work's preflight calls it: the read and
+// the comparison together, both best-effort — nothing here refuses or
+// blocks a shift over a release notice, the same tolerance probeUsage has.
+func updateNoticeLine(ctx context.Context, binary string, cfg config) string {
+	published, ok := readPublishedVersion(ctx, cfg)
+	if !ok {
+		return ""
+	}
+	return updateAvailableLine(binary, cfg.pluginVersion, published)
+}
+
 // applyUpdate prints the plan — always, -check or not, since the two have to
 // say the same thing — then, on a real run with something to do, runs it and
 // prints the closing line. Nothing here mutates anything before this point:
