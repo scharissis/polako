@@ -111,7 +111,7 @@ and [`health`](reference.md#auditing-repository-health-unattended-polako-health)
 
 ## What leaves the machine
 
-One thing, and only on request:
+Two things, one of them only on request:
 
 | What | Where it goes | Default |
 | --- | --- | --- |
