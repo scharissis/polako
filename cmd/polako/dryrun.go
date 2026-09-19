@@ -29,7 +29,7 @@ func dryRun(ctx context.Context, cfg config, out io.Writer) error {
 	// issue — but a real run also closes a finished, unheld container before it
 	// picks one up, so this names the containers it would close and writes
 	// nothing, the same promise the rest of the command keeps.
-	ready, blocked, heldBack, containers, err := openIssues(ctx, cfg)
+	ready, blocked, _, heldBack, containers, err := openIssues(ctx, cfg)
 	if err != nil {
 		return err
 	}

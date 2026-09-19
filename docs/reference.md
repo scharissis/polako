@@ -90,13 +90,14 @@ those moments:
 polako work -notify ~/bin/tell-me
 ```
 
-It fires on six states, and nothing else:
+It fires on seven states, and nothing else:
 
 | `POLAKO_NOTIFY_EVENT` | What happened |
 | --- | --- |
 | `parked` | An issue was parked for a human — including a run that crashed and used up its resumes. |
 | `awaiting-answer` | A run stopped to ask something on the issue thread. Reply there and the next shift folds it in. |
 | `cleared` | The backlog is empty. Nothing is left to work. |
+| `stuck` | Nothing is left to work this pass, but the backlog isn't empty — every remaining open issue is parked, whether this shift put it there or an earlier one did. `REASON` names the count. Distinct from `cleared` on purpose: a hook watching only for `cleared` must not read this as the work being done. |
 | `stopped` | The shift ended before the backlog did: a fatal error, or `-max-session-cost` spent. (`-max-session-usage`/`-max-week-usage` does *not* fire this — the shift waits the reset out and carries on.) |
 | `epic-done` | An epic's last child closed and the drain closed the container, with a comment saying so. Fires once, on the close; a container a human has held with `needs-human` or `proposed` is left open and fires nothing. |
 | `proposed` | A [`polako plan`](#planning-a-backlog-unattended-polako-plan) run finished with proposals behind the `proposed` label. `ISSUE` is empty — it names the whole batch — and it fires only when the run actually proposed something. |
@@ -105,7 +106,7 @@ The context arrives in the environment, so the command needs no arguments:
 
 | Variable | Value |
 | --- | --- |
-| `POLAKO_NOTIFY_EVENT` | One of the six above. |
+| `POLAKO_NOTIFY_EVENT` | One of the seven above. |
 | `POLAKO_NOTIFY_ISSUE` | The issue number, or empty when the whole shift rather than one issue needs you. |
 | `POLAKO_NOTIFY_REPO` | `owner/name`. |
 | `POLAKO_NOTIFY_REASON` | One line of English saying what happened and what to do about it. |

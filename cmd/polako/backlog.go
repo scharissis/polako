@@ -20,23 +20,26 @@ import (
 )
 
 // openIssues asks GitHub what there is to work: the issues ready now, the
-// ones a run already flagged for a human, and the containers — never worked
-// themselves, but the drain still needs them to notice a finished one.
-// -strict-order folds the second list back into the first, which is the whole
-// of what the flag does — a flagged issue keeps its place in the queue, and
-// everything behind it waits. heldBack is untouched by the flag either way:
-// unlike an awaiting-answer issue, running one again this pass cannot reveal
-// anything the same listing didn't already know, so it never rejoins ready
-// and is reported alongside instead.
-func openIssues(ctx context.Context, cfg config) (ready, blocked []int, heldBack []heldBackInfo, containers []containerInfo, err error) {
+// ones a run already flagged for a human, the ones a human has parked, and
+// the containers — never worked themselves, but the drain still needs them
+// to notice a finished one. -strict-order folds the second list back into
+// the first, which is the whole of what the flag does — a flagged issue
+// keeps its place in the queue, and everything behind it waits. heldBack is
+// untouched by the flag either way: unlike an awaiting-answer issue, running
+// one again this pass cannot reveal anything the same listing didn't already
+// know, so it never rejoins ready and is reported alongside instead. parked
+// is untouched too, for the same reason as heldBack — nothing here releases
+// it, only a human removing needs-human does — and the drain reads it back
+// only to tell "nothing workable" from "nothing open" (issue #389).
+func openIssues(ctx context.Context, cfg config) (ready, blocked, parked []int, heldBack []heldBackInfo, containers []containerInfo, err error) {
 	q, err := openQueues(ctx, cfg)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	if cfg.strictOrder {
-		return append(q.ready, q.blocked...), nil, q.heldBack, q.containers, nil
+		return append(q.ready, q.blocked...), nil, q.parked, q.heldBack, q.containers, nil
 	}
-	return q.ready, q.blocked, q.heldBack, q.containers, nil
+	return q.ready, q.blocked, q.parked, q.heldBack, q.containers, nil
 }
 
 // What the queue is derived from: the labels the exclusions read, the
