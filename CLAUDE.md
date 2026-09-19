@@ -70,7 +70,9 @@ in the PR body rather than doing it quietly.
   A missing plugin stays missing — installing one is the operator's own
   call — so `update` prints the install commands instead of running them.
   The write surface is exactly the plugin, through the `claude` CLI, and the
-  binary, through `go install`; nothing under `-dir`, nothing on GitHub.
+  binary, through `go install` or, for a release binary, a checksum-verified
+  swap over a `gh release download`; nothing under `-dir`, nothing written
+  to GitHub.
 - **Restart safety.** If a PR already exists for an issue's branch, never
   re-run the skill for that issue — go straight to waiting on the PR.
 - **The `needs-human` label is orchestration state.** It's the only durable trace of a
