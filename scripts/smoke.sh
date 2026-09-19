@@ -92,6 +92,15 @@ skip() {
 lastLine() {
   grep -v '^[[:space:]]*$' "$1" 2>/dev/null | tail -1
 }
+# GNU coreutils ships sha256sum everywhere this runs except macOS, which has
+# shasum instead - both print the hex digest first.
+sha256File() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
 
 semverTag="v$version"
 pluginTag="$name--v$version"
@@ -272,6 +281,24 @@ else
     else
       bad "the downloaded binary reports \"$got\", not \"$want\"" \
         "the -ldflags stamp in the release workflow is wrong; every recorded run would be misattributed"
+    fi
+
+    # Separate from the asset download above so a missing checksums.txt and a
+    # missing binary fail with two different, correctly-named lines.
+    if ! gh release download "$semverTag" --pattern checksums.txt --dir "$tmp/dl" >/dev/null 2>&1; then
+      bad "checksums.txt is not attached to $semverTag" \
+        "the checksums step of the release workflow did not run; cannot verify $asset"
+    else
+      wantSum=$(awk -v a="$asset" '$2 == a { print $1 }' "$tmp/dl/checksums.txt")
+      if [ -z "$wantSum" ]; then
+        bad "checksums.txt has no line for $asset" \
+          "the checksums step ran before this asset was built, or its format changed"
+      elif [ "$wantSum" = "$(sha256File "$tmp/dl/$asset")" ]; then
+        ok "$asset matches checksums.txt"
+      else
+        bad "$asset does not match checksums.txt" \
+          "the download is corrupt, or checksums.txt does not match the uploaded binaries"
+      fi
     fi
   else
     bad "could not download $asset" "gh release download failed"
