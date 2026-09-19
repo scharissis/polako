@@ -481,6 +481,30 @@ assumes:
 7. Does Read on a PNG work headless, and what does one 1280x800 shot cost in
    tokens? It sets whether four is the right cap.
 
+### Answers
+
+Probes 3 to 6, run 2026-09-20 with a real push to this repo — one orphan
+commit, `bee66f1`, on `polako-evidence` — and written up on issue #402.
+Probes 1, 2 and 7 are still open; ticket 4 needs them.
+
+3. Yes, on a public repo, web: the image renders inline in an issue comment,
+   and the URL answers 200 `image/png`. A private repo, the mobile app and
+   GHES are unchecked.
+4. The push was accepted here, where the one branch ruleset targets the
+   default branch only. `commit-tree` ignores `commit.gpgsign`, even with a
+   broken `gpg.program`: it writes an unsigned commit and doesn't fail. So a
+   required-signature rule covering all branches refuses the push — the
+   ladder's ruleset rung. That refusal's error text is unseen.
+5. Actions ran nothing: zero runs and zero check suites on the evidence
+   commit. Vercel, Netlify and CircleCI are unchecked — none is installed
+   here — so `[skip ci]` stays in the subject.
+6. Yes on git 2.55, macOS. The index is empty and nothing is on disk after
+   the `worktree add`, with or without a parent commit, so `read-tree P` is
+   what makes an append. First creation and append both work, no local branch
+   is made, and a push from a stale parent is rejected as non-fast-forward
+   without `--force`. `ls-remote --heads` exits 0 either way: absent is empty
+   output, not a failed command. Older git and Windows are unchecked.
+
 ## Work items
 
 Each is one PR, one of the tickets above. Tickets 1 and 2 have no
