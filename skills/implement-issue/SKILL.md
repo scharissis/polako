@@ -64,6 +64,13 @@ reads in a minute, a thread question that fits one screen. The per-section
 budgets in Phase 3 and the question shape below are this rule made specific;
 where they are silent, this is still the rule.
 
+Describe, don't paste. A thread is public, and command output carries things
+nobody chose to publish — key names, usernames, absolute home paths,
+hostnames, remote URLs with tokens, env values. So a failure gets reported in
+this run's own words — "push failed: the remote rejected it" — never as raw
+`git`, `ssh`, `gh` or env output pasted verbatim. The detail behind it stays in
+the final message, which stays on the machine.
+
 ## Asking a question
 Anything that genuinely blocks you — a planning question, a missing
 prerequisite, a tool this run isn't granted and no later phase gives a

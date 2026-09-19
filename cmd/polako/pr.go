@@ -397,11 +397,19 @@ func prCommentTools(prNumber int) string {
 // spelling picks an inline --body, which is refused. The file goes under
 // scratchDir and stays there: the run has no `rm` to delete it with, and a
 // stray body file in the worktree root is one tidy counts as left work.
+//
+// The redaction sentence rides along here rather than living in each of the
+// three remediateX prompts separately, for the same reason prCommentTools is
+// shared: one place to change, and no remediation prompt can be added later
+// without it (issue #386 — a run pasted raw `git push` stderr, naming the
+// operator's SSH key, into a comment on a public issue).
 func prCommentHow(prNumber int) string {
 	return fmt.Sprintf("To comment, write the text to a file under `%s/` in the worktree "+
 		"— never the worktree root, and never commit it — and run "+
 		"`gh pr comment %d --body-file <file>` — PR number first, that spelling, the "+
-		"only form this run is granted. ", scratchDir, prNumber)
+		"only form this run is granted. Describe a failure in "+
+		"your own words; never paste raw git, ssh, gh or env output into it — a PR is "+
+		"public, and that output can name a key, a username, a home path or a host. ", scratchDir, prNumber)
 }
 
 // remediationMaySayWhy is the clause every remediation park reason ends

@@ -80,6 +80,12 @@ colon, no trailing period, one clause, 70 characters including the prefix. An
 epic: `epic(<type>): <the outcome>`, `<type>` naming the dominant intent of
 its children, same cap, same rules.
 
+Describe, don't paste. Issue bodies are public, and command output carries
+things nobody chose to publish — key names, usernames, absolute home paths,
+hostnames, remote URLs with tokens, env values. So anything this run reports —
+a `gh` rejection, a degraded mode — gets reported in its own words, never as
+raw `git`, `ssh`, `gh` or env output pasted verbatim.
+
 ## Phase 0 — Context and posture (every run, before anything else)
 1. Read $vision, resolved inside the repository.
 2. Read the backlog, **including proposals already filed**:
