@@ -214,6 +214,33 @@ def grader_paths(graders):
     return paths
 
 
+def origin_state(ws, sub):
+    """Origin's own view of its refs and the polako-evidence branch, read
+    fresh each grade rather than off whatever the local checkout happened to
+    fetch during the run — a plain `git push` to a plumbing-built ref like
+    polako-evidence never touches the pusher's own remote-tracking refs, so
+    without this a pushed evidence commit would be invisible to grading. The
+    fetch is scoped to that one ref; nothing here writes to the checkout the
+    run itself worked in."""
+    d = os.path.join(ws, sub)
+    if not os.path.isdir(d):
+        return f"(no {sub})"
+    refs = subprocess.run(["git", "-C", d, "ls-remote", "origin"],
+                          capture_output=True, text=True)
+    refs_out = refs.stdout.strip() or refs.stderr.strip() or "(no refs)"
+    fetch = subprocess.run(
+        ["git", "-C", d, "fetch", "--quiet", "origin", "polako-evidence"],
+        capture_output=True, text=True)
+    if fetch.returncode != 0:
+        tree_out = "(no polako-evidence ref on origin)"
+    else:
+        tree = subprocess.run(["git", "-C", d, "ls-tree", "-r", "FETCH_HEAD"],
+                              capture_output=True, text=True)
+        tree_out = tree.stdout.strip() or tree.stderr.strip() or "(empty tree)"
+    return (f"origin refs (ls-remote): {refs_out}\n"
+           f"polako-evidence tree (ls-tree -r): {tree_out}")
+
+
 def build_evidence(ws, case):
     events, stream_note = load_events(os.path.join(ws, "run.stream.jsonl"))
     parts = ["## Recorded artifacts (.eval/)"]
@@ -234,7 +261,8 @@ def build_evidence(ws, case):
         parts.append(f"### {sub}\n"
                      f"log: {git(ws, sub, 'log', '--oneline', '-8')}\n"
                      f"status: {git(ws, sub, 'status', '--porcelain') or '(clean)'}\n"
-                     f"branches: {git(ws, sub, 'branch', '-a')}")
+                     f"branches: {git(ws, sub, 'branch', '-a')}\n"
+                     + origin_state(ws, sub))
     tl, tools = timeline(events)
     parts.append("## Tool timeline (call order, with result heads)\n"
                  + stream_note + "\n" + tl)
