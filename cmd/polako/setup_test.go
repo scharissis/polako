@@ -16,6 +16,23 @@ import (
 	"time"
 )
 
+// setupRepoOKRow calls queueGate rather than re-implementing its condition,
+// so the note here is exactly what a real `polako work` run would refuse
+// on — proved by checking for queueGate's own wording rather than a copy of
+// it.
+func TestSetupRepoOKRowNotesTheQueueGate(t *testing.T) {
+	row := setupRepoOKRow(setupRepoView{Visibility: "PUBLIC"}, "")
+	gateErr := queueGate("PUBLIC", "", false)
+	if !strings.Contains(row.detail, gateErr.Error()) {
+		t.Errorf("detail = %q, want it to contain queueGate's own message %q", row.detail, gateErr.Error())
+	}
+
+	labelled := setupRepoOKRow(setupRepoView{Visibility: "PUBLIC"}, "ready")
+	if strings.Contains(labelled.detail, "pass -label") {
+		t.Errorf("detail = %q, a -label already given should not repeat queueGate's advice", labelled.detail)
+	}
+}
+
 // The bare invocation's verb table has to list setup now that it exists.
 func TestVerbUsageListsSetup(t *testing.T) {
 	var b strings.Builder

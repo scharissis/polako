@@ -234,12 +234,14 @@ func readSetupRepoView(ctx context.Context, cfg config) (setupRepoViewResult, er
 }
 
 // setupRepoOKRow is what "gh repo view" reports once it has answered: the
-// visibility, plus the same gate note queueGate would itself refuse on —
-// said here as advice, since this report never refuses anything.
+// visibility, plus queueGate's own verdict — called rather than
+// re-implemented, so this note can never drift from what a real `polako
+// work` run would actually refuse on. Said here as advice: this report
+// never refuses anything itself.
 func setupRepoOKRow(view setupRepoView, label string) setupRow {
 	detail := view.Visibility
-	if strings.EqualFold(view.Visibility, "PUBLIC") && label == "" {
-		detail += " — public: -label is required for `polako work` to refuse an unfiltered queue"
+	if err := queueGate(view.Visibility, label, false); err != nil {
+		detail += " — " + err.Error()
 	}
 	return setupRow{name: "gh repo view", status: setupOK, detail: detail}
 }
