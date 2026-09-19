@@ -298,7 +298,11 @@ func main() {
 func denyGitAuth(t *testing.T, checkout string) {
 	t.Helper()
 	gitAt(t, checkout, "remote", "set-url", "origin", "ssh://git@example.invalid/repo.git")
-	t.Setenv("GIT_SSH_COMMAND", fakeGitSSHDeny(t))
+	// Git for Windows runs GIT_SSH_COMMAND through its bundled sh, which
+	// treats backslashes as escapes — a native filepath.Join path there
+	// gets mangled ("C:\Users\..." becomes "C:Users...", "command not
+	// found"). Forward slashes work in both that sh and a Windows exec.
+	t.Setenv("GIT_SSH_COMMAND", filepath.ToSlash(fakeGitSSHDeny(t)))
 }
 
 // Issue #425: git's own credentials being refused is a narrower, likelier-
