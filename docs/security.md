@@ -147,11 +147,14 @@ visibility an interactive `claude --remote-control` session has.
 `-remote=false` would again be the way to decline it. Until then there's
 nothing to decline.
 
-### `polako update -check`, and why it isn't in that table either
+### The published-version read, and why it isn't in that table either
 
 [`polako update`](install.md#getting-updates) reads one public file —
 `.claude-plugin/marketplace.json` on this project's own repository, through
-`gh api` — to learn what's published. It sends nothing about your run, your
-repository or your account: the request carries only the path to a file
-anyone can already fetch from a browser. Not a second destination under the
-table above, but named here for the same reason `-remote` is.
+`gh api` — to learn what's published. `polako work`'s preflight and `polako
+status` make the same read now, passively: one line when the published
+release is ahead of the binary or the installed plugin, nothing otherwise.
+All three send nothing about your run, your repository or your account: the
+request carries only the path to a file anyone can already fetch from a
+browser. Not a second destination under the table above, but named here for
+the same reason `-remote` is.
