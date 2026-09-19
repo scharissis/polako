@@ -664,14 +664,16 @@ func updateNoticeLine(ctx context.Context, binary string, cfg config) string {
 // prints the closing line. Nothing here mutates anything before the -check
 // return below except removeStaleOldBinary, which is not part of the plan —
 // it clears a Windows ".old" a previous stamped-tier swap left behind,
-// unconditionally on every real run, whether or not this one has anything
-// else to do. Everything else is a read (the published-version fetch,
-// `plugin list`, `go env`) that has already happened in runUpdate and
+// unconditionally on every real run for a stamped-tier binary, whether or
+// not this one has anything else to do — gated to that tier because a
+// ".old" is only ever swapBinary's own leftover, and only that tier ever
+// calls it. Everything else is a read (the published-version fetch, `plugin
+// list`, `go env`) that has already happened in runUpdate and
 // resolveBinaryPlan by the time this is called, so -check's "reads only"
 // promise for the plan itself holds structurally, not by a flag this
 // function has to remember to check before every call.
 func applyUpdate(ctx context.Context, cfg config, check bool, published string, plugin pluginPlan, binary binaryPlan, out io.Writer) error {
-	if !check {
+	if !check && binary.tier == tierStamped {
 		removeStaleOldBinary(binary.exe)
 	}
 

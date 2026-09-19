@@ -780,6 +780,37 @@ func TestApplyUpdateRemovesAStaleOldBinaryOnARealRun(t *testing.T) {
 	}
 }
 
+// A ".old" beside a go-installed or VCS-tier binary was never swapBinary's
+// own — only tierStamped ever calls it — so it's not this verb's to delete.
+func TestApplyUpdateLeavesAnOldFileAloneForANonStampedTier(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("the .old dance only exists on Windows")
+	}
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "polako.exe")
+	old := exe + ".old"
+	if err := os.WriteFile(old, []byte("somebody else's file"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(exe, []byte("current"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config{dir: t.TempDir(), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
+	t.Setenv(fakeClaudeEnv, "stream")
+	t.Setenv(fakeGoEnv, "1")
+
+	plugin := pluginPlan{state: pluginFound, version: "0.24.0"}
+	binary := binaryPlan{tier: tierModule, current: "0.24.0", exe: exe}
+
+	var out strings.Builder
+	if err := applyUpdate(context.Background(), cfg, false, "0.24.0", plugin, binary, &out); err != nil {
+		t.Fatalf("applyUpdate: %v", err)
+	}
+	if _, err := os.Stat(old); err != nil {
+		t.Errorf("a module-tier update removed a .old file it never created: %v", err)
+	}
+}
+
 func TestApplyUpdateLeavesAStaleOldBinaryUnderCheck(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("the .old dance only exists on Windows")
