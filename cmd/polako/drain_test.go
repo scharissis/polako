@@ -1916,6 +1916,57 @@ func TestDrainDoesNotPickAnIssueBackUpForABotComment(t *testing.T) {
 	}
 }
 
+// --- merge conflicts on an open PR ---
+
+// The point of issue #381: a conflict remediation that exited cleanly without
+// pushing used to be logged "remediation pushed — GitHub will recompute
+// mergeability" and reset the failure counter to zero — the conflicts case
+// had no cross-poll comparison the way checks and review do, so a run that
+// never actually resolved the conflict could loop forever without ever
+// parking or spending budget. runRemediation now reads the PR back once the
+// run exits and treats an unmoved head as the failed attempt it is, the same
+// as a Go error from execClaude.
+func TestDrainParksWhenConflictRemediationChangesNothing(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		// "stream" leaves the pretend repository alone: the run ends cleanly
+		// having pushed nothing, which is the case worth pinning.
+		PRs: map[string]*fakePR{"issue-1": {
+			Number: 9, State: "OPEN", Mergeable: "CONFLICTING",
+			Head: "abc123", Checks: []string{"SUCCESS"},
+		}},
+		Labels: []string{needsHumanLabel},
+	})
+
+	// Bounded, because the regression this guards is an unbounded wait: before
+	// the fix, a conflict remediation that pushed nothing never parked at all.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("one unresolved conflict must not end the drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if got := st.Issues["1"].Labels; !slices.Contains(got, needsHumanLabel) {
+		t.Errorf("issue 1 labels = %v, want it parked once remediation left the conflict unresolved", got)
+	}
+	if !st.Issues["1"].Open {
+		t.Error("parking must leave the issue open for a human")
+	}
+
+	out := buf.String()
+	if got := strings.Count(out, "dispatching remediation"); got != 1 {
+		t.Errorf("dispatched %d remediation runs, want 1 before giving up\ngot:\n%s", got, out)
+	}
+	if strings.Contains(out, "remediation pushed") {
+		t.Errorf("a run that pushed nothing must not be logged as having pushed\ngot:\n%s", out)
+	}
+	if want := "conflict remediation for PR #9 failed 1 times"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+}
+
 // --- red CI on an open PR ---
 
 // The point of issue #5: a failing check used to be invisible to the
@@ -1931,7 +1982,10 @@ func TestDrainRemediatesAFailingCheck(t *testing.T) {
 		PRs: map[string]*fakePR{"issue-1": {
 			Number: 9, State: "OPEN", Mergeable: "MERGEABLE",
 			Head: "abc123", Checks: []string{"SUCCESS", "FAILURE"},
-			MergeOnRead: 3,
+			// One more than the two polls that would otherwise see it: the
+			// remediation gate itself now reads the PR once right after the
+			// run to confirm the push landed, so that reads counts too.
+			MergeOnRead: 4,
 		}},
 	})
 
@@ -2324,9 +2378,10 @@ func TestDrainParentLabelReadFailureFallsThrough(t *testing.T) {
 	}
 }
 
-// A remediation that finishes without pushing has diagnosed all it is going to.
-// Running it again reads the same logs against the same commit and lands in the
-// same place, so the issue parks rather than looping until someone notices.
+// A remediation that finishes without pushing has diagnosed all it is going
+// to. runRemediation catches that the moment the run exits — the PR's head
+// has not moved — and treats it the same as a Go error, so the issue parks
+// rather than looping until someone notices.
 func TestDrainParksWhenCIRemediationChangesNothing(t *testing.T) {
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
@@ -2362,7 +2417,10 @@ func TestDrainParksWhenCIRemediationChangesNothing(t *testing.T) {
 	if got := strings.Count(out, "dispatching remediation"); got != 1 {
 		t.Errorf("dispatched %d remediation runs, want 1 before giving up\ngot:\n%s", got, out)
 	}
-	if want := "CI on PR #9 is still red and remediation left the branch unchanged"; !strings.Contains(out, want) {
+	if want := "check remediation 1/1 failed (remediation run finished without pushing a commit)"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+	if want := "CI on PR #9 is still red after 1 remediation runs — needs a human"; !strings.Contains(out, want) {
 		t.Errorf("log is missing %q\ngot:\n%s", want, out)
 	}
 	// The park that ends this issue is raised several calls down, inside the PR
@@ -2451,10 +2509,78 @@ func TestDrainRemediatesARequestedChange(t *testing.T) {
 	}
 }
 
-// A review a run cannot answer is not worth re-reading. Once a remediation has
-// finished and left the branch where it was, the same words against the same
-// commit land in the same place, so the issue parks for a human instead of
-// consuming a run per poll.
+// All three remediation prompts tell the run to comment on the PR, and a run
+// under -p is refused any tool it was not granted — so each dispatch has to
+// carry the comment grant, pinned to the PR it was sent to (issue #385). The
+// review run must keep its own pinned read alongside it.
+func TestEveryRemediationRunMayCommentOnItsOwnPR(t *testing.T) {
+	cases := []struct {
+		name, mode string
+		pr         fakePR
+		alsoWants  string
+	}{
+		{name: "conflict", mode: "stream", pr: fakePR{
+			Number: 9, State: "OPEN", Mergeable: "CONFLICTING",
+			Head: "abc123", Checks: []string{"SUCCESS"},
+		}},
+		{name: "checks", mode: "fixci", pr: fakePR{
+			Number: 9, State: "OPEN", Mergeable: "MERGEABLE",
+			Head: "abc123", Checks: []string{"SUCCESS", "FAILURE"}, MergeOnRead: 4,
+		}},
+		{name: "review", mode: "fixreview", pr: fakePR{
+			Number: 9, State: "OPEN", Mergeable: "MERGEABLE",
+			Head: "abc123", Checks: []string{"SUCCESS"},
+			Reviews:     []fakeReview{{State: reviewChangesRequested, SubmittedAt: "2026-08-20T10:00:00Z"}},
+			CommittedAt: "2026-08-19T10:00:00Z", MergeOnRead: 3,
+		}, alsoWants: "pulls/9/comments:*)"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			captureLog(t)
+			getArgs := watchClaudeArgs(t)
+			pr := c.pr
+			cfg, _ := drainConfig(t, c.mode, &ghState{
+				Issues: map[string]*fakeIssue{"1": {Open: true}},
+				PRs:    map[string]*fakePR{"issue-1": &pr},
+				Labels: []string{needsHumanLabel},
+			})
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := drain(ctx, cfg); err != nil {
+				t.Fatalf("drain: %v", err)
+			}
+
+			var remediations int
+			for _, argv := range getArgs() {
+				if !strings.Contains(argv, "PR #9") {
+					continue // a version probe, a usage read — not a remediation
+				}
+				remediations++
+				for _, want := range []string{
+					"Bash(gh pr comment 9 --body-file:*)",  // the grant
+					"`gh pr comment 9 --body-file <file>`", // the prompt spelling it
+					c.alsoWants,
+				} {
+					if !strings.Contains(argv, want) {
+						t.Errorf("remediation argv is missing %q:\n%s", want, argv)
+					}
+				}
+				if strings.Contains(argv, "Bash(gh pr comment:*)") {
+					t.Errorf("remediation argv grants gh pr comment unpinned:\n%s", argv)
+				}
+			}
+			if remediations == 0 {
+				t.Fatal("no remediation run was dispatched, so nothing was checked")
+			}
+		})
+	}
+}
+
+// A review a run cannot answer is not worth re-reading. A remediation that
+// exits cleanly without pushing is caught right there — runRemediation reads
+// the PR back and finds the head unmoved — and is treated the same as a Go
+// error: the budget is spent and, with none left, the issue parks for a
+// human instead of consuming a run per poll.
 func TestDrainParksWhenReviewRemediationChangesNothing(t *testing.T) {
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
@@ -2490,7 +2616,10 @@ func TestDrainParksWhenReviewRemediationChangesNothing(t *testing.T) {
 	if got := strings.Count(out, "dispatching remediation"); got != 1 {
 		t.Errorf("dispatched %d remediation runs, want 1 before giving up\ngot:\n%s", got, out)
 	}
-	if want := "changes are still requested on PR #9 and remediation left the branch unchanged"; !strings.Contains(out, want) {
+	if want := "review remediation 1/1 failed (remediation run finished without pushing a commit)"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+	if want := "changes requested on PR #9 are still outstanding after 1 remediation runs — needs a human"; !strings.Contains(out, want) {
 		t.Errorf("log is missing %q\ngot:\n%s", want, out)
 	}
 }

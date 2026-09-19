@@ -1375,6 +1375,26 @@ func TestPRReviewToolsStayPinnedToOnePR(t *testing.T) {
 	}
 }
 
+// Every remediation prompt asks for a PR comment, so the grant has to exist and
+// stay bounded: the PR number and --body-file are both inside the pattern. A
+// bare `gh pr comment 42` prefix would also match PR 420, and `gh pr comment`
+// in defaultTools would let a skill run comment on any PR in the repository.
+func TestPRCommentToolsStayPinnedToOnePR(t *testing.T) {
+	got := prCommentTools(42)
+	if want := "Bash(gh pr comment 42 --body-file:*)"; got != want {
+		t.Errorf("prCommentTools = %q, want %q", got, want)
+	}
+	if strings.Contains(defaultTools, "gh pr comment") {
+		t.Error("defaultTools grants gh pr comment; it belongs in prCommentTools, where " +
+			"it is bounded to the PR a remediation run was dispatched to")
+	}
+	// The prompt has to name the exact spelling the grant allows, or the run
+	// reaches for an inline --body and is refused.
+	if how := prCommentHow(42); !strings.Contains(how, "gh pr comment 42 --body-file") {
+		t.Errorf("prCommentHow does not spell the granted command: %q", how)
+	}
+}
+
 // Whether a review is still owed an answer is decided from one `pr view`
 // payload alone, so that a drain restarted mid-flight reaches the same verdict
 // as the one that dispatched the run.
