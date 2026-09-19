@@ -91,8 +91,8 @@ refreshing the secret is the fix.
    [`marketplace.json`](../.claude-plugin/marketplace.json) to the new tag, and
    merging that one line is the moment anybody is exposed to the release. Its
    body says what to check first: the *Smoke* run — every check CI can't make
-   before the tags exist, from the six attached assets — the five binaries
-   against their `checksums.txt` sums, and the `-ldflags` version stamp —
+   before the tags exist, from the five attached binaries' sizes, the
+   downloaded one's `checksums.txt` sum and `-ldflags` version stamp,
    through `go install ...@vX.Y.Z` resolving, to the plugin
    installing with the ref moved and a session listing the skill, all against
    a throwaway `CLAUDE_CONFIG_DIR` so no machine moves onto the release early
