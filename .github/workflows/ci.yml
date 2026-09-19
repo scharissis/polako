@@ -31,6 +31,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      # actions/checkout only fetches the ref the triggering event names — on
+      # a pull_request run that's the merge ref, not main — so
+      # TestShippingFixesDoNotSitUnreleased has no other path to origin/main's
+      # own history without this.
+      - name: fetch main
+        run: git fetch origin main
+
       # This cache is frozen, and that is fine. setup-go keys on a hash of
       # go.sum; stdlib-only means there is no go.sum, so the key is a constant
       # that hits every run, and on a hit the action skips saving. It has held

@@ -1413,15 +1413,23 @@ func TestShippingFixesDoNotSitUnreleased(t *testing.T) {
 		return
 	}
 
-	// The short name of the remote default branch, e.g. "origin/main" — same
-	// pattern as sync.go and park.go. Walking from here, not HEAD: on a
-	// feature branch HEAD follows that branch's own commits, so a first-parent
-	// walk from HEAD can name commits that were never on main at all (#387).
-	mainRef, ok := git("symbolic-ref", "refs/remotes/origin/HEAD", "--short")
-	if !ok || mainRef == "" {
-		unavailable("no origin/HEAD to resolve the default branch from")
+	// "origin/main" by name, not resolved via origin/HEAD the way sync.go and
+	// park.go do for a generic -dir repo: this test is inherently about this
+	// repository, which already hardcodes skills/, cmd/ and
+	// .claude-plugin/plugin.json, and origin/HEAD is not a safe assumption —
+	// actions/checkout never runs `git remote set-head`, so that symref is
+	// simply absent in CI regardless of event. Walking from here, not HEAD:
+	// on a feature branch HEAD follows that branch's own commits, so a
+	// first-parent walk from HEAD can name commits that were never on main at
+	// all (#387). ci.yml fetches origin/main explicitly for this, since
+	// actions/checkout otherwise only fetches the ref the triggering event
+	// names — a pull_request run's checkout has no other path to main's
+	// history.
+	if _, ok := git("rev-parse", "--verify", "-q", "origin/main"); !ok {
+		unavailable("origin/main not found: needs a fetch of the default branch")
 		return
 	}
+	const mainRef = "origin/main"
 
 	// The newest release by semver, not by tag date: a re-tag could land out of
 	// order, and v0.9.0 sorts after v0.10.0 lexically. The vX.Y.Z tags are the
