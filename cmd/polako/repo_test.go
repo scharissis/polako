@@ -32,6 +32,35 @@ func readRepoFile(t *testing.T, parts ...string) string {
 	return string(b)
 }
 
+// skillFrontmatter splits a skill's YAML frontmatter from its body — the
+// split every test that reads a skill's calling convention needs. label
+// names the file in the failure message.
+func skillFrontmatter(t *testing.T, label, skill string) (front, body string) {
+	t.Helper()
+	front, body, ok := strings.Cut(strings.TrimPrefix(skill, "---\n"), "\n---")
+	if !ok {
+		t.Fatalf("%s has no YAML frontmatter", label)
+	}
+	return front, body
+}
+
+// declaredArguments returns the names in frontmatter's `arguments: [a, b]`
+// list, or fails the test if that line isn't in the [name, name] form.
+func declaredArguments(t *testing.T, front string) []string {
+	t.Helper()
+	m := regexp.MustCompile(`(?m)^arguments:\s*\[([^\]]*)\]`).FindStringSubmatch(front)
+	if m == nil {
+		t.Fatalf("frontmatter's `arguments:` is not the [name, name] list form:\n%s", front)
+	}
+	var names []string
+	for _, name := range strings.Split(m[1], ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // moduleName is the last path element of the go.mod module directive; the
 // plugin, the binary and the repository all take their name from it.
 func moduleName(t *testing.T) string {
@@ -224,10 +253,7 @@ func TestDefaultSkillIsNamespacedForThePlugin(t *testing.T) {
 func TestShippedSkillMatchesTheDefaultFlag(t *testing.T) {
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
-	front, _, ok := strings.Cut(strings.TrimPrefix(skill, "---\n"), "\n---")
-	if !ok {
-		t.Fatalf("skills/%s/SKILL.md has no YAML frontmatter", skillDir)
-	}
+	front, _ := skillFrontmatter(t, "skills/"+skillDir+"/SKILL.md", skill)
 	for _, key := range []string{"description:", "argument-hint:", "arguments:"} {
 		if !strings.Contains(front, key) {
 			t.Errorf("SKILL.md frontmatter is missing %q\ngot:\n%s", key, front)
@@ -257,24 +283,14 @@ func planSkill(t *testing.T) string {
 func TestPlanSkillDeclaresItsArguments(t *testing.T) {
 	skill := planSkill(t)
 
-	front, body, ok := strings.Cut(strings.TrimPrefix(skill, "---\n"), "\n---")
-	if !ok {
-		t.Fatalf("skills/%s/SKILL.md has no YAML frontmatter", planSkillDir)
-	}
+	front, body := skillFrontmatter(t, "skills/"+planSkillDir+"/SKILL.md", skill)
 	for _, key := range []string{"description:", "argument-hint:", "arguments:", "disable-model-invocation: true"} {
 		if !strings.Contains(front, key) {
 			t.Errorf("SKILL.md frontmatter is missing %q\ngot:\n%s", key, front)
 		}
 	}
 
-	declared := regexp.MustCompile(`(?m)^arguments:\s*\[([^\]]*)\]`).FindStringSubmatch(front)
-	if declared == nil {
-		t.Fatalf("frontmatter's `arguments:` is not the [name, name] list form:\n%s", front)
-	}
-	for _, name := range strings.Split(declared[1], ",") {
-		if name = strings.TrimSpace(name); name == "" {
-			continue
-		}
+	for _, name := range declaredArguments(t, front) {
 		if !strings.Contains(body, "$"+name) {
 			t.Errorf("frontmatter declares argument %q but the body never interpolates $%s,"+
 				" so whatever the operator typed for it is silently dropped", name, name)
@@ -976,10 +992,7 @@ func TestEvidenceRefSectionIsPinned(t *testing.T) {
 func TestSkillDeclaresTheEvidenceArgument(t *testing.T) {
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
-	front, body, ok := strings.Cut(strings.TrimPrefix(skill, "---\n"), "\n---")
-	if !ok {
-		t.Fatalf("skills/%s/SKILL.md has no YAML frontmatter", skillDir)
-	}
+	front, body := skillFrontmatter(t, "skills/"+skillDir+"/SKILL.md", skill)
 	if !regexp.MustCompile(`(?m)^arguments:\s*\[issue,\s*evidence\]`).MatchString(front) {
 		t.Errorf("frontmatter's `arguments:` no longer declares `evidence`:\n%s", front)
 	}
