@@ -166,7 +166,8 @@ func fileRetireIssue(ctx context.Context, cfg config, c containerInfo, footer pl
 		// `proposed` label — GitHub refuses to attach one that doesn't exist
 		// yet. Same recovery parkIssue makes for needs-human: create it, then
 		// retry the one call that actually failed.
-		if cerr := ensureLabel(ctx, cfg, proposedLabel, proposedLabelColor, proposedLabelDesc); cerr == nil {
+		l := labelByName(proposedLabel)
+		if cerr := ensureLabel(ctx, cfg, l.name, l.color, l.description); cerr == nil {
 			raw, err = gh(ctx, cfg, "issue", "create", "--title", title, "--body", body, "--label", proposedLabel)
 		}
 	}

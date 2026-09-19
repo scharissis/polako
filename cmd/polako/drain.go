@@ -404,8 +404,8 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string) {
 		// label: GitHub refuses to add one that does not exist yet. A create
 		// that fails means the label was already there, so the first failure
 		// was something else and retrying the edit would only repeat it.
-		if cerr := ensureLabel(ctx, cfg, needsHumanLabel, "D93F0B",
-			"polako parked this issue for a human"); cerr == nil {
+		l := labelByName(needsHumanLabel)
+		if cerr := ensureLabel(ctx, cfg, l.name, l.color, l.description); cerr == nil {
 			_, err = gh(ctx, cfg, "issue", "edit", n, "--add-label", needsHumanLabel)
 		}
 	}

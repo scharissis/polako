@@ -20,16 +20,6 @@ import (
 	"time"
 )
 
-// The `proposed` label is declared at plan/health preflight and nowhere
-// else — the drain only ever excludes it. GitHub refuses to apply a label the
-// repository never defined, and a headless run holds no grant that could
-// create one, so the supervisor mints it up front exactly as it mints
-// awaiting-answer.
-const (
-	proposedLabelColor = "1D76DB"
-	proposedLabelDesc  = "proposed by polako — a human removes this label to queue it"
-)
-
 // openIssuesBefore is the set of open issue numbers before a run — the
 // baseline the label pass diffs against, so an issue a person files by hand
 // while the run is going is told apart from one the skill created. Open

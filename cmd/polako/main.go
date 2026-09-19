@@ -309,8 +309,8 @@ func preflight(ctx context.Context, cfg *config) error {
 	// Not on a dry run, which declares nothing: creating a label is a write, and
 	// the promise is that it leaves the repository as it found it.
 	if !cfg.dryRun {
-		_ = ensureLabel(ctx, *cfg, awaitingAnswerLabel, "FBCA04",
-			"polako is waiting for an answer on this issue")
+		l := labelByName(awaitingAnswerLabel)
+		_ = ensureLabel(ctx, *cfg, l.name, l.color, l.description)
 	}
 	cfg.claudeVersion = claudeVersion(ctx, *cfg)
 	cfg.pluginVersion, cfg.pluginID = pluginVersion(ctx, *cfg)
