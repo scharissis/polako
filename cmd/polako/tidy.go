@@ -154,8 +154,12 @@ func reclaim(ctx context.Context, cfg config, apply bool, watched int) ([]tidyRe
 
 	// The ancestor check below means nothing against a stale mirror, so the
 	// sweep runs after this and never before it — the same rule the drain
-	// itself follows picking up an issue.
-	syncDefaultBranch(ctx, cfg)
+	// itself follows picking up an issue. An unreachable origin stops a pickup
+	// but not a sweep: a tidy-up must not take a backlog down, and against a
+	// stale mirror the ancestor check only ever errs towards keeping a branch.
+	if err := syncDefaultBranch(ctx, cfg); err != nil {
+		narrate(sevWarning, "sweeping against the default branch as it is: %v", err)
+	}
 
 	if apply {
 		// A worktree whose directory was removed by hand still marks its

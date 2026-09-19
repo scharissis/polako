@@ -64,8 +64,8 @@ in the PR body rather than doing it quietly.
   reported, not swallowed — otherwise the next drain just works that issue
   again. One unfinishable issue parks; it never ends the session, since every
   later issue is still workable. Fatal is reserved for conditions nothing can
-  succeed at: a bad `-dir`, a `gh` that can't answer, a `-skill` this install
-  lacks, a token the API refuses.
+  succeed at: a bad `-dir`, a `gh` that can't answer, an origin that can't be
+  fetched, a `-skill` this install lacks, a token the API refuses.
 - **The `proposed` label is orchestration state**, intake's twin of `needs-human`: it
   marks an issue a machine proposed and nobody approved yet, the queue
   excludes it, and only a human removes it. Whatever creates issues applies it
@@ -112,7 +112,10 @@ in the PR body rather than doing it quietly.
   per merge. `--ff-only` is the whole mechanism: refuse rather than rebase,
   reset or commit. This isn't an exception to *nothing merges itself* —
   advancing a mirror to a state a human already created on the remote decides
-  nothing. Both halves do this; the skill also runs with no supervisor at all.
+  nothing. A refusal is logged and the drain carries on; an origin that can't
+  be fetched at pickup stops the shift instead — that run would start from a
+  base of unknown age and couldn't push, and so would every issue behind it.
+  Both halves do this; the skill also runs with no supervisor at all.
 - **Stdlib-only Go.** No third-party modules — it has to cross-compile to a
   single binary for five targets with nothing but the Go toolchain, and CI
   enforces that.

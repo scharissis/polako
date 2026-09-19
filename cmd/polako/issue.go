@@ -211,8 +211,11 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 	// Before the run, not only after the last merge: the gap this closes is also
 	// opened by a teammate's push and by a drain restarted days later, and the
 	// moment that matters is the one just before a branch is cut and a review
-	// resolves its base.
-	syncDefaultBranch(ctx, cfg)
+	// resolves its base. It is also the gate: an origin that cannot be fetched
+	// ends the shift here, before a run is paid for that could not push.
+	if err := syncDefaultBranch(ctx, cfg); err != nil {
+		return err
+	}
 
 	// The pickup half of the two samples the ledger reads a terminal record
 	// for — see issueState.weekUsageAtPickup. Sampled here rather than at the

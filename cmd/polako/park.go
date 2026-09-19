@@ -41,7 +41,8 @@ func deferReason(err error) (*deferredError, bool) {
 // stopping the session over it strands every later issue too — typically hours
 // before anyone looks at the terminal. Fatal is reserved for conditions where
 // no further progress is possible at all: a bad -dir, a gh that cannot answer,
-// a -skill this installation does not have, a token the API refuses.
+// an origin that cannot be fetched, a -skill this installation does not have,
+// a token the API refuses.
 type parkedError struct {
 	reason string
 	// category is the same park in one identifier, for the terminal issue

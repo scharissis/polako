@@ -106,6 +106,29 @@ func TestReclaimRemovesAMergedAndCleanIssue(t *testing.T) {
 	}
 }
 
+// A sweep is housekeeping: the unreachable origin that stops a pickup must not
+// stop it, or a tidy-up takes the backlog down. It judges against the mirror as
+// it stands instead.
+func TestReclaimSurvivesAnUnreachableOrigin(t *testing.T) {
+	buf := captureLog(t)
+	_, checkout := upstream(t)
+	mergeIssueBranch(t, checkout, "issue-1", "feature-1")
+	unreachableOrigin(t, checkout)
+
+	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: false}}})
+
+	results, err := reclaim(context.Background(), tidyCfg(t, checkout), true, 0)
+	if err != nil {
+		t.Fatalf("reclaim: %v", err)
+	}
+	if r := findTidyResult(t, results, 1); !r.reclaimed {
+		t.Errorf("issue #1 was not reclaimed: %+v", r)
+	}
+	if !strings.Contains(buf.String(), "sweeping against the default branch as it is") {
+		t.Errorf("log does not say the refresh was skipped:\n%s", buf)
+	}
+}
+
 // reclaim matches a branch's worktree by asking git which branch it holds,
 // never by directory name or location (see worktreeFor in sync.go) — so a
 // worktree from the old sibling-folder convention and one at the current

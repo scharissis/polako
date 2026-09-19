@@ -909,6 +909,43 @@ func TestDrainParksADeadIssueAndKeepsGoing(t *testing.T) {
 	}
 }
 
+// An origin that cannot be fetched stops the shift before a run is paid for:
+// the run would work from a base of unknown age and could not push. Stopped, not
+// parked — issue 2 would meet the same dead remote, and a park apiece would
+// label the whole backlog needs-human for a fault that is none of theirs.
+func TestDrainStopsWhenOriginCannotBeFetched(t *testing.T) {
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true},
+			"2": {Open: true},
+		},
+	})
+	_, cfg.dir = upstream(t)
+	unreachableOrigin(t, cfg.dir)
+	told := notifyLog(t, &cfg)
+
+	err := drain(context.Background(), cfg)
+	if err == nil || !strings.Contains(err.Error(), "could not fetch origin") {
+		t.Fatalf("err = %v, want the drain stopped on the failed fetch", err)
+	}
+
+	// The "stream" fake opens no PR, so a run that had started would have
+	// parked issue 1 — label, comment and all.
+	st := finalGhState(t, path)
+	for n, is := range st.Issues {
+		if len(is.Labels) != 0 || is.Comments != 0 {
+			t.Errorf("issue %s has labels %v and %d comments, want it untouched", n, is.Labels, is.Comments)
+		}
+	}
+	if out := buf.String(); strings.Contains(out, "=== issue #2 ===") {
+		t.Errorf("the drain went on to issue 2 against the same dead remote:\n%s", out)
+	}
+	if got := strings.Join(told(), "\n"); !strings.Contains(got, notifyStopped) {
+		t.Errorf("notifications = %q, want one %s: somebody has to unlock the agent", got, notifyStopped)
+	}
+}
+
 // Issue #389: a shift that parks its only issue must not report the backlog
 // as cleared. The issue is still open — only parked — and "cleared" is the
 // success line, so an operator reading just that would think the work was
