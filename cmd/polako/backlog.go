@@ -390,7 +390,7 @@ func issueHasLabel(ctx context.Context, cfg config, issue int, name string) (boo
 // like listOpenIssues, so it costs no retry allowance. Unlike listOpenIssues
 // it is not remembered for the shift: this is one read per pickup and a drain
 // works one issue at a time, so the rejected call is paid once per issue
-// rather than once per shift, keeping this off the queue listing on
+// rather than once per shift. This is kept off the queue listing on
 // purpose, where a per-shift memo would matter. On such a gh an epic's labels
 // simply do not reach its children. The second call — a plain `--json labels`
 // on the parent — runs only when the issue settled fewer than both families
