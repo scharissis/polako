@@ -1,0 +1,8 @@
+{
+  "name": "visual-change-fixture",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "python3 -m http.server 4173"
+  }
+}

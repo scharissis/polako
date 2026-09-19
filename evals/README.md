@@ -1,6 +1,6 @@
 # Eval suite for the shipped skills
 
-Seven cases that grade what a run *does*, not what a `SKILL.md` says. Each one
+Eight cases that grade what a run *does*, not what a `SKILL.md` says. Each one
 scaffolds a scratch git repo, points a stand-in `gh` at fixtures, runs a real
 skill invocation, and scores the artifacts left behind.
 
@@ -11,6 +11,7 @@ skill invocation, and scores the artifacts left behind.
 | `review-gate` | implement-issue | `/code-review` fires, aimed at `issue-1`, before `gh pr create` |
 | `resume-existing-plan` | implement-issue | an existing worktree and PLAN.md are resumed, not rewritten |
 | `one-turn` | implement-issue | a slow verification step is waited out in the turn, not deferred to one that never comes |
+| `visual-change` | implement-issue | a screenshot reaches `polako-evidence` and the PR body's blob link names a real commit on it |
 | `plan-vision` | plan-backlog | a vision document becomes labelled, sized, parented proposals — and the gap the backlog already covers is not re-proposed |
 | `review-health` | review-health | a repo's planted structural problems become labelled, sized proposals, each resting on a measurement or a named location, the missing size gate proposed as its own issue, and the overlap the backlog already covers left alone |
 
@@ -18,6 +19,14 @@ skill invocation, and scores the artifacts left behind.
 after numbers from a benchmark that takes a minute and a quarter each time, and
 waiting those out is the behaviour under test. `seed.sh` puts that benchmark in
 the scratch repo for this case alone, so the other cases stay quick.
+
+`visual-change` is the one case with anything to look at: a static page and a
+`dev` script it can serve. It uses a real Chromium, about 150 MB once into the
+user cache, so it stays as opt-in as the rest of the suite. It's also ahead of
+what the skill does today — the capture pipeline it grades ships across
+`docs/plans/visual-evidence.md`'s tickets 3–6, so most of its graders read red
+until then; `case.yaml` says so, and one of them stays red on purpose even
+after capture ships, until the before shot lands.
 
 `plan-vision` and `review-health` are the odd shape: their subjects write no
 code at all. `plan-vision` seeds a `VISION.md` and an open backlog that already

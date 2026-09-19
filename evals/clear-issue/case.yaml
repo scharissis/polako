@@ -57,5 +57,15 @@ graders:
       Fail if labels.log records "add awaiting-answer" without a matching
       "remove awaiting-answer" in the same run.
 
+  - type: llm
+    name: no_dev_server_or_evidence_ref
+    focus: whether the run started a dev server or touched polako-evidence, per the tool timeline and origin state
+    criteria: >
+      greet.sh has no browser-rendered files and no package.json, so nothing
+      here is visual. Fail if the tool timeline shows a server command (npm
+      run, python3 -m http.server, playwright) or the origin state shows a
+      polako-evidence ref — a plain script fix has no business starting
+      either.
+
   - type: tool_used
     tool: Skill

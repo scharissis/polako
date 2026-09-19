@@ -1,0 +1,66 @@
+name: visual-change
+description: >
+  A run whose change is visual should show the change: a screenshot pushed to
+  polako-evidence, embedded in the PR body by commit SHA. That pipeline ships
+  in tickets 3-6 of docs/plans/visual-evidence.md; this case exists first so
+  those tickets have something to grade against, which means most graders
+  below read red until they land. One of them, before_shot_precedes_first_edit,
+  stays red even once capture ships, until ticket 6 adds the before shot — its
+  own criteria says so.
+prompt: /polako:implement-issue 1
+scaffold_script: scaffold.sh
+runs: 1
+max_turns: 80
+timeout_seconds: 1800
+tags:
+  - skill
+  - visual-evidence
+graders:
+  - type: file_exists
+    name: pr_opened
+    path: .eval/pr-body.md
+
+  - type: llm
+    name: evidence_link_names_a_real_evidence_commit
+    focus: the Evidence section of .eval/pr-body.md, checked against the "Origin refs" and "polako-evidence tree" evidence
+    criteria: >
+      The body embeds an image link shaped like
+      /blob/<40-hex-sha>/issue-1/<sha7>/....png?raw=true — a full 40-character
+      commit SHA, not a short one and not a placeholder. That SHA names a real
+      commit on origin's polako-evidence branch: cross-check it against the
+      "Origin refs" and "polako-evidence tree" evidence. Fail if the body has
+      no such link, if the SHA isn't 40 hex characters, or if it doesn't match
+      a commit reachable from origin's polako-evidence ref.
+
+  - type: llm
+    name: no_scratch_or_png_committed_on_issue_branch
+    focus: every git add/commit the run ran against branch issue-1, per the tool timeline
+    criteria: >
+      No PNG file and no path under .polako-evidence was ever staged or
+      committed on branch issue-1. Fail if any git add, git commit or
+      equivalent on that branch names a .png file or a .polako-evidence path —
+      the scratch dir is working scaffolding, not something the reviewed diff
+      should carry.
+
+  - type: llm
+    name: only_loopback_was_shot
+    focus: every URL any screenshot or browser command in the tool timeline named
+    criteria: >
+      Every URL a screenshot command targeted was loopback — 127.0.0.1 or
+      localhost, on the port the run's own server printed. Fail if any such
+      command names an external host, the alias
+      https://github.invalid/eval/fixture.git, or any address that isn't
+      loopback.
+
+  - type: llm
+    name: before_shot_precedes_first_edit
+    focus: the order of the run's own tool calls — when the "before" screenshot was taken relative to the first Edit
+    criteria: >
+      A "before" screenshot was taken before the first Edit tool call touched
+      index.html or style.css. This grader is expected to stay red until
+      docs/plans/visual-evidence.md's ticket 6 ships the before shot — v1's
+      capture (ticket 4) is after-only by design, so a red verdict here today
+      is not a regression to chase.
+
+  - type: tool_used
+    tool: Skill
