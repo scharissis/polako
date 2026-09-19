@@ -386,7 +386,11 @@ func applyStampedBinary(ctx context.Context, cfg config, published, exe string) 
 		return fmt.Errorf("%s is not writable (%w) — download %s from %s yourself",
 			dir, err, asset, releaseURL(published))
 	}
-	defer os.RemoveAll(tmp)
+	defer func() {
+		if err := os.RemoveAll(tmp); err != nil {
+			log.Printf("could not remove the temp dir %s: %v — safe to delete by hand", tmp, err)
+		}
+	}()
 
 	if _, err := gh(ctx, cfg, "release", "download", "v"+published, "--repo", updateRepo,
 		"--pattern", asset, "--pattern", "checksums.txt", "--dir", tmp); err != nil {
