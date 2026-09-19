@@ -13,6 +13,23 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.24.0]
+
+### What's Changed
+* docs: plan for permission parks that name their fix by @scharissis in https://github.com/scharissis/polako/pull/427
+* test: a visual-change eval case with a page to shoot by @scharissis in https://github.com/scharissis/polako/pull/436 (closes #401)
+* refactor: one label table and a label-exists lookup by @scharissis in https://github.com/scharissis/polako/pull/437 (closes #412)
+* docs: plan for polako update by @scharissis in https://github.com/scharissis/polako/pull/438
+* feat: work refuses a -label the repo doesn't have by @scharissis in https://github.com/scharissis/polako/pull/445 (closes #414)
+* feat: polako update, the plugin then a go-installed binary by @scharissis in https://github.com/scharissis/polako/pull/446 (closes #440)
+* feat: work and status say when a newer release is published by @scharissis in https://github.com/scharissis/polako/pull/447 (closes #441)
+* feat: releases attach a checksums.txt for the five binaries by @scharissis in https://github.com/scharissis/polako/pull/448 (closes #442)
+* feat: polako update replaces a release binary, checksum-verified by @scharissis in https://github.com/scharissis/polako/pull/449 (closes #443)
+* docs: install page leads with install, then polako update by @scharissis in https://github.com/scharissis/polako/pull/450 (closes #444)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.23.0...v0.24.0
+
 ## [0.23.0]
 
 ### What's Changed
