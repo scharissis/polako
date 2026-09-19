@@ -221,22 +221,20 @@ def origin_state(ws, sub):
     polako-evidence never touches the pusher's own remote-tracking refs, so
     without this a pushed evidence commit would be invisible to grading. The
     fetch is scoped to that one ref; nothing here writes to the checkout the
-    run itself worked in."""
+    run itself worked in. Reuses git() for the two read-only calls; the fetch
+    stays a bare subprocess.run because git() throws its returncode away and
+    this is the one call whose success decides what runs next."""
     d = os.path.join(ws, sub)
     if not os.path.isdir(d):
         return f"(no {sub})"
-    refs = subprocess.run(["git", "-C", d, "ls-remote", "origin"],
-                          capture_output=True, text=True)
-    refs_out = refs.stdout.strip() or refs.stderr.strip() or "(no refs)"
+    refs_out = git(ws, sub, "ls-remote", "origin") or "(no refs)"
     fetch = subprocess.run(
         ["git", "-C", d, "fetch", "--quiet", "origin", "polako-evidence"],
         capture_output=True, text=True)
     if fetch.returncode != 0:
         tree_out = "(no polako-evidence ref on origin)"
     else:
-        tree = subprocess.run(["git", "-C", d, "ls-tree", "-r", "FETCH_HEAD"],
-                              capture_output=True, text=True)
-        tree_out = tree.stdout.strip() or tree.stderr.strip() or "(empty tree)"
+        tree_out = git(ws, sub, "ls-tree", "-r", "FETCH_HEAD") or "(empty tree)"
     return (f"origin refs (ls-remote): {refs_out}\n"
            f"polako-evidence tree (ls-tree -r): {tree_out}")
 
