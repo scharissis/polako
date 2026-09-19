@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -393,10 +396,11 @@ func TestBinarySummary(t *testing.T) {
 		published: "0.24.0",
 		want:      []string{"0.24.0", "already current"},
 	}, {
-		name:      "stamped, behind",
-		plan:      binaryPlan{tier: tierStamped, current: "0.23.0"},
-		published: "0.24.0",
-		want:      []string{releaseAssetName("0.24.0"), releaseURL("0.24.0")},
+		name:       "stamped, behind",
+		plan:       binaryPlan{tier: tierStamped, current: "0.23.0"},
+		published:  "0.24.0",
+		wantAction: true,
+		want:       []string{"0.23.0", "0.24.0", releaseAssetName("0.24.0")},
 	}, {
 		name:      "vcs build",
 		plan:      binaryPlan{tier: tierVCS, current: "a1b2c3d4e5f6"},
@@ -449,6 +453,186 @@ func TestGoInstallDirFallsBackToGOPATHBin(t *testing.T) {
 	if want := filepath.Join("/gopath", "bin"); got != want {
 		t.Errorf("goInstallDir = %q, want %q", got, want)
 	}
+}
+
+// --- applyStampedBinary / swapBinary (ticket 4) ---
+
+// exeBaseName is the running-binary name applyStampedBinary and swapBinary
+// tests write their fake "exe" as — real on every OS the suite runs on, so
+// swapBinary's Windows-only rename-aside branch is exercised for real on the
+// Windows CI runner rather than only on the OSes that happen to develop it.
+func exeBaseName() string {
+	if runtime.GOOS == "windows" {
+		return "polako.exe"
+	}
+	return "polako"
+}
+
+func stampedGhCfg(t *testing.T, release *fakeRelease) config {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "gh-state.json")
+	if err := writeGhState(path, &ghState{Repo: "example/repo", Release: release}); err != nil {
+		t.Fatalf("writing fake gh state: %v", err)
+	}
+	t.Setenv(fakeGhEnv, path)
+	return config{dir: t.TempDir(), ghBin: fakeCLI(t)}
+}
+
+func TestChecksumFor(t *testing.T) {
+	raw := []byte("aaaa11  polako_v0.24.0_linux_amd64\nbbbb22 *polako_v0.24.0_darwin_arm64\n")
+	if got, err := checksumFor(raw, "polako_v0.24.0_linux_amd64"); err != nil || got != "aaaa11" {
+		t.Errorf("checksumFor(linux) = %q, %v, want aaaa11, nil", got, err)
+	}
+	// The "*" binary-mode marker sha256sum prefixes the name with is stripped.
+	if got, err := checksumFor(raw, "polako_v0.24.0_darwin_arm64"); err != nil || got != "bbbb22" {
+		t.Errorf("checksumFor(darwin) = %q, %v, want bbbb22, nil", got, err)
+	}
+	if _, err := checksumFor(raw, "polako_v0.24.0_windows_amd64.exe"); err == nil {
+		t.Error("checksumFor should error on an asset with no entry")
+	}
+}
+
+func TestApplyStampedBinaryReplacesTheRunningBinary(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, exeBaseName())
+	if err := os.WriteFile(exe, []byte("old binary"), 0o755); err != nil {
+		t.Fatalf("seeding the running binary: %v", err)
+	}
+	asset := releaseAssetName("0.24.0")
+	content := []byte("new binary content")
+	cfg := stampedGhCfg(t, &fakeRelease{Assets: map[string][]byte{asset: content}})
+
+	if err := applyStampedBinary(context.Background(), cfg, "0.24.0", exe); err != nil {
+		t.Fatalf("applyStampedBinary: %v", err)
+	}
+	got, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatalf("reading the swapped binary: %v", err)
+	}
+	if !bytes.Equal(got, content) {
+		t.Errorf("exe content = %q, want %q", got, content)
+	}
+	if runtime.GOOS != "windows" {
+		// Windows mostly ignores POSIX mode bits; the ".old" dance below
+		// covers what actually matters on that OS.
+		info, err := os.Stat(exe)
+		if err != nil {
+			t.Fatalf("stat: %v", err)
+		}
+		if info.Mode().Perm() != 0o755 {
+			t.Errorf("exe mode = %v, want 0755 (copied from the old binary)", info.Mode().Perm())
+		}
+	}
+}
+
+func TestApplyStampedBinaryRefusesOnChecksumMismatch(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, exeBaseName())
+	original := []byte("old binary")
+	if err := os.WriteFile(exe, original, 0o755); err != nil {
+		t.Fatalf("seeding the running binary: %v", err)
+	}
+	asset := releaseAssetName("0.24.0")
+	cfg := stampedGhCfg(t, &fakeRelease{
+		Assets:      map[string][]byte{asset: []byte("new binary")},
+		BadChecksum: asset,
+	})
+
+	err := applyStampedBinary(context.Background(), cfg, "0.24.0", exe)
+	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("err = %v, want a checksum mismatch", err)
+	}
+	got, readErr := os.ReadFile(exe)
+	if readErr != nil || !bytes.Equal(got, original) {
+		t.Errorf("exe = %q, %v, want the original binary untouched", got, readErr)
+	}
+}
+
+func TestApplyStampedBinaryRefusesWithNoChecksumsFile(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, exeBaseName())
+	original := []byte("old binary")
+	if err := os.WriteFile(exe, original, 0o755); err != nil {
+		t.Fatalf("seeding the running binary: %v", err)
+	}
+	asset := releaseAssetName("0.24.0")
+	cfg := stampedGhCfg(t, &fakeRelease{
+		Assets:      map[string][]byte{asset: []byte("new binary")},
+		NoChecksums: true,
+	})
+
+	err := applyStampedBinary(context.Background(), cfg, "0.24.0", exe)
+	if err == nil || !strings.Contains(err.Error(), "checksums.txt") {
+		t.Fatalf("err = %v, want it to name the missing checksums.txt", err)
+	}
+	got, readErr := os.ReadFile(exe)
+	if readErr != nil || !bytes.Equal(got, original) {
+		t.Errorf("exe = %q, %v, want the original binary untouched", got, readErr)
+	}
+}
+
+func TestApplyStampedBinaryRefusesWithNoExePath(t *testing.T) {
+	cfg := stampedGhCfg(t, &fakeRelease{})
+	err := applyStampedBinary(context.Background(), cfg, "0.24.0", "")
+	if err == nil || !strings.Contains(err.Error(), releaseAssetName("0.24.0")) {
+		t.Fatalf("err = %v, want it to name the asset to download by hand", err)
+	}
+}
+
+func TestSwapBinaryReplacesTheRunningBinary(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, exeBaseName())
+	if err := os.WriteFile(exe, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	newBinary := filepath.Join(dir, "new")
+	if err := os.WriteFile(newBinary, []byte("new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := swapBinary(newBinary, exe); err != nil {
+		t.Fatalf("swapBinary: %v", err)
+	}
+	got, err := os.ReadFile(exe)
+	if err != nil || string(got) != "new" {
+		t.Errorf("exe = %q, %v, want \"new\"", got, err)
+	}
+
+	old := exe + ".old"
+	if runtime.GOOS == "windows" {
+		// The whole reason this dance exists: Windows can't rename over its
+		// own loader's open file, so the original is left here for
+		// removeStaleOldBinary to clean up on the next `update`.
+		oldContent, err := os.ReadFile(old)
+		if err != nil || string(oldContent) != "old" {
+			t.Errorf("exe.old = %q, %v, want \"old\" left behind", oldContent, err)
+		}
+	} else if _, err := os.Stat(old); err == nil {
+		t.Error("swapBinary left a .old file on a non-Windows OS")
+	}
+}
+
+func TestRemoveStaleOldBinary(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("the .old dance only exists on Windows")
+	}
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "polako.exe")
+	old := exe + ".old"
+	if err := os.WriteFile(old, []byte("stale"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	removeStaleOldBinary(exe)
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Errorf("stale .old file was not removed (stat err = %v)", err)
+	}
+}
+
+func TestRemoveStaleOldBinaryNoOpWithNothingThere(t *testing.T) {
+	// Best-effort: no .old file, and no exe path known at all, are both the
+	// common case, not an error — nothing here should panic either way.
+	removeStaleOldBinary(filepath.Join(t.TempDir(), "polako.exe"))
+	removeStaleOldBinary("")
 }
 
 // --- applyUpdate orchestration ---
@@ -511,6 +695,87 @@ func TestApplyUpdateRunsBothHalvesWhenBehind(t *testing.T) {
 	}
 	if !sawGoInstall {
 		t.Error("did not run `go install`")
+	}
+}
+
+func TestApplyUpdateRunsStampedBinaryWhenBehind(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, exeBaseName())
+	if err := os.WriteFile(exe, []byte("old binary"), 0o755); err != nil {
+		t.Fatalf("seeding the running binary: %v", err)
+	}
+	asset := releaseAssetName("0.24.0")
+	content := []byte("new binary content")
+	cfg := stampedGhCfg(t, &fakeRelease{Assets: map[string][]byte{asset: content}})
+
+	plugin := pluginPlan{state: pluginFound, version: "0.24.0"} // already current — only the binary half moves
+	binary := binaryPlan{tier: tierStamped, current: "0.23.0", exe: exe}
+
+	var out strings.Builder
+	if err := applyUpdate(context.Background(), cfg, false, "0.24.0", plugin, binary, &out); err != nil {
+		t.Fatalf("applyUpdate: %v", err)
+	}
+	got, err := os.ReadFile(exe)
+	if err != nil || !bytes.Equal(got, content) {
+		t.Errorf("exe = %q, %v, want the downloaded release content", got, err)
+	}
+}
+
+func TestApplyUpdateRemovesAStaleOldBinaryOnARealRun(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("the .old dance only exists on Windows")
+	}
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "polako.exe")
+	old := exe + ".old"
+	if err := os.WriteFile(old, []byte("stale"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(exe, []byte("current"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config{dir: t.TempDir(), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
+	t.Setenv(fakeClaudeEnv, "stream")
+	t.Setenv(fakeGoEnv, "1")
+
+	plugin := pluginPlan{state: pluginFound, version: "0.24.0"}
+	binary := binaryPlan{tier: tierStamped, current: "0.24.0", exe: exe} // already current — nothing else to run
+
+	var out strings.Builder
+	if err := applyUpdate(context.Background(), cfg, false, "0.24.0", plugin, binary, &out); err != nil {
+		t.Fatalf("applyUpdate: %v", err)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Errorf("stale .old file was not cleared by a real run (stat err = %v)", err)
+	}
+}
+
+func TestApplyUpdateLeavesAStaleOldBinaryUnderCheck(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("the .old dance only exists on Windows")
+	}
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "polako.exe")
+	old := exe + ".old"
+	if err := os.WriteFile(old, []byte("stale"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(exe, []byte("current"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config{dir: t.TempDir(), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
+	t.Setenv(fakeClaudeEnv, "stream")
+	t.Setenv(fakeGoEnv, "1")
+
+	plugin := pluginPlan{state: pluginFound, version: "0.24.0"}
+	binary := binaryPlan{tier: tierStamped, current: "0.24.0", exe: exe}
+
+	var out strings.Builder
+	if err := applyUpdate(context.Background(), cfg, true, "0.24.0", plugin, binary, &out); err != nil {
+		t.Fatalf("applyUpdate: %v", err)
+	}
+	if _, err := os.Stat(old); err != nil {
+		t.Errorf("-check removed the stale .old file, but -check must not write anything: %v", err)
 	}
 }
 

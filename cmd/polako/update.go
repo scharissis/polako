@@ -13,6 +13,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -263,11 +265,22 @@ func applyPlugin(ctx context.Context, cfg config, p pluginPlan) error {
 type binaryPlan struct {
 	tier    buildTier
 	current string
+	// exe is the running binary's own resolved path, read once here rather
+	// than by applyStampedBinary itself — the same "every read happens before
+	// applyUpdate is called" shape every other field in this file already
+	// has, and the seam that lets a test hand applyStampedBinary a temp file
+	// instead of the real os.Executable(). Empty when it can't be read; a
+	// stamped-tier update then refuses rather than guessing a path.
+	exe string
 }
 
 func resolveBinaryPlan() binaryPlan {
 	tier, v := polakoBuildTier()
-	return binaryPlan{tier: tier, current: normalizeBuildVersion(tier, v)}
+	exe, _ := os.Executable()
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return binaryPlan{tier: tier, current: normalizeBuildVersion(tier, v), exe: exe}
 }
 
 // normalizeBuildVersion strips a release tag's "v" prefix for the two tiers
@@ -298,8 +311,8 @@ func normalizeBuildVersion(tier buildTier, v string) string {
 const updateModulePath = "github.com/scharissis/polako/cmd/polako"
 
 // applyBinary runs `go install` for a module-tier build. Never called for
-// any other tier: a stamped release binary is a download (ticket 4, out of
-// scope here) and a VCS build is the operator's own rebuild — neither has
+// any other tier: a stamped release binary goes through applyStampedBinary
+// instead, and a VCS build is the operator's own rebuild — neither has
 // anything for `go install` to do.
 func applyBinary(ctx context.Context, cfg config, published string) error {
 	target := updateModulePath + "@v" + published
@@ -354,10 +367,125 @@ func goInstallWarning(ctx context.Context, cfg config) string {
 		filepath.Dir(exe), installDir)
 }
 
+// applyStampedBinary downloads the release asset for this GOOS/GOARCH,
+// verifies it against checksums.txt, and swaps it in over the running
+// binary — the download ticket 1 could only print a link for. Everything
+// happens in a temp dir made beside exe, so the one rename that actually
+// touches the running binary never crosses a filesystem boundary; a
+// checksum mismatch, a missing checksums.txt, or an unwritable directory
+// all refuse before that rename, leaving exe untouched.
+func applyStampedBinary(ctx context.Context, cfg config, published, exe string) error {
+	asset := releaseAssetName(published)
+	if exe == "" {
+		return fmt.Errorf("could not find this binary's own path — download %s from %s yourself",
+			asset, releaseURL(published))
+	}
+	dir := filepath.Dir(exe)
+	tmp, err := os.MkdirTemp(dir, ".polako-update-*")
+	if err != nil {
+		return fmt.Errorf("%s is not writable (%w) — download %s from %s yourself",
+			dir, err, asset, releaseURL(published))
+	}
+	defer os.RemoveAll(tmp)
+
+	if _, err := gh(ctx, cfg, "release", "download", "v"+published, "--repo", updateRepo,
+		"--pattern", asset, "--pattern", "checksums.txt", "--dir", tmp); err != nil {
+		return fmt.Errorf("downloading %s: %w", asset, err)
+	}
+
+	sums, err := os.ReadFile(filepath.Join(tmp, "checksums.txt"))
+	if err != nil {
+		return fmt.Errorf("release v%s has no checksums.txt to verify %s against — leaving the running binary in place", published, asset)
+	}
+	want, err := checksumFor(sums, asset)
+	if err != nil {
+		return err
+	}
+	assetPath := filepath.Join(tmp, asset)
+	got, err := sha256File(assetPath)
+	if err != nil {
+		return fmt.Errorf("checksumming %s: %w", asset, err)
+	}
+	if got != want {
+		return fmt.Errorf("checksum mismatch for %s: downloaded %s, checksums.txt says %s — leaving the running binary in place",
+			asset, got, want)
+	}
+
+	info, err := os.Stat(exe)
+	if err != nil {
+		return fmt.Errorf("reading %s's mode: %w", exe, err)
+	}
+	if err := os.Chmod(assetPath, info.Mode()); err != nil {
+		return fmt.Errorf("setting %s's mode: %w", assetPath, err)
+	}
+	return swapBinary(assetPath, exe)
+}
+
+// checksumFor finds asset's line in a checksums.txt-shaped file — sha256sum's
+// own format, "<hex>  name" (or "<hex> *name" in binary mode), which is what
+// release.yml's own `sha256sum * > checksums.txt` step writes.
+func checksumFor(raw []byte, asset string) (string, error) {
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		if strings.TrimPrefix(fields[1], "*") == asset {
+			return fields[0], nil
+		}
+	}
+	return "", fmt.Errorf("checksums.txt has no entry for %s — leaving the running binary in place", asset)
+}
+
+// sha256File is the download's half of the checksum comparison.
+func sha256File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// swapBinary replaces exe with newBinary in the one rename that touches the
+// running binary — assumed already on the same filesystem, which
+// applyStampedBinary's own temp dir (made beside exe) guarantees. Every OS
+// but Windows can rename straight over a running executable; Windows' loader
+// holds it open in a way that blocks that, so the running exe is renamed
+// aside to ".old" first, freeing its name for the new one. removeStaleOldBinary
+// cleans that file up, not this — the loader may still hold it open right
+// after the swap.
+func swapBinary(newBinary, exe string) error {
+	if runtime.GOOS == "windows" {
+		old := exe + ".old"
+		if err := os.Rename(exe, old); err != nil {
+			return fmt.Errorf("moving the running binary aside to %s: %w", old, err)
+		}
+	}
+	if err := os.Rename(newBinary, exe); err != nil {
+		return fmt.Errorf("replacing %s: %w", exe, err)
+	}
+	return nil
+}
+
+// removeStaleOldBinary clears a ".old" a previous swapBinary left next to exe
+// on Windows. Best-effort and silent: exe not existing yet, or nothing to
+// remove, are both the common case, not an error.
+func removeStaleOldBinary(exe string) {
+	if runtime.GOOS != "windows" || exe == "" {
+		return
+	}
+	os.Remove(exe + ".old")
+}
+
 // releaseAssetName is the asset a stamped binary's release attaches for
 // this GOOS/GOARCH — release.yml's own naming, `polako_v<version>_<goos>_
-// <goarch>[.exe]` — named here rather than downloaded: replacing a stamped
-// binary is ticket 4, out of scope for this verb yet.
+// <goarch>[.exe]` — both what applyStampedBinary downloads and what a human
+// downloads by hand when it can't.
 func releaseAssetName(published string) string {
 	name := fmt.Sprintf("polako_v%s_%s_%s", published, runtime.GOOS, runtime.GOARCH)
 	if runtime.GOOS == "windows" {
@@ -419,8 +547,8 @@ func binarySummary(ctx context.Context, cfg config, b binaryPlan, published stri
 		if b.current == published {
 			return fmt.Sprintf("binary: release build, %s, already current", b.current), false, ""
 		}
-		return fmt.Sprintf("binary: release build, %s, published is %s — download %s from %s",
-			b.current, published, releaseAssetName(published), releaseURL(published)), false, ""
+		return fmt.Sprintf("binary: release build, %s -> %s — download %s, verify its checksum, and replace this binary",
+			b.current, published, releaseAssetName(published)), true, ""
 	case tierVCS:
 		return fmt.Sprintf("binary: built from source (%s) — rebuild it yourself", b.current), false, ""
 	default: // tierUnknown
@@ -521,12 +649,20 @@ func updateNoticeLine(ctx context.Context, binary string, cfg config) string {
 
 // applyUpdate prints the plan — always, -check or not, since the two have to
 // say the same thing — then, on a real run with something to do, runs it and
-// prints the closing line. Nothing here mutates anything before this point:
-// every read (the published-version fetch, `plugin list`, `go env`) has
-// already happened in runUpdate and resolveBinaryPlan by the time this is
-// called, so -check's "reads only" promise holds structurally, not by a flag
-// this function has to remember to check before every call.
+// prints the closing line. Nothing here mutates anything before the -check
+// return below except removeStaleOldBinary, which is not part of the plan —
+// it clears a Windows ".old" a previous stamped-tier swap left behind,
+// unconditionally on every real run, whether or not this one has anything
+// else to do. Everything else is a read (the published-version fetch,
+// `plugin list`, `go env`) that has already happened in runUpdate and
+// resolveBinaryPlan by the time this is called, so -check's "reads only"
+// promise for the plan itself holds structurally, not by a flag this
+// function has to remember to check before every call.
 func applyUpdate(ctx context.Context, cfg config, check bool, published string, plugin pluginPlan, binary binaryPlan, out io.Writer) error {
+	if !check {
+		removeStaleOldBinary(binary.exe)
+	}
+
 	pLine, pAction := pluginSummary(plugin, published)
 	bLine, bAction, warn := binarySummary(ctx, cfg, binary, published)
 
@@ -550,7 +686,14 @@ func applyUpdate(ctx context.Context, cfg config, check bool, published string, 
 		}
 	}
 	if bAction {
-		if err := applyBinary(ctx, cfg, published); err != nil {
+		var err error
+		switch binary.tier {
+		case tierStamped:
+			err = applyStampedBinary(ctx, cfg, published, binary.exe)
+		default: // tierModule — the only other tier binarySummary ever sets action for
+			err = applyBinary(ctx, cfg, published)
+		}
+		if err != nil {
 			return err
 		}
 	}
