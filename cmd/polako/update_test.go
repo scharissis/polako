@@ -612,6 +612,36 @@ func TestSwapBinaryReplacesTheRunningBinary(t *testing.T) {
 	}
 }
 
+func TestSwapBinaryRestoresTheOriginalIfTheSecondRenameFails(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("only Windows renames the running binary aside before the swap")
+	}
+	dir := t.TempDir()
+	exe := filepath.Join(dir, exeBaseName())
+	if err := os.WriteFile(exe, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A newBinary that doesn't exist makes the second rename fail, the same
+	// as a transient lock or permission error would — after the first rename
+	// (exe -> exe.old) has already gone through.
+	missing := filepath.Join(dir, "does-not-exist")
+
+	err := swapBinary(missing, exe)
+	if err == nil {
+		t.Fatal("swapBinary should have failed on the second rename")
+	}
+	if !strings.Contains(err.Error(), "the original binary was put back") {
+		t.Errorf("err = %v, want it to say the original was restored", err)
+	}
+	got, readErr := os.ReadFile(exe)
+	if readErr != nil || string(got) != "old" {
+		t.Errorf("exe = %q, %v, want the original binary restored to its own name", got, readErr)
+	}
+	if _, statErr := os.Stat(exe + ".old"); statErr == nil {
+		t.Error("exe.old should have been renamed back, not left behind")
+	}
+}
+
 func TestRemoveStaleOldBinary(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("the .old dance only exists on Windows")

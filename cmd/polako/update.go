@@ -460,14 +460,26 @@ func sha256File(path string) (string, error) {
 // cleans that file up, not this — the loader may still hold it open right
 // after the swap.
 func swapBinary(newBinary, exe string) error {
-	if runtime.GOOS == "windows" {
-		old := exe + ".old"
-		if err := os.Rename(exe, old); err != nil {
-			return fmt.Errorf("moving the running binary aside to %s: %w", old, err)
+	if runtime.GOOS != "windows" {
+		if err := os.Rename(newBinary, exe); err != nil {
+			return fmt.Errorf("replacing %s: %w", exe, err)
 		}
+		return nil
+	}
+
+	old := exe + ".old"
+	if err := os.Rename(exe, old); err != nil {
+		return fmt.Errorf("moving the running binary aside to %s: %w", old, err)
 	}
 	if err := os.Rename(newBinary, exe); err != nil {
-		return fmt.Errorf("replacing %s: %w", exe, err)
+		// The rename-aside above already succeeded, so exe is gone — put the
+		// running binary straight back rather than leave the operator with
+		// neither a working exe nor an obvious way back to one.
+		if restoreErr := os.Rename(old, exe); restoreErr != nil {
+			return fmt.Errorf("replacing %s: %w (restoring the original from %s also failed: %v — "+
+				"it's still there, move it back to %s by hand)", exe, err, old, restoreErr, exe)
+		}
+		return fmt.Errorf("replacing %s: %w (the original binary was put back)", exe, err)
 	}
 	return nil
 }
