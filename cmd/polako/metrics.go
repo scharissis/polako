@@ -28,9 +28,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"runtime/debug"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -717,44 +715,6 @@ func toolsHash(tools string) string {
 	h.Write([]byte(tools))
 	return fmt.Sprintf("%08x", h.Sum32())
 }
-
-// polakoVersion is the release tag when the binary was stamped at build time,
-// the module version when installed with `go install`, and the short VCS
-// revision when built from a clone. Empty if the binary carries none of them —
-// a `go run` of the package, or a test.
-//
-// The stamp comes first because it is the only one a cross-compiled release
-// binary has: `go build` from a checkout records the revision but leaves the
-// module version at "(devel)", so without it every published binary would
-// report a bare SHA and no run could be attributed to a release.
-var polakoVersion = sync.OnceValue(func() string {
-	if version != "" {
-		return version
-	}
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return ""
-	}
-	if v := info.Main.Version; v != "" && v != "(devel)" {
-		return v
-	}
-	rev, dirty := "", false
-	for _, s := range info.Settings {
-		switch s.Key {
-		case "vcs.revision":
-			rev = s.Value
-		case "vcs.modified":
-			dirty = s.Value == "true"
-		}
-	}
-	if len(rev) > 12 {
-		rev = rev[:12]
-	}
-	if rev != "" && dirty {
-		return rev + "+dirty"
-	}
-	return rev
-})
 
 // recorder appends records to one file per repository. The zero value, and a
 // nil *recorder, are both valid and write nothing — so a config built without

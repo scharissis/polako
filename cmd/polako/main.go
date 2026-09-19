@@ -103,90 +103,8 @@ func main() {
 		verbUsage(os.Stdout)
 		return
 	}
-	runReport := func(name string, run func() error) {
-		// Narration (transient retries, gh warnings, the proposed-issues
-		// notice) goes through the same sinks and rendering rules work's
-		// does, rather than the bare stdlib logger this used to leave it
-		// on — colour on a capable stderr TTY, plain otherwise. Stamps stay
-		// off unconditionally: unlike work, status and stats never open a
-		// shift log, so there's no stamped copy elsewhere to justify a
-		// terminal that drops them, and turning stamps on here would put a
-		// timestamp on piped output that never had one.
-		log.SetFlags(0) // a report, not a log
-		log.SetOutput(milestoneWriter{u: sinks})
-		sinks.stamp = stampOff
-		if isTerminal(os.Stderr) {
-			sinks.style = styleFor(true)
-		}
-		if err := run(); err != nil {
-			if errors.Is(err, errFlagsReported) {
-				os.Exit(2) // the usage is already on screen
-			}
-			log.Fatalf("%s: %v", name, err)
-		}
-	}
-	switch os.Args[1] {
-	case "work":
-		// Drop the verb so the flag package parses what follows it.
-		os.Args = append(os.Args[:1], os.Args[2:]...)
-	case "plan":
-		// Its own context, cancelled by the same signals work honours: the
-		// preflight probes make a handful of gh calls, and Ctrl+C partway
-		// through should end them rather than be ignored.
-		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
-		defer stop()
-		runReport("plan", func() error { return runPlan(ctx, os.Args[2:], os.Stdout) })
+	if dispatchVerb() {
 		return
-	case "health":
-		// Its own context for the same reason plan's is: preflight makes a
-		// handful of gh calls, and Ctrl+C partway through should end them
-		// rather than be ignored.
-		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
-		defer stop()
-		runReport("health", func() error { return runHealth(ctx, os.Args[2:], os.Stdout) })
-		return
-	case "stats":
-		rpt := newReport(isTerminal(os.Stdout))
-		runReport("stats", func() error { return runStats(os.Args[2:], os.Stdout, os.Stderr, time.Now(), rpt) })
-		return
-	case "status":
-		// Its own context, cancelled by the same signals work honours: a
-		// snapshot makes a handful of gh calls, and Ctrl+C partway through
-		// should end them rather than be ignored.
-		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
-		defer stop()
-		rpt := newReport(isTerminal(os.Stdout))
-		runReport("status", func() error { return runStatus(ctx, os.Args[2:], os.Stdout, time.Now(), rpt) })
-		return
-	case "tidy":
-		// Its own context for the same reason status gets one: this makes gh
-		// and git calls, and some of them mutate, so Ctrl+C partway through
-		// should end them rather than be ignored.
-		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
-		defer stop()
-		rpt := newReport(isTerminal(os.Stdout))
-		runReport("tidy", func() error { return runTidy(ctx, os.Args[2:], os.Stdout, rpt) })
-		return
-	case "version", "-version", "--version":
-		// Reachable without a verb, because it is what an operator asks
-		// exactly when they are unsure what they are running.
-		fmt.Println(describeVersion())
-		return
-	case "help", "-h", "-help", "--help":
-		verbUsage(os.Stdout)
-		return
-	default:
-		// Old muscle memory lands here: the bare invocation used to work the
-		// backlog, so flags arriving without a verb get pointed at the verb
-		// they almost certainly meant.
-		if strings.HasPrefix(os.Args[1], "-") {
-			fmt.Fprintf(os.Stderr, "polako needs a verb before any flags — did you mean `polako work %s`?\n\n",
-				strings.Join(os.Args[1:], " "))
-		} else {
-			fmt.Fprintf(os.Stderr, "unknown verb %q\n\n", os.Args[1])
-		}
-		verbUsage(os.Stderr)
-		os.Exit(2)
 	}
 
 	cfg := parseFlags()
@@ -221,6 +139,106 @@ func main() {
 		}
 		fatal("stopping: %v", err)
 	}
+}
+
+// dispatchVerb handles every verb but `work`: parses none of work's own
+// flags, since each of these owns its own flag.FlagSet. Returns true once
+// the verb is fully handled, telling main to stop; false only for `work`
+// (after dropping the verb word so the flag package parses what follows
+// it), which main then carries on to run itself — the one verb that isn't
+// a self-contained report.
+//
+// Split out of main so the switch itself doesn't count against main's own
+// budget (sizebudget_test.go's funcBudget) — main was already at it before
+// this verb, `update`, existed.
+func dispatchVerb() bool {
+	runReport := func(name string, run func() error) {
+		// Narration (transient retries, gh warnings, the proposed-issues
+		// notice) goes through the same sinks and rendering rules work's
+		// does, rather than the bare stdlib logger this used to leave it
+		// on — colour on a capable stderr TTY, plain otherwise. Stamps stay
+		// off unconditionally: unlike work, status and stats never open a
+		// shift log, so there's no stamped copy elsewhere to justify a
+		// terminal that drops them, and turning stamps on here would put a
+		// timestamp on piped output that never had one.
+		log.SetFlags(0) // a report, not a log
+		log.SetOutput(milestoneWriter{u: sinks})
+		sinks.stamp = stampOff
+		if isTerminal(os.Stderr) {
+			sinks.style = styleFor(true)
+		}
+		if err := run(); err != nil {
+			if errors.Is(err, errFlagsReported) {
+				os.Exit(2) // the usage is already on screen
+			}
+			log.Fatalf("%s: %v", name, err)
+		}
+	}
+	switch os.Args[1] {
+	case "work":
+		// Drop the verb so the flag package parses what follows it.
+		os.Args = append(os.Args[:1], os.Args[2:]...)
+		return false
+	case "plan":
+		// Its own context, cancelled by the same signals work honours: the
+		// preflight probes make a handful of gh calls, and Ctrl+C partway
+		// through should end them rather than be ignored.
+		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
+		defer stop()
+		runReport("plan", func() error { return runPlan(ctx, os.Args[2:], os.Stdout) })
+	case "health":
+		// Its own context for the same reason plan's is: preflight makes a
+		// handful of gh calls, and Ctrl+C partway through should end them
+		// rather than be ignored.
+		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
+		defer stop()
+		runReport("health", func() error { return runHealth(ctx, os.Args[2:], os.Stdout) })
+	case "stats":
+		rpt := newReport(isTerminal(os.Stdout))
+		runReport("stats", func() error { return runStats(os.Args[2:], os.Stdout, os.Stderr, time.Now(), rpt) })
+	case "status":
+		// Its own context, cancelled by the same signals work honours: a
+		// snapshot makes a handful of gh calls, and Ctrl+C partway through
+		// should end them rather than be ignored.
+		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
+		defer stop()
+		rpt := newReport(isTerminal(os.Stdout))
+		runReport("status", func() error { return runStatus(ctx, os.Args[2:], os.Stdout, time.Now(), rpt) })
+	case "tidy":
+		// Its own context for the same reason status gets one: this makes gh
+		// and git calls, and some of them mutate, so Ctrl+C partway through
+		// should end them rather than be ignored.
+		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
+		defer stop()
+		rpt := newReport(isTerminal(os.Stdout))
+		runReport("tidy", func() error { return runTidy(ctx, os.Args[2:], os.Stdout, rpt) })
+	case "update":
+		// Its own context for the same reason tidy's is: `claude plugin
+		// update` and `go install` are writes, and Ctrl+C partway through
+		// should end them rather than be ignored.
+		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
+		defer stop()
+		runReport("update", func() error { return runUpdate(ctx, os.Args[2:], os.Stdout) })
+	case "version", "-version", "--version":
+		// Reachable without a verb, because it is what an operator asks
+		// exactly when they are unsure what they are running.
+		fmt.Println(describeVersion())
+	case "help", "-h", "-help", "--help":
+		verbUsage(os.Stdout)
+	default:
+		// Old muscle memory lands here: the bare invocation used to work the
+		// backlog, so flags arriving without a verb get pointed at the verb
+		// they almost certainly meant.
+		if strings.HasPrefix(os.Args[1], "-") {
+			fmt.Fprintf(os.Stderr, "polako needs a verb before any flags — did you mean `polako work %s`?\n\n",
+				strings.Join(os.Args[1:], " "))
+		} else {
+			fmt.Fprintf(os.Stderr, "unknown verb %q\n\n", os.Args[1])
+		}
+		verbUsage(os.Stderr)
+		os.Exit(2)
+	}
+	return true
 }
 
 // shutdownSignals are every way a host says "stop now". All of them have to
@@ -326,7 +344,7 @@ func preflight(ctx context.Context, cfg *config) error {
 		_ = ensureLabel(ctx, *cfg, l.name, l.color, l.description)
 	}
 	cfg.claudeVersion = claudeVersion(ctx, *cfg)
-	cfg.pluginVersion, cfg.pluginID = pluginVersion(ctx, *cfg)
+	cfg.pluginVersion, _, _ = pluginVersion(ctx, *cfg)
 	warnClaudeModelEnv()
 	if err := refuseOrNote(effortFlagGate(ctx, *cfg), cfg.dryRun); err != nil {
 		return err

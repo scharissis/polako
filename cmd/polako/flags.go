@@ -205,12 +205,10 @@ type config struct {
 	repo          string
 	claudeVersion string
 	pluginVersion string
-	// The `<plugin>@<marketplace>` id of the copy pluginVersion read, set only
-	// when one copy was unambiguously in the running. The skew warning prints it
-	// in the `claude plugin update` command it recommends — that command needs
-	// the full id, and the marketplace half is operator-chosen, so it cannot be
-	// rebuilt from the plugin name.
-	pluginID string
+	// goBin is a test seam like ghBin: `polako update` is the one caller, for
+	// `go env` and `go install`. No flag sets it — updateConfig pins it to
+	// "go".
+	goBin string
 	// usage is the account's own plan, as of the one probe preflight (or
 	// statusConfig) ran — nil when the probe never answered, never a zero
 	// snapshot standing in for "could not tell". See usage.go.
@@ -292,7 +290,8 @@ func verbUsage(w io.Writer) {
 			"  health  propose a backlog from the repository's own shape, behind the `proposed` label, unattended\n"+
 			"  status  print where the backlog stands, from GitHub (read-only)\n"+
 			"  stats   report on the run data already recorded (local, read-only)\n"+
-			"  tidy    reclaim the worktrees and branches of finished issues (dry-run by default)\n\n"+
+			"  tidy    reclaim the worktrees and branches of finished issues (dry-run by default)\n"+
+			"  update  bring the installed plugin and binary to the published release\n\n"+
 			"Run 'polako <verb> -h' for that verb's flags.\n")
 }
 
