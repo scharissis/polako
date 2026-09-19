@@ -152,6 +152,53 @@ func TestReadSetupResolvesTheRepoName(t *testing.T) {
 	}
 }
 
+// A repository with Issues turned off is a required, failing row — not
+// "couldn't tell", since this gh answered the question and the answer was
+// no.
+func TestReadSetupIssuesDisabledFailsTheReport(t *testing.T) {
+	disabled := false
+	_, checkout := upstream(t)
+	tidyGh(t, &ghState{
+		Labels:        []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel},
+		IssuesEnabled: &disabled,
+	})
+	cfg := setupCfg(t, checkout)
+
+	_, rows := readSetup(context.Background(), cfg)
+
+	r := findSetupRow(t, rows, "issues enabled")
+	if r.status != setupMissing || !r.required {
+		t.Errorf("issues enabled row = %+v, want a required missing row", r)
+	}
+	if !setupFailed(rows) {
+		t.Error("setupFailed(rows) = false, want true with Issues disabled")
+	}
+}
+
+// A gh too old to serve hasIssuesEnabled must not take the rest of the repo
+// row down with it — the same unknownJSONField fallback listOpenIssues
+// already uses for a gh too old for sub-issues.
+func TestReadSetupIssuesEnabledIsUnknownOnAnOldGh(t *testing.T) {
+	_, checkout := upstream(t)
+	tidyGh(t, &ghState{
+		Labels:               []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel},
+		NoIssuesEnabledField: true,
+	})
+	cfg := setupCfg(t, checkout)
+
+	_, rows := readSetup(context.Background(), cfg)
+
+	if r := findSetupRow(t, rows, "issues enabled"); r.status != setupUnknown {
+		t.Errorf("issues enabled row = %+v, want %q on a gh that doesn't report it", r, setupUnknown)
+	}
+	if r := findSetupRow(t, rows, "gh repo view"); r.status != setupOK {
+		t.Errorf("gh repo view row = %+v, want ok — the fallback should still answer the rest of the read", r)
+	}
+	if setupFailed(rows) {
+		t.Errorf("an old gh must not fail the report on its own: %+v", rows)
+	}
+}
+
 // -label names a fourth label outside the fixed table — checked as its own
 // row, and required, since the operator is about to point `polako work` at
 // it.
