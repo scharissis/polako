@@ -1137,6 +1137,43 @@ func TestDrainParkSaysNothingExtraWhenTheRunLeftNothing(t *testing.T) {
 	}
 }
 
+// issue #400: shots in the evidence scratch dir are not left work either, the
+// same way PLAN.md above isn't — a dead run's shots must not pad the park
+// message's file count.
+func TestDrainParkSaysNothingExtraWhenTheRunLeftOnlyEvidence(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	_, checkout := upstream(t)
+	cfg.dir = checkout
+	wt := filepath.Join(t.TempDir(), "checkout-issue-1")
+	gitAt(t, checkout, "worktree", "add", wt, "-b", "issue-1")
+	if err := os.WriteFile(filepath.Join(wt, planFile), []byte("## Approach\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(wt, evidenceDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, evidenceDir, "shot.png"), []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("one dead issue must not end the drain: %v", err)
+	}
+
+	out := buf.String()
+	if want := "parked  #1 ($0.50) — the run completed without opening a PR\n"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+	for _, unwanted := range []string{"left work behind", "branch issue-1 has", "the work it left is in"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("log says %q about a run that left only evidence shots\ngot:\n%s", unwanted, out)
+		}
+	}
+}
+
 // Issue #157: a run blocked on an ungranted tool used to park with the same
 // sentence as one that decided nothing, which is false reassurance — the run
 // asked something, it was just never posted where a person would see it. It
