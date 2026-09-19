@@ -35,6 +35,11 @@ type issueResult struct {
 	// issue this process only waited on contributes an honest zero.
 	cost         float64
 	approximated int
+	// fetchAuthFailed carries issueState's own field through to the exit
+	// summary, which counts it once across every issue rather than repeating
+	// the fact in each park's own reason (which already says it, per-issue,
+	// via parkCleanExit).
+	fetchAuthFailed bool
 }
 
 // issueState is what one drain remembers between the runs it dispatches for a
@@ -79,6 +84,13 @@ type issueState struct {
 	// recorder is configured, or the probe could not answer.
 	weekUsageAtPickup    int
 	hasWeekUsageAtPickup bool
+	// fetchAuthFailed is set by syncDefaultBranch when the fetch it ran right
+	// before this leg's pickup couldn't authenticate. A clean-exit park that
+	// follows reads it to lead its reason with the real cause (see
+	// parkCleanExit) rather than whatever else the run drew along the way —
+	// issue #425, filed after one such run parked as "permission refused"
+	// when the actual cause was the SSH agent.
+	fetchAuthFailed bool
 }
 
 // resumeHint points the operator at the local handles for an issue a shift
@@ -311,6 +323,7 @@ func drain(ctx context.Context, cfg config) error {
 // the last moment it is readable, since the state is dropped immediately after.
 func spend(st *issueState, r issueResult) issueResult {
 	r.cost, r.approximated = st.tally.costUSD, st.tally.approximated
+	r.fetchAuthFailed = st.fetchAuthFailed
 	return r
 }
 
@@ -648,7 +661,11 @@ func drainSummary(results []issueResult, containers, closed []containerInfo, ret
 	var closedNoChange []string
 	var waiting []string
 	var parked []string
+	authFailures := 0
 	for _, r := range results {
+		if r.fetchAuthFailed {
+			authFailures++
+		}
 		switch {
 		case r.awaiting:
 			waiting = append(waiting, "#"+strconv.Itoa(r.issue)+price(r.cost))
@@ -681,6 +698,14 @@ func drainSummary(results []issueResult, containers, closed []containerInfo, ret
 		}
 	}
 	lines := []string{head + ", " + dur(elapsed) + " of wall clock"}
+	if authFailures > 0 {
+		// Once here rather than repeated in every affected park's own reason
+		// (which already says it — see parkCleanExit): the point is one number
+		// an operator sees without counting parked lines themselves.
+		lines = append(lines, fmt.Sprintf("  auth    polako's own git fetch failed to authenticate before %s "+
+			"this shift — fix git access in -dir, then remove needs-human from anything it parked",
+			plural(authFailures, "run")))
+	}
 	if len(merged) > 0 {
 		lines = append(lines, "  merged  "+strings.Join(merged, ", "))
 	}
