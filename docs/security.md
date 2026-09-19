@@ -146,3 +146,12 @@ model and holding the transcript — reaching you and nobody else, the same
 visibility an interactive `claude --remote-control` session has.
 `-remote=false` would again be the way to decline it. Until then there's
 nothing to decline.
+
+### `polako update -check`, and why it isn't in that table either
+
+[`polako update`](install.md#getting-updates) reads one public file —
+`.claude-plugin/marketplace.json` on this project's own repository, through
+`gh api` — to learn what's published. It sends nothing about your run, your
+repository or your account: the request carries only the path to a file
+anyone can already fetch from a browser. Not a second destination under the
+table above, but named here for the same reason `-remote` is.

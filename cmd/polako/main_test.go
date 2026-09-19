@@ -58,6 +58,12 @@ func TestMain(m *testing.M) {
 	if state := os.Getenv(fakeGhEnv); state != "" && len(os.Args) > 1 && slices.Contains(ghSubcommands, os.Args[1]) {
 		os.Exit(fakeGh(state, os.Args[1:]))
 	}
+	// Gated on argv the same way, and for the same reason: `polako update`'s
+	// process inherits every POLAKO_FAKE_* a test set for gh and claude too.
+	if os.Getenv(fakeGoEnv) != "" && len(os.Args) > 1 && (os.Args[1] == "env" || os.Args[1] == "install") {
+		recordFakeArgs()
+		os.Exit(fakeGo(os.Args[1:]))
+	}
 	if mode := os.Getenv(fakeClaudeEnv); mode != "" {
 		// Here rather than inside fakeClaude, which recurses: a mode that
 		// delegates to another must still count as the one invocation it is.
@@ -157,6 +163,45 @@ func buildFakeCLI() {
 	_ = warm.Run()
 }
 
+// fakeGoEnv makes the test binary impersonate `go`, for `polako update`'s
+// own two calls — `go env GOBIN`/`go env GOPATH`, and `go install
+// ...@vX.Y.Z`. Gated on argv (TestMain) like fakeGhEnv, since a test that
+// sets this alongside the claude/gh fixtures has all three inherited by
+// every child update spawns.
+const fakeGoEnv = "POLAKO_FAKE_GO"
+
+// fakeGoGOBINEnv and fakeGoGOPATHEnv are what the fake answers `go env
+// GOBIN`/`go env GOPATH` with. Both empty (unset) is the common case — an
+// operator who never set GOBIN — under which goInstallDir falls back to
+// GOPATH's bin directory.
+const (
+	fakeGoGOBINEnv  = "POLAKO_FAKE_GO_GOBIN"
+	fakeGoGOPATHEnv = "POLAKO_FAKE_GO_GOPATH"
+)
+
+// fakeGo stands in for `go env GOBIN`/`go env GOPATH` and `go install`.
+// Trusts exit status for `install` the same way update.go's own caller
+// does — no output to fake, since nothing reads `go install`'s stdout.
+func fakeGo(args []string) int {
+	if len(args) == 2 && args[0] == "env" {
+		switch args[1] {
+		case "GOBIN":
+			fmt.Println(os.Getenv(fakeGoGOBINEnv))
+		case "GOPATH":
+			fmt.Println(os.Getenv(fakeGoGOPATHEnv))
+		default:
+			fmt.Fprintf(os.Stderr, "fake go: unknown env var %q\n", args[1])
+			return 1
+		}
+		return 0
+	}
+	if len(args) >= 1 && args[0] == "install" {
+		return 0
+	}
+	fmt.Fprintf(os.Stderr, "fake go: unrecognized argv %v\n", args)
+	return 1
+}
+
 // fakeUsageEnv picks which `/usage` fixture fakeClaude answers with. Unset
 // means "no such command" — an old CLI without /usage — which is also why
 // every existing stream-mode test is unaffected by this dispatch existing
@@ -184,6 +229,16 @@ func fakeClaude(mode string) int {
 		// Two entries, so the match is proved to be by name and not by luck.
 		emit(`[{"id":"some-other-plugin@elsewhere","version":"9.9.9"},` +
 			`{"id":"polako@scharissis","version":"` + v + `","scope":"user","enabled":true}]`)
+		return 0
+	}
+	// `polako update`'s own two writes — argv-dispatched like plugin list,
+	// since neither goes through execClaude. Success is the only fixture:
+	// what update.go does with a failure is capture()'s own error wrapping,
+	// already covered where every other exec caller in this package is.
+	if len(os.Args) > 2 && os.Args[1] == "plugin" && os.Args[2] == "marketplace" {
+		return 0
+	}
+	if len(os.Args) > 2 && os.Args[1] == "plugin" && os.Args[2] == "update" {
 		return 0
 	}
 	// `claude --version` is another argv-dispatched call any run's preflight can

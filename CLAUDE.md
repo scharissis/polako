@@ -57,6 +57,20 @@ in the PR body rather than doing it quietly.
   hang, prompt or fail one, and nothing durable may remember whether it
   worked. A second destination, or widening `-post-summary`, is a change to
   argue for out loud, not slip in.
+- **`update` runs only between shifts, and its write surface is the two
+  release channels.** `work` never updates itself — a shift's binary and
+  skill don't change under it by polako's hand. Checking what's published is
+  one `gh api` call for a public file, under a 10s timeout, the same
+  best-effort shape `probeUsage` has: nothing durable remembers having
+  checked, the same write-only rule the run-data recorder and the shift log
+  already follow. No stdin, attended or scripted: `update` never passes `-y`
+  to `claude plugin update`, so a marketplace that ever declares an install
+  command is left to whatever the CLI does without one, never blindly
+  accepted on the operator's behalf.
+  A missing plugin stays missing — installing one is the operator's own
+  call — so `update` prints the install commands instead of running them.
+  The write surface is exactly the plugin, through the `claude` CLI, and the
+  binary, through `go install`; nothing under `-dir`, nothing on GitHub.
 - **Restart safety.** If a PR already exists for an issue's branch, never
   re-run the skill for that issue — go straight to waiting on the PR.
 - **The `needs-human` label is orchestration state.** It's the only durable trace of a

@@ -101,27 +101,36 @@ with their tag, so `polako -version` tells you what you're running.
 ## Getting updates
 
 **Nothing updates on its own by default.** Auto-update is off for third-party
-marketplaces, so an installed plugin stays exactly where it is until you ask:
+marketplaces, so an installed plugin stays exactly where it is until you ask.
+`polako update` brings both halves to the release this project has actually
+published — never `@latest`, which can land the binary ahead of what the
+plugin side resolves to, in the window between the release tag landing and
+the publish PR merging (docs/releasing.md):
+
+```bash
+polako update
+```
+
+`polako update -check` prints the same plan without changing anything;
+`-gh`/`-claude` point it at a `gh`/`claude` binary that isn't on PATH under
+those names. Then `/reload-plugins`, or restart.
+
+By hand, that's the same two commands as always — `update` wants the full
+`plugin@marketplace` id; the bare name it reports as not found, even
+installed — followed by the binary, pinned to the published version rather
+than `@latest`:
 
 ```bash
 claude plugin marketplace update scharissis && claude plugin update polako@scharissis
-```
-
-(`update` wants the full `plugin@marketplace` id; the bare name it reports as
-not found, even installed.)
-
-Then `/reload-plugins`, or restart. **Upgrade the binary in the same breath** —
-the two halves are one release, and mixing them isn't a supported combination:
-
-```bash
-go install github.com/scharissis/polako/cmd/polako@latest
+go install github.com/scharissis/polako/cmd/polako@v0.23.0
 ```
 
 If they end up mismatched anyway, the supervisor says so at startup and names
-both versions. A skill *newer* than the binary — testing a tip binary against
-an installed release, say — is only a warning: that direction is deliberate
-often enough that refusing would be more annoying than useful, and the
-supervisor still finds a PR by the branch name the skill chooses either way.
+both versions, and how to fix it is the same either way: `polako update`. A
+skill *newer* than the binary — testing a tip binary against an installed
+release, say — is only a warning: that direction is deliberate often enough
+that refusing would be more annoying than useful, and the supervisor still
+finds a PR by the branch name the skill chooses either way.
 
 A skill *older* than the binary is the direction that actually costs money —
 [issue #239](https://github.com/scharissis/polako/issues/239) is a shift that

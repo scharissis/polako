@@ -48,6 +48,12 @@ type ghState struct {
 	// flat.
 	NoSubIssues bool `json:"no_sub_issues"`
 
+	// PublishedRef is the marketplace.json `ref` publishedVersion's own read
+	// answers with, in the real file's "polako--vX.Y.Z" shape — empty (the
+	// default) answers as though the file could not be read, since only
+	// `update`'s own tests have a reason to set it.
+	PublishedRef string `json:"published_ref"`
+
 	// FailReads is a network that has not come back yet after the host woke:
 	// the next N calls of a kind ("issue list", "pr list") fail the way gh does
 	// when it cannot reach GitHub, and then it answers normally again. Keyed by
@@ -280,6 +286,9 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 	if at(0) == "api" {
 		if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "milestones") }) {
 			return answerMilestones(st, args)
+		}
+		if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "contents") }) {
+			return answerContents(st, args)
 		}
 		if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "/labels/") }) {
 			call = "api label"
@@ -592,6 +601,23 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 // answerMilestones stands in for `gh api repos/{owner}/{repo}/milestones`: a
 // GET listing, or a POST when a `-f title=` field is present. Titles live in
 // ghState.Milestones, which both the drain's writes and its reads can see.
+// answerContents is publishedVersion's own route — `gh api
+// repos/scharissis/polako/contents/.claude-plugin/marketplace.json -H
+// "Accept: application/vnd.github.raw"`. The real header asks the API to
+// hand back the raw file rather than a base64-wrapped JSON envelope; the
+// fake doesn't need to inspect the header to honour that, since it only
+// ever has the raw shape to answer with anyway. Empty PublishedRef answers
+// as though the file could not be read — the same "not set up for this"
+// shape an unconfigured fixture gets elsewhere in this file.
+func answerContents(st *ghState, args []string) (out string, changed bool, code int) {
+	if st.PublishedRef == "" {
+		fmt.Fprintln(os.Stderr, "fake gh: no published_ref set on this fixture")
+		return "", false, 1
+	}
+	return fmt.Sprintf(`{"name":"scharissis","plugins":[{"name":%q,"source":{"source":"github",`+
+		`"repo":%q,"ref":%q}}]}`, pluginName, updateRepo, st.PublishedRef), false, 0
+}
+
 func answerMilestones(st *ghState, args []string) (out string, changed bool, code int) {
 	var title string
 	for i, a := range args {
