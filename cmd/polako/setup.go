@@ -263,10 +263,20 @@ func setupIssuesEnabledRow(result setupRepoViewResult) setupRow {
 // that `git symbolic-ref refs/remotes/origin/HEAD` resolves. A checkout made
 // with `git init` plus `git remote add` has no such ref, and the first run
 // would find out the hard way (docs/plans/setup.md).
+//
+// -dir not being a git checkout at all is a different problem from origin/
+// HEAD merely being unset — `git remote set-head origin -a` fails with the
+// same error a non-checkout gives `symbolic-ref`, so it is checked apart
+// and named for what it actually is, the same distinction preflight's own
+// `git rev-parse --git-dir` check draws (main.go).
 func setupOriginHeadRow(ctx context.Context, cfg config, gitOK bool) setupRow {
 	const name = "origin/HEAD"
 	if !gitOK {
 		return setupRow{name: name, status: setupUnknown, detail: "git isn't on PATH"}
+	}
+	if _, err := git(ctx, cfg, "rev-parse", "--git-dir"); err != nil {
+		return setupRow{name: name, status: setupMissing, required: true,
+			detail: fmt.Sprintf("-dir %s is not a git checkout", cfg.dir)}
 	}
 	if _, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short"); err != nil {
 		return setupRow{name: name, status: setupMissing, required: true,

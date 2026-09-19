@@ -33,6 +33,21 @@ func TestSetupRepoOKRowNotesTheQueueGate(t *testing.T) {
 	}
 }
 
+// -dir not being a git checkout at all is a different failure than
+// origin/HEAD merely being unset, and needs a different remedy: `git
+// remote set-head origin -a` would itself fail with the same error.
+func TestSetupOriginHeadRowDistinguishesANonCheckout(t *testing.T) {
+	cfg := config{dir: t.TempDir()} // no .git here at all
+	row := setupOriginHeadRow(context.Background(), cfg, true)
+	if row.status != setupMissing || !row.required {
+		t.Errorf("row = %+v, want a required missing row", row)
+	}
+	if !strings.Contains(row.detail, "not a git checkout") {
+		t.Errorf("detail = %q, want it to name -dir as not a git checkout rather than suggest "+
+			"`git remote set-head`, which would fail here too", row.detail)
+	}
+}
+
 // The bare invocation's verb table has to list setup now that it exists.
 func TestVerbUsageListsSetup(t *testing.T) {
 	var b strings.Builder
