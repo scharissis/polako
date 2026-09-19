@@ -1,7 +1,7 @@
 # Reference
 
 Every flag `polako` takes, verb by verb. Flags also take
-defaults from the [environment](#setting-defaults-from-the-environment).
+defaults from the [environment](#setting-defaults-from-the-environment). See [setup.md](setup.md) for `polako setup`, the readiness report.
 
 ## Flags
 
