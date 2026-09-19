@@ -2044,7 +2044,7 @@ func TestSupervisePRStillWaitsOutAnOverspentPRNobodyHasToFix(t *testing.T) {
 	cfg.maxCost = 1
 	tally := issueTally{runs: 1, costUSD: 9}
 
-	state, err := supervisePR(context.Background(), cfg, 1, 9, &tally, runChoice{})
+	state, err := supervisePR(context.Background(), cfg, 1, 9, &issueState{}, &tally, runChoice{})
 	if err != nil {
 		t.Fatalf("an overspent issue whose PR is green must still be waited out: %v", err)
 	}
@@ -2070,7 +2070,7 @@ func TestSupervisePRParksRatherThanRemediateOnAnOverspentIssue(t *testing.T) {
 	cfg.maxIssueTime = time.Minute
 	tally := issueTally{runs: 1, wallMS: (2 * time.Minute).Milliseconds()}
 
-	_, err := supervisePR(context.Background(), cfg, 1, 9, &tally, runChoice{})
+	_, err := supervisePR(context.Background(), cfg, 1, 9, &issueState{}, &tally, runChoice{})
 	reason, parked := parkReason(err)
 	if !parked {
 		t.Fatalf("a red PR on an issue past its cap should park, got %v", err)

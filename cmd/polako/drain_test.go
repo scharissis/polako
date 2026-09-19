@@ -1965,6 +1965,16 @@ func TestDrainParksWhenConflictRemediationChangesNothing(t *testing.T) {
 	if want := "conflict remediation for PR #9 failed 1 times"; !strings.Contains(out, want) {
 		t.Errorf("log is missing %q\ngot:\n%s", want, out)
 	}
+	// The park points the reader at the remediation run's own PR comment
+	// rather than promising more than the reason text itself can say.
+	if want := "The remediation run's comment on PR #9 says why"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+	// And the resume hint sends the operator to that run's own session, not
+	// (only) the implement run's — issue #388.
+	if want := "reopens the remediation run that gave up"; !strings.Contains(out, want) {
+		t.Errorf("log is missing the remediation resume hint\ngot:\n%s", out)
+	}
 }
 
 // --- red CI on an open PR ---
@@ -2423,6 +2433,12 @@ func TestDrainParksWhenCIRemediationChangesNothing(t *testing.T) {
 	if want := "CI on PR #9 is still red after 1 remediation runs — needs a human"; !strings.Contains(out, want) {
 		t.Errorf("log is missing %q\ngot:\n%s", want, out)
 	}
+	if want := "The remediation run's comment on PR #9 says why"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+	if want := "reopens the remediation run that gave up"; !strings.Contains(out, want) {
+		t.Errorf("log is missing the remediation resume hint\ngot:\n%s", out)
+	}
 	// The park that ends this issue is raised several calls down, inside the PR
 	// supervisor, and the record is written by its caller. So this is the path
 	// that proves the reason travels: classify it anywhere but on the error and
@@ -2621,6 +2637,12 @@ func TestDrainParksWhenReviewRemediationChangesNothing(t *testing.T) {
 	}
 	if want := "changes requested on PR #9 are still outstanding after 1 remediation runs — needs a human"; !strings.Contains(out, want) {
 		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+	if want := "The remediation run's comment on PR #9 says why"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+	if want := "reopens the remediation run that gave up"; !strings.Contains(out, want) {
+		t.Errorf("log is missing the remediation resume hint\ngot:\n%s", out)
 	}
 }
 
@@ -3804,6 +3826,70 @@ func TestSelectableIssuesLabelsAndContainersOutrankAnOpenBlocker(t *testing.T) {
 	want := []heldBackInfo{{number: 8, blockers: []int{100}}}
 	if !heldBackEqual(q.heldBack, want) {
 		t.Errorf("heldBack = %+v, want %+v — only the plain ready candidate is held back", q.heldBack, want)
+	}
+}
+
+// A checks/review/conflict park follows a remediation run, not the implement
+// run from earlier — resumeHint has to send the operator to that transcript
+// first, or they land on the wrong one (issue #388).
+func TestResumeHintLeadsWithTheRemediationSessionOnARemediationPark(t *testing.T) {
+	for _, category := range []string{parkConflicts, parkChecks, parkReview} {
+		t.Run(category, func(t *testing.T) {
+			buf := captureLog(t)
+			st := &issueState{session: "sess-implement", remediationSession: "sess-remediate"}
+			resumeHint(config{}, 7, st, category)
+
+			out := buf.String()
+			remediate := strings.Index(out, "reopens the remediation run that gave up")
+			implement := strings.Index(out, "reopens what the last skill run on it did")
+			if remediate == -1 || implement == -1 {
+				t.Fatalf("expected both hints, got:\n%s", out)
+			}
+			if remediate > implement {
+				t.Errorf("remediation session printed after the implement one, want it first:\n%s", out)
+			}
+			if !strings.Contains(out, "claude --resume sess-remediate") {
+				t.Errorf("missing the remediation session id:\n%s", out)
+			}
+			if !strings.Contains(out, "claude --resume sess-implement") {
+				t.Errorf("missing the implement session id:\n%s", out)
+			}
+		})
+	}
+}
+
+// An ordinary park (budget, permission, pr_closed, ...) never followed a
+// remediation run, so there is nothing to send the operator to resume there —
+// only the implement session, same as before #388.
+func TestResumeHintSkipsTheRemediationSessionOnAnOrdinaryPark(t *testing.T) {
+	buf := captureLog(t)
+	st := &issueState{session: "sess-implement", remediationSession: "sess-remediate"}
+	resumeHint(config{}, 7, st, parkBudget)
+
+	out := buf.String()
+	if strings.Contains(out, "sess-remediate") {
+		t.Errorf("an ordinary park must not point at a remediation session:\n%s", out)
+	}
+	if !strings.Contains(out, "claude --resume sess-implement") {
+		t.Errorf("missing the implement session id:\n%s", out)
+	}
+}
+
+// A remediation park with no remediation session recorded yet — the first
+// leg of an issue's life, or a crash before any run reported one — falls
+// back to the implement session alone rather than printing an empty resume
+// command.
+func TestResumeHintOmitsAnUnsetRemediationSession(t *testing.T) {
+	buf := captureLog(t)
+	st := &issueState{session: "sess-implement"}
+	resumeHint(config{}, 7, st, parkChecks)
+
+	out := buf.String()
+	if strings.Contains(out, "gave up") {
+		t.Errorf("must not print a remediation hint with no session to resume:\n%s", out)
+	}
+	if !strings.Contains(out, "claude --resume sess-implement") {
+		t.Errorf("missing the implement session id:\n%s", out)
 	}
 }
 
