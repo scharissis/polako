@@ -116,7 +116,7 @@ Two things, one of them only on request:
 | What | Where it goes | Default |
 | --- | --- | --- |
 | [`-post-summary`](run-data.md#putting-it-on-the-pr--post-summary) | One line of run numbers, as a comment on your own merged PR — readable by exactly the people who can already see that PR. | Off. |
-| Evidence images | A PNG the skill captured as real output, pushed to the `polako-evidence` orphan branch on your own origin and embedded in the PR body by commit sha — readable by anyone who can already read that repo. | On for a manually invoked run, `no-evidence` as its second argument turns it off; `polako work` doesn't drive this yet. |
+| Evidence images | A PNG the skill captured as real output, pushed to the `polako-evidence` orphan branch on your own origin and embedded in the PR body by commit sha — readable by anyone who can already read that repo. | Nothing today: no step in the skill takes a screenshot yet. `no-evidence` as the skill's second argument will turn the channel off once one does; `polako work` doesn't drive any of this yet either. |
 
 `plan` and `health` don't change this — neither has a `-post-summary` of its
 own, and neither posts anything anywhere.
