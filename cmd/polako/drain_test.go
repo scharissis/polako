@@ -2509,6 +2509,73 @@ func TestDrainRemediatesARequestedChange(t *testing.T) {
 	}
 }
 
+// All three remediation prompts tell the run to comment on the PR, and a run
+// under -p is refused any tool it was not granted — so each dispatch has to
+// carry the comment grant, pinned to the PR it was sent to (issue #385). The
+// review run must keep its own pinned read alongside it.
+func TestEveryRemediationRunMayCommentOnItsOwnPR(t *testing.T) {
+	cases := []struct {
+		name, mode string
+		pr         fakePR
+		alsoWants  string
+	}{
+		{name: "conflict", mode: "stream", pr: fakePR{
+			Number: 9, State: "OPEN", Mergeable: "CONFLICTING",
+			Head: "abc123", Checks: []string{"SUCCESS"},
+		}},
+		{name: "checks", mode: "fixci", pr: fakePR{
+			Number: 9, State: "OPEN", Mergeable: "MERGEABLE",
+			Head: "abc123", Checks: []string{"SUCCESS", "FAILURE"}, MergeOnRead: 4,
+		}},
+		{name: "review", mode: "fixreview", pr: fakePR{
+			Number: 9, State: "OPEN", Mergeable: "MERGEABLE",
+			Head: "abc123", Checks: []string{"SUCCESS"},
+			Reviews:     []fakeReview{{State: reviewChangesRequested, SubmittedAt: "2026-08-20T10:00:00Z"}},
+			CommittedAt: "2026-08-19T10:00:00Z", MergeOnRead: 3,
+		}, alsoWants: "pulls/9/comments:*)"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			captureLog(t)
+			getArgs := watchClaudeArgs(t)
+			pr := c.pr
+			cfg, _ := drainConfig(t, c.mode, &ghState{
+				Issues: map[string]*fakeIssue{"1": {Open: true}},
+				PRs:    map[string]*fakePR{"issue-1": &pr},
+				Labels: []string{needsHumanLabel},
+			})
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := drain(ctx, cfg); err != nil {
+				t.Fatalf("drain: %v", err)
+			}
+
+			var remediations int
+			for _, argv := range getArgs() {
+				if !strings.Contains(argv, "PR #9") {
+					continue // a version probe, a usage read — not a remediation
+				}
+				remediations++
+				for _, want := range []string{
+					"Bash(gh pr comment 9 --body-file:*)",  // the grant
+					"`gh pr comment 9 --body-file <file>`", // the prompt spelling it
+					c.alsoWants,
+				} {
+					if !strings.Contains(argv, want) {
+						t.Errorf("remediation argv is missing %q:\n%s", want, argv)
+					}
+				}
+				if strings.Contains(argv, "Bash(gh pr comment:*)") {
+					t.Errorf("remediation argv grants gh pr comment unpinned:\n%s", argv)
+				}
+			}
+			if remediations == 0 {
+				t.Fatal("no remediation run was dispatched, so nothing was checked")
+			}
+		})
+	}
+}
+
 // A review a run cannot answer is not worth re-reading. A remediation that
 // exits cleanly without pushing is caught right there — runRemediation reads
 // the PR back and finds the head unmoved — and is treated the same as a Go
