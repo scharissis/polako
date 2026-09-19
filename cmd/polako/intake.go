@@ -185,7 +185,8 @@ func intakePreflight(ctx context.Context, cfg *config, opt *intakeOptions, verb 
 
 		// Best-effort like the drain's awaiting-answer declaration: an
 		// "already exists" is the healthy repeat case, not a failure.
-		_ = ensureLabel(ctx, *cfg, proposedLabel, proposedLabelColor, proposedLabelDesc)
+		l := labelByName(proposedLabel)
+		_ = ensureLabel(ctx, *cfg, l.name, l.color, l.description)
 	}
 	return hierarchical, nil
 }
