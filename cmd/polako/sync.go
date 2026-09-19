@@ -123,7 +123,18 @@ func worktreeFor(list, branch string) string {
 // any one about-to-run issue. If that run then ends with no PR, the park
 // leads with the real cause — see parkCleanExit — rather than whatever else
 // it drew along the way, which is what actually misled #390.
+//
+// st.fetchAuthFailed is reset to false on every call before anything can
+// fail: it means "this leg's own pickup fetch just failed to authenticate",
+// not "ever did". An issue can carry the same *issueState across legs (put
+// down for a human answer, then resumed once one lands), and without the
+// reset a leg whose own fetch succeeded would still inherit an earlier leg's
+// stale true — leading that leg's own clean-exit park with a cause that
+// wasn't its.
 func syncDefaultBranch(ctx context.Context, cfg config, st *issueState) error {
+	if st != nil {
+		st.fetchAuthFailed = false
+	}
 	if _, err := git(ctx, cfg, "remote", "get-url", "origin"); err != nil {
 		narrate(sevWarning, "no origin remote to fetch in %s, so the default branch is left as it is "+
 			"and a review may run against a stale base: %v", cfg.dir, err)
