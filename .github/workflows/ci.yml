@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # Daily, so an overdue release turns main red within a day even with no
+    # push or PR to trigger a run (issue #387) — someone sees it instead of
+    # the next PR going red for a reason its own branch can't fix.
+    - cron: "17 6 * * *"
 
 permissions:
   contents: read
@@ -25,6 +30,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      # actions/checkout only fetches the ref the triggering event names — on
+      # a pull_request run that's the merge ref, not main — so
+      # TestShippingFixesDoNotSitUnreleased has no other path to origin/main's
+      # own history without this.
+      - name: fetch main
+        run: git fetch origin main
 
       # This cache is frozen, and that is fine. setup-go keys on a hash of
       # go.sum; stdlib-only means there is no go.sum, so the key is a constant

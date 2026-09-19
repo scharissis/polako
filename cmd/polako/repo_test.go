@@ -1413,6 +1413,24 @@ func TestShippingFixesDoNotSitUnreleased(t *testing.T) {
 		return
 	}
 
+	// "origin/main" by name, not resolved via origin/HEAD the way sync.go and
+	// park.go do for a generic -dir repo: this test is inherently about this
+	// repository, which already hardcodes skills/, cmd/ and
+	// .claude-plugin/plugin.json, and origin/HEAD is not a safe assumption —
+	// actions/checkout never runs `git remote set-head`, so that symref is
+	// simply absent in CI regardless of event. Walking from here, not HEAD:
+	// on a feature branch HEAD follows that branch's own commits, so a
+	// first-parent walk from HEAD can name commits that were never on main at
+	// all (#387). ci.yml fetches origin/main explicitly for this, since
+	// actions/checkout otherwise only fetches the ref the triggering event
+	// names — a pull_request run's checkout has no other path to main's
+	// history.
+	if _, ok := git("rev-parse", "--verify", "-q", "origin/main"); !ok {
+		unavailable("origin/main not found: needs a fetch of the default branch")
+		return
+	}
+	const mainRef = "origin/main"
+
 	// The newest release by semver, not by tag date: a re-tag could land out of
 	// order, and v0.9.0 sorts after v0.10.0 lexically. The vX.Y.Z tags are the
 	// ones `go install ...@vX.Y.Z` resolves; polako--vX.Y.Z moves with them.
@@ -1450,7 +1468,7 @@ func TestShippingFixesDoNotSitUnreleased(t *testing.T) {
 	// the merge's ("Merge pull request #N …"), which points at the PR to
 	// release. Test files are dropped: they do not ship to a `go install` user.
 	log, ok := git("log", "--first-parent", "--pretty=format:%ct%x09%h%x09%s",
-		latestTag+"..HEAD", "--", "skills", "cmd", ":(exclude)*_test.go")
+		latestTag+".."+mainRef, "--", "skills", "cmd", ":(exclude)*_test.go")
 	if !ok {
 		unavailable("could not list commits since " + latestTag)
 		return
@@ -1476,7 +1494,7 @@ func TestShippingFixesDoNotSitUnreleased(t *testing.T) {
 		}
 	}
 	if age := time.Since(oldest); age > releaseGrace {
-		t.Errorf("%d commit(s) touching skills/ or cmd/ have been unreleased since %s,"+
+		msg := fmt.Sprintf("%d commit(s) touching skills/ or cmd/ have been unreleased since %s,"+
 			" the oldest for %s (grace is %s):\n%s\n\n"+
 			"An install resolves to a release tag, not to main, so the released plugin"+
 			" and binary do not contain these — an unattended run keeps getting the"+
@@ -1484,6 +1502,40 @@ func TestShippingFixesDoNotSitUnreleased(t *testing.T) {
 			" .claude-plugin/plugin.json and CHANGELOG.md (the \"Start a release\""+
 			" workflow, or ./scripts/release.sh).",
 			len(lines), latestTag, age.Round(time.Hour), releaseGrace, strings.Join(lines, "\n"))
+		if releaseCheckShouldSkip(os.Getenv("GITHUB_EVENT_NAME")) {
+			t.Skipf("%s", msg)
+			return
+		}
+		t.Errorf("%s", msg)
+	}
+}
+
+// releaseCheckShouldSkip decides, from the GitHub Actions event name, whether
+// an overdue-release finding in TestShippingFixesDoNotSitUnreleased should
+// become a skip rather than a failure. A pull_request event can't cut a
+// release — only a push to main can — so gating a PR on this check blocks
+// work the PR has no way to fix; push, schedule and workflow_dispatch (and a
+// local run, where this env var isn't "pull_request") still fail.
+func releaseCheckShouldSkip(event string) bool {
+	return event == "pull_request"
+}
+
+// Hermetic: no network, no gh, no real claude — just the event switch itself.
+func TestReleaseCheckShouldSkip(t *testing.T) {
+	cases := []struct {
+		event string
+		skip  bool
+	}{
+		{"pull_request", true},
+		{"push", false},
+		{"schedule", false},
+		{"workflow_dispatch", false},
+		{"", false}, // a local run, outside any CI event
+	}
+	for _, c := range cases {
+		if got := releaseCheckShouldSkip(c.event); got != c.skip {
+			t.Errorf("releaseCheckShouldSkip(%q) = %v, want %v", c.event, got, c.skip)
+		}
 	}
 }
 

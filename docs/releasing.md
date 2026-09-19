@@ -18,7 +18,12 @@ thing that moves an installed user.
 commit touching `skills/` or `cmd/` has sat above the newest release tag for
 more than a day, naming the commits and pointing at a `chore(release)` bump.
 Test-only changes and a release already in flight are exempt; the day of grace
-is there so ordinary work between releases doesn't turn the build red.
+is there so ordinary work between releases doesn't turn the build red. CI runs
+this daily (`schedule:` in `ci.yml`) as well as on push, PR and dispatch, so an
+overdue release goes red on `main` within a day instead of on whatever PR
+happens to open next — and it skips, rather than fails, on a `pull_request`
+event, since a PR can't cut a release and gating one on this only blocks
+unrelated work.
 
 ## Cutting a release
 
