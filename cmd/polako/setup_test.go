@@ -69,7 +69,7 @@ func TestReadSetupNamesMissingLabelsAndFails(t *testing.T) {
 	tidyGh(t, &ghState{})
 	cfg := setupCfg(t, checkout)
 
-	rows := readSetup(context.Background(), cfg)
+	_, rows := readSetup(context.Background(), cfg)
 
 	for _, name := range []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel} {
 		r := findSetupRow(t, rows, name)
@@ -88,7 +88,7 @@ func TestReadSetupWithAllLabelsSucceeds(t *testing.T) {
 	tidyGh(t, &ghState{Labels: []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel}})
 	cfg := setupCfg(t, checkout)
 
-	rows := readSetup(context.Background(), cfg)
+	_, rows := readSetup(context.Background(), cfg)
 
 	for _, name := range []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel} {
 		r := findSetupRow(t, rows, name)
@@ -101,6 +101,25 @@ func TestReadSetupWithAllLabelsSucceeds(t *testing.T) {
 	}
 }
 
+// readSetup resolves the repository name when -repo was not given, and
+// hands that back in cfg — runSetup passes this returned cfg to
+// renderSetup, not its own pre-resolution copy, so the report's header
+// names the repo it actually checked rather than falling back to -dir.
+func TestReadSetupResolvesTheRepoName(t *testing.T) {
+	_, checkout := upstream(t)
+	tidyGh(t, &ghState{Repo: "example/widgets"})
+	cfg := setupCfg(t, checkout)
+	if cfg.repo != "" {
+		t.Fatalf("test setup: cfg.repo = %q, want empty before readSetup resolves it", cfg.repo)
+	}
+
+	resolved, _ := readSetup(context.Background(), cfg)
+
+	if resolved.repo != "example/widgets" {
+		t.Errorf("resolved.repo = %q, want %q", resolved.repo, "example/widgets")
+	}
+}
+
 // -label names a fourth label outside the fixed table — checked as its own
 // row, and required, since the operator is about to point `polako work` at
 // it.
@@ -110,7 +129,7 @@ func TestReadSetupChecksTheGateLabelToo(t *testing.T) {
 	cfg := setupCfg(t, checkout)
 	cfg.label = "ready"
 
-	rows := readSetup(context.Background(), cfg)
+	_, rows := readSetup(context.Background(), cfg)
 
 	r := findSetupRow(t, rows, "ready")
 	if r.status != setupMissing || !r.required {
@@ -129,7 +148,7 @@ func TestReadSetupPluginRowIsUnknownRatherThanFailingWithNoFixture(t *testing.T)
 	tidyGh(t, &ghState{Labels: []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel}})
 	cfg := setupCfg(t, checkout)
 
-	rows := readSetup(context.Background(), cfg)
+	_, rows := readSetup(context.Background(), cfg)
 
 	r := findSetupRow(t, rows, "plugin")
 	if r.status != setupUnknown {

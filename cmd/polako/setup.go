@@ -67,7 +67,7 @@ func runSetup(ctx context.Context, args []string, in io.Reader, out io.Writer, r
 	if err != nil {
 		return err
 	}
-	rows := readSetup(ctx, cfg)
+	cfg, rows := readSetup(ctx, cfg)
 	renderSetup(out, rpt, cfg, rows)
 	if setupFailed(rows) {
 		return errSetupNotReady
@@ -137,8 +137,12 @@ func setupFailed(rows []setupRow) bool {
 // binaries first, since nothing past them can run without one; then what gh
 // can say about the repository and whether Issues are on; then the
 // independent git and claude checks; then sub-issue support and the labels,
-// both of which need gh and the repository resolved.
-func readSetup(ctx context.Context, cfg config) []setupRow {
+// both of which need gh and the repository resolved. It hands back cfg too,
+// with cfg.repo/cfg.ghRepo filled in when -repo was not given — the caller's
+// own copy stops at whatever setupConfig resolved, and renderSetup's header
+// needs the name this function discovered, not that earlier, possibly-empty
+// one.
+func readSetup(ctx context.Context, cfg config) (config, []setupRow) {
 	claudeOK := onPath(cfg.claudeBin)
 	ghOK := onPath(cfg.ghBin)
 	gitOK := onPath("git")
@@ -174,7 +178,7 @@ func readSetup(ctx context.Context, cfg config) []setupRow {
 	rows = append(rows, setupPluginRow(ctx, cfg, claudeOK))
 	rows = append(rows, setupSubIssueRow(ctx, cfg, reposOK))
 	rows = append(rows, setupLabelRows(ctx, cfg, reposOK)...)
-	return rows
+	return cfg, rows
 }
 
 func onPath(bin string) bool {
