@@ -898,12 +898,10 @@ func TestPlanExistenceCheckUsesReadNotBash(t *testing.T) {
 	}
 }
 
-// issue #400: the visual-evidence capture flow that will write shots to
-// evidenceDir hasn't landed in SKILL.md yet — that's a later ticket in
-// docs/plans/visual-evidence.md — so this arms itself only once SKILL.md
-// does name the directory, rather than asserting today on wording that
-// doesn't exist yet. Once it lands, this catches a spelling that drifts from
-// the Go constant inspectLeftWork actually discounts.
+// issue #402 landed the "Evidence ref" section this pins against, naming
+// the scratch dir alongside the polako-evidence branch. The early return
+// guards a SKILL.md that stops naming either — this catches a spelling that
+// drifts from the Go constant inspectLeftWork actually discounts.
 func TestEvidenceDirSpellingMatchesTheSkill(t *testing.T) {
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
