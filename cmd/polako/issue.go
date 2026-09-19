@@ -748,7 +748,7 @@ func (r *issueLoop) superviseToClose(pr *pullRequest) error {
 		// and reasonReview resolve identically (remediationReasons), so the
 		// class representative is enough.
 		remChoice := r.policy.choose(reasonRemediate)
-		state, err := supervisePR(ctx, cfg, issue, pr.Number, r.tally, remChoice)
+		state, err := supervisePR(ctx, cfg, issue, pr.Number, r.st, r.tally, remChoice)
 		if err != nil {
 			if ctx.Err() == nil { // not Ctrl+C: remediation ran out of attempts
 				return r.parked(pr.Number, err)

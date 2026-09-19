@@ -53,6 +53,15 @@ type issueState struct {
 	// once an answer lands, and then dying before it reports a session of its
 	// own, still has one to resume rather than starting over from nothing.
 	session string
+	// remediationSession is the session of the last remediation run (conflict,
+	// checks or review, dispatched from supervisePR while a PR is open) that
+	// gave up — set on failure, cleared on a successful push (runRemediation),
+	// so it is only ever non-empty when there is genuinely a "run that gave
+	// up" to point at. Tracked separately from session because a park raised
+	// here follows the remediation, not the implement run session belongs to,
+	// and pointing the operator at the wrong transcript is what issue #388
+	// was filed over.
+	remediationSession string
 	// closedNoChange is set when this issue's run took the fourth ending
 	// (#210): verified evidence the issue needed no code change, and closed it
 	// directly rather than opening a PR. Read once processIssue returns nil, to
@@ -72,16 +81,25 @@ type issueState struct {
 	hasWeekUsageAtPickup bool
 }
 
-// resumeHint points the operator at the two local handles for an issue a shift
-// left mid-flight: the last skill run's transcript, and this shift's slice of
-// the run data. Both are machine-local — the transcript lives under ~/.claude —
-// so neither is GitHub-shaped state, and both are logged here and never posted
-// to the issue thread: the same reasoning that keeps the session id out of a
-// park's reason, which reaches the thread verbatim.
+// resumeHint points the operator at the local handles for an issue a shift
+// left mid-flight: the last relevant run's transcript, and this shift's slice
+// of the run data. Both are machine-local — the transcript lives under
+// ~/.claude — so neither is GitHub-shaped state, and both are logged here and
+// never posted to the issue thread: the same reasoning that keeps the session
+// id out of a park's reason, which reaches the thread verbatim.
 //
-// "skill run", because a park raised while supervising a PR follows remediation
-// runs, which report sessions of their own that this state does not track;
-// those are on their own "session started" lines in the log above.
+// remediationSession prints first, worded "the remediation run that gave
+// up", whenever one is recorded — it is only ever set on a failed
+// remediation dispatch and cleared on a successful one (see its doc comment
+// on issueState), so its mere presence means there is a run to point at, with
+// no need to also check which park category just fired (checking the
+// category instead of the field's own state was tried first and dropped: the
+// interrupt/fatal exit below never carries a parkedError, so a category check
+// there could never match, and the field could otherwise go stale across two
+// different remediation kinds). The implement session still prints second,
+// since it is where the branch itself came from (issue #388; before this,
+// only the implement session was ever tracked, so a remediation park sent the
+// operator to resume the wrong transcript).
 //
 // Printed on a park, and — since #218 — on the interrupt and fatal exits too: a
 // Ctrl+C during a usage-limit wait used to drop a resumable 32-minute session,
@@ -89,6 +107,10 @@ type issueState struct {
 func resumeHint(cfg config, issue int, st *issueState) {
 	if st == nil {
 		return
+	}
+	if st.remediationSession != "" {
+		log.Printf("issue #%d: `claude --resume %s` reopens the remediation run that gave up",
+			issue, st.remediationSession)
 	}
 	if st.session != "" {
 		log.Printf("issue #%d: `claude --resume %s` reopens what the last skill run on it did",
