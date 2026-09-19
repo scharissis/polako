@@ -228,7 +228,7 @@ func inspectLeftWork(ctx context.Context, cfg config, issue int) leftWork {
 			w.path = ""
 		}
 		for _, line := range strings.Split(string(out), "\n") {
-			if p := porcelainPath(line); p != "" && p != planFile {
+			if p := porcelainPath(line); p != "" && p != planFile && !strings.HasPrefix(p, evidenceDir+"/") {
 				w.dirty++
 			}
 		}

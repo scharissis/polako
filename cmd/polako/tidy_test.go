@@ -168,6 +168,39 @@ func TestReclaimRemovesAWorktreeHoldingOnlyThePlan(t *testing.T) {
 	}
 }
 
+// issue #400: shots a dead run left in the evidence scratch dir are not left
+// work either, the same way a lone PLAN.md isn't.
+func TestReclaimRemovesAWorktreeHoldingOnlyThePlanAndEvidence(t *testing.T) {
+	_, checkout := upstream(t)
+	mergeIssueBranch(t, checkout, "issue-9", "feature-9")
+	wt := filepath.Join(t.TempDir(), "issue-9-worktree")
+	gitAt(t, checkout, "worktree", "add", wt, "issue-9")
+	if err := os.WriteFile(filepath.Join(wt, planFile), []byte("## Approach\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(wt, evidenceDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, evidenceDir, "shot.png"), []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"9": {Open: false}}})
+	cfg := tidyCfg(t, checkout)
+
+	results, err := reclaim(context.Background(), cfg, true, 0)
+	if err != nil {
+		t.Fatalf("reclaim: %v", err)
+	}
+	r := findTidyResult(t, results, 9)
+	if !r.reclaimed {
+		t.Fatalf("issue #9 was not reclaimed — PLAN.md and evidence shots are not work left behind: %+v", r)
+	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Errorf("worktree %s still exists", wt)
+	}
+}
+
 // An open issue is left entirely alone, whatever its branch looks like.
 func TestReclaimSkipsAnOpenIssue(t *testing.T) {
 	_, checkout := upstream(t)

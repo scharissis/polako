@@ -882,6 +882,25 @@ func TestPlanExistenceCheckUsesReadNotBash(t *testing.T) {
 	}
 }
 
+// issue #400: the visual-evidence capture flow that will write shots to
+// evidenceDir hasn't landed in SKILL.md yet — that's a later ticket in
+// docs/plans/visual-evidence.md — so this arms itself only once SKILL.md
+// does name the directory, rather than asserting today on wording that
+// doesn't exist yet. Once it lands, this catches a spelling that drifts from
+// the Go constant inspectLeftWork actually discounts.
+func TestEvidenceDirSpellingMatchesTheSkill(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	if !strings.Contains(skill, "polako-evidence") {
+		return
+	}
+	if !strings.Contains(skill, evidenceDir) {
+		t.Errorf("SKILL.md names the evidence scratch dir but not spelled %q — the supervisor"+
+			" discounts left-work paths under that exact string, so a drift here would make"+
+			" tidy and park treat real shots as left work", evidenceDir)
+	}
+}
+
 // Under headless `claude -p` — the only way the supervisor invokes the skill —
 // the model ending its turn is the process exiting. So a run that stops to wait
 // on something does not pause, it terminates: exit 0, no error, work left
