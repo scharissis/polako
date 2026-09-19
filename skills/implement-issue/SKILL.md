@@ -206,6 +206,11 @@ Host, owner and repo come from `git -C <worktree> config --get remote.origin.url
 — not `remote get-url`, which expands `insteadOf` and would hand back an ssh
 rewrite instead of the address a browser needs.
 
+If the push never lands (a refused ruleset, an unparseable origin URL, the
+retry in step 7 still failing), there's no sha to embed: write step 3's
+`## Evidence` bullet as omitted, the same as `no-evidence` — never a made-up
+URL, and never a reason to stop or ask.
+
 ## Phase 0 — Gather context (every run, before anything else)
 1. Run `gh issue view $issue --json number,title,state,body,comments,blockedBy`
    and read it. Always use this --json form: the plain and --comments forms
