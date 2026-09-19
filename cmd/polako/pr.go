@@ -217,6 +217,7 @@ func remediateConflicts(ctx context.Context, cfg config, issue, prNumber int, be
 			"This run is not finished until the branch has a new commit pushed. Leave a short "+
 			"comment on the PR saying what changed and anything noteworthy about it; if you "+
 			"cannot push, say so in a PR comment rather than only in your final message. "+
+			prCommentHow(prNumber)+
 			"Do not open a new PR, do not merge anything, and do not commit to the default branch.",
 		prNumber, branch, branch)
 	return runRemediation(ctx, cfg, issue, prNumber, reasonRemediate, choice, prompt, "", beforeHead, tally)
@@ -225,8 +226,9 @@ func remediateConflicts(ctx context.Context, cfg config, issue, prNumber int, be
 // runRemediation dispatches one self-contained remediation run and records it.
 // The three remediateX helpers differ only in the prompt they build and, for a
 // review, extraTools — a per-run allowlist widening on top of the operator's
-// -add-tools. The base cfg is what the record's tools_hash identifies; the
-// invocation gets a copy.
+// -add-tools. Every one of them also gets prCommentTools, since every prompt
+// asks for a PR comment. The base cfg is what the record's tools_hash
+// identifies; the invocation gets a copy.
 //
 // choice is the policy's model/effort for a remediation run: applied to the
 // invocation, and its model/effort/source carried onto the record so a
@@ -247,9 +249,7 @@ func remediateConflicts(ctx context.Context, cfg config, issue, prNumber int, be
 func runRemediation(ctx context.Context, cfg config, issue, prNumber int, reason string,
 	choice runChoice, prompt, extraTools, beforeHead string, tally *issueTally) error {
 	runCfg := choice.apply(cfg)
-	if extraTools != "" {
-		runCfg.addTools = resolveTools(cfg.addTools, extraTools)
-	}
+	runCfg.addTools = resolveTools(cfg.addTools, resolveTools(extraTools, prCommentTools(prNumber)))
 	if line := choice.dispatchLine(issue); line != "" {
 		log.Print(line)
 	}
@@ -290,6 +290,7 @@ func remediateChecks(ctx context.Context, cfg config, issue, prNumber int, faili
 			"If a change to this branch cannot fix it — a missing secret, a broken runner, "+
 			"a check waiting on a human's approval — say so in a PR comment rather than only "+
 			"in your final message. "+
+			prCommentHow(prNumber)+
 			"Do not open a new PR, do not merge anything, do not commit to the default "+
 			"branch, and do not rerun or cancel workflows.",
 		prNumber, branch, strings.Join(failing, ", "), prNumber, branch)
@@ -319,7 +320,8 @@ func remediateReview(ctx context.Context, cfg config, issue, prNumber int, befor
 			"has a new commit pushed. Leave a short reply on the review (or a PR comment) "+
 			"saying what changed and anything noteworthy about it. Where a comment is wrong, "+
 			"or asks for something a change to this branch cannot do, say so in a PR comment "+
-			"rather than only in your final message. Do not open a new PR, do not merge "+
+			"rather than only in your final message. "+prCommentHow(prNumber)+
+			"Do not open a new PR, do not merge "+
 			"anything, do not dismiss or resolve the review, and do not commit to the "+
 			"default branch.",
 		prNumber, branch, prNumber, cfg.repo, prNumber)
@@ -328,6 +330,31 @@ func remediateReview(ctx context.Context, cfg config, issue, prNumber int, befor
 	// operator's -tools/-add-tools rather than changing with every PR number.
 	return runRemediation(ctx, cfg, issue, prNumber, reasonReview, choice, prompt,
 		prReviewTools(cfg.repo, prNumber), beforeHead, tally)
+}
+
+// prCommentTools grants a remediation run the one write its prompt asks for
+// and defaultTools lacks: a comment on the PR it was dispatched to. Without it
+// the call is refused under -p, and what the run found out — "red on the
+// default branch too, a release fixes it" — stays in a transcript nobody reads
+// (issue #385).
+//
+// Pinned to one PR like prReviewTools, and the flag is part of the pin on
+// purpose: without it the prefix `gh pr comment 38` would also match PR 382.
+// It also holds the run to --body-file, so no comment text passes through
+// shell quoting. The usual caveat applies — a prefix, not a signature: flags
+// appended after it (--edit-last, --delete-last) still match, which reaches
+// this account's own comments on this one PR and no further.
+func prCommentTools(prNumber int) string {
+	return fmt.Sprintf("Bash(gh pr comment %d --body-file:*)", prNumber)
+}
+
+// prCommentHow is the sentence every remediation prompt shares: the one form
+// of `gh pr comment` that prCommentTools grants. A run left to pick its own
+// spelling picks an inline --body, which is refused.
+func prCommentHow(prNumber int) string {
+	return fmt.Sprintf("To comment, write the text to a file in the worktree, run "+
+		"`gh pr comment %d --body-file <file>` — PR number first, that spelling, the "+
+		"only form this run is granted — then delete the file. ", prNumber)
 }
 
 // prReviewTools grants a review remediation the one read the gh CLI has no
