@@ -993,12 +993,15 @@ func TestSkillDeclaresTheEvidenceArgument(t *testing.T) {
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	front, body := skillFrontmatter(t, "skills/"+skillDir+"/SKILL.md", skill)
-	if !regexp.MustCompile(`(?m)^arguments:\s*\[issue,\s*evidence\]`).MatchString(front) {
-		t.Errorf("frontmatter's `arguments:` no longer declares `evidence`:\n%s", front)
+	declared := declaredArguments(t, front)
+	if !slices.Contains(declared, "evidence") {
+		t.Errorf("frontmatter's `arguments:` no longer declares `evidence`: %v", declared)
 	}
-	if !strings.Contains(body, "$evidence") {
-		t.Error("frontmatter declares the `evidence` argument but the body never interpolates" +
-			" $evidence, so whatever the operator typed for it is silently dropped")
+	for _, name := range declared {
+		if !strings.Contains(body, "$"+name) {
+			t.Errorf("frontmatter declares argument %q but the body never interpolates $%s,"+
+				" so whatever the operator typed for it is silently dropped", name, name)
+		}
 	}
 	if !strings.Contains(body, "no-evidence") {
 		t.Error("SKILL.md never spells the `no-evidence` value that turns the evidence channel off")
