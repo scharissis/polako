@@ -425,8 +425,7 @@ polako status -json | jq .
     "curate #27, #28 (drop proposed to queue them)"
   ],
   "plans": { "docs": [{ "path": "docs/plans/backlog-fill.md", "state": "active", "open_children": 4, "containers": [{ "issue": 101, "total": 6, "completed": 2, "finished": false, "held": false }] }], "gone": [], "truncated": false },
-  "plan": "plan: session 42%, week 52% (resets Sep 2, 6pm) — polako was 29% of the last 24h",
-  "published": "0.24.0"
+  "plan": "plan: session 42%, week 52% (resets Sep 2, 6pm) — polako was 29% of the last 24h", "published": "0.24.0"
 }
 ```
 
@@ -445,12 +444,9 @@ so a caller can tell a finished container from one in progress without a
 second call. For a finished one, `held: false` means the next shift is about
 to close it, `held: true` means it's the caller's.
 Every array field is always `[]`, never `null`; `quiet_seconds`, `plan` and
-`published` are the fields that can be *absent* instead of a fake zero or
-empty string — `published` is the release polako has actually published,
-the same read the text report's own update notice makes, carried here
-whether or not that notice fires, absent only when the read itself failed
-or timed out. Same rule as the text report: no issue, PR or comment text,
-only numbers, branches, labels, states and URLs.
+`published` can be *absent* instead of a fake zero or empty string. Same
+rule as the text report: no issue, PR or comment text, only numbers,
+branches, labels, states and URLs.
 
 ## Reclaiming finished issues: `polako tidy`
 
