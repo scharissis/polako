@@ -949,13 +949,12 @@ func TestEvidenceRefSectionIsPinned(t *testing.T) {
 	if start < 0 || end < 0 || end < start {
 		t.Fatal("SKILL.md no longer has an `## Evidence ref` section before Phase 0")
 	}
-	section := skill[start:end]
-	flat := strings.Join(strings.Fields(section), " ")
+	flat := strings.Join(strings.Fields(skill[start:end]), " ")
 
-	if !strings.Contains(section, "polako-evidence") {
+	if !strings.Contains(flat, "polako-evidence") {
 		t.Error("the Evidence ref section never names the polako-evidence branch")
 	}
-	if !strings.Contains(section, "Never `--force`") {
+	if !strings.Contains(flat, "Never `--force`") {
 		t.Error("the Evidence ref section no longer forbids --force beside the push step —" +
 			" without it a resumed or concurrent run could clobber another push to the same ref")
 	}
@@ -964,7 +963,7 @@ func TestEvidenceRefSectionIsPinned(t *testing.T) {
 			" `config --get remote.origin.url` — `remote get-url` expands insteadOf and would" +
 			" hand back an ssh rewrite instead of a browsable address")
 	}
-	if !strings.Contains(section, evidenceDir) {
+	if !strings.Contains(flat, evidenceDir) {
 		t.Errorf("the Evidence ref section no longer names the scratch dir %q — it has to match"+
 			" the Go constant inspectLeftWork discounts, or tidy and park would treat real"+
 			" shots as left work", evidenceDir)
