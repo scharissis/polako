@@ -36,6 +36,14 @@ matches — a `--method DELETE`, a `../..` the API host resolves back out of.
 Granting nothing isn't safer either: a tripped permission prompt hangs a run
 in silence until the stall watchdog kills it.
 
+Every remediation run — rebase, red check, review — gets one write, pinned
+the same way: `Bash(gh pr comment 42 --body-file:*)`. Its prompt asks it to
+say on the PR what it changed, or why a change to the branch can't fix it, and
+without the grant that finding stays in a transcript. The flag is inside the
+pin so the prefix can't match PR 420, and so comment text never passes through
+shell quoting. Prefix caveat again: `--edit-last` or `--delete-last` appended
+still match, which reaches your account's own comments on that one PR.
+
 What the allowlist can't close: `Bash(git:*)` includes `git push`, which
 opening a PR requires; build commands run whatever the checked-out repo's
 scripts contain; `Bash(python:*)`, `Bash(npx:*)`, `Bash(uv:*)`, `Bash(go:*)`
