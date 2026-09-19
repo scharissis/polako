@@ -139,6 +139,61 @@ func TestRunPolicyEffortBySize(t *testing.T) {
 	}
 }
 
+// -model-by-size mirrors -effort-by-size (#395): one rung below a model:
+// label and above -model, and only on an implementation-class run.
+func TestRunPolicyModelBySize(t *testing.T) {
+	cells := map[string]string{"S": "sonnet", "L": "opus"}
+
+	// The S body hits the S cell; the record's model_source says so.
+	got := runPolicy{model: "opus", sizeModel: cells, size: "S"}.choose(reasonImplement)
+	if got.model != "sonnet" || got.modelSource != sourceSize {
+		t.Errorf("S issue = %+v, want model sonnet (size)", got)
+	}
+	// Effort is untouched by the model cell.
+	if got.effort != "" || got.effortSource != sourceInherit {
+		t.Errorf("S issue effort = %+v, want the model cell to leave effort alone", got)
+	}
+
+	// A size with no cell falls through to -model.
+	got = runPolicy{model: "opus", sizeModel: cells, size: "M"}.choose(reasonImplement)
+	if got.model != "opus" || got.modelSource != sourceFlag {
+		t.Errorf("M issue (no M cell) = %+v, want the -model flag", got)
+	}
+
+	// No size at all: the flag, as before the feature.
+	got = runPolicy{model: "opus", sizeModel: cells}.choose(reasonImplement)
+	if got.model != "opus" || got.modelSource != sourceFlag {
+		t.Errorf("issue with no Estimate line = %+v, want the -model flag", got)
+	}
+
+	// A remediation run keeps whatever the remediation/flag cell gave it.
+	got = runPolicy{model: "opus", remediationModel: "haiku", sizeModel: cells, size: "S"}.choose(reasonReview)
+	if got.model != "haiku" || got.modelSource != sourceRemediation {
+		t.Errorf("remediation run = %+v, want -model-by-size ignored", got)
+	}
+
+	// A model: label beats the cell.
+	got = runPolicy{
+		model:     "opus",
+		sizeModel: cells, size: "S",
+		labels: labelChoice{model: "haiku", modelSet: true},
+	}.choose(reasonImplement)
+	if got.model != "haiku" || got.modelSource != sourceLabel {
+		t.Errorf("model: label + S issue = %+v, want the label to win", got)
+	}
+
+	// model:default (set but empty) also beats the cell — it stops resolution
+	// at inherit rather than falling through to the flag or the size cell.
+	got = runPolicy{
+		model:     "opus",
+		sizeModel: cells, size: "S",
+		labels: labelChoice{modelSet: true},
+	}.choose(reasonImplement)
+	if got.model != "" || got.modelSource != sourceInherit {
+		t.Errorf("model:default + S issue = %+v, want empty/inherit", got)
+	}
+}
+
 // resume, unfinished and answers are implementation class: a resumed
 // implement run must not suddenly get the remediation cell.
 func TestRunPolicyResumesAreImplementationClass(t *testing.T) {
@@ -309,9 +364,8 @@ func TestRunChoiceApply(t *testing.T) {
 }
 
 // The six source strings are what a run record's model_source / effort_source
-// carry, and a stats reader keys on them. size is still unused; pinning the
-// whole set up front means a later ticket adds code, not a vocabulary a record
-// consumer has to relearn.
+// carry, and a stats reader keys on them. size now backs both -effort-by-size
+// (#366) and -model-by-size (#395).
 func TestSourceConstantsAreStable(t *testing.T) {
 	for got, want := range map[string]string{
 		sourceInherit: "inherit", sourceFlag: "flag", sourceRemediation: "remediation",

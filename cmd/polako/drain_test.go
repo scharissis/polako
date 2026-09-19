@@ -2313,6 +2313,57 @@ func TestDrainEffortBySizeFromTheEstimateLine(t *testing.T) {
 	}
 }
 
+// -model-by-size (#395) mirrors -effort-by-size: an S issue dispatches at the
+// S cell's model, the run record names the source as size, and the terminal
+// issue record carries the size letter.
+func TestDrainModelBySizeFromTheEstimateLine(t *testing.T) {
+	captureLog(t)
+	getArgs := watchClaudeArgs(t)
+	cfg, path := drainConfig(t, "implementmerged", &ghState{
+		Issues: map[string]*fakeIssue{"1": {
+			Open: true,
+			Body: "## Summary\n\nDo the thing.\n\nEstimate: S — likely one run\n",
+		}},
+	})
+	cfg.model = "opus" // the flag the S cell must beat
+	cfg.modelBySize = "S=sonnet,L=opus"
+	cfg.sizeModel = map[string]string{"S": "sonnet", "L": "opus"}
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if finalGhState(t, path).Issues["1"].Open {
+		t.Error("issue 1 should have closed behind its merged PR")
+	}
+
+	argv := getArgs()
+	if len(argv) != 1 {
+		t.Fatalf("claude ran %d times, want 1:\n%s", len(argv), strings.Join(argv, "\n"))
+	}
+	if !strings.Contains(argv[0], "--model sonnet") || strings.Contains(argv[0], "--model opus") {
+		t.Errorf("the implement run should have dispatched at the S cell's model: %s", argv[0])
+	}
+
+	for _, line := range readRecords(t, records, cfg.repo) {
+		var rec runRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("record is not JSON: %v\n%s", err, line)
+		}
+		if rec.Reason == reasonImplement &&
+			(rec.ModelSource != sourceSize || rec.RequestedModel != "sonnet") {
+			t.Errorf("implement record = model %q (%s), want sonnet (size)", rec.RequestedModel, rec.ModelSource)
+		}
+	}
+	recs := terminalRecords(t, records, cfg.repo)
+	if len(recs) != 1 || recs[0].Size != "S" {
+		t.Errorf("terminal record = %+v, want size S", recs)
+	}
+}
+
 // Two labels of one family are a mistake, not a choice: the run warns and falls
 // through to the flag rather than picking one.
 func TestDrainFallsThroughOnDuplicateModelLabels(t *testing.T) {

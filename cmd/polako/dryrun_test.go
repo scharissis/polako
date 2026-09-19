@@ -200,6 +200,26 @@ func TestDryRunRoutesThroughThePolicySeam(t *testing.T) {
 	}
 }
 
+// -model-by-size (#395) reaches -dry-run through the same policy seam: an S
+// issue prints the S cell's model, beating -model.
+func TestDryRunRoutesModelBySizeThroughThePolicySeam(t *testing.T) {
+	cfg, _ := drainConfig(t, "stream", &ghState{Issues: map[string]*fakeIssue{"1": {
+		Open: true,
+		Body: "Estimate: S\n",
+	}}})
+	cfg.model = "opus"
+	cfg.modelBySize = "S=sonnet"
+	cfg.sizeModel = map[string]string{"S": "sonnet"}
+
+	var out strings.Builder
+	if err := dryRun(context.Background(), cfg, &out); err != nil {
+		t.Fatalf("dryRun: %v", err)
+	}
+	if !strings.Contains(out.String(), "--model sonnet") || strings.Contains(out.String(), "--model opus") {
+		t.Errorf("an S issue should print the S cell's model, got:\n%s", out.String())
+	}
+}
+
 // Restart safety is the first thing an issue is put through, so it is the first
 // thing a dry run has to report: an issue whose branch already carries a PR
 // gets no claude run at all, and printing one would be a lie.

@@ -363,15 +363,26 @@ decide most of what it costs: which model, and how hard it thinks. Both are
 resolved once per pickup — the choice is fixed for every run on that issue in
 that leg, and a resume keeps the choice of the run it resumes.
 
-Five levels can set them, most specific first:
+Six levels can set them, most specific first:
 
 | Level | Where it lives | Who sets it | May it make a run dearer? |
 | --- | --- | --- | --- |
 | 1. Ticket | `model:<value>` / `effort:<level>` labels on the issue | A maintainer, at curation | Yes |
 | 2. Epic | The same labels on the parent issue, taken by a child without its own | A maintainer | Yes |
-| 3. Run reason | `-remediation-model` / `-remediation-effort`, for the rebase, red-check and review runs against an open PR | The operator | Yes |
-| 4. Command | `-model` / `-effort` on `work`, `plan`, `health` | The operator | Yes |
-| 5. Inherit | Nothing passed — the CLI resolves it from Claude Code settings, the repo's `.claude/settings.json`, the account tier | — | — |
+| 3. Size | `-model-by-size` / `-effort-by-size` cells, keyed off the issue body's `Estimate:` line — implementation runs only | The operator | Yes |
+| 4. Run reason | `-remediation-model` / `-remediation-effort`, for the rebase, red-check and review runs against an open PR | The operator | Yes |
+| 5. Command | `-model` / `-effort` on `work`, `plan`, `health` | The operator | Yes |
+| 6. Inherit | Nothing passed — the CLI resolves it from Claude Code settings, the repo's `.claude/settings.json`, the account tier | — | — |
+
+Size and run reason never compete — an implementation run can hit a size
+cell, a remediation run can hit the run-reason cell, never both — so despite
+size's row sitting above run reason here, both simply outrank level 5, the
+command flags they're a size- or reason-keyed override of. The body only
+picks *which* cell applies; the cell's value is still the operator's own,
+same trust level as every other flag. The intended use is `-model` naming
+the dear default and the cells naming cheaper tiers, so issue text can only
+route a run cheaper — but the binary can't enforce that itself, since model
+strings have no order, so keeping the cells cheap is on the operator.
 
 The last column is the rule: **labels and flags may make a run dearer; issue
 text never may.** A label needs triage rights and a flag needs the operator's
@@ -400,8 +411,8 @@ A dispatch logs one line, and only when something other than inherit resolved:
 issue #42: model sonnet (label), effort medium (epic)
 ```
 
-The word in parentheses is the level that won — `label`, `epic`, `remediation`,
-`flag`.
+The word in parentheses is the level that won — `label`, `epic`, `size`,
+`remediation`, `flag`.
 
 **Two label families let a maintainer steer one issue's run.** `model:<value>`
 — `model:opus`, `model:sonnet`, `model:haiku`, `model:best`, `model:default`,

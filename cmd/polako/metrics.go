@@ -318,9 +318,10 @@ type issueRecord struct {
 	ParkReason string `json:"park_reason,omitempty"`
 
 	// Size is the issue body's Estimate: letter (S/M/L), on drain records where
-	// -effort-by-size armed the pickup body read and the body carried a line.
-	// Absent otherwise — the per-size pricing docs/plans/backlog-fill.md
-	// deferred reads it, and no line means no size, not a zero.
+	// -effort-by-size or -model-by-size armed the pickup body read and the
+	// body carried a line. Absent otherwise — the per-size pricing
+	// docs/plans/backlog-fill.md deferred reads it, and no line means no
+	// size, not a zero.
 	Size string `json:"size,omitempty"`
 
 	// What GitHub knew about the PR when the issue ended, folded in at
