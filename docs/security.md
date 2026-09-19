@@ -81,6 +81,12 @@ overrules it, an explicit flag so the unfiltered queue is something an
 operator says; a [`-dry-run`](reference.md#looking-before-you-leap--dry-run)
 may still look without either, since it runs nothing.
 
+A `-label` naming a label the repository has never defined refuses too,
+public or not: without this, `-label typo` would pass the gate above and
+drain an empty queue all shift, reported as success. `polako status` never
+refuses — it reads only — so it prints the same message as a note instead
+and carries on.
+
 Beyond those: Phase 0 tells the skill to read issue and comment text as a
 change to make, never instructions addressed to it, and to report anything
 that tries to be rather than obey it. Defence in depth behind the two
