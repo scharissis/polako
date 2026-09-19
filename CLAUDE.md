@@ -60,12 +60,12 @@ in the PR body rather than doing it quietly.
   force, not a new one; it must still degrade to an unwatched run rather than
   hang, prompt or fail one, and nothing durable may remember whether it
   worked. A third is staged the same way: the `polako-evidence` orphan
-  branch on origin, the channel `skills/implement-issue/SKILL.md`'s publish
-  recipe writes through, chosen per run by the skill's own `evidence`
-  argument (`no-evidence` turns it off). Nothing drives a capture yet — no
-  step takes a screenshot — so today the channel carries nothing; issue #402
+  branch on origin. `skills/implement-issue/SKILL.md`'s publish recipe
+  writes through it, chosen per run by the skill's own `evidence` argument
+  (`no-evidence` turns it off). Nothing drives a capture yet — no step
+  takes a screenshot — so today the channel carries nothing; issue #402
   ships the channel and the argument only. Once a later ticket wires a
-  capture behind it, the destination still isn't new — the content is:
+  capture behind it, the destination still isn't new. The content is
   pixels, sha-pinned and, on a public repo, not retractable in practice. A
   new destination beyond these three, or widening `-post-summary`, is a
   change to argue for out loud, not slip in.
