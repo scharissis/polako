@@ -999,7 +999,13 @@ func TestSkillDeclaresTheEvidenceArgument(t *testing.T) {
 // reads in a minute.
 func TestEvidenceSectionCapsShotsAndNarrowsTheUploadBan(t *testing.T) {
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
-	flat := strings.Join(strings.Fields(skill), " ")
+
+	start := strings.Index(skill, "## Evidence — add only when")
+	end := strings.Index(skill, "## Design decisions")
+	if start < 0 || end < 0 || end < start {
+		t.Fatal("SKILL.md's PR body spec no longer has an `## Evidence` bullet before `## Design decisions`")
+	}
+	flat := strings.Join(strings.Fields(skill[start:end]), " ")
 
 	if !strings.Contains(flat, "at most four shots or pairs") {
 		t.Error("the Evidence section's budget no longer caps shots at four — without a" +
