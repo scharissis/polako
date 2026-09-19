@@ -105,8 +105,10 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 	}
 	// Best-effort, like every claude-CLI read this binary makes: read here so
 	// both renderStatus and renderStatusJSON see the same cfg.pluginVersion the
-	// update notice compares against, mirroring work's own preflight call.
-	cfg.pluginVersion, _, _ = pluginVersion(ctx, cfg)
+	// update notice compares against. status carries no -skill of its own, so
+	// this asks by name (pluginName) rather than manufacturing a -skill value
+	// just to satisfy pluginVersion's own cfg.skill-driven lookup.
+	cfg.pluginVersion, _, _ = statusPluginVersion(ctx, cfg)
 	statusLabelNote(ctx, cfg)
 	snap, err := readStatus(ctx, cfg, now)
 	if err != nil {
@@ -153,9 +155,6 @@ func statusConfig(ctx context.Context, opt statusOptions) (config, error) {
 		label:        opt.label,
 		branchPrefix: opt.branchPrefix,
 		strictOrder:  opt.strictOrder,
-		// status takes no -skill of its own — it reports on this project's
-		// own plugin, the same default `update` uses.
-		skill: defaultSkill,
 		// The same memo a shift carries, so a snapshot that ever grows a second
 		// listing pays for an old gh once rather than once per call.
 		queue: new(queueMemo),
@@ -188,6 +187,24 @@ func statusConfig(ctx context.Context, opt statusOptions) (config, error) {
 	cfg.repo = strings.TrimSpace(string(out))
 	cfg.ghRepo = cfg.repo
 	return cfg, nil
+}
+
+// statusPluginVersion is installedPluginVersion bounded the way probeUsage
+// bounds its own claude-CLI read: status's own doc comment promises a fast,
+// GitHub-only snapshot, and an unbounded `claude plugin list` call — the CLI
+// blocked on a first-run prompt, say — would break that promise the way an
+// unbounded gh call already can't (every gh read here goes through
+// retryRead's own timeouts). Reuses usageTimeout rather than adding a
+// second knob for what is, like the usage probe, a best-effort claude-CLI
+// read on the same snapshot.
+func statusPluginVersion(ctx context.Context, cfg config) (version, id, scope string) {
+	timeout := cfg.usageTimeout
+	if timeout <= 0 {
+		timeout = defaultUsageProbeTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return installedPluginVersion(ctx, cfg, pluginName)
 }
 
 // --- reading ---
@@ -301,7 +318,9 @@ func readStatus(ctx context.Context, cfg config, now time.Time) (statusSnapshot,
 	} else if ctx.Err() != nil {
 		return snap, ctx.Err()
 	}
-	if published, ok := readPublishedVersion(ctx, cfg); ok {
+	// Ungated, unlike work's own readPublishedVersion: status carries no
+	// -skill to gate on, and always means this project's own plugin.
+	if published, ok := publishedVersionQuiet(ctx, cfg); ok {
 		snap.published = published
 	}
 	return snap, nil
@@ -924,8 +943,7 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 		doc.Plan = &line
 	}
 	if snap.published != "" {
-		published := snap.published
-		doc.Published = &published
+		doc.Published = &snap.published
 	}
 	return doc
 }

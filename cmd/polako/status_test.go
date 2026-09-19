@@ -30,13 +30,11 @@ func statusConfigFor(t *testing.T, st *ghState) (config, string) {
 	t.Helper()
 	drainCfg, path := drainConfig(t, "stream", st)
 	return config{
-		dir:       drainCfg.dir,
-		ghBin:     drainCfg.ghBin,
-		claudeBin: drainCfg.claudeBin,
-		repo:      drainCfg.repo,
-		ghRepo:    drainCfg.repo,
-		// status takes no -skill of its own — same default statusConfig sets.
-		skill:        defaultSkill,
+		dir:          drainCfg.dir,
+		ghBin:        drainCfg.ghBin,
+		claudeBin:    drainCfg.claudeBin,
+		repo:         drainCfg.repo,
+		ghRepo:       drainCfg.repo,
 		branchPrefix: "issue-",
 		ghRetryWait:  time.Millisecond,
 		usageTimeout: 5 * time.Second,
@@ -1043,6 +1041,21 @@ func TestStatusOmitsThePlanLineWhenTheProbeCannotAnswer(t *testing.T) {
 }
 
 // --- the update notice (docs/plans/update.md ticket 2) ---
+
+// statusPluginVersion asks by explicit name (pluginName), not through a
+// -skill status doesn't carry — this pins that it still reads the real
+// installed version, the way runStatus wires cfg.pluginVersion for both
+// renderers.
+func TestStatusPluginVersionReadsThisRepoSOwnPlugin(t *testing.T) {
+	cfg := fakeClaudeConfig(t, "stream")
+	cfg.usageTimeout = 5 * time.Second
+	t.Setenv(fakePluginEnv, "0.3.0")
+
+	got, _, _ := statusPluginVersion(context.Background(), cfg)
+	if got != "0.3.0" {
+		t.Errorf("statusPluginVersion = %q, want the installed plugin's version", got)
+	}
+}
 
 func TestStatusReportsTheUpdateNoticeWhenAheadOfEitherHalf(t *testing.T) {
 	cfg, _ := statusConfigFor(t, &ghState{
