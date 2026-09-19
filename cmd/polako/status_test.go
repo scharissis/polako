@@ -789,6 +789,24 @@ func TestGhArgsNamesTheRepository(t *testing.T) {
 	}
 }
 
+// Shared by tidyConfig, statusConfig and setupConfig — each lets -repo name
+// the repository outright instead of resolving it from -dir, and all three
+// go through this one check now.
+func TestParseRepoFlag(t *testing.T) {
+	t.Parallel()
+	if repo, err := parseRepoFlag(""); repo != "" || err != nil {
+		t.Errorf("parseRepoFlag(\"\") = (%q, %v), want (\"\", nil) — unset is the caller's business", repo, err)
+	}
+	if repo, err := parseRepoFlag(" octocat/hello-world "); repo != "octocat/hello-world" || err != nil {
+		t.Errorf("parseRepoFlag(padded) = (%q, %v), want the trimmed slug and no error", repo, err)
+	}
+	for _, bad := range []string{"octocat", "octocat/", "/hello-world", "octocat/hello/world"} {
+		if _, err := parseRepoFlag(bad); err == nil {
+			t.Errorf("parseRepoFlag(%q) accepted a slug that is not owner/name", bad)
+		}
+	}
+}
+
 // The other end of the naming contract: the supervisor finds a PR by the branch
 // the skill named, and this finds the issue by the same rule.
 func TestIssueForBranch(t *testing.T) {
