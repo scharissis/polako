@@ -1341,7 +1341,7 @@ func TestIssueTemplatesApplyNoOrchestrationLabel(t *testing.T) {
 			// model:<value> and effort:<level> raise a run's cost, and a
 			// template applies its labels whoever files the issue — so this
 			// repository's own forms must not hand out `model:opus` or
-			// `effort:max` to an outsider (docs/plans/model-and-effort.md). The
+			// `effort:max` to an outsider (docs/behaviour.md). The
 			// bare prefix is enough here: applied() only returns `labels:` lines
 			// and their `- ` items, so it catches every YAML form — quoted,
 			// dash-list, and inline `labels: [model:opus]`.

@@ -71,7 +71,7 @@ the other way — from a shift's own log or a filed issue, on issues #217,
 #140, #225, #154, #210, #272, #273 and #255 respectively — and are here under
 the same rule that fills this file: a `SKILL.md` change earns a row.
 
-The `remediation-effort-medium` and `plan-best` rows come from
-`docs/plans/model-and-effort.md`, which drafted the model/effort experiments;
+The `remediation-effort-medium` and `plan-best` rows come from the model/effort
+design in [behaviour.md](behaviour.md#which-model-and-effort-a-run-gets);
 `remediation-effort-medium` waited on the `-remediation-effort` knob and could
 not be filed until it shipped (#365).

@@ -236,9 +236,10 @@ now says `model_usage` is the authoritative figure.
 - **Running planning or the review gate on a cheaper model.** Plausible, but
   it is a skill-side model-selection design question of its own, not a bug
   fix, and it belongs in the `docs/experiments.md` loop with a real A/B
-  rather than in a token-spend bug. Drafted in
-  [model-and-effort.md](model-and-effort.md); the `remediation-effort-medium`,
-  `remediation-sonnet` and `plan-best` rows in `docs/experiments.md` are the A/B.
+  rather than in a token-spend bug. Designed in
+  [behaviour.md](../behaviour.md#which-model-and-effort-a-run-gets); the
+  `remediation-effort-medium`, `remediation-sonnet` and `plan-best` rows in
+  `docs/experiments.md` are the A/B.
 
 ## Recommendation
 
