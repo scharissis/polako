@@ -149,7 +149,7 @@ nothing to decline.
 
 ### The published-version read, and why it isn't in that table either
 
-[`polako update`](install.md#getting-updates) reads one public file —
+[`polako update`](install.md#update) reads one public file —
 `.claude-plugin/marketplace.json` on this project's own repository, through
 `gh api` — to learn what's published. `polako work`'s preflight and `polako
 status` make the same read now, passively: one line when the published

@@ -185,5 +185,5 @@ Which path when:
 | --- | --- | --- |
 | `claude --plugin-dir <clone>` | the working tree, for one session | Developing against `main`. |
 | `claude plugin install polako@scharissis` | the tagged release | Smoke-testing a release, and normal use — see [Smoke-testing the skill](docs/releasing.md#smoke-testing-the-skill). |
-| [Hand install](docs/install.md#the-skill-by-hand) | a copy you made | Not involving the plugin system at all. Remember `-skill implement-issue`. |
+| [Hand install](docs/install.md#by-hand) | a copy you made | Not involving the plugin system at all. Remember `-skill implement-issue`. |
 
