@@ -936,6 +936,84 @@ func TestSkillSendsScratchFilesToTheScratchDir(t *testing.T) {
 	}
 }
 
+// issue #402 (ticket 3 of docs/plans/visual-evidence.md): the publish
+// recipe is git plumbing a run executes unattended, so its sharpest edges —
+// the exact ref name, the flag that would silently clobber a concurrent
+// pusher, the URL-building command, and the scratch dir it reads shots
+// from — are pinned together in the section that documents them.
+func TestEvidenceRefSectionIsPinned(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	start := strings.Index(skill, "## Evidence ref")
+	end := strings.Index(skill, "## Phase 0")
+	if start < 0 || end < 0 || end < start {
+		t.Fatal("SKILL.md no longer has an `## Evidence ref` section before Phase 0")
+	}
+	section := skill[start:end]
+	flat := strings.Join(strings.Fields(section), " ")
+
+	if !strings.Contains(section, "polako-evidence") {
+		t.Error("the Evidence ref section never names the polako-evidence branch")
+	}
+	if !strings.Contains(section, "Never `--force`") {
+		t.Error("the Evidence ref section no longer forbids --force beside the push step —" +
+			" without it a resumed or concurrent run could clobber another push to the same ref")
+	}
+	if !strings.Contains(flat, "config --get remote.origin.url") {
+		t.Error("the Evidence ref section no longer builds its URL from" +
+			" `config --get remote.origin.url` — `remote get-url` expands insteadOf and would" +
+			" hand back an ssh rewrite instead of a browsable address")
+	}
+	if !strings.Contains(section, evidenceDir) {
+		t.Errorf("the Evidence ref section no longer names the scratch dir %q — it has to match"+
+			" the Go constant inspectLeftWork discounts, or tidy and park would treat real"+
+			" shots as left work", evidenceDir)
+	}
+}
+
+// issue #402: the frontmatter is the calling convention, and the skill's own
+// `no-evidence` value means nothing if the argument it rides on was never
+// declared, or the body never reads it.
+func TestSkillDeclaresTheEvidenceArgument(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	front, body, ok := strings.Cut(strings.TrimPrefix(skill, "---\n"), "\n---")
+	if !ok {
+		t.Fatalf("skills/%s/SKILL.md has no YAML frontmatter", skillDir)
+	}
+	if !regexp.MustCompile(`(?m)^arguments:\s*\[issue,\s*evidence\]`).MatchString(front) {
+		t.Errorf("frontmatter's `arguments:` no longer declares `evidence`:\n%s", front)
+	}
+	if !strings.Contains(body, "$evidence") {
+		t.Error("frontmatter declares the `evidence` argument but the body never interpolates" +
+			" $evidence, so whatever the operator typed for it is silently dropped")
+	}
+	if !strings.Contains(body, "no-evidence") {
+		t.Error("SKILL.md never spells the `no-evidence` value that turns the evidence channel off")
+	}
+}
+
+// issue #402: the PR body's Evidence section gained a hard shot cap and a
+// narrower upload ban once a second channel — the evidence ref — existed to
+// publish through; a rewrite that drops either silently reopens "upload
+// anything anywhere" or lets a run pad the section past what a reviewer
+// reads in a minute.
+func TestEvidenceSectionCapsShotsAndNarrowsTheUploadBan(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+	flat := strings.Join(strings.Fields(skill), " ")
+
+	if !strings.Contains(flat, "at most four shots or pairs") {
+		t.Error("the Evidence section's budget no longer caps shots at four — without a" +
+			" number, a run captured evidence could pad the PR body past a minute's read")
+	}
+	if !strings.Contains(flat, "the evidence ref is the one sanctioned channel; never any other upload") {
+		t.Error("the Evidence section no longer narrows the upload ban to name the evidence ref" +
+			" as the one sanctioned channel — without it the ban still reads as a blanket" +
+			" 'no upload tool is in this run's grant', which the evidence ref itself is now an" +
+			" exception to")
+	}
+}
+
 // Under headless `claude -p` — the only way the supervisor invokes the skill —
 // the model ending its turn is the process exiting. So a run that stops to wait
 // on something does not pause, it terminates: exit 0, no error, work left

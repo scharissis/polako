@@ -6,9 +6,11 @@
 
 <!-- If this changes something a human looks at — CLI output, a generated
      file, a rendered doc, an error message, a report layout — show it: a
-     fenced block of real output, a mermaid diagram, or a link to an image
-     already committed on the branch. Delete this section if nothing visible
-     changed. -->
+     fenced block of real output, a mermaid diagram, a link to an image
+     already committed on the branch, or an image pushed to the
+     `polako-evidence` ref and embedded by its commit sha — the evidence ref
+     is the one sanctioned channel; never any other upload. At most four
+     shots or pairs. Delete this section if nothing visible changed. -->
 
 ## Design decisions
 
