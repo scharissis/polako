@@ -13,6 +13,27 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.23.0]
+
+### What's Changed
+* fix: park a remediation that finishes without pushing by @scharissis in https://github.com/scharissis/polako/pull/382 (closes #381)
+* docs: retire docs/plans/model-and-effort.md by @scharissis in https://github.com/scharissis/polako/pull/391 (closes #380)
+* docs: assess tiered orchestration and draft the size-routing plan by @scharissis in https://github.com/scharissis/polako/pull/392
+* docs: plan visual evidence in PRs by @scharissis in https://github.com/scharissis/polako/pull/398
+* fix: run CI daily so an overdue release surfaces on main, not the next PR by @scharissis in https://github.com/scharissis/polako/pull/397 (closes #387)
+* fix: point a remediation park's resume hint at the run that gave up by @scharissis in https://github.com/scharissis/polako/pull/406 (closes #388)
+* fix: split "backlog cleared" from "nothing left to work, parked" by @scharissis in https://github.com/scharissis/polako/pull/407 (closes #389)
+* docs: re-run a parked issue on a stronger tier with a label by @scharissis in https://github.com/scharissis/polako/pull/408 (closes #396)
+* docs: draft the setup-verb plan by @scharissis in https://github.com/scharissis/polako/pull/409
+* feat: .polako-evidence doesn't count as left work by @scharissis in https://github.com/scharissis/polako/pull/410 (closes #400)
+* refactor: move the model and effort flags out of parseFlags by @scharissis in https://github.com/scharissis/polako/pull/419 (closes #394)
+* fix: stop the shift when origin can't be fetched by @scharissis in https://github.com/scharissis/polako/pull/421
+* feat: clearer plan and health reports — what was filed, what it costs, where to curate by @scharissis in https://github.com/scharissis/polako/pull/422
+* feat: -model-by-size, the model twin of -effort-by-size by @scharissis in https://github.com/scharissis/polako/pull/423 (closes #395)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.22.0...v0.23.0
+
 ## [0.22.0]
 
 ### What's Changed
