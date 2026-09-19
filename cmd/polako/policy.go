@@ -225,22 +225,23 @@ func (p runPolicy) choose(reason string) runChoice {
 	}
 	m, ms := pick(p.labels.model, p.labels.modelSet, p.labels.modelFromEpic, p.remediationModel, p.model)
 	e, es := pick(p.labels.effort, p.labels.effortSet, p.labels.effortFromEpic, p.remediationEffort, p.effort)
-	// Effort by size: one rung below a maintainer's effort: label (the issue's
-	// own or its epic's), above the -effort flag, and only on an
-	// implementation-class run — a remediation run keeps the cell pick() just
-	// gave it (#362's seam). The issue body chooses which -effort-by-size cell
-	// applies, never a level directly.
-	if !remediation && !p.labels.effortSet {
-		if cell, ok := p.sizeEffort[p.size]; ok {
-			e, es = cell, sourceSize
+	// By size: one rung below a maintainer's model:/effort: label (the
+	// issue's own or its epic's), above the -model/-effort flag, and only on
+	// an implementation-class run — a remediation run keeps the cell pick()
+	// just gave it (#362's seam). The issue body chooses which cell applies,
+	// never a model or level directly. #366 shipped this for effort;
+	// #395 mirrors it for model.
+	bySize := func(cur, curSrc string, labelSet bool, cells map[string]string) (string, string) {
+		if remediation || labelSet {
+			return cur, curSrc
 		}
-	}
-	// Model by size: the same rung, mirrored (#395).
-	if !remediation && !p.labels.modelSet {
-		if cell, ok := p.sizeModel[p.size]; ok {
-			m, ms = cell, sourceSize
+		if cell, ok := cells[p.size]; ok {
+			return cell, sourceSize
 		}
+		return cur, curSrc
 	}
+	m, ms = bySize(m, ms, p.labels.modelSet, p.sizeModel)
+	e, es = bySize(e, es, p.labels.effortSet, p.sizeEffort)
 	return runChoice{model: m, effort: e, modelSource: ms, effortSource: es}
 }
 
