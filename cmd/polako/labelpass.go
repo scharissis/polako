@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -58,11 +59,13 @@ func openIssuesBefore(ctx context.Context, cfg config) (map[int]bool, error) {
 // collected here rather than swallowed and it makes the run exit nonzero.
 type labelPassOutcome struct {
 	created   int      // new issues this account was found to have filed
+	numbers   []int    // which ones — what the summary names, so the operator can find them
 	epics     int      // of those, the ones that are containers (sub-issues > 0)
 	labelled  []int    // issues confirmed to carry exactly proposedLabel afterwards
 	added     int      // missing proposedLabel labels the pass applied
 	stripped  int      // stray labels removed, across all of them
 	milestone []int    // issues the batch milestone was newly attached to
+	title     string   // that milestone's title; "" for a run with none
 	failures  []string // one line per action that did not take — loud
 	listErr   error    // the after-listing itself failed: nothing could be checked
 }
@@ -89,7 +92,7 @@ func (o labelPassOutcome) labelsEnforced() int { return o.added + o.stripped }
 // the narration prefix ("plan" or "health") so a mixed shift's terminal still
 // says which run each label edit belongs to.
 func normaliseProposals(ctx context.Context, cfg config, before map[int]bool, milestone, logTag string) labelPassOutcome {
-	var out labelPassOutcome
+	out := labelPassOutcome{title: milestone}
 	maxBefore := 0
 	for n := range before {
 		if n > maxBefore {
@@ -135,6 +138,7 @@ func normaliseProposals(ctx context.Context, cfg config, before map[int]bool, mi
 			continue // there before the run — not ours to touch
 		}
 		out.created++
+		out.numbers = append(out.numbers, r.Number)
 		if r.SubIssues.Total > 0 {
 			out.epics++
 		}
@@ -175,7 +179,11 @@ func normaliseProposals(ctx context.Context, cfg config, before map[int]bool, mi
 				out.failures = append(out.failures,
 					fmt.Sprintf("could not attach the %q milestone to #%d: %v", milestone, r.Number, err))
 			} else {
-				log.Printf("%s: attached the %q milestone to #%d", logTag, milestone, r.Number)
+				// The ordinary path — the pass attaches it to every issue of
+				// every batch — so it goes to the shift log and the summary
+				// says it once. A strip or a missing label is the run falling
+				// short of the gate, which is why those stay on the terminal.
+				detail.Printf("%s: attached the %q milestone to #%d", logTag, milestone, r.Number)
 				out.milestone = append(out.milestone, r.Number)
 			}
 		}
@@ -214,19 +222,33 @@ func (o labelPassOutcome) summary(rep runReport) string {
 		}
 		return "the run created no issues"
 	}
-	s := fmt.Sprintf("%s created, %d normalised to %s",
-		plural(o.created, "issue"), len(o.labelled), proposedLabel)
+	s := fmt.Sprintf("filed %s — %s", plural(o.created, "issue"), issueRanges(o.numbers))
+	if len(o.labelled) == o.created {
+		s += ", all labelled " + proposedLabel
+	} else {
+		s += fmt.Sprintf(", %d of %d labelled %s", len(o.labelled), o.created, proposedLabel)
+	}
 	if o.stripped > 0 {
 		s += fmt.Sprintf(" (%s stripped)", plural(o.stripped, "stray label"))
 	}
-	if len(o.milestone) > 0 {
-		s += fmt.Sprintf(", milestone attached to %d", len(o.milestone))
+	if o.epics > 0 {
+		s += ", " + plural(o.epics, "epic")
+	}
+	switch {
+	case len(o.milestone) == 0:
+		// No milestone concept, -milestone off, or the run set its own.
+	case len(o.milestone) == o.created:
+		s += fmt.Sprintf(", milestone %q", o.title)
+	default:
+		s += fmt.Sprintf(", milestone %q attached to %d", o.title, len(o.milestone))
 	}
 	if rep.capped {
 		s += " — stopped at the -max-issues cap"
 	}
 	if len(o.failures) > 0 {
-		s += fmt.Sprintf(" — %s FAILED, see above", plural(len(o.failures), "action"))
+		// Below, not above: the failures are the run's exit error, which
+		// main prints after everything intakeRun narrates.
+		s += fmt.Sprintf(" — %s FAILED, see below", plural(len(o.failures), "action"))
 	}
 	return s
 }
@@ -254,8 +276,13 @@ const noPricingHistory = "no run history to price against — work a few issues 
 // proposalPricingLine is the one line a plan or health report prints after the
 // label pass: what the operator's own run records say a batch of proposals
 // will cost to implement — the median cost and median run time of a merged
-// issue in this repository, times the number of proposals. It never invents a
-// figure; with no usable history it says exactly that and stops.
+// issue in this repository, times the number of proposals a drain would
+// actually work. That is workable, not everything filed: an epic is a
+// container, never worked, so pricing it would overstate the batch; epics is
+// only there so the line can say why its count is short of the summary's. The
+// estimate leads and its basis follows, because the estimate is the question
+// the operator has. It never invents a figure; with no usable history it says
+// exactly that and stops.
 //
 // This is the second of telemetry's two readers, the one named beside `stats`
 // in CLAUDE.md's write-only-telemetry invariant: human-facing rendering,
@@ -266,7 +293,7 @@ const noPricingHistory = "no run history to price against — work a few issues 
 // — rather than parsing the records a second way. It reads ordinary issue-run
 // records, keyed on a merged outcome, so it is unaffected by which verb
 // proposed the batch it is pricing.
-func proposalPricingLine(metricsDir, repo string, proposals int, now time.Time) string {
+func proposalPricingLine(metricsDir, repo string, workable, epics int, now time.Time) string {
 	if metricsDir == "" {
 		return noPricingHistory // -metrics off, or no home directory: nothing to read, no file opened to find out
 	}
@@ -300,11 +327,30 @@ func proposalPricingLine(metricsDir, repo string, proposals int, now time.Time) 
 	n := len(costs)
 	costMedian := median(costs)
 	timeMedian := median(times)
-	return fmt.Sprintf("your last %s ran %s and %s median — %s ≈ %s and %s of run time, before curation cuts",
-		plural(n, "merged issue"), usd(costMedian), dur(timeMedian),
-		plural(proposals, "proposal"),
-		approxUSD(float64(proposals)*costMedian),
-		approxDur(time.Duration(proposals)*timeMedian))
+	which := fmt.Sprintf("all %d", workable)
+	switch {
+	case epics > 0 && workable == 1:
+		which = "the 1 that isn't an epic"
+	case epics > 0:
+		which = fmt.Sprintf("the %d that aren't epics", workable)
+	case workable == 1:
+		which = "it"
+	}
+	return fmt.Sprintf("working %s would cost about %s and %s — a merged issue here runs %s and %s (median of your last %d)",
+		which,
+		approxUSD(float64(workable)*costMedian),
+		approxDur(time.Duration(workable)*timeMedian),
+		usd(costMedian), medianDur(timeMedian), n)
+}
+
+// medianDur renders the median run time at the resolution a basis figure
+// earns: whole minutes once it is worth one, so "15m" is not dressed up as
+// "14m46s" beside an estimate rounded to the half hour.
+func medianDur(d time.Duration) string {
+	if d < time.Minute {
+		return dur(d)
+	}
+	return dur(d.Round(time.Minute))
 }
 
 // approxUSD renders a projected batch cost — a median times a count — at the
@@ -335,4 +381,32 @@ func approxDur(d time.Duration) string {
 		return fmt.Sprintf("%d½h", halves/2)
 	}
 	return fmt.Sprintf("%dh", halves/2)
+}
+
+// proposalsURL is the issue search that shows a batch for curation: what is
+// open behind proposedLabel, narrowed to the batch milestone when the run had
+// one. Built from the slug alone, no gh call. "" for anything but a plain
+// owner/name — the rule issueURL keeps, for its reason: a fabricated link that
+// 404s is worse than no link.
+func proposalsURL(repo, milestone string) string {
+	if !plainRepo(repo) {
+		return ""
+	}
+	q := "is:open label:" + proposedLabel
+	if milestone != "" {
+		q += fmt.Sprintf(" milestone:%q", milestone)
+	}
+	return fmt.Sprintf("https://github.com/%s/issues?%s", repo, url.Values{"q": {q}}.Encode())
+}
+
+// curationLine is the last thing a run that proposed something prints: where
+// the batch is and the one action that queues an issue. The run ends at the
+// curation gate, and a report that stops at a dollar figure leaves the operator
+// to remember what the gate is.
+func curationLine(repo, milestone string) string {
+	where := "with `gh issue list --label " + proposedLabel + "`"
+	if u := proposalsURL(repo, milestone); u != "" {
+		where = "at " + u
+	}
+	return fmt.Sprintf("review them %s — remove the %s label to queue them", where, proposedLabel)
 }

@@ -7,6 +7,7 @@ package main
 // `gh` and fake `claude` the drain loop does — no network, no real gh, no claude.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -479,7 +480,8 @@ func TestPlanNormaliseFallsBackForAnOldGh(t *testing.T) {
 // normalises what it filed. The fake skill creates three proposals, only one
 // of them labelled.
 func TestPlanRunSpawnsTheSkillAndNormalisesWhatItCreated(t *testing.T) {
-	buf := captureLog(t)
+	var term, buf bytes.Buffer
+	wireSinks(t, &ui{terminal: &term, file: &buf})
 	cfg, statePath := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plan")
 
 	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10}, vision: "VISION.md"}
@@ -508,8 +510,21 @@ func TestPlanRunSpawnsTheSkillAndNormalisesWhatItCreated(t *testing.T) {
 	if mine != 3 {
 		t.Errorf("the run created %d issues, want 3", mine)
 	}
-	if !strings.Contains(buf.String(), "3 issues created, 3 normalised to "+proposedLabel) {
-		t.Errorf("the pass summary is missing from the log:\n%s", buf.String())
+	for _, want := range []string{"filed 3 issues — #", "all labelled " + proposedLabel, "review them "} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("the run's report is missing %q:\n%s", want, buf.String())
+		}
+	}
+	// The milestone is attached per issue but said once: seven identical lines
+	// above the summary was the noise this run's report used to open with.
+	if strings.Contains(term.String(), "attached the") {
+		t.Errorf("per-issue milestone lines belong in the shift log, not the terminal:\n%s", term.String())
+	}
+	if !strings.Contains(buf.String(), `attached the "VISION" milestone to #`) {
+		t.Errorf("the shift log lost the per-issue milestone lines:\n%s", buf.String())
+	}
+	if !strings.Contains(term.String(), `milestone "VISION"`) {
+		t.Errorf("the summary does not name the batch milestone:\n%s", buf.String())
 	}
 }
 
@@ -745,15 +760,15 @@ func TestPlanPricingLineFromHistory(t *testing.T) {
 		"scharissis--polako.jsonl": pricingFixture,
 		"scharissis--other.jsonl":  pricingOtherRepo,
 	})
-	got := proposalPricingLine(dir, "scharissis/polako", 5, fixtureNow)
-	want := "your last 2 merged issues ran $3.00 and 40m median — 5 proposals ≈ $15 and 3½h of run time, before curation cuts"
+	got := proposalPricingLine(dir, "scharissis/polako", 5, 0, fixtureNow)
+	want := "working all 5 would cost about $15 and 3½h — a merged issue here runs $3.00 and 40m (median of your last 2)"
 	if got != want {
 		t.Errorf("proposalPricingLine:\n got %q\nwant %q", got, want)
 	}
 }
 
 func TestPlanPricingLineWithNoHistory(t *testing.T) {
-	if got := proposalPricingLine(t.TempDir(), "scharissis/polako", 5, fixtureNow); got != noPricingHistory {
+	if got := proposalPricingLine(t.TempDir(), "scharissis/polako", 5, 0, fixtureNow); got != noPricingHistory {
 		t.Errorf("empty directory: got %q, want the no-history line", got)
 	}
 }
@@ -761,7 +776,7 @@ func TestPlanPricingLineWithNoHistory(t *testing.T) {
 func TestPlanPricingLineWithMetricsOff(t *testing.T) {
 	// -metrics off resolves to an empty dir string: no file is opened to find
 	// out there is nothing to read.
-	if got := proposalPricingLine("", "scharissis/polako", 5, fixtureNow); got != noPricingHistory {
+	if got := proposalPricingLine("", "scharissis/polako", 5, 0, fixtureNow); got != noPricingHistory {
 		t.Errorf("-metrics off: got %q, want the no-history line", got)
 	}
 }
@@ -775,7 +790,7 @@ func TestPlanPricingLineTreatsUnpricedCrashesAsNoHistory(t *testing.T) {
 {"v":1,"kind":"issue","ts":"2026-08-20T10:00:00Z","repo":"scharissis/polako","issue":40,"pr":0,"outcome":"merged"}
 `
 	dir := writePricingFixture(t, map[string]string{"scharissis--polako.jsonl": crashOnly})
-	if got := proposalPricingLine(dir, "scharissis/polako", 5, fixtureNow); got != noPricingHistory {
+	if got := proposalPricingLine(dir, "scharissis/polako", 5, 0, fixtureNow); got != noPricingHistory {
 		t.Errorf("crash-only history: got %q, want the no-history line", got)
 	}
 }
@@ -792,8 +807,8 @@ func TestPlanPricingLineSkipsUnpricedIssuesInAMixedHistory(t *testing.T) {
 {"v":1,"kind":"issue","ts":"2026-08-21T10:00:00Z","repo":"scharissis/polako","issue":61,"pr":0,"outcome":"merged"}
 `
 	dir := writePricingFixture(t, map[string]string{"scharissis--polako.jsonl": mixed})
-	got := proposalPricingLine(dir, "scharissis/polako", 2, fixtureNow)
-	want := "your last 1 merged issue ran $6.00 and 1h median — 2 proposals ≈ $12 and 2h of run time, before curation cuts"
+	got := proposalPricingLine(dir, "scharissis/polako", 2, 0, fixtureNow)
+	want := "working all 2 would cost about $12 and 2h — a merged issue here runs $6.00 and 1h (median of your last 1)"
 	if got != want {
 		t.Errorf("mixed history:\n got %q\nwant %q", got, want)
 	}
@@ -803,10 +818,117 @@ func TestPlanPricingLineOnlyPrintsForABatch(t *testing.T) {
 	// Zero proposals never reaches proposalPricingLine in planRun, but the median
 	// half of the sentence should still read sanely if it ever did.
 	dir := writePricingFixture(t, map[string]string{"scharissis--polako.jsonl": pricingFixture})
-	got := proposalPricingLine(dir, "scharissis/polako", 1, fixtureNow)
-	want := "your last 2 merged issues ran $3.00 and 40m median — 1 proposal ≈ $3.00 and 40m of run time, before curation cuts"
+	got := proposalPricingLine(dir, "scharissis/polako", 1, 0, fixtureNow)
+	want := "working it would cost about $3.00 and 40m — a merged issue here runs $3.00 and 40m (median of your last 2)"
 	if got != want {
 		t.Errorf("single proposal:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestPlanPricingLineSaysWhyItsCountIsShortOfTheSummary(t *testing.T) {
+	// An epic is a container, never worked, so the caller prices created minus
+	// epics — and the line names the gap, or "filed 7" above "all 6" reads as
+	// a miscount.
+	dir := writePricingFixture(t, map[string]string{"scharissis--polako.jsonl": pricingFixture})
+	for _, c := range []struct {
+		workable, epics int
+		want            string
+	}{
+		{6, 1, "working the 6 that aren't epics would cost about $18 and 4h — a merged issue here runs $3.00 and 40m (median of your last 2)"},
+		{1, 1, "working the 1 that isn't an epic would cost about $3.00 and 40m — a merged issue here runs $3.00 and 40m (median of your last 2)"},
+	} {
+		if got := proposalPricingLine(dir, "scharissis/polako", c.workable, c.epics, fixtureNow); got != c.want {
+			t.Errorf("workable %d, epics %d:\n got %q\nwant %q", c.workable, c.epics, got, c.want)
+		}
+	}
+}
+
+func TestMedianDurRoundsToTheMinuteOnceItIsWorthOne(t *testing.T) {
+	for _, c := range []struct {
+		in   time.Duration
+		want string
+	}{
+		{14*time.Minute + 46*time.Second, "15m"},
+		{40 * time.Minute, "40m"},
+		{time.Hour + 10*time.Minute + 20*time.Second, "1h10m"},
+		{42 * time.Second, "42s"},
+	} {
+		if got := medianDur(c.in); got != c.want {
+			t.Errorf("medianDur(%s) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestLabelPassSummaryVariants(t *testing.T) {
+	seven := []int{405, 404, 403, 402, 401, 400, 399}
+	for _, c := range []struct {
+		name string
+		o    labelPassOutcome
+		rep  runReport
+		want string
+	}{
+		{"a clean plan batch",
+			labelPassOutcome{created: 7, numbers: seven, labelled: seven, epics: 1, milestone: seven, title: "visual-evidence"},
+			runReport{},
+			`filed 7 issues — #399–#405, all labelled proposed, 1 epic, milestone "visual-evidence"`},
+		{"health has no milestone",
+			labelPassOutcome{created: 2, numbers: []int{12, 11}, labelled: []int{12, 11}},
+			runReport{},
+			"filed 2 issues — #11–#12, all labelled proposed"},
+		{"a milestone only some needed",
+			labelPassOutcome{created: 3, numbers: []int{9, 8, 7}, labelled: []int{9, 8, 7}, milestone: []int{9}, title: "m"},
+			runReport{},
+			`filed 3 issues — #7–#9, all labelled proposed, milestone "m" attached to 1`},
+		{"a label that did not take, strays stripped, capped",
+			labelPassOutcome{created: 3, numbers: []int{9, 8, 7}, labelled: []int{9, 8}, stripped: 2,
+				failures: []string{"could not add proposed to #7: boom"}},
+			runReport{capped: true},
+			"filed 3 issues — #7–#9, 2 of 3 labelled proposed (2 stray labels stripped) — stopped at the -max-issues cap — 1 action FAILED, see below"},
+		{"one issue", labelPassOutcome{created: 1, numbers: []int{5}, labelled: []int{5}}, runReport{},
+			"filed 1 issue — #5, all labelled proposed"},
+		{"nothing filed", labelPassOutcome{}, runReport{}, "the run created no issues"},
+		{"capped before filing", labelPassOutcome{}, runReport{capped: true}, "the run was capped before it created anything"},
+	} {
+		if got := c.o.summary(c.rep); got != c.want {
+			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestIssueRanges(t *testing.T) {
+	for _, c := range []struct {
+		in   []int
+		want string
+	}{
+		{[]int{405, 399, 400, 401, 402, 403, 404}, "#399–#405"},
+		{[]int{403, 399, 401, 402}, "#399, #401–#403"},
+		{[]int{7, 9}, "#7, #9"},
+		{[]int{7, 8}, "#7–#8"},
+		{[]int{7}, "#7"},
+		{nil, ""},
+	} {
+		if got := issueRanges(c.in); got != c.want {
+			t.Errorf("issueRanges(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestCurationLine(t *testing.T) {
+	for _, c := range []struct {
+		name, repo, milestone, want string
+	}{
+		{"plan, with its batch milestone", "scharissis/polako", "visual-evidence",
+			"review them at https://github.com/scharissis/polako/issues?q=is%3Aopen+label%3Aproposed+milestone%3A%22visual-evidence%22 — remove the proposed label to queue them"},
+		{"a title with a space survives the query", "o/r", "a dating app",
+			"review them at https://github.com/o/r/issues?q=is%3Aopen+label%3Aproposed+milestone%3A%22a+dating+app%22 — remove the proposed label to queue them"},
+		{"health, no milestone", "o/r", "",
+			"review them at https://github.com/o/r/issues?q=is%3Aopen+label%3Aproposed — remove the proposed label to queue them"},
+		{"a slug that is not owner/name gets no invented link", "ghe.example.com/o/r", "m",
+			"review them with `gh issue list --label proposed` — remove the proposed label to queue them"},
+	} {
+		if got := curationLine(c.repo, c.milestone); got != c.want {
+			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
+		}
 	}
 }
 

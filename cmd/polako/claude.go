@@ -570,7 +570,9 @@ func (w *watchdogs) stop() {
 func scanEvents(stdout io.Reader, cfg config, cmd *exec.Cmd, invokes string, w *watchdogs, rep *runReport) (missing string, scanErr error) {
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 64*1024), maxEventBytes)
-	var el eventLog
+	// maxIssues is set by plan and health alone — the same tell the cap check
+	// below keys on — and is what picks the intake stage map over the drain's.
+	el := eventLog{stages: stageNarrator{intake: cfg.maxIssues > 0}}
 	for sc.Scan() {
 		w.lastEvent.Store(time.Now().UnixNano())
 		ev, ok := parseEvent(sc.Bytes())

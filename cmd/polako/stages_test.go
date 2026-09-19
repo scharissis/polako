@@ -197,3 +197,96 @@ func TestStageNarrationIsAMilestoneOnBothSinks(t *testing.T) {
 		}
 	}
 }
+
+// toolUseID is toolUse with the id a tool_result answers to — what the intake
+// narrator pairs a `gh issue create` with the issue it made by.
+func toolUseID(id, name, input string) string {
+	return `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"` + id + `","name":"` +
+		name + `","input":` + input + `}]}}`
+}
+
+func toolResult(id, content string, isError bool) string {
+	e := "false"
+	if isError {
+		e = "true"
+	}
+	return `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"` + id +
+		`","is_error":` + e + `,"content":` + jsonString(content) + `}]}}`
+}
+
+// narratedIntake is narratedStages for a plan or health run.
+func narratedIntake(t *testing.T, events ...string) []string {
+	t.Helper()
+	buf := captureLog(t)
+	n := stageNarrator{intake: true}
+	for _, e := range events {
+		ev, ok := parseEvent([]byte(e))
+		if !ok {
+			t.Fatalf("parseEvent rejected %s", e)
+		}
+		n.observe(ev)
+	}
+	var got []string
+	for _, ln := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if i := strings.Index(ln, "[claude] "); i >= 0 {
+			got = append(got, strings.TrimSpace(ln[i+len("[claude] "):]))
+		}
+	}
+	return got
+}
+
+// A plan run reads, writes a scratch issue body, and files issues. The drain's
+// map called that scratch write "implementing…"; the intake map says what the
+// run is doing, and names each issue as gh confirms it.
+func TestIntakeStageNarration(t *testing.T) {
+	create := `{"command":"gh issue create --title T --label proposed --body-file ISSUE_BODY.md"}`
+	got := narratedIntake(t,
+		toolUse("Read", `{"file_path":"/x/docs/VISION.md"}`),
+		bash("git branch --list"),
+		toolUse("Write", `{"file_path":"/x/ISSUE_BODY.md","content":"..."}`),
+		toolUseID("t1", "Bash", create),
+		toolResult("t1", "https://github.com/o/r/issues/399", false),
+		toolUse("Write", `{"file_path":"/x/ISSUE_BODY.md","content":"..."}`),
+		toolUse("Grep", `{"pattern":"x"}`),
+		toolUseID("t2", "Bash", create),
+		toolResult("t2", "https://github.com/o/r/issues/400", false),
+	)
+	want := []string{"reading the code…", "filing proposals…", "filed #399", "filed #400"}
+	if !slices.Equal(got, want) {
+		t.Errorf("intake lines =\n%v\nwant\n%v", got, want)
+	}
+}
+
+// Only what gh confirmed is named: a failed create, a result with no issue URL
+// in it, a --help probe and the result of some other call all say nothing.
+func TestIntakeNarrationOnlyNamesAnIssueGhConfirmed(t *testing.T) {
+	create := `{"command":"gh issue create --title T --body-file B.md --parent 12"}`
+	got := narratedIntake(t,
+		toolUseID("h", "Bash", `{"command":"gh issue create --help"}`),
+		toolResult("h", "see https://github.com/o/r/issues/1", false),
+		toolUseID("v", "Bash", `{"command":"gh issue view 7"}`),
+		toolResult("v", "https://github.com/o/r/issues/7", false),
+		toolUseID("t1", "Bash", create),
+		toolResult("t1", "unknown flag: --parent — see https://github.com/cli/cli/issues/1", true),
+		toolUseID("t2", "Bash", create),
+		toolResult("t2", "created", false),
+	)
+	want := []string{"filing proposals…"}
+	if !slices.Equal(got, want) {
+		t.Errorf("intake lines =\n%v\nwant\n%v", got, want)
+	}
+}
+
+// The drain's map is untouched by intake mode existing: a `gh issue create`
+// inside an implement-issue run is not a stage, and its result names nothing.
+func TestDrainNarrationIgnoresIssueCreates(t *testing.T) {
+	got := narratedStages(t,
+		toolUseID("t1", "Bash", `{"command":"gh issue create --title T --body-file B.md"}`),
+		toolResult("t1", "https://github.com/o/r/issues/399", false),
+		toolUse("Edit", `{"file_path":"/x/main.go","old_string":"a","new_string":"b"}`),
+	)
+	want := []string{"implementing…"}
+	if !slices.Equal(got, want) {
+		t.Errorf("stage lines = %v, want %v", got, want)
+	}
+}
