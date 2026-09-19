@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 )
@@ -75,41 +76,65 @@ func worktreeFor(list, branch string) string {
 // human already created on the remote, and refuses rather than moving anything
 // it cannot advance cleanly. It creates no commit, merges no PR, rewrites
 // nothing somebody committed here — so it stays on the right side of "nothing
-// merges itself". Every failure is best-effort and logged rather than fatal: a
-// checkout on another branch, or with work in the way, is the operator's to
-// sort out and none of it is worth ending an overnight drain over. It is logged
-// loudly because a skipped sync is what puts a stale base under the next review.
-func syncDefaultBranch(ctx context.Context, cfg config) {
-	if _, err := git(ctx, cfg, "fetch", "origin", "--quiet"); err != nil {
-		narrate(sevWarning, "could not fetch origin, so the default branch may be behind "+
-			"and a review may run against a stale base: %v", err)
-		return
+// merges itself".
+//
+// The local refusals are best-effort and logged rather than fatal: a checkout
+// on another branch, or with work in the way, is the operator's to sort out and
+// none of it is worth ending an overnight drain over. The fetch worked, so the
+// issue's branch is still cut from a fresh origin ref and its push will land;
+// only a review's base may be off, which is why it is logged loudly.
+//
+// An origin that cannot be fetched is the one failure returned, for the caller
+// to stop on. A run started then works from a base of unknown age, and the
+// remote that refused the fetch refuses the run's push too — the money is spent
+// and nothing ships. It is not a park either: every later issue meets the same
+// dead remote, so parking would label the whole backlog needs-human one issue
+// at a time. No origin remote at all is a different condition — there is no
+// mirror to keep — and stays a warning.
+func syncDefaultBranch(ctx context.Context, cfg config) error {
+	if _, err := git(ctx, cfg, "remote", "get-url", "origin"); err != nil {
+		narrate(sevWarning, "no origin remote to fetch in %s, so the default branch is left as it is "+
+			"and a review may run against a stale base: %v", cfg.dir, err)
+		return nil
+	}
+	// Retried like a GitHub read, and for the same reason: waking from sleep is
+	// exactly when the network is not back yet. A fetch is safe to repeat.
+	if _, err := retryRead(ctx, cfg, "git fetch origin", func() ([]byte, error) {
+		return git(ctx, cfg, "fetch", "origin", "--quiet")
+	}); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("could not fetch origin, so a run would start from a base of unknown age "+
+			"and could not push its work — check the network and git's credentials (is the ssh-agent "+
+			"unlocked? does `git -C %s fetch origin` work?), then start the drain again: %w", cfg.dir, err)
 	}
 	head, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short")
 	if err != nil {
 		narrate(sevWarning, "could not resolve origin's default branch, so %s is left as it is "+
 			"— run `git remote set-head origin -a` there if reviews look mis-scoped: %v", cfg.dir, err)
-		return
+		return nil
 	}
 	remote := strings.TrimSpace(string(head))
 	local := strings.TrimPrefix(remote, "origin/")
 	on, err := git(ctx, cfg, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
-		return
+		return nil
 	}
 	if got := strings.TrimSpace(string(on)); got != local {
 		log.Printf("%s is on %s, not %s — leaving it alone, but a run's review base "+
 			"comes from %s, so check it before trusting a review's scope", cfg.dir, got, local, local)
-		return
+		return nil
 	}
 	before, _ := git(ctx, cfg, "rev-parse", "HEAD")
 	if _, err := git(ctx, cfg, "merge", "--ff-only", remote); err != nil {
 		narrate(sevWarning, "could not fast-forward %s to %s, so a review may run against a stale "+
 			"base — commit, stash or discard whatever is in the way in %s: %v",
 			local, remote, cfg.dir, err)
-		return
+		return nil
 	}
 	if after, _ := git(ctx, cfg, "rev-parse", "HEAD"); string(after) != string(before) {
 		detail.Printf("fast-forwarded %s to %s", local, remote)
 	}
+	return nil
 }

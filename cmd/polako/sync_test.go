@@ -144,7 +144,9 @@ func TestSyncDefaultBranchFastForwardsOntoOrigin(t *testing.T) {
 	if head := gitAt(t, checkout, "rev-parse", "HEAD"); head == want {
 		t.Fatal("checkout is already current, so this proves nothing")
 	}
-	syncDefaultBranch(context.Background(), config{dir: checkout})
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout}); err != nil {
+		t.Fatalf("a reachable origin must never stop a pickup: %v", err)
+	}
 
 	if got := gitAt(t, checkout, "rev-parse", "HEAD"); got != want {
 		t.Errorf("checkout is at %s, want %s: a review here would diff against a base "+
@@ -163,7 +165,9 @@ func TestSyncDefaultBranchLeavesAnotherBranchAlone(t *testing.T) {
 	gitAt(t, checkout, "checkout", "-b", "operators-own-work")
 	want := commit(t, checkout, "not-yours-to-move")
 
-	syncDefaultBranch(context.Background(), config{dir: checkout})
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout}); err != nil {
+		t.Fatalf("a reachable origin must never stop a pickup: %v", err)
+	}
 
 	if got := gitAt(t, checkout, "rev-parse", "HEAD"); got != want {
 		t.Errorf("HEAD moved from %s to %s; a checkout on another branch must be left alone",
@@ -184,7 +188,9 @@ func TestSyncDefaultBranchRefusesRatherThanRewriteALocalCommit(t *testing.T) {
 
 	want := commit(t, checkout, "mine-committed-straight-to-main")
 
-	syncDefaultBranch(context.Background(), config{dir: checkout})
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout}); err != nil {
+		t.Fatalf("a reachable origin must never stop a pickup: %v", err)
+	}
 
 	if got := gitAt(t, checkout, "rev-parse", "HEAD"); got != want {
 		t.Errorf("HEAD moved from %s to %s: a diverged default branch needs a human, "+
@@ -192,5 +198,51 @@ func TestSyncDefaultBranchRefusesRatherThanRewriteALocalCommit(t *testing.T) {
 	}
 	if !strings.Contains(gitAt(t, checkout, "log", "--oneline", "-1"), "mine-committed-straight-to-main") {
 		t.Error("the local commit is gone; --ff-only must refuse rather than rewrite")
+	}
+}
+
+// unreachableOrigin points checkout's origin at a path with nothing behind it:
+// the hermetic stand-in for a locked ssh-agent or a network that is down.
+func unreachableOrigin(t *testing.T, checkout string) {
+	t.Helper()
+	gitAt(t, checkout, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "gone"))
+}
+
+// The one sync failure a caller hears about. A run started now would work from
+// a base nobody can date and then fail its push against the same remote, so the
+// error has to reach processIssue — and say what to go and fix.
+func TestSyncDefaultBranchReportsAnUnreachableOrigin(t *testing.T) {
+	buf := captureLog(t)
+	_, checkout := upstream(t)
+	unreachableOrigin(t, checkout)
+
+	err := syncDefaultBranch(context.Background(), config{dir: checkout, ghRetryWait: 1})
+	if err == nil {
+		t.Fatal("err = nil, want the failed fetch reported so the pickup can stop on it")
+	}
+	for _, want := range []string{"could not fetch origin", "ssh-agent", "fetch origin` work", "start the drain again"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error is missing %q, so it does not say what to do:\n%v", want, err)
+		}
+	}
+	// Bounded patience first: a network still waking up is not a dead remote.
+	if got := strings.Count(buf.String(), "transient: git fetch origin failed"); got != ghReads-1 {
+		t.Errorf("fetch was retried %d times, want %d\n%s", got, ghReads-1, buf)
+	}
+}
+
+// No origin at all is not an unreachable one: there is no mirror to keep, which
+// is a warning today and stays one. It is also what every drain test relies on,
+// running as they do in a directory that is not a checkout.
+func TestSyncDefaultBranchWithoutAnOriginIsNotFatal(t *testing.T) {
+	buf := captureLog(t)
+	_, checkout := upstream(t)
+	gitAt(t, checkout, "remote", "remove", "origin")
+
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout}); err != nil {
+		t.Fatalf("err = %v, want a warning and nothing more", err)
+	}
+	if !strings.Contains(buf.String(), "no origin remote to fetch") {
+		t.Errorf("log does not say the sync was skipped:\n%s", buf)
 	}
 }

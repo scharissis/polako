@@ -70,7 +70,8 @@ const ghRetryDelay = 3 * time.Second
 //
 // Reads only, deliberately. A retried write is a write that can happen twice —
 // a second park comment on a thread, a duplicate close — and none of the writes
-// here is idempotent enough to be worth that.
+// here is idempotent enough to be worth that. `git fetch origin` counts as a
+// read: it fails for the same just-woken network, and twice is the same as once.
 func retryRead[T any](ctx context.Context, cfg config, what string, read func() (T, error)) (T, error) {
 	var zero T
 	for attempt := 1; ; attempt++ {
