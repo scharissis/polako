@@ -149,6 +149,21 @@ sys.exit(1)
   ;;
 
 "pr create")
+  # Real `gh pr create` pushes the head branch first when it has no upstream —
+  # this stand-in skipped that, which made a rejected push nothing any case
+  # could ever exercise. Pushed from the checkout itself, not a worktree: refs
+  # are shared across worktrees of the same repo, so this reaches the branch
+  # regardless of which worktree has it checked out. A rejection (the
+  # push-blocked case's pre-receive hook) fails this call exactly as a real
+  # `gh pr create` would, with git's own stderr — the thing the run must
+  # describe rather than paste (issue #386).
+  if head=$(value_of --head "$@"); then
+    repo=$(dirname "$record")/repo
+    if ! out=$(git -C "$repo" push origin "$head:$head" 2>&1); then
+      echo "$out" >&2
+      exit 1
+    fi
+  fi
   # Same reasoning as body_of: record whatever was given, including nothing, and
   # let the graders be the ones to object.
   value_of --title "$@" > "$record/pr-title.txt" || true

@@ -1,0 +1,7 @@
+{
+  "number": 1,
+  "title": "greet.sh has no --version",
+  "state": "OPEN",
+  "body": "## Problem\n\n`greet.sh` has no way to print its own version.\n\n## What to do\n\nAccept `--version` (and `-V`) as the first argument. Print `greet.sh 1.0.0` and\nexit 0.\n\n`--version` must be checked before the missing-argument branch, so\n`./greet.sh --version` prints the version rather than the error.\n\n## Done when\n\n- `./greet.sh --version` and `./greet.sh -V` both print `greet.sh 1.0.0` and exit 0.\n- `./test.sh` still passes, with a case covering the new flag.\n",
+  "comments": []
+}
