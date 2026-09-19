@@ -153,20 +153,20 @@ func claudeVersion(ctx context.Context, cfg config) string {
 
 // pluginVersion reports which release of the skill this run will drive, by
 // asking the CLI what it has installed, along with that copy's
-// `<plugin>@<marketplace>` id where there is an unambiguous one. Best-effort in
-// the same way as claudeVersion, and empty rather than wrong in every case
-// where there is no honest answer: a -skill with no plugin prefix names a
-// hand-installed skill, which carries no version at all, a CLI too old for
-// `plugin list --json` fails the call, and a list that holds the plugin more
-// than once may not say which copy wins.
-func pluginVersion(ctx context.Context, cfg config) (version, id string) {
+// `<plugin>@<marketplace>` id and `--scope` where there is an unambiguous
+// one. Best-effort in the same way as claudeVersion, and empty rather than
+// wrong in every case where there is no honest answer: a -skill with no
+// plugin prefix names a hand-installed skill, which carries no version at
+// all, a CLI too old for `plugin list --json` fails the call, and a list
+// that holds the plugin more than once may not say which copy wins.
+func pluginVersion(ctx context.Context, cfg config) (version, id, scope string) {
 	plugin, _, ok := strings.Cut(cfg.skill, ":")
 	if !ok || plugin == "" {
-		return "", ""
+		return "", "", ""
 	}
 	out, err := capture(ctx, cfg.dir, cfg.claudeBin, "plugin", "list", "--json")
 	if err != nil {
-		return "", ""
+		return "", "", ""
 	}
 	return installedVersion(out, plugin)
 }
@@ -188,14 +188,15 @@ func (p installedPlugin) loadable() bool { return p.Enabled == nil || *p.Enabled
 // installedVersion picks the copy of plugin a session started now would load,
 // out of `plugin list --json` output. The list can hold the same plugin twice,
 // and the first entry is not the one that drives the run. It returns that
-// copy's version and its `<plugin>@<marketplace>` id — the id only when one
-// copy is unambiguously in the running, because the marketplace half is
-// operator-chosen and the skew warning builds a `plugin update` command out of
-// it (see warnOnVersionSkew).
-func installedVersion(list []byte, plugin string) (version, id string) {
+// copy's version and its `<plugin>@<marketplace>` id and scope — id and scope
+// only when one copy is unambiguously in the running, because the
+// marketplace half is operator-chosen and `update` needs both to build a
+// `claude plugin update <id> --scope <scope>` command that names the right
+// copy.
+func installedVersion(list []byte, plugin string) (version, id, scope string) {
 	var installed []installedPlugin
 	if err := json.Unmarshal(list, &installed); err != nil {
-		return "", ""
+		return "", "", ""
 	}
 	// The id is <plugin>@<marketplace>; the marketplace is whatever the
 	// operator named it when they added it, so only the plugin half is ours to
@@ -224,7 +225,7 @@ func installedVersion(list []byte, plugin string) (version, id string) {
 		}
 	}
 	if len(matches) == 0 {
-		return "", ""
+		return "", "", ""
 	}
 	// Several copies still in the running. Report a version only if they agree
 	// on one, because picking between them would be a guess, and a wrong
@@ -232,17 +233,18 @@ func installedVersion(list []byte, plugin string) (version, id string) {
 	// later can tell that it is wrong.
 	for _, p := range matches[1:] {
 		if p.Version != matches[0].Version {
-			return "", ""
+			return "", "", ""
 		}
 	}
-	// The id goes back only when a single copy is left: two marketplaces that
-	// happen to agree on a version still have no one right `plugin update`
-	// target, so the warning drops the command rather than guess between them —
-	// the same "wrong identifier is worse than none" rule the version follows.
+	// The id and scope go back only when a single copy is left: two
+	// marketplaces that happen to agree on a version still have no one right
+	// `plugin update` target, so a caller building that command drops it
+	// rather than guess between them — the same "wrong identifier is worse
+	// than none" rule the version follows.
 	if len(matches) == 1 {
-		return matches[0].Version, matches[0].ID
+		return matches[0].Version, matches[0].ID, matches[0].Scope
 	}
-	return matches[0].Version, ""
+	return matches[0].Version, "", ""
 }
 
 // warnOnVersionSkew reports a binary and a skill that did not ship together.
@@ -263,7 +265,7 @@ func warnOnVersionSkew(binary string, cfg config) {
 	}
 	log.Printf("version skew: this binary is %s but the installed %s plugin is %s — "+
 		"they are meant to ship together, and the supervisor finds a PR by the "+
-		"branch name the skill chooses. To fix, %s", self, pluginName, plugin, skewRemedy(cfg))
+		"branch name the skill chooses. To fix, %s", self, pluginName, plugin, skewRemedy())
 }
 
 // skewComparison is the one place that decides whether a binary and an
@@ -299,33 +301,15 @@ func semverLess(a, b [3]int) bool {
 	return slices.Compare(a[:], b[:]) < 0
 }
 
-// skewRemedy is the command (or commands) an operator runs to bring the
-// binary and the plugin back to the same release, shared by
-// warnOnVersionSkew and versionSkewGate so the two never drift apart in what
-// they tell an operator to do about it.
-func skewRemedy(cfg config) string {
-	// `claude plugin update` wants the full `<plugin>@<marketplace>` id and
-	// reports the bare name as not found even when it is installed
-	// (docs/install.md) — so the remedy prints the id preflight carried from
-	// the `plugin list` read, never one rebuilt from pluginName here, because
-	// the marketplace half is operator-chosen and unguessable. When there was
-	// no unambiguous id — copies from more than one marketplace — the skew is
-	// still worth saying, so the message fires without the exact command and
-	// sends the operator to the docs instead.
-	if cfg.pluginID == "" {
-		return "bring both to the current release — update the plugin (its update " +
-			"command needs the full `plugin@marketplace` id, and more than one copy is " +
-			"installed here) and run " +
-			"`go install github.com/scharissis/polako/cmd/polako@latest`; see docs/install.md"
-	}
-	// `claude plugin marketplace update` wants the marketplace name, which is
-	// the `@` half of the id — the same one docs/install.md names. Deriving it
-	// keeps the two commands in step and matches the canonical wording there.
-	_, marketplace, _ := strings.Cut(cfg.pluginID, "@")
-	return fmt.Sprintf("bring both to the current release: "+
-		"`claude plugin marketplace update %s && claude plugin update %s`, then "+
-		"`go install github.com/scharissis/polako/cmd/polako@latest` (see docs/install.md)",
-		marketplace, cfg.pluginID)
+// skewRemedy is the one line every skew message and refusal points to,
+// shared by warnOnVersionSkew and versionSkewGate so the two never drift
+// apart in what they tell an operator to do about it. `polako update`
+// resolves both halves to the published release on its own — including the
+// case this used to have to special-case, a plugin installed from more than
+// one marketplace with no one unambiguous `plugin update` target — so there
+// is nothing left here to branch on.
+func skewRemedy() string {
+	return "run `polako update`"
 }
 
 // versionSkewGate refuses to start a drain whose installed skill is a
@@ -348,7 +332,7 @@ func versionSkewGate(binary string, cfg config) error {
 		"together, and a shift on a stale skill is not only a branch-naming risk: it is the shift #239 ran, "+
 		"missing the polling floor (#217), the review-gate resume point (#216) and the diff-scaled review "+
 		"level (#225), and spending well more per issue for it. Pass -ignore-skew to run anyway, or %s",
-		pluginName, plugin, self, skewRemedy(cfg))
+		pluginName, plugin, self, skewRemedy())
 }
 
 // releaseVersion normalizes a version that names a release, and reports false

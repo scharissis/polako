@@ -205,12 +205,6 @@ type config struct {
 	repo          string
 	claudeVersion string
 	pluginVersion string
-	// The `<plugin>@<marketplace>` id of the copy pluginVersion read, set only
-	// when one copy was unambiguously in the running. The skew warning prints it
-	// in the `claude plugin update` command it recommends — that command needs
-	// the full id, and the marketplace half is operator-chosen, so it cannot be
-	// rebuilt from the plugin name.
-	pluginID string
 	// usage is the account's own plan, as of the one probe preflight (or
 	// statusConfig) ran — nil when the probe never answered, never a zero
 	// snapshot standing in for "could not tell". See usage.go.

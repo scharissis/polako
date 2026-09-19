@@ -186,12 +186,15 @@ func TestPluginVersionReadsTheInstalledPlugin(t *testing.T) {
 	cfg := fakeClaudeConfig(t, "stream")
 	t.Setenv(fakePluginEnv, "0.3.0")
 
-	got, id := pluginVersion(context.Background(), cfg)
+	got, id, scope := pluginVersion(context.Background(), cfg)
 	if got != "0.3.0" {
 		t.Errorf("pluginVersion = %q, want the installed plugin's version", got)
 	}
 	if id != "polako@scharissis" {
 		t.Errorf("pluginVersion id = %q, want the installed copy's marketplace-qualified id", id)
+	}
+	if scope != "user" {
+		t.Errorf("pluginVersion scope = %q, want the installed copy's scope", scope)
 	}
 }
 
@@ -203,7 +206,7 @@ func TestPluginVersionIsEmptyForAHandInstalledSkill(t *testing.T) {
 	cfg.skill = skillDir
 	t.Setenv(fakePluginEnv, "0.3.0")
 
-	if got, _ := pluginVersion(context.Background(), cfg); got != "" {
+	if got, _, _ := pluginVersion(context.Background(), cfg); got != "" {
 		t.Errorf("pluginVersion = %q, want empty: a hand-installed skill has no version", got)
 	}
 }
@@ -211,7 +214,7 @@ func TestPluginVersionIsEmptyForAHandInstalledSkill(t *testing.T) {
 func TestPluginVersionIsEmptyWhenTheCLICannotAnswer(t *testing.T) {
 	cfg := fakeClaudeConfig(t, "stream")
 
-	if got, _ := pluginVersion(context.Background(), cfg); got != "" {
+	if got, _, _ := pluginVersion(context.Background(), cfg); got != "" {
 		t.Errorf("pluginVersion = %q, want empty rather than a guess", got)
 	}
 }
@@ -221,18 +224,20 @@ func TestPluginVersionIsEmptyWhenTheCLICannotAnswer(t *testing.T) {
 // `plugin list --json` produces can be written out literally.
 func TestPluginVersionPicksTheCopyThatWillRun(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		list   string
-		want   string
-		wantID string
-		why    string
+		name      string
+		list      string
+		want      string
+		wantID    string
+		wantScope string
+		why       string
 	}{{
 		name: "sole match",
 		list: `[{"id":"some-other-plugin@elsewhere","version":"9.9.9","scope":"user"},
 		        {"id":"polako@scharissis","version":"0.3.0","scope":"user"}]`,
-		want:   "0.3.0",
-		wantID: "polako@scharissis",
-		why:    "one copy installed, so there is nothing to choose between",
+		want:      "0.3.0",
+		wantID:    "polako@scharissis",
+		wantScope: "user",
+		why:       "one copy installed, so there is nothing to choose between",
 	}, {
 		// The reason this issue exists: a --plugin-dir copy loaded alongside a
 		// user-scope install of the same name, which is how a tip skill gets
@@ -241,9 +246,10 @@ func TestPluginVersionPicksTheCopyThatWillRun(t *testing.T) {
 		name: "session copy behind a user install",
 		list: `[{"id":"polako@scharissis","version":"0.1.0","scope":"user"},
 		        {"id":"polako@inline","version":"0.6.1","scope":"session"}]`,
-		want:   "0.6.1",
-		wantID: "polako@inline",
-		why:    "the session copy is the one that drives the run",
+		want:      "0.6.1",
+		wantID:    "polako@inline",
+		wantScope: "session",
+		why:       "the session copy is the one that drives the run",
 	}, {
 		name: "two copies with no scope to separate them",
 		list: `[{"id":"polako@scharissis","version":"0.1.0","scope":"user"},
@@ -265,19 +271,21 @@ func TestPluginVersionPicksTheCopyThatWillRun(t *testing.T) {
 		name: "a disabled duplicate beside an enabled one",
 		list: `[{"id":"polako@a-fork","version":"0.1.0","scope":"user","enabled":false},
 		        {"id":"polako@scharissis","version":"0.6.1","scope":"user","enabled":true}]`,
-		want:   "0.6.1",
-		wantID: "polako@scharissis",
-		why:    "a disabled copy never loads, so it is not one of the copies to choose between",
+		want:      "0.6.1",
+		wantID:    "polako@scharissis",
+		wantScope: "user",
+		why:       "a disabled copy never loads, so it is not one of the copies to choose between",
 	}, {
 		name: "the only copy is disabled",
 		list: `[{"id":"polako@scharissis","version":"0.6.1","scope":"user","enabled":false}]`,
 		why:  "nothing will load it, so no version drove the run",
 	}, {
-		name:   "a CLI that does not report enabled",
-		list:   `[{"id":"polako@scharissis","version":"0.6.1","scope":"user"}]`,
-		want:   "0.6.1",
-		wantID: "polako@scharissis",
-		why:    "an absent field is not a disabled plugin",
+		name:      "a CLI that does not report enabled",
+		list:      `[{"id":"polako@scharissis","version":"0.6.1","scope":"user"}]`,
+		want:      "0.6.1",
+		wantID:    "polako@scharissis",
+		wantScope: "user",
+		why:       "an absent field is not a disabled plugin",
 	}, {
 		name: "no match",
 		list: `[{"id":"some-other-plugin@elsewhere","version":"9.9.9","scope":"user"}]`,
@@ -292,12 +300,15 @@ func TestPluginVersionPicksTheCopyThatWillRun(t *testing.T) {
 		why:  "a CLI answering with something else is not a version",
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, gotID := installedVersion([]byte(tc.list), pluginName)
+			got, gotID, gotScope := installedVersion([]byte(tc.list), pluginName)
 			if got != tc.want {
 				t.Errorf("installedVersion = %q, want %q — %s", got, tc.want, tc.why)
 			}
 			if gotID != tc.wantID {
 				t.Errorf("installedVersion id = %q, want %q — %s", gotID, tc.wantID, tc.why)
+			}
+			if gotScope != tc.wantScope {
+				t.Errorf("installedVersion scope = %q, want %q — %s", gotScope, tc.wantScope, tc.why)
 			}
 		})
 	}
@@ -308,16 +319,11 @@ func TestWarnOnVersionSkew(t *testing.T) {
 		name           string
 		skill          string
 		binary, plugin string
-		id             string
 		warn           bool
 	}{
 		{name: "matched release", binary: "0.4.0", plugin: "0.4.0"},
 		{name: "matched despite the module's v prefix", binary: "v0.4.0", plugin: "0.4.0"},
-		// A resolvable id: the remedy prints a `plugin update` command that names it.
-		{name: "skewed with a resolvable id", binary: "0.4.0", plugin: "0.3.0", id: "polako@acme", warn: true},
-		// No id — copies from more than one marketplace. The warning still fires
-		// and still names both versions, but drops the exact command.
-		{name: "skewed without an id", binary: "0.4.0", plugin: "0.3.0", warn: true},
+		{name: "skewed", binary: "0.4.0", plugin: "0.3.0", warn: true},
 		// A build from a clone reports a revision. That is an unreleased
 		// binary, not a skew, and warning every time would train the operator
 		// to ignore the message that matters.
@@ -337,7 +343,7 @@ func TestWarnOnVersionSkew(t *testing.T) {
 			if skill == "" {
 				skill = defaultSkill
 			}
-			warnOnVersionSkew(tc.binary, config{skill: skill, pluginVersion: tc.plugin, pluginID: tc.id})
+			warnOnVersionSkew(tc.binary, config{skill: skill, pluginVersion: tc.plugin})
 
 			out := buf.String()
 			got := strings.Contains(out, "version skew")
@@ -350,22 +356,8 @@ func TestWarnOnVersionSkew(t *testing.T) {
 			if !strings.Contains(out, tc.plugin) || !strings.Contains(out, tc.binary) {
 				t.Errorf("the warning has to name both versions, got: %s", out)
 			}
-			if !strings.Contains(out, "docs/install.md") {
-				t.Errorf("the warning has to point at docs/install.md, got: %s", out)
-			}
-			switch {
-			case tc.id != "":
-				// The remedy command has to carry the @-qualified id, or it is
-				// the broken command this issue (#190) is about.
-				if !strings.Contains(out, "claude plugin update "+tc.id) {
-					t.Errorf("skewed with id %q: want a `claude plugin update %s` command, got: %s", tc.id, tc.id, out)
-				}
-			default:
-				// No id to name, so no exact `plugin update` command — guessing
-				// a marketplace is worse than sending the operator to the docs.
-				if strings.Contains(out, "claude plugin update ") {
-					t.Errorf("no id available: the warning must not print a `claude plugin update` command, got: %s", out)
-				}
+			if !strings.Contains(out, "polako update") {
+				t.Errorf("the warning has to point at `polako update`, got: %s", out)
 			}
 		})
 	}
@@ -380,7 +372,6 @@ func TestVersionSkewGateRefusesOnlyWhenTheSkillIsBehind(t *testing.T) {
 		name           string
 		skill          string
 		binary, plugin string
-		id             string
 		ignoreSkew     bool
 		refused        bool
 	}{
@@ -404,7 +395,7 @@ func TestVersionSkewGateRefusesOnlyWhenTheSkillIsBehind(t *testing.T) {
 			if skill == "" {
 				skill = defaultSkill
 			}
-			err := versionSkewGate(tc.binary, config{skill: skill, pluginVersion: tc.plugin, pluginID: tc.id, ignoreSkew: tc.ignoreSkew})
+			err := versionSkewGate(tc.binary, config{skill: skill, pluginVersion: tc.plugin, ignoreSkew: tc.ignoreSkew})
 			if tc.refused && err == nil {
 				t.Fatalf("gate let a behind-the-binary skill (%s behind %s) through", tc.plugin, tc.binary)
 			}
@@ -441,21 +432,16 @@ func TestSemverLess(t *testing.T) {
 	}
 }
 
-// The skew warning's remedy and the update command in docs/install.md must not
-// drift: install.md is the canonical wording of the `claude plugin update`
-// trap (issue #190), so if the two can disagree, one is wrong the next time the
-// CLI changes.
+// The skew warning's remedy and docs/install.md must not drift: install.md
+// is the canonical wording of how to fix a mismatch, so if the two can
+// disagree, one is wrong the next time either changes.
 func TestVersionSkewRemedyAgreesWithInstallDocs(t *testing.T) {
-	const wantCmd = "claude plugin marketplace update scharissis && claude plugin update polako@scharissis"
+	const wantCmd = "polako update"
 	if docs := readRepoFile(t, "docs", "install.md"); !strings.Contains(docs, wantCmd) {
 		t.Fatalf("docs/install.md no longer shows %q — move this test and warnOnVersionSkew's remedy with it", wantCmd)
 	}
 	buf := captureLog(t)
-	warnOnVersionSkew("0.4.0", config{
-		skill:         defaultSkill,
-		pluginVersion: "0.3.0",
-		pluginID:      "polako@scharissis",
-	})
+	warnOnVersionSkew("0.4.0", config{skill: defaultSkill, pluginVersion: "0.3.0"})
 	if !strings.Contains(buf.String(), wantCmd) {
 		t.Errorf("skew warning does not print the docs' update command %q\nlog: %s", wantCmd, buf.String())
 	}

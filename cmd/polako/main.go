@@ -326,7 +326,7 @@ func preflight(ctx context.Context, cfg *config) error {
 		_ = ensureLabel(ctx, *cfg, l.name, l.color, l.description)
 	}
 	cfg.claudeVersion = claudeVersion(ctx, *cfg)
-	cfg.pluginVersion, cfg.pluginID = pluginVersion(ctx, *cfg)
+	cfg.pluginVersion, _, _ = pluginVersion(ctx, *cfg)
 	warnClaudeModelEnv()
 	if err := refuseOrNote(effortFlagGate(ctx, *cfg), cfg.dryRun); err != nil {
 		return err
