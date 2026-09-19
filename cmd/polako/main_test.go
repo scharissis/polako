@@ -1269,6 +1269,32 @@ func TestParseEffortBySize(t *testing.T) {
 	}
 }
 
+func TestParseModelBySize(t *testing.T) {
+	got, err := parseModelBySize(" S=sonnet , L=opus ")
+	if err != nil {
+		t.Fatalf("parseModelBySize: %v", err)
+	}
+	if want := map[string]string{"S": "sonnet", "L": "opus"}; len(got) != len(want) ||
+		got["S"] != want["S"] || got["L"] != want["L"] {
+		t.Errorf("parseModelBySize = %v, want %v", got, want)
+	}
+
+	if m, err := parseModelBySize(""); m != nil || err != nil {
+		t.Errorf("empty -model-by-size = (%v, %v), want (nil, nil)", m, err)
+	}
+
+	// A full model id passes, the same shape a model: label accepts.
+	if got, err := parseModelBySize("S=claude-opus-4-1"); err != nil || got["S"] != "claude-opus-4-1" {
+		t.Errorf("parseModelBySize(full id) = (%v, %v), want claude-opus-4-1, nil", got, err)
+	}
+
+	for _, bad := range []string{"S", "S=", "=sonnet", "XL=opus", "S=opus!", "S=sonnet,S=opus"} {
+		if _, err := parseModelBySize(bad); err == nil {
+			t.Errorf("parseModelBySize(%q) = nil error, want a rejection", bad)
+		}
+	}
+}
+
 func TestResolveToolsAppendsWithoutDuplicating(t *testing.T) {
 	got := resolveTools("Read,Write,", " Bash(cargo:*) ,Read")
 	if want := "Read,Write,Bash(cargo:*)"; got != want {
@@ -1962,6 +1988,27 @@ func TestPreflightPairsGatesAndOrdersEveryRow(t *testing.T) {
 	}
 	if !strings.Contains(got[9][1], "/tmp/metrics") || !strings.Contains(got[10][1], "abc123") {
 		t.Errorf("run data/shift rows = %v, want the recorder dir and shift id named", got[9:11])
+	}
+}
+
+// modelEffortLine discloses the by-size cells too, since POLAKO_MODEL_BY_SIZE
+// / POLAKO_EFFORT_BY_SIZE can set them silently — same reasoning as every
+// other unprompted preflight row.
+func TestModelEffortLine(t *testing.T) {
+	if got := modelEffortLine(config{}); got != "" {
+		t.Errorf("modelEffortLine(zero value) = %q, want empty", got)
+	}
+	got := modelEffortLine(config{
+		model: "opus", effort: "medium",
+		modelBySize: "S=sonnet,L=opus", effortBySize: "S=medium,L=max",
+	})
+	for _, want := range []string{"model opus", "effort medium", "model-by-size S=sonnet,L=opus", "effort-by-size S=medium,L=max"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("modelEffortLine = %q, missing %q", got, want)
+		}
+	}
+	if got := modelEffortLine(config{modelBySize: "S=sonnet"}); got != "model-by-size S=sonnet" {
+		t.Errorf("modelEffortLine(model-by-size alone) = %q, want just that part", got)
 	}
 }
 
