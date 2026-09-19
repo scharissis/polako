@@ -194,8 +194,11 @@ prefixes, no stdin, all of which fall outside `Bash(git:*)`'s prefix match:
 6. `write-tree`, then `commit-tree <tree> [-p P] -m "<subject>"`. With no
    parent, that commit is the orphan root.
 7. `push origin <commit>:refs/heads/polako-evidence`. Never `--force` — a
-   non-fast-forward push means a concurrent pusher; refetch once and retry,
-   then give up quietly rather than force it.
+   non-fast-forward push means a concurrent pusher. Refetch once: the
+   commit from step 6 is parented on the old P, so pushing it again fails
+   the same way. Redo steps 3 to 6 against the newly fetched parent, then
+   retry the push once; if that still fails, give up quietly rather than
+   force it.
 8. `worktree remove --force` the temp worktree.
 
 The URL: `https://<host>/<owner>/<repo>/blob/<evidence-commit-sha>/<path>?raw=true`.
