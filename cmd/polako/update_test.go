@@ -743,11 +743,22 @@ func TestRemoveStaleOldBinaryNoOpWithNothingThere(t *testing.T) {
 
 // --- applyUpdate orchestration ---
 
+// applyUpdateCfg is the config every applyUpdate test runs under: fake claude
+// and go binaries, their handshake on config.env, and the test's own ui.
+func applyUpdateCfg(t *testing.T) config {
+	t.Helper()
+	return config{
+		dir:       t.TempDir(),
+		ui:        testUI(t),
+		claudeBin: fakeCLI(t),
+		goBin:     fakeCLI(t),
+		env:       fakeEnv(fakeClaudeEnv, "stream", fakeGoEnv, "1"),
+	}
+}
+
 func TestApplyUpdateChecksWithoutWriting(t *testing.T) {
 	t.Parallel()
-	cfg := config{dir: t.TempDir(), ui: testUI(t), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
-	setFakeEnv(&cfg, fakeClaudeEnv, "stream")
-	setFakeEnv(&cfg, fakeGoEnv, "1")
+	cfg := applyUpdateCfg(t)
 	argsOf := watchClaudeArgs(t, &cfg)
 	buf := captureLog(t)
 
@@ -771,9 +782,7 @@ func TestApplyUpdateChecksWithoutWriting(t *testing.T) {
 
 func TestApplyUpdateRunsBothHalvesWhenBehind(t *testing.T) {
 	t.Parallel()
-	cfg := config{dir: t.TempDir(), ui: testUI(t), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
-	setFakeEnv(&cfg, fakeClaudeEnv, "stream")
-	setFakeEnv(&cfg, fakeGoEnv, "1")
+	cfg := applyUpdateCfg(t)
 	argsOf := watchClaudeArgs(t, &cfg)
 
 	plugin := pluginPlan{state: pluginFound, version: "0.23.0", id: "polako@scharissis", scope: "user", marketplace: "scharissis"}
@@ -844,9 +853,7 @@ func TestApplyUpdateRemovesAStaleOldBinaryOnARealRun(t *testing.T) {
 	if err := os.WriteFile(exe, []byte("current"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := config{dir: t.TempDir(), ui: testUI(t), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
-	setFakeEnv(&cfg, fakeClaudeEnv, "stream")
-	setFakeEnv(&cfg, fakeGoEnv, "1")
+	cfg := applyUpdateCfg(t)
 
 	plugin := pluginPlan{state: pluginFound, version: "0.24.0"}
 	binary := binaryPlan{tier: tierStamped, current: "0.24.0", exe: exe} // already current — nothing else to run
@@ -876,9 +883,7 @@ func TestApplyUpdateLeavesAnOldFileAloneForANonStampedTier(t *testing.T) {
 	if err := os.WriteFile(exe, []byte("current"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := config{dir: t.TempDir(), ui: testUI(t), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
-	setFakeEnv(&cfg, fakeClaudeEnv, "stream")
-	setFakeEnv(&cfg, fakeGoEnv, "1")
+	cfg := applyUpdateCfg(t)
 
 	plugin := pluginPlan{state: pluginFound, version: "0.24.0"}
 	binary := binaryPlan{tier: tierModule, current: "0.24.0", exe: exe}
@@ -906,9 +911,7 @@ func TestApplyUpdateLeavesAStaleOldBinaryUnderCheck(t *testing.T) {
 	if err := os.WriteFile(exe, []byte("current"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := config{dir: t.TempDir(), ui: testUI(t), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
-	setFakeEnv(&cfg, fakeClaudeEnv, "stream")
-	setFakeEnv(&cfg, fakeGoEnv, "1")
+	cfg := applyUpdateCfg(t)
 
 	plugin := pluginPlan{state: pluginFound, version: "0.24.0"}
 	binary := binaryPlan{tier: tierStamped, current: "0.24.0", exe: exe}
@@ -1017,9 +1020,7 @@ func TestRunUpdateEndToEndBothCurrentRunsNothing(t *testing.T) {
 
 func TestApplyUpdateRunsNothingWhenAlreadyCurrent(t *testing.T) {
 	t.Parallel()
-	cfg := config{dir: t.TempDir(), ui: testUI(t), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
-	setFakeEnv(&cfg, fakeClaudeEnv, "stream")
-	setFakeEnv(&cfg, fakeGoEnv, "1")
+	cfg := applyUpdateCfg(t)
 	argsOf := watchClaudeArgs(t, &cfg)
 
 	plugin := pluginPlan{state: pluginFound, version: "0.24.0", id: "polako@scharissis", scope: "user", marketplace: "scharissis"}
