@@ -22,7 +22,7 @@ func TestVerbUsageListsUpdate(t *testing.T) {
 // The same flags-only contract every other verb's entry point holds to; see
 // TestRunStatusRejectsAnArgument in main_test.go for the sibling this mirrors.
 func TestRunUpdateRejectsAnArgument(t *testing.T) {
-	err := runUpdate(context.Background(), []string{"12"}, &strings.Builder{})
+	err := runUpdate(context.Background(), config{}, []string{"12"}, &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "update takes flags only") {
 		t.Errorf("err = %v, want a complaint about the argument", err)
 	}
@@ -713,10 +713,10 @@ func TestRemoveStaleOldBinaryNoOpWithNothingThere(t *testing.T) {
 // --- applyUpdate orchestration ---
 
 func TestApplyUpdateChecksWithoutWriting(t *testing.T) {
-	cfg := config{dir: t.TempDir(), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
+	cfg := config{dir: t.TempDir(), ui: testUI(t), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
 	t.Setenv(fakeClaudeEnv, "stream")
 	t.Setenv(fakeGoEnv, "1")
-	argsOf := watchClaudeArgs(t)
+	argsOf := watchClaudeArgs(t, &cfg)
 	buf := captureLog(t)
 
 	plugin := pluginPlan{state: pluginFound, version: "0.23.0", id: "polako@scharissis", scope: "user", marketplace: "scharissis"}
@@ -738,10 +738,10 @@ func TestApplyUpdateChecksWithoutWriting(t *testing.T) {
 }
 
 func TestApplyUpdateRunsBothHalvesWhenBehind(t *testing.T) {
-	cfg := config{dir: t.TempDir(), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
+	cfg := config{dir: t.TempDir(), ui: testUI(t), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
 	t.Setenv(fakeClaudeEnv, "stream")
 	t.Setenv(fakeGoEnv, "1")
-	argsOf := watchClaudeArgs(t)
+	argsOf := watchClaudeArgs(t, &cfg)
 
 	plugin := pluginPlan{state: pluginFound, version: "0.23.0", id: "polako@scharissis", scope: "user", marketplace: "scharissis"}
 	binary := binaryPlan{tier: tierModule, current: "0.23.0"}
@@ -809,7 +809,7 @@ func TestApplyUpdateRemovesAStaleOldBinaryOnARealRun(t *testing.T) {
 	if err := os.WriteFile(exe, []byte("current"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := config{dir: t.TempDir(), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
+	cfg := config{dir: t.TempDir(), ui: testUI(t), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
 	t.Setenv(fakeClaudeEnv, "stream")
 	t.Setenv(fakeGoEnv, "1")
 
@@ -840,7 +840,7 @@ func TestApplyUpdateLeavesAnOldFileAloneForANonStampedTier(t *testing.T) {
 	if err := os.WriteFile(exe, []byte("current"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := config{dir: t.TempDir(), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
+	cfg := config{dir: t.TempDir(), ui: testUI(t), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
 	t.Setenv(fakeClaudeEnv, "stream")
 	t.Setenv(fakeGoEnv, "1")
 
@@ -869,7 +869,7 @@ func TestApplyUpdateLeavesAStaleOldBinaryUnderCheck(t *testing.T) {
 	if err := os.WriteFile(exe, []byte("current"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := config{dir: t.TempDir(), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
+	cfg := config{dir: t.TempDir(), ui: testUI(t), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
 	t.Setenv(fakeClaudeEnv, "stream")
 	t.Setenv(fakeGoEnv, "1")
 
@@ -894,29 +894,30 @@ func TestApplyUpdateLeavesAStaleOldBinaryUnderCheck(t *testing.T) {
 // build), so what it reports depends on the environment the suite runs in,
 // not on anything this test controls — the module-tier branch itself is
 // covered above, directly, by TestApplyUpdateRunsBothHalvesWhenBehind.
-func runUpdateCfg(t *testing.T, published, installedPluginVersion string) (args []string, argsOf func() []string) {
+func runUpdateCfg(t *testing.T, published, installedPluginVersion string) (seed config, args []string, argsOf func() []string) {
 	t.Helper()
 	bin := fakeCLI(t)
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakePluginEnv, installedPluginVersion)
-	t.Setenv(fakeGoEnv, "1")
-	argsOf = watchClaudeArgs(t)
 
 	ghPath := filepath.Join(t.TempDir(), "gh-state.json")
 	if err := writeGhState(ghPath, &ghState{Repo: "example/repo", PublishedRef: "polako--v" + published}); err != nil {
 		t.Fatalf("writing fake gh state: %v", err)
 	}
-	t.Setenv(fakeGhEnv, ghPath)
+	seed = config{
+		ui: testUI(t),
+		env: fakeEnv(fakeClaudeEnv, "stream", fakePluginEnv, installedPluginVersion,
+			fakeGoEnv, "1", fakeGhEnv, ghPath),
+	}
+	argsOf = watchClaudeArgs(t, &seed)
 
-	return []string{"-claude", bin, "-gh", bin}, argsOf
+	return seed, []string{"-claude", bin, "-gh", bin}, argsOf
 }
 
 func TestRunUpdateEndToEndRunsThePlanWhenBehind(t *testing.T) {
-	args, argsOf := runUpdateCfg(t, "0.24.0", "0.23.0")
+	seed, args, argsOf := runUpdateCfg(t, "0.24.0", "0.23.0")
 	buf := captureLog(t)
 
 	var out strings.Builder
-	if err := runUpdate(context.Background(), args, &out); err != nil {
+	if err := runUpdate(context.Background(), seed, args, &out); err != nil {
 		t.Fatalf("runUpdate: %v", err)
 	}
 	if !strings.Contains(out.String(), "plugin: 0.23.0 -> 0.24.0") {
@@ -940,11 +941,11 @@ func TestRunUpdateEndToEndRunsThePlanWhenBehind(t *testing.T) {
 }
 
 func TestRunUpdateEndToEndCheckRunsNothing(t *testing.T) {
-	args, argsOf := runUpdateCfg(t, "0.24.0", "0.23.0")
+	seed, args, argsOf := runUpdateCfg(t, "0.24.0", "0.23.0")
 	args = append(args, "-check")
 	buf := captureLog(t)
 
-	if err := runUpdate(context.Background(), args, &strings.Builder{}); err != nil {
+	if err := runUpdate(context.Background(), seed, args, &strings.Builder{}); err != nil {
 		t.Fatalf("runUpdate: %v", err)
 	}
 	if !strings.Contains(buf.String(), "-check") {
@@ -958,10 +959,10 @@ func TestRunUpdateEndToEndCheckRunsNothing(t *testing.T) {
 }
 
 func TestRunUpdateEndToEndBothCurrentRunsNothing(t *testing.T) {
-	args, argsOf := runUpdateCfg(t, "0.23.0", "0.23.0")
+	seed, args, argsOf := runUpdateCfg(t, "0.23.0", "0.23.0")
 
 	var out strings.Builder
-	if err := runUpdate(context.Background(), args, &out); err != nil {
+	if err := runUpdate(context.Background(), seed, args, &out); err != nil {
 		t.Fatalf("runUpdate: %v", err)
 	}
 	if !strings.Contains(out.String(), "plugin: 0.23.0, already current") {
@@ -975,10 +976,10 @@ func TestRunUpdateEndToEndBothCurrentRunsNothing(t *testing.T) {
 }
 
 func TestApplyUpdateRunsNothingWhenAlreadyCurrent(t *testing.T) {
-	cfg := config{dir: t.TempDir(), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
+	cfg := config{dir: t.TempDir(), ui: testUI(t), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
 	t.Setenv(fakeClaudeEnv, "stream")
 	t.Setenv(fakeGoEnv, "1")
-	argsOf := watchClaudeArgs(t)
+	argsOf := watchClaudeArgs(t, &cfg)
 
 	plugin := pluginPlan{state: pluginFound, version: "0.24.0", id: "polako@scharissis", scope: "user", marketplace: "scharissis"}
 	binary := binaryPlan{tier: tierModule, current: "0.24.0"}

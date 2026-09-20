@@ -413,16 +413,16 @@ func issuePickupPolicy(ctx context.Context, cfg config, issue int) (labelChoice,
 		return out, err
 	})
 	if err != nil {
-		narrate(sevWarning, "could not read #%d's labels (%v) — model and effort fall through to the flags", issue, err)
+		cfg.narrate(sevWarning, "could not read #%d's labels (%v) — model and effort fall through to the flags", issue, err)
 		return labelChoice{}, ""
 	}
 	var v ghIssue
 	if err := json.Unmarshal(out, &v); err != nil {
-		narrate(sevWarning, "could not parse #%d's labels (%v) — model and effort fall through to the flags", issue, err)
+		cfg.narrate(sevWarning, "could not parse #%d's labels (%v) — model and effort fall through to the flags", issue, err)
 		return labelChoice{}, ""
 	}
 	size := sizeFromBody(v.Body)
-	child := labelPolicy(v.Labels)
+	child := labelPolicy(cfg.sink(), v.Labels)
 	if child.complete() || v.Parent == nil {
 		return child, size
 	}
@@ -432,17 +432,17 @@ func issuePickupPolicy(ctx context.Context, cfg config, issue int) (labelChoice,
 		return gh(ctx, cfg, "issue", "view", strconv.Itoa(parent), "--json", "labels")
 	})
 	if err != nil {
-		narrate(sevWarning, "could not read epic #%d's labels (%v) — #%d's unset model/effort fall through to the flags",
+		cfg.narrate(sevWarning, "could not read epic #%d's labels (%v) — #%d's unset model/effort fall through to the flags",
 			parent, err, issue)
 		return child, size
 	}
 	var pv ghIssue
 	if err := json.Unmarshal(out, &pv); err != nil {
-		narrate(sevWarning, "could not parse epic #%d's labels (%v) — #%d's unset model/effort fall through to the flags",
+		cfg.narrate(sevWarning, "could not parse epic #%d's labels (%v) — #%d's unset model/effort fall through to the flags",
 			parent, err, issue)
 		return child, size
 	}
-	return child.inheritFrom(labelPolicy(pv.Labels)), size
+	return child.inheritFrom(labelPolicy(cfg.sink(), pv.Labels)), size
 }
 
 // issueComment is the part of one thread comment a wait decides on: which
@@ -563,7 +563,7 @@ func (c config) dropExtendedFields() {
 	if c.queue != nil && c.queue.extendedFieldsOff.Swap(true) {
 		return
 	}
-	narrate(sevWarning, "gh too old to see sub-issues or blockedBy dependencies; "+
+	c.narrate(sevWarning, "gh too old to see sub-issues or blockedBy dependencies; "+
 		"container issues will be treated as workable and blocked issues will be treated as ready — upgrade gh")
 }
 
@@ -579,6 +579,6 @@ func (c config) sayProposals(n int) {
 	if c.queue != nil && c.queue.saidProposed.Swap(true) {
 		return
 	}
-	narrate(sevWarning, "ignoring %d proposed issue(s) awaiting curation — remove the %s label to queue them",
+	c.narrate(sevWarning, "ignoring %d proposed issue(s) awaiting curation — remove the %s label to queue them",
 		n, proposedLabel)
 }

@@ -31,7 +31,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -361,25 +360,25 @@ func ensureMilestone(ctx context.Context, cfg config, title string) error {
 // leaves that repository exactly as it found it.
 func planDryRun(cfg config, opt planOptions, milestone string, hierarchical bool, out io.Writer) error {
 	if opt.vision != "" {
-		log.Printf("planning from %s", opt.vision)
+		cfg.logf("planning from %s", opt.vision)
 	} else {
-		log.Printf("planning from an inline brief (%d characters)", len(strings.TrimSpace(opt.brief)))
+		cfg.logf("planning from an inline brief (%d characters)", len(strings.TrimSpace(opt.brief)))
 	}
 	if opt.focus != "" {
-		log.Printf("focus: %s", opt.focus)
+		cfg.logf("focus: %s", opt.focus)
 	}
-	log.Printf("issue cap: %d, epics included", opt.maxIssues)
+	cfg.logf("issue cap: %d, epics included", opt.maxIssues)
 	if milestone == "" {
-		log.Println("milestone: off")
+		cfg.logf("milestone: off")
 	} else {
-		log.Printf("milestone: %q — a real run would create it at preflight", milestone)
+		cfg.logf("milestone: %q — a real run would create it at preflight", milestone)
 	}
 	if hierarchical {
-		log.Println("issue shape: hierarchical — epics with sub-issues")
+		cfg.logf("issue shape: hierarchical — epics with sub-issues")
 	} else {
-		log.Println("issue shape: flat — this gh has no `gh issue create --parent`, so a tracking issue holds the design")
+		cfg.logf("issue shape: flat — this gh has no `gh issue create --parent`, so a tracking issue holds the design")
 	}
-	log.Println("dry run — no proposed label, no milestone, no run data; the invocation follows on stdout")
+	cfg.logf("dry run — no proposed label, no milestone, no run data; the invocation follows on stdout")
 
 	_, err := fmt.Fprintln(out, commandLine(cfg.claudeBin, planArgs(cfg, opt)))
 	return err

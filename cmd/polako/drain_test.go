@@ -851,9 +851,9 @@ func drainConfig(t *testing.T, mode string, st *ghState) (config, string) {
 	if err := writeGhState(path, st); err != nil {
 		t.Fatalf("writing fake gh state: %v", err)
 	}
-	t.Setenv(fakeGhEnv, path)
-	t.Setenv(fakeClaudeEnv, mode)
 	return config{
+		env: fakeEnv(fakeGhEnv, path, fakeClaudeEnv, mode),
+		ui:  testUI(t),
 		// Not a checkout at all, which is deliberate: worktree cleanup is
 		// best-effort, and so is the probe that says what a parked run left
 		// behind — every git call here fails, so every park in these tests
@@ -1140,7 +1140,7 @@ func TestDrainParkSaysWhatTheRunLeftBehind(t *testing.T) {
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 	leftBehind(t, &cfg)
 	records := t.TempDir()
 	cfg.rec = newRecorder(records)
@@ -1289,7 +1289,7 @@ func TestDrainParksAPermissionRefusalWithoutResuming(t *testing.T) {
 	cfg.shiftID = "shift99"
 	cfg.logPath = "/tmp/fake-shift.log"
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 	records := t.TempDir()
 	cfg.rec = newRecorder(records)
 
@@ -1394,7 +1394,7 @@ func TestDrainParksARefusedToolResultWithoutResuming(t *testing.T) {
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 	records := t.TempDir()
 	cfg.rec = newRecorder(records)
 
@@ -2261,10 +2261,10 @@ func TestDrainRemediatesAFailingCheck(t *testing.T) {
 // run's argv carries both and its record names them as the remediation cell.
 func TestDrainRemediationFlagsSteerOnlyTheRemediationRun(t *testing.T) {
 	captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementthenrebase", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 	cfg.remediationModel, cfg.remediationEffort = "sonnet", "medium"
 	records := t.TempDir()
 	cfg.rec = newRecorder(records)
@@ -2322,10 +2322,10 @@ func TestDrainRemediationFlagsSteerOnlyTheRemediationRun(t *testing.T) {
 // values and its record names them as sourceLabel.
 func TestDrainHonoursModelAndEffortLabels(t *testing.T) {
 	captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true, Labels: []string{"effort:low", "model:sonnet"}}},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 	cfg.model, cfg.effort = "opus", "high" // the flags the label must beat
 	records := t.TempDir()
 	cfg.rec = newRecorder(records)
@@ -2373,13 +2373,13 @@ func TestDrainHonoursModelAndEffortLabels(t *testing.T) {
 // the source as size, and the terminal issue record carries the size letter.
 func TestDrainEffortBySizeFromTheEstimateLine(t *testing.T) {
 	captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		Issues: map[string]*fakeIssue{"1": {
 			Open: true,
 			Body: "## Summary\n\nDo the thing.\n\nEstimate: S — likely one run\n",
 		}},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 	cfg.effort = "high" // the flag the S cell must beat
 	cfg.effortBySize = "S=medium,L=max"
 	cfg.sizeEffort = map[string]string{"S": "medium", "L": "max"}
@@ -2424,13 +2424,13 @@ func TestDrainEffortBySizeFromTheEstimateLine(t *testing.T) {
 // issue record carries the size letter.
 func TestDrainModelBySizeFromTheEstimateLine(t *testing.T) {
 	captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		Issues: map[string]*fakeIssue{"1": {
 			Open: true,
 			Body: "## Summary\n\nDo the thing.\n\nEstimate: S — likely one run\n",
 		}},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 	cfg.model = "opus" // the flag the S cell must beat
 	cfg.modelBySize = "S=sonnet,L=opus"
 	cfg.sizeModel = map[string]string{"S": "sonnet", "L": "opus"}
@@ -2474,10 +2474,10 @@ func TestDrainModelBySizeFromTheEstimateLine(t *testing.T) {
 // through to the flag rather than picking one.
 func TestDrainFallsThroughOnDuplicateModelLabels(t *testing.T) {
 	buf := captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true, Labels: []string{"model:opus", "model:sonnet"}}},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 	cfg.model = "haiku" // the flag the duplicate labels fall through to
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -2503,13 +2503,13 @@ func TestDrainFallsThroughOnDuplicateModelLabels(t *testing.T) {
 // names the source epic.
 func TestDrainInheritsModelFromEpic(t *testing.T) {
 	captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		Issues: map[string]*fakeIssue{
 			"1": {Open: true, Parent: 2},
 			"2": {Open: true, SubIssues: 2, Labels: []string{"model:sonnet"}},
 		},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 	cfg.model = "opus" // the flag the epic's label must beat
 	records := t.TempDir()
 	cfg.rec = newRecorder(records)
@@ -2553,13 +2553,13 @@ func TestDrainInheritsModelFromEpic(t *testing.T) {
 // stops resolution at inherit rather than taking the epic's model.
 func TestDrainChildModelDefaultBeatsEpic(t *testing.T) {
 	captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		Issues: map[string]*fakeIssue{
 			"1": {Open: true, Parent: 2, Labels: []string{"model:default"}},
 			"2": {Open: true, SubIssues: 2, Labels: []string{"model:sonnet"}},
 		},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 	cfg.model = "opus"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -2581,13 +2581,13 @@ func TestDrainChildModelDefaultBeatsEpic(t *testing.T) {
 // parent with model:sonnet gets both.
 func TestDrainEpicAndChildLabelsResolveIndependently(t *testing.T) {
 	captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		Issues: map[string]*fakeIssue{
 			"1": {Open: true, Parent: 2, Labels: []string{"effort:high"}},
 			"2": {Open: true, SubIssues: 2, Labels: []string{"model:sonnet"}},
 		},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -2614,7 +2614,6 @@ func TestDrainEpicAndChildLabelsResolveIndependently(t *testing.T) {
 // working, an epic's labels just do not reach it.
 func TestDrainSurvivesGhWithoutParentField(t *testing.T) {
 	captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		NoParentField: true,
 		Issues: map[string]*fakeIssue{
@@ -2622,6 +2621,7 @@ func TestDrainSurvivesGhWithoutParentField(t *testing.T) {
 			"2": {Open: true, SubIssues: 2, Labels: []string{"model:sonnet"}},
 		},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 	cfg.model = "haiku" // the flag the child falls through to
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -2643,13 +2643,13 @@ func TestDrainSurvivesGhWithoutParentField(t *testing.T) {
 // through to the flags rather than the shift ending.
 func TestDrainParentLabelReadFailureFallsThrough(t *testing.T) {
 	buf := captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		Issues: map[string]*fakeIssue{
 			// #99 is named as the parent but does not exist, so its view fails.
 			"1": {Open: true, Parent: 99},
 		},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 	cfg.model = "haiku"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -2834,13 +2834,13 @@ func TestEveryRemediationRunMayCommentOnItsOwnPR(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			captureLog(t)
-			getArgs := watchClaudeArgs(t)
 			pr := c.pr
 			cfg, _ := drainConfig(t, c.mode, &ghState{
 				Issues: map[string]*fakeIssue{"1": {Open: true}},
 				PRs:    map[string]*fakePR{"issue-1": &pr},
 				Labels: []string{needsHumanLabel},
 			})
+			getArgs := watchClaudeArgs(t, &cfg)
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if err := drain(ctx, cfg); err != nil {
@@ -3387,7 +3387,7 @@ func TestDrainReadsAFinishedContainerOnceInAShift(t *testing.T) {
 		},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("drain: %v", err)
@@ -3685,7 +3685,7 @@ func TestOldGhListsWithoutTheSubIssueRollup(t *testing.T) {
 		},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 
 	// Twice, because both the fallback and the warning have to be paid for once
 	// a shift rather than once per issue — and the drain lists once per issue.
@@ -4119,7 +4119,7 @@ func TestSelectableIssuesLabelsAndContainersOutrankAnOpenBlocker(t *testing.T) {
 func TestResumeHintLeadsWithTheRemediationSessionWhenOneIsRecorded(t *testing.T) {
 	buf := captureLog(t)
 	st := &issueState{session: "sess-implement", remediationSession: "sess-remediate"}
-	resumeHint(config{}, 7, st)
+	resumeHint(config{ui: testUI(t)}, 7, st)
 
 	out := buf.String()
 	remediate := strings.Index(out, "reopens the remediation run that gave up")
@@ -4145,7 +4145,7 @@ func TestResumeHintLeadsWithTheRemediationSessionWhenOneIsRecorded(t *testing.T)
 func TestResumeHintOmitsAnUnsetRemediationSession(t *testing.T) {
 	buf := captureLog(t)
 	st := &issueState{session: "sess-implement"}
-	resumeHint(config{}, 7, st)
+	resumeHint(config{ui: testUI(t)}, 7, st)
 
 	out := buf.String()
 	if strings.Contains(out, "gave up") {
@@ -4509,7 +4509,7 @@ func TestDrainWaitsOutTheWeekUsageGateThenCarriesOn(t *testing.T) {
 		// back under the ceiling, as if the block had reset during the wait.
 		PRs: map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
 	})
-	t.Setenv(fakeUsageEnv, "over-then-under")
+	setFakeEnv(&cfg, fakeUsageEnv, "over-then-under")
 	cfg.maxWeekUsage = 50
 
 	if err := drain(context.Background(), cfg); err != nil {
@@ -4546,7 +4546,7 @@ func TestDrainWaitsOutTheSessionUsageGate(t *testing.T) {
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 		PRs:    map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
 	})
-	t.Setenv(fakeUsageEnv, "over-then-under")
+	setFakeEnv(&cfg, fakeUsageEnv, "over-then-under")
 	cfg.maxSessionUsage = 40
 
 	if err := drain(context.Background(), cfg); err != nil {
@@ -4612,14 +4612,14 @@ func TestUsageGateWait(t *testing.T) {
 // fake CLI that would happily answer /usage if asked.
 func TestDrainUsageGateOffChangesNothing(t *testing.T) {
 	buf := captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	// Restart safety: a PR already on the branch means no claude run at all,
 	// so this is a clean merge with nothing about the run itself in play.
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 		PRs:    map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
 	})
-	t.Setenv(fakeUsageEnv, "sub")
+	setFakeEnv(&cfg, fakeUsageEnv, "sub")
+	getArgs := watchClaudeArgs(t, &cfg)
 
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("drain: %v", err)
@@ -4672,8 +4672,8 @@ func TestDrainRecordsUsageSamplesOnTheTerminalRecord(t *testing.T) {
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 	})
-	t.Setenv(fakeUsageEnv, "sub") // week (all models): 52% used, both samples
-	cfg.maxWeekUsage = 99         // high enough that the gate never trips
+	setFakeEnv(&cfg, fakeUsageEnv, "sub") // week (all models): 52% used, both samples
+	cfg.maxWeekUsage = 99                 // high enough that the gate never trips
 	records := t.TempDir()
 	cfg.rec = newRecorder(records)
 

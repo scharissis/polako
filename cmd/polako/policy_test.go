@@ -245,7 +245,7 @@ func TestLabelPolicy(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := labelPolicy(labelsFrom(tc.labels...))
+			got := labelPolicy(testUI(t), labelsFrom(tc.labels...))
 			if got.model != tc.model || got.modelSet != tc.modelSet ||
 				got.effort != tc.effort || got.effortSet != tc.effortSet {
 				t.Errorf("labelPolicy(%v) = %+v, want model=%q(%v) effort=%q(%v)",

@@ -20,7 +20,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,8 +53,10 @@ type updateOptions struct {
 
 // runUpdate is the `update` subcommand: parse its own flags, read what's
 // published, resolve what each half would need to change, then either print
-// that plan (-check) or run it.
-func runUpdate(ctx context.Context, args []string, out io.Writer) error {
+// that plan (-check) or run it. seed is zero in production; the suite uses it
+// to hand the verb a ui to narrate into and fake-CLI handshake vars for its
+// children (see config.env), since this entry point builds its own config.
+func runUpdate(ctx context.Context, seed config, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
 	fs.SetOutput(out)
 	var opt updateOptions
@@ -85,6 +86,7 @@ func runUpdate(ctx context.Context, args []string, out io.Writer) error {
 	}
 
 	cfg, err := updateConfig(opt)
+	cfg.env, cfg.ui = seed.env, seed.ui
 	if err != nil {
 		return err
 	}
@@ -219,7 +221,7 @@ func resolvePluginPlan(ctx context.Context, cfg config) pluginPlan {
 	if !ok || plugin == "" {
 		return pluginPlan{state: pluginNotConfigured, skill: cfg.skill}
 	}
-	out, err := capture(ctx, cfg.dir, cfg.claudeBin, "plugin", "list", "--json")
+	out, err := capture(ctx, cfg.dir, cfg.env, cfg.claudeBin, "plugin", "list", "--json")
 	if err != nil {
 		return pluginPlan{state: pluginNotInstalled}
 	}
@@ -251,10 +253,10 @@ func resolvePluginPlanFrom(list []byte, plugin string) pluginPlan {
 // first and trusting the exit status is that ticket's own open question 2,
 // resolved by not answering it yet.
 func applyPlugin(ctx context.Context, cfg config, p pluginPlan) error {
-	if _, err := capture(ctx, cfg.dir, cfg.claudeBin, "plugin", "marketplace", "update", p.marketplace); err != nil {
+	if _, err := capture(ctx, cfg.dir, cfg.env, cfg.claudeBin, "plugin", "marketplace", "update", p.marketplace); err != nil {
 		return fmt.Errorf("updating the %s marketplace: %w", p.marketplace, err)
 	}
-	if _, err := capture(ctx, cfg.dir, cfg.claudeBin, "plugin", "update", p.id, "--scope", p.scope, "--json"); err != nil {
+	if _, err := capture(ctx, cfg.dir, cfg.env, cfg.claudeBin, "plugin", "update", p.id, "--scope", p.scope, "--json"); err != nil {
 		return fmt.Errorf("updating the %s plugin: %w", p.id, err)
 	}
 	return nil
@@ -316,7 +318,7 @@ const updateModulePath = "github.com/scharissis/polako/cmd/polako"
 // anything for `go install` to do.
 func applyBinary(ctx context.Context, cfg config, published string) error {
 	target := updateModulePath + "@v" + published
-	if _, err := capture(ctx, cfg.dir, cfg.goBin, "install", target); err != nil {
+	if _, err := capture(ctx, cfg.dir, cfg.env, cfg.goBin, "install", target); err != nil {
 		return fmt.Errorf("go install %s: %w", target, err)
 	}
 	return nil
@@ -327,12 +329,12 @@ func applyBinary(ctx context.Context, cfg config, published string) error {
 // `go env` that fails leaves the warning goInstallWarning would add unsaid
 // rather than blocking the install itself.
 func goInstallDir(ctx context.Context, cfg config) (string, error) {
-	if out, err := capture(ctx, cfg.dir, cfg.goBin, "env", "GOBIN"); err == nil {
+	if out, err := capture(ctx, cfg.dir, cfg.env, cfg.goBin, "env", "GOBIN"); err == nil {
 		if dir := strings.TrimSpace(string(out)); dir != "" {
 			return dir, nil
 		}
 	}
-	out, err := capture(ctx, cfg.dir, cfg.goBin, "env", "GOPATH")
+	out, err := capture(ctx, cfg.dir, cfg.env, cfg.goBin, "env", "GOPATH")
 	if err != nil {
 		return "", err
 	}
@@ -389,7 +391,7 @@ func applyStampedBinary(ctx context.Context, cfg config, published, exe string) 
 	}
 	defer func() {
 		if err := os.RemoveAll(tmp); err != nil {
-			log.Printf("could not remove the temp dir %s: %v — safe to delete by hand", tmp, err)
+			cfg.logf("could not remove the temp dir %s: %v — safe to delete by hand", tmp, err)
 		}
 	}()
 
@@ -691,11 +693,11 @@ func applyUpdate(ctx context.Context, cfg config, check bool, published string, 
 	}
 
 	if !pAction && !bAction {
-		log.Println("nothing to run — both halves are already current, or neither can be updated by this verb")
+		cfg.logf("nothing to run — both halves are already current, or neither can be updated by this verb")
 		return nil
 	}
 	if check {
-		log.Println("-check: the plan above, nothing run")
+		cfg.logf("-check: the plan above, nothing run")
 		return nil
 	}
 
@@ -723,6 +725,6 @@ func applyUpdate(ctx context.Context, cfg config, check bool, published string, 
 	if bAction {
 		done = append(done, "polako "+published)
 	}
-	log.Printf("done — %s — restart Claude Code, or `/reload-plugins`", strings.Join(done, ", "))
+	cfg.logf("done — %s — restart Claude Code, or `/reload-plugins`", strings.Join(done, ", "))
 	return nil
 }

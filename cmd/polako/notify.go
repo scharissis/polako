@@ -17,7 +17,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"strconv"
@@ -127,7 +126,7 @@ func notify(ctx context.Context, cfg config, n notification) {
 	// Deliberately no Dir: the command is one the operator typed on this
 	// command line, so it runs where they started the drain rather than in
 	// -dir, and a relative path in it resolves the way exec already resolves it.
-	cmd.Env = append(os.Environ(), n.env(cfg)...)
+	cmd.Env = append(append(os.Environ(), n.env(cfg)...), cfg.env...)
 	// Captured rather than inherited, so a chatty notifier cannot interleave
 	// itself with the run log — and quoted back only when it failed, where it
 	// is usually the whole diagnosis.
@@ -138,11 +137,11 @@ func notify(ctx context.Context, cfg config, n notification) {
 		if s := strings.TrimSpace(out.String()); s != "" {
 			said = ": " + clip(s, 160)
 		}
-		log.Printf("-notify command failed for %s (%v)%s — nobody was told, but the shift continues",
+		cfg.logf("-notify command failed for %s (%v)%s — nobody was told, but the shift continues",
 			n.describe(), err, said)
 		return
 	}
-	log.Printf("-notify ran for %s", n.describe())
+	cfg.logf("-notify ran for %s", n.describe())
 }
 
 // splitCommand splits a -notify command line into a program and its arguments,

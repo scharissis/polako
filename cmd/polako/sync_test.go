@@ -145,7 +145,7 @@ func TestSyncDefaultBranchFastForwardsOntoOrigin(t *testing.T) {
 	if head := gitAt(t, checkout, "rev-parse", "HEAD"); head == want {
 		t.Fatal("checkout is already current, so this proves nothing")
 	}
-	if err := syncDefaultBranch(context.Background(), config{dir: checkout}, nil); err != nil {
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout, ui: testUI(t)}, nil); err != nil {
 		t.Fatalf("a reachable origin must never stop a pickup: %v", err)
 	}
 
@@ -166,7 +166,7 @@ func TestSyncDefaultBranchLeavesAnotherBranchAlone(t *testing.T) {
 	gitAt(t, checkout, "checkout", "-b", "operators-own-work")
 	want := commit(t, checkout, "not-yours-to-move")
 
-	if err := syncDefaultBranch(context.Background(), config{dir: checkout}, nil); err != nil {
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout, ui: testUI(t)}, nil); err != nil {
 		t.Fatalf("a reachable origin must never stop a pickup: %v", err)
 	}
 
@@ -189,7 +189,7 @@ func TestSyncDefaultBranchRefusesRatherThanRewriteALocalCommit(t *testing.T) {
 
 	want := commit(t, checkout, "mine-committed-straight-to-main")
 
-	if err := syncDefaultBranch(context.Background(), config{dir: checkout}, nil); err != nil {
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout, ui: testUI(t)}, nil); err != nil {
 		t.Fatalf("a reachable origin must never stop a pickup: %v", err)
 	}
 
@@ -217,7 +217,7 @@ func TestSyncDefaultBranchReportsAnUnreachableOrigin(t *testing.T) {
 	_, checkout := upstream(t)
 	unreachableOrigin(t, checkout)
 
-	err := syncDefaultBranch(context.Background(), config{dir: checkout, ghRetryWait: 1}, nil)
+	err := syncDefaultBranch(context.Background(), config{dir: checkout, ui: testUI(t), ghRetryWait: 1}, nil)
 	if err == nil {
 		t.Fatal("err = nil, want the failed fetch reported so the pickup can stop on it")
 	}
@@ -316,7 +316,7 @@ func TestSyncDefaultBranchDoesNotStopOnAnAuthFailure(t *testing.T) {
 	denyGitAuth(t, checkout)
 
 	st := &issueState{}
-	if err := syncDefaultBranch(context.Background(), config{dir: checkout, ghRetryWait: 1}, st); err != nil {
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout, ui: testUI(t), ghRetryWait: 1}, st); err != nil {
 		t.Fatalf("an auth failure must not stop the caller: %v", err)
 	}
 	if !st.fetchAuthFailed {
@@ -334,7 +334,7 @@ func TestSyncDefaultBranchDoesNotStopOnAnAuthFailureWithNilState(t *testing.T) {
 	_, checkout := upstream(t)
 	denyGitAuth(t, checkout)
 
-	if err := syncDefaultBranch(context.Background(), config{dir: checkout, ghRetryWait: 1}, nil); err != nil {
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout, ui: testUI(t), ghRetryWait: 1}, nil); err != nil {
 		t.Fatalf("an auth failure must not stop the caller: %v", err)
 	}
 }
@@ -347,7 +347,7 @@ func TestSyncDefaultBranchWithoutAnOriginIsNotFatal(t *testing.T) {
 	_, checkout := upstream(t)
 	gitAt(t, checkout, "remote", "remove", "origin")
 
-	if err := syncDefaultBranch(context.Background(), config{dir: checkout}, nil); err != nil {
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout, ui: testUI(t)}, nil); err != nil {
 		t.Fatalf("err = %v, want a warning and nothing more", err)
 	}
 	if !strings.Contains(buf.String(), "no origin remote to fetch") {

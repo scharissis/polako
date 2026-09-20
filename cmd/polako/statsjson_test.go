@@ -314,8 +314,8 @@ func TestStatsJSONHTMLConfirmationGoesToStderr(t *testing.T) {
 // rather than depending on runStats's default claudeBin ("claude") failing
 // to resolve on whatever machine runs the suite.
 func TestStatsJSONWindow(t *testing.T) {
-	t.Setenv(fakeClaudeEnv, "stream")
-	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second}
+	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second,
+		env: fakeEnv(fakeClaudeEnv, "stream")}
 	now := time.Date(2026, 8, 25, 15, 0, 0, 0, time.UTC)
 	opt := statsOptions{window: windowToday}
 
@@ -349,9 +349,8 @@ func TestStatsJSONWindow(t *testing.T) {
 // plan carries the same figures planCostPairs' text line does, cross-check
 // included, and is nil exactly when that line is absent.
 func TestStatsJSONPlan(t *testing.T) {
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeUsageEnv, "sub")
-	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second}
+	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second,
+		env: fakeEnv(fakeClaudeEnv, "stream", fakeUsageEnv, "sub")}
 
 	ds, issues, summary, err := statsReport(context.Background(), cfg, statsOptions{}, planCostDir(t), fixtureNow)
 	if err != nil {

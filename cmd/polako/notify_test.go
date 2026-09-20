@@ -50,7 +50,7 @@ func fakeNotify(dest string) int {
 func notifyLog(t *testing.T, cfg *config) func() []string {
 	t.Helper()
 	dest := filepath.Join(t.TempDir(), "notifications")
-	t.Setenv(fakeNotifyEnv, dest)
+	setFakeEnv(cfg, fakeNotifyEnv, dest)
 	// Quoted, because a test binary's path is not guaranteed to be free of
 	// spaces — which is the case splitCommand exists for.
 	cfg.notifyCmd = `"` + fakeCLI(t) + `"`
@@ -102,9 +102,9 @@ func TestNotifyHandsTheHookItsContext(t *testing.T) {
 // the operator notifications and nothing else.
 func TestNotifyFailureNeverBreaksTheRun(t *testing.T) {
 	buf := captureLog(t)
-	cfg := config{repo: "owner/repo"}
+	cfg := config{repo: "owner/repo", ui: testUI(t)}
 	notifyLog(t, &cfg)
-	t.Setenv(fakeNotifyEnv, "fail")
+	setFakeEnv(&cfg, fakeNotifyEnv, "fail")
 
 	notify(context.Background(), cfg, notification{event: notifyParked, issue: 3, reason: "no"})
 
@@ -406,7 +406,7 @@ func TestNotifyFailureForEpicDoneDoesNotAffectTheShift(t *testing.T) {
 		},
 	})
 	notifyLog(t, &cfg)
-	t.Setenv(fakeNotifyEnv, "fail")
+	setFakeEnv(&cfg, fakeNotifyEnv, "fail")
 
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("a broken -notify must not end the drain: %v", err)

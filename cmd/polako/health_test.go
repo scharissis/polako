@@ -31,6 +31,8 @@ func healthTestConfig(t *testing.T, st *ghState) (cfg config, statePath, checkou
 	_, checkout = upstream(t)
 	cfg = config{
 		dir:            checkout,
+		env:            slices.Clone(drainCfg.env), // the fake gh and claude handshake, for the child
+		ui:             testUI(t),
 		ghBin:          drainCfg.ghBin,
 		claudeBin:      drainCfg.claudeBin,
 		ghRetryWait:    time.Millisecond,
@@ -105,6 +107,7 @@ func TestHealthPreflightDeclaresOnlyTheLabel(t *testing.T) {
 // positions cwd at the target repo (see healthPrompt), so there is nothing
 // else to pass.
 func TestHealthDryRunWritesNothingAndPrintsTheInvocation(t *testing.T) {
+	buf := captureLog(t)
 	cfg, statePath, _ := healthTestConfig(t, &ghState{})
 	before, err := os.ReadFile(statePath)
 	if err != nil {
@@ -117,7 +120,6 @@ func TestHealthDryRunWritesNothingAndPrintsTheInvocation(t *testing.T) {
 	told := notifyLog(t, &cfg)
 
 	opt := healthOptions{focus: "only cmd/polako", maxIssues: 7, dryRun: true}
-	buf := captureLog(t)
 	hierarchical, err := healthPreflight(context.Background(), &cfg, &opt)
 	if err != nil {
 		t.Fatalf("healthPreflight: %v", err)
@@ -198,7 +200,7 @@ func healthRunConfig(t *testing.T, st *ghState, claudeMode string) (config, stri
 	t.Helper()
 	cfg, statePath, _ := healthTestConfig(t, st)
 	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
-	t.Setenv(fakeClaudeEnv, claudeMode)
+	setFakeEnv(&cfg, fakeClaudeEnv, claudeMode)
 	return cfg, statePath
 }
 

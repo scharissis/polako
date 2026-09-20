@@ -26,7 +26,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 )
 
 // healthSkillDir is the intake-side skill under skills/, the twin of
@@ -143,17 +142,17 @@ func healthPreflight(ctx context.Context, cfg *config, opt *healthOptions) (hier
 // records nothing: pointing it at an unfamiliar repository leaves that
 // repository exactly as it found it.
 func healthDryRun(cfg config, opt healthOptions, hierarchical bool, out io.Writer) error {
-	log.Printf("auditing %s", cfg.dir)
+	cfg.logf("auditing %s", cfg.dir)
 	if opt.focus != "" {
-		log.Printf("focus: %s", opt.focus)
+		cfg.logf("focus: %s", opt.focus)
 	}
-	log.Printf("issue cap: %d, epics included", opt.maxIssues)
+	cfg.logf("issue cap: %d, epics included", opt.maxIssues)
 	if hierarchical {
-		log.Println("issue shape: hierarchical — epics with sub-issues")
+		cfg.logf("issue shape: hierarchical — epics with sub-issues")
 	} else {
-		log.Println("issue shape: flat — this gh has no `gh issue create --parent`, so a tracking issue holds the design")
+		cfg.logf("issue shape: flat — this gh has no `gh issue create --parent`, so a tracking issue holds the design")
 	}
-	log.Println("dry run — no proposed label, no run data; the invocation follows on stdout")
+	cfg.logf("dry run — no proposed label, no run data; the invocation follows on stdout")
 
 	_, err := fmt.Fprintln(out, commandLine(cfg.claudeBin, healthArgs(cfg, opt)))
 	return err

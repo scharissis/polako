@@ -30,6 +30,8 @@ func planTestConfig(t *testing.T, st *ghState) (cfg config, statePath, checkout 
 	_, checkout = upstream(t)
 	cfg = config{
 		dir:            checkout,
+		env:            slices.Clone(drainCfg.env), // the fake gh and claude handshake, for the child
+		ui:             testUI(t),
 		ghBin:          drainCfg.ghBin,
 		claudeBin:      drainCfg.claudeBin,
 		ghRetryWait:    time.Millisecond,
@@ -317,7 +319,7 @@ func planRunConfig(t *testing.T, st *ghState, claudeMode string) (config, string
 	t.Helper()
 	cfg, statePath, checkout := planTestConfig(t, st)
 	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
-	t.Setenv(fakeClaudeEnv, claudeMode)
+	setFakeEnv(&cfg, fakeClaudeEnv, claudeMode)
 	writeVision(t, checkout, "VISION.md")
 	return cfg, statePath
 }
@@ -481,7 +483,7 @@ func TestPlanNormaliseFallsBackForAnOldGh(t *testing.T) {
 // of them labelled.
 func TestPlanRunSpawnsTheSkillAndNormalisesWhatItCreated(t *testing.T) {
 	var term, buf bytes.Buffer
-	wireSinks(t, &ui{terminal: &term, file: &buf})
+	captureUI(t, &ui{terminal: &term, file: &buf})
 	cfg, statePath := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plan")
 
 	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10}, vision: "VISION.md"}

@@ -9,7 +9,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -41,9 +40,23 @@ type config struct {
 	// proves the ceiling stops the loop rather than proving its size.
 	// parseFlags pins it to defaultResumeCeiling.
 	resumeCeiling int
-	skill         string
-	branchPrefix  string
-	label         string
+	// env is extra "KEY=value" entries handed to every child this config
+	// spawns — gh, git, claude, the notify hook — on top of the operator's
+	// own environment, never instead of it. A test seam only: production
+	// leaves it nil, so real runs inherit the environment byte-for-byte
+	// (docs/hardening.md's HTTPS_PROXY passthrough depends on that). The
+	// suite uses it to hand a child its fake-CLI handshake variables without
+	// calling t.Setenv on the parent, which would bar the test from
+	// t.Parallel(). See capture, dispatchClaude and notify.
+	env []string
+	// ui is where this config's work narrates — the process-wide sinks in
+	// production (parseFlags leaves it nil and the wrappers below fall back
+	// to sinks), a test's own capturing ui under the suite. Threaded rather
+	// than global so parallel tests do not share one logger. See ui.go.
+	ui           *ui
+	skill        string
+	branchPrefix string
+	label        string
 	// ignoreSkew is consent to what versionSkewGate otherwise refuses:
 	// starting a drain whose installed skill is an older release than this
 	// binary, which is the #239 shape — a shift on a skill missing recent
@@ -363,7 +376,7 @@ func parseFlags() config {
 	// Before Parse, so an argument on the command line always wins over a
 	// preference set in the environment.
 	if err := applyEnvDefaults(flag.CommandLine); err != nil {
-		log.Fatalf("%v", err)
+		sinks.fatal("%v", err)
 	}
 	flag.Parse()
 
@@ -371,7 +384,7 @@ func parseFlags() config {
 	// value would otherwise surface as a usage error an hour in, looking like
 	// a crash. Same exit shape as an unparseable env default above.
 	if err := validatePolicyFlags(&cfg); err != nil {
-		log.Fatalf("%v", err)
+		sinks.fatal("%v", err)
 	}
 
 	// Answered before anything else a flag implies, so it stays usable on a
@@ -401,7 +414,7 @@ func parseFlags() config {
 	cfg.skip = parseSkip(skip)
 	abs, err := filepath.Abs(cfg.dir)
 	if err != nil {
-		log.Fatalf("resolving -dir: %v", err)
+		sinks.fatal("resolving -dir: %v", err)
 	}
 	cfg.dir = abs
 	return cfg

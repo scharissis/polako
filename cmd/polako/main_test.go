@@ -9,7 +9,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,6 +43,35 @@ const envCanaryVar = "POLAKO_TEST_ENV_CANARY"
 // including a run the supervisor threw away and re-dispatched, which by design
 // leaves no other trace at all.
 const fakeArgsLogEnv = "POLAKO_FAKE_ARGS_LOG"
+
+// fakeEnv turns alternating key, value pairs into KEY=value entries for
+// config.env, which hands them to a child without t.Setenv on the parent —
+// the thing that would otherwise bar the test from t.Parallel(). A pair whose
+// value is "" is dropped: with config.env an absent entry is the "unset" the
+// child sees, so no placeholder is needed.
+func fakeEnv(kv ...string) []string {
+	var env []string
+	for i := 0; i+1 < len(kv); i += 2 {
+		if kv[i+1] != "" {
+			env = append(env, kv[i]+"="+kv[i+1])
+		}
+	}
+	return env
+}
+
+// setFakeEnv replaces (or adds, or with an empty value removes) KEY=value
+// entries on cfg.env, for a test that layers one more handshake variable on a
+// config a builder already populated.
+func setFakeEnv(cfg *config, kv ...string) {
+	for i := 0; i+1 < len(kv); i += 2 {
+		cfg.env = slices.DeleteFunc(cfg.env, func(e string) bool {
+			return strings.HasPrefix(e, kv[i]+"=")
+		})
+		if kv[i+1] != "" {
+			cfg.env = append(cfg.env, kv[i]+"="+kv[i+1])
+		}
+	}
+}
 
 func TestMain(m *testing.M) {
 	// A notify command inherits every variable the drain has, the fake-CLI ones
@@ -761,11 +789,12 @@ func recordFakeArgs() {
 }
 
 // watchClaudeArgs points the fake CLI at a fresh log and returns the reader for
-// it: one string per invocation the supervisor made, in order.
-func watchClaudeArgs(t *testing.T) func() []string {
+// it: one string per invocation the supervisor made, in order. It records the
+// log path on cfg.env, so the config must be built first.
+func watchClaudeArgs(t *testing.T, cfg *config) func() []string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "claude-args.log")
-	t.Setenv(fakeArgsLogEnv, path)
+	setFakeEnv(cfg, fakeArgsLogEnv, path)
 	return func() []string {
 		b, err := os.ReadFile(path)
 		if errors.Is(err, os.ErrNotExist) {
@@ -1030,20 +1059,52 @@ func lastNumber(prompt string) string {
 	return n
 }
 
-// captureLog redirects both narration loggers into one buffer and returns it.
-// The union is the shift-log view: these tests pin what happened, not how the
-// terminal chose to present it, so a line moving between channels breaks
-// nothing here. Presentation has its own tests in ui_test.go.
-//
-// Wired through a ui rather than pointing both loggers at the buffer, because
-// the buffer needs what production has: one mutex ordering the two loggers'
-// writers — the stderr copier goroutine writes detail while the scan loop and
-// the watchdogs write log, and two loggers' own locks do not know each other.
+// testCaptureUI maps a running test to its one ui. Keyed by *testing.T — which
+// every test and subtest owns uniquely — so parallel tests never see each
+// other's entry; this is the per-test replacement for the global logger
+// redirect that used to make narration tests serial. Every config builder
+// sets cfg.ui to testUI(t), so all of a test's production narration lands in
+// one buffer it can assert on, whatever order the test builds things in.
+var testCaptureUI sync.Map // *testing.T -> *ui
+
+// testUI is this test's ui, created on first use: an io.Discard terminal and
+// a buffer for everything (captureLog hands that buffer back). Presentation
+// tests that need the terminal and file sinks kept apart, or -verbose, call
+// captureUI first with a ui of their own.
+func testUI(t *testing.T) *ui {
+	if u, ok := testCaptureUI.Load(t); ok {
+		return u.(*ui)
+	}
+	u := &ui{terminal: io.Discard, file: &bytes.Buffer{}}
+	actual, loaded := testCaptureUI.LoadOrStore(t, u)
+	if !loaded {
+		t.Cleanup(func() { testCaptureUI.Delete(t) })
+	}
+	return actual.(*ui)
+}
+
+// captureLog returns the buffer this test's narration is captured into — the
+// shift-log view these tests assert on, terminal presentation and the
+// milestone/detail split alike collapsed into one stream (ui_test.go covers
+// presentation separately). No global to redirect, so the test is free to
+// run t.Parallel(). Order-independent with the config builders: both resolve
+// the same ui through testUI.
 func captureLog(t *testing.T) *bytes.Buffer {
 	t.Helper()
-	var buf bytes.Buffer
-	wireSinks(t, &ui{terminal: io.Discard, file: &buf})
-	return &buf
+	return testUI(t).file.(*bytes.Buffer)
+}
+
+// captureUI registers a caller-built ui for this test, for the presentation
+// tests that need the terminal and file sinks kept apart or -verbose set —
+// what testUI's io.Discard terminal collapses. Config builders route
+// production narration into it the same way. Call it before anything that
+// reaches testUI.
+func captureUI(t *testing.T, u *ui) {
+	t.Helper()
+	if _, loaded := testCaptureUI.LoadOrStore(t, u); loaded {
+		t.Fatal("captureUI: this test already has a ui — call it before captureLog or any config builder")
+	}
+	t.Cleanup(func() { testCaptureUI.Delete(t) })
 }
 
 // Only SIGINT used to cancel the run. A SIGTERM — a machine shutting down, a
@@ -1105,7 +1166,7 @@ func TestLogEventRendersProgressLines(t *testing.T) {
 		`{"type":"result","subtype":"success","duration_ms":1141000,"num_turns":74,"total_cost_usd":4.12,"is_error":false,` +
 			`"result":"Unknown skill: polako:implement-issue"}`,
 	}
-	var el eventLog
+	el := eventLog{u: testUI(t)}
 	for _, e := range events {
 		if ev, ok := parseEvent([]byte(e)); ok {
 			el.event(ev)
@@ -1143,7 +1204,7 @@ func TestLogEventNamesTheSession(t *testing.T) {
 	if !ok {
 		t.Fatal("init event should parse")
 	}
-	(&eventLog{}).event(ev)
+	(&eventLog{u: testUI(t)}).event(ev)
 	if want := "session started (model claude-opus-5, session 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9)"; !strings.Contains(buf.String(), want) {
 		t.Errorf("output missing %q\ngot:\n%s", want, buf.String())
 	}
@@ -2205,8 +2266,9 @@ func TestSleepReturnsOnCancel(t *testing.T) {
 
 func fakeClaudeConfig(t *testing.T, mode string) config {
 	t.Helper()
-	t.Setenv(fakeClaudeEnv, mode) // inherited by the child process
 	return config{
+		env:            fakeEnv(fakeClaudeEnv, mode), // handed to the child, not set on the parent
+		ui:             testUI(t),
 		dir:            t.TempDir(),
 		claudeBin:      fakeCLI(t), // this test package, re-entered via TestMain
 		skill:          defaultSkill,
@@ -2259,9 +2321,9 @@ func TestExecClaudeCarriesChildStderrIntoTheNarration(t *testing.T) {
 // is what the pair guards against coming back — a flag reintroduced anywhere
 // between buildArgs and exec would pass the unit test and still overpromise.
 func TestDispatchNeverSendsRemoteControlToTheCLI(t *testing.T) {
-	args := watchClaudeArgs(t)
 	cfg := fakeClaudeConfig(t, "stream")
 	cfg.remote, cfg.repo = true, "example/repo"
+	args := watchClaudeArgs(t, &cfg)
 
 	if _, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0); err != nil {
 		t.Fatalf("a healthy run under -remote: %v", err)
@@ -2310,7 +2372,7 @@ func TestGhAndGitInheritTheOperatorsEnvironmentToo(t *testing.T) {
 	t.Setenv(fakeClaudeEnv, "envcanaryout") // inherited by the child process
 	t.Setenv(envCanaryVar, "http://localhost:8443")
 
-	out, err := capture(context.Background(), t.TempDir(), fakeCLI(t), "status")
+	out, err := capture(context.Background(), t.TempDir(), nil, fakeCLI(t), "status")
 	if err != nil {
 		t.Fatalf("capture: %v", err)
 	}
@@ -2409,7 +2471,7 @@ func TestExecClaudeHeartbeatSpeaksWhileTheTerminalIsQuiet(t *testing.T) {
 // not a special case.
 func TestExecClaudeHeartbeatIsSilentUnderVerbose(t *testing.T) {
 	var buf bytes.Buffer
-	wireSinks(t, &ui{terminal: &buf, verbose: true})
+	captureUI(t, &ui{terminal: &buf, verbose: true})
 	cfg := fakeClaudeConfig(t, "heartbeat")
 	cfg.heartbeat = 300 * time.Millisecond
 
@@ -2473,8 +2535,6 @@ func TestExecClaudeReportsAnEventTooLargeToRead(t *testing.T) {
 }
 
 func TestExecClaudeStopsWhenTheContextIsCancelled(t *testing.T) {
-	log.SetOutput(io.Discard)
-	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 	cfg := fakeClaudeConfig(t, "hang")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)

@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
-	"os"
 	"strings"
 	"testing"
 )
@@ -80,13 +78,10 @@ func TestPreflightRefusesAnUngatedPublicQueue(t *testing.T) {
 // still tells them a real run would refuse.
 func TestPreflightLetsADryRunLookThroughTheGate(t *testing.T) {
 	_, checkout := upstream(t)
+	logged := captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{Visibility: "PUBLIC"})
 	cfg.dir = checkout
 	cfg.dryRun = true
-
-	var logged strings.Builder
-	log.SetOutput(&logged)
-	defer log.SetOutput(os.Stderr)
 
 	if err := preflight(context.Background(), &cfg); err != nil {
 		t.Fatalf("the gate stopped a dry run, which changes nothing: %v", err)
@@ -146,9 +141,7 @@ func TestPreflightLetsADryRunLookThroughTheLabelGate(t *testing.T) {
 	cfg.label = "typo"
 	cfg.dryRun = true
 
-	var logged strings.Builder
-	log.SetOutput(&logged)
-	defer log.SetOutput(os.Stderr)
+	logged := captureLog(t)
 
 	if err := preflight(context.Background(), &cfg); err != nil {
 		t.Fatalf("the label gate stopped a dry run, which changes nothing: %v", err)
@@ -184,7 +177,7 @@ func TestPreflightFailsOutrightWhenTheLabelLookupCannotAnswer(t *testing.T) {
 
 func TestPluginVersionReadsTheInstalledPlugin(t *testing.T) {
 	cfg := fakeClaudeConfig(t, "stream")
-	t.Setenv(fakePluginEnv, "0.3.0")
+	setFakeEnv(&cfg, fakePluginEnv, "0.3.0")
 
 	got, id, scope := pluginVersion(context.Background(), cfg)
 	if got != "0.3.0" {
@@ -236,7 +229,7 @@ func TestNamesThisPlugin(t *testing.T) {
 func TestPluginVersionIsEmptyForAHandInstalledSkill(t *testing.T) {
 	cfg := fakeClaudeConfig(t, "stream")
 	cfg.skill = skillDir
-	t.Setenv(fakePluginEnv, "0.3.0")
+	setFakeEnv(&cfg, fakePluginEnv, "0.3.0")
 
 	if got, _, _ := pluginVersion(context.Background(), cfg); got != "" {
 		t.Errorf("pluginVersion = %q, want empty: a hand-installed skill has no version", got)
@@ -375,7 +368,7 @@ func TestWarnOnVersionSkew(t *testing.T) {
 			if skill == "" {
 				skill = defaultSkill
 			}
-			warnOnVersionSkew(tc.binary, config{skill: skill, pluginVersion: tc.plugin})
+			warnOnVersionSkew(tc.binary, config{ui: testUI(t), skill: skill, pluginVersion: tc.plugin})
 
 			out := buf.String()
 			got := strings.Contains(out, "version skew")
@@ -473,7 +466,7 @@ func TestVersionSkewRemedyAgreesWithInstallDocs(t *testing.T) {
 		t.Fatalf("docs/install.md no longer shows %q — move this test and warnOnVersionSkew's remedy with it", wantCmd)
 	}
 	buf := captureLog(t)
-	warnOnVersionSkew("0.4.0", config{skill: defaultSkill, pluginVersion: "0.3.0"})
+	warnOnVersionSkew("0.4.0", config{ui: testUI(t), skill: defaultSkill, pluginVersion: "0.3.0"})
 	if !strings.Contains(buf.String(), wantCmd) {
 		t.Errorf("skew warning does not print the docs' update command %q\nlog: %s", wantCmd, buf.String())
 	}

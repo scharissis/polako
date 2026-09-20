@@ -101,11 +101,12 @@ type stageNarrator struct {
 // about to stop, not sit quietly in a phase.
 func (n *stageNarrator) phase() stage { return n.reached }
 
-// observe folds one stream event into the narrator, emitting a milestone when —
-// and only when — it advances the run past a phase it had not yet reported.
-func (n *stageNarrator) observe(ev streamEvent) {
+// observe folds one stream event into the narrator, emitting a milestone into
+// u when — and only when — it advances the run past a phase it had not yet
+// reported.
+func (n *stageNarrator) observe(u *ui, ev streamEvent) {
 	if n.intake {
-		n.observeIntake(ev)
+		n.observeIntake(u, ev)
 		return
 	}
 	if ev.Type != "assistant" {
@@ -123,13 +124,13 @@ func (n *stageNarrator) observe(ev streamEvent) {
 			// and is the tell that this run ends in a question, not a PR. It
 			// neither advances nor blocks the chain.
 			n.asked = true
-			narrate(sevProgress, "[claude] %s", stageLine(stageAsking))
+			u.narrate(sevProgress, "[claude] %s", stageLine(stageAsking))
 			continue
 		}
 
 		if s := recognizeStage(c.Name, in); s > n.reached {
 			n.reached = s
-			narrate(sevProgress, "[claude] %s", stageLine(s))
+			u.narrate(sevProgress, "[claude] %s", stageLine(s))
 		}
 	}
 }
@@ -143,7 +144,7 @@ var filedIssue = regexp.MustCompile(`/issues/(\d+)`)
 // names the issue it made. On the result, not the call, for the reason the cap
 // counts there — a create in flight has filed nothing yet. A result with no
 // issue URL in it — an error, a gh that printed something else — says nothing.
-func (n *stageNarrator) observeIntake(ev streamEvent) {
+func (n *stageNarrator) observeIntake(u *ui, ev streamEvent) {
 	for _, c := range ev.Message.Content {
 		switch {
 		case ev.Type == "assistant" && c.Type == "tool_use":
@@ -162,7 +163,7 @@ func (n *stageNarrator) observeIntake(ev streamEvent) {
 			}
 			if s > n.reached {
 				n.reached = s
-				narrate(sevProgress, "[claude] %s", stageLine(s))
+				u.narrate(sevProgress, "[claude] %s", stageLine(s))
 			}
 		case ev.Type == "user" && c.Type == "tool_result" && n.filing[c.ToolUseID]:
 			delete(n.filing, c.ToolUseID)
@@ -171,7 +172,7 @@ func (n *stageNarrator) observeIntake(ev streamEvent) {
 			}
 			if m := filedIssue.FindStringSubmatch(toolResultContentText(c.ResultText)); m != nil {
 				if num, err := strconv.Atoi(m[1]); err == nil {
-					narrate(sevProgress, "[claude] filed #%d", num)
+					u.narrate(sevProgress, "[claude] filed #%d", num)
 				}
 			}
 		}

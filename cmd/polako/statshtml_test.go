@@ -440,9 +440,8 @@ func TestProportionBarsKeepUnknownValuesNeutral(t *testing.T) {
 // public runStats: this fixture has samples, so a real "claude" resolved off
 // PATH would otherwise be probed for the cross-check.
 func TestStatsHTMLPlanCostCard(t *testing.T) {
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeUsageEnv, "sub")
-	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second}
+	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second,
+		env: fakeEnv(fakeClaudeEnv, "stream", fakeUsageEnv, "sub")}
 	ds, issues, summary, err := statsReport(context.Background(), cfg, statsOptions{}, planCostDir(t), fixtureNow)
 	if err != nil {
 		t.Fatalf("statsReport: %v", err)

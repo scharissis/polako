@@ -162,9 +162,9 @@ func TestWeekAnchorFromProbeFalseWithoutAReadableReset(t *testing.T) {
 // --- week: the fallback path, exercised through the live (fake) probe ---
 
 func TestResolveWeekWindowFallsBackToMondayWhenTheProbeCannotAnswer(t *testing.T) {
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeUsageEnv, "") // unset: an old CLI with no /usage, per fakeUsageProbe
-	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second}
+	// fakeUsageEnv left out: an old CLI with no /usage, per fakeUsageProbe.
+	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second,
+		env: fakeEnv(fakeClaudeEnv, "stream")}
 	now := time.Date(2026, 8, 26, 15, 0, 0, 0, time.UTC) // a Wednesday
 
 	bounds, probe, err := resolveWindowBounds(context.Background(), cfg, statsOptions{window: windowWeek}, "", now)
@@ -189,9 +189,8 @@ func TestResolveWeekWindowFallsBackToMondayWhenTheProbeCannotAnswer(t *testing.T
 // wall clock (see the pure-math tests above for that) — only that the probe
 // fired and the bounds it returned are internally consistent.
 func TestResolveWeekWindowUsesTheProbeWhenItAnswers(t *testing.T) {
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeUsageEnv, "sub")
-	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second}
+	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second,
+		env: fakeEnv(fakeClaudeEnv, "stream", fakeUsageEnv, "sub")}
 
 	bounds, probe, err := resolveWindowBounds(context.Background(), cfg, statsOptions{window: windowWeek}, "", time.Now())
 	if err != nil {
@@ -329,9 +328,9 @@ func planCostDir(t *testing.T) string {
 // otherwise be probed for the cross-check — exactly the trap status_test.go
 // avoids by never exercising a live probe through anything but a fake CLI.
 func TestPlanCostPerIssueLine(t *testing.T) {
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeUsageEnv, "") // unset: no cross-check figure, so the line is pinned in full
-	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second}
+	// fakeUsageEnv left out: no cross-check figure, so the line is pinned in full.
+	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second,
+		env: fakeEnv(fakeClaudeEnv, "stream")}
 
 	_, _, summary, err := statsReport(context.Background(), cfg, statsOptions{}, planCostDir(t), fixtureNow)
 	if err != nil {
@@ -360,9 +359,9 @@ func TestPlanCostOmittedWithoutAnySamples(t *testing.T) {
 // self-reported window — sits beside the mean/median and is fetched once,
 // through statsReport directly since it needs a cfg pointed at the fake CLI.
 func TestPlanCostCrossCheckFromTheLiveProbe(t *testing.T) {
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeUsageEnv, "sub") // usageSample: "Top plugins: polako 29%" over "Last 24h"
-	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second}
+	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second,
+		// usageSample: "Top plugins: polako 29%" over "Last 24h"
+		env: fakeEnv(fakeClaudeEnv, "stream", fakeUsageEnv, "sub")}
 
 	_, _, summary, err := statsReport(context.Background(), cfg, statsOptions{}, planCostDir(t), fixtureNow)
 	if err != nil {
@@ -381,10 +380,9 @@ func TestPlanCostCrossCheckFromTheLiveProbe(t *testing.T) {
 // point of gating it on issuesHaveUsageSamples rather than probing on every
 // invocation regardless.
 func TestPlanCostNoProbeCallWithoutSamples(t *testing.T) {
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeUsageEnv, "sub")
-	args := watchClaudeArgs(t)
-	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second}
+	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second,
+		env: fakeEnv(fakeClaudeEnv, "stream", fakeUsageEnv, "sub")}
+	args := watchClaudeArgs(t, &cfg)
 
 	_, _, _, err := statsReport(context.Background(), cfg, statsOptions{}, fixtureDir(t), fixtureNow)
 	if err != nil {

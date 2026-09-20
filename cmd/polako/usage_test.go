@@ -262,9 +262,9 @@ func fakeUsageConfig(t *testing.T, usageMode string) config {
 	// fakeClaudeEnv is what makes the child impersonate claude at all (see
 	// TestMain); the mode itself is never reached, because the /usage argv
 	// check in fakeClaude dispatches before the mode switch does.
-	t.Setenv(fakeClaudeEnv, "warmup")
-	t.Setenv(fakeUsageEnv, usageMode)
 	return config{
+		env: fakeEnv(fakeClaudeEnv, "warmup", fakeUsageEnv, usageMode),
+		ui:  testUI(t),
 		dir: t.TempDir(),
 		// skill names this repo's own plugin, the same as an unconfigured
 		// -skill would default to — probeUsage cuts this the way
