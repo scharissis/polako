@@ -21,6 +21,7 @@ import (
 // on — proved by checking for queueGate's own wording rather than a copy of
 // it.
 func TestSetupRepoOKRowNotesTheQueueGate(t *testing.T) {
+	t.Parallel()
 	row := setupRepoOKRow(setupRepoView{Visibility: "PUBLIC"}, "")
 	gateErr := queueGate("PUBLIC", "", false)
 	if !strings.Contains(row.detail, gateErr.Error()) {
@@ -37,6 +38,7 @@ func TestSetupRepoOKRowNotesTheQueueGate(t *testing.T) {
 // origin/HEAD merely being unset, and needs a different remedy: `git
 // remote set-head origin -a` would itself fail with the same error.
 func TestSetupOriginHeadRowDistinguishesANonCheckout(t *testing.T) {
+	t.Parallel()
 	cfg := config{dir: t.TempDir()} // no .git here at all
 	row := setupOriginHeadRow(context.Background(), cfg, true)
 	if row.status != setupMissing || !row.required {
@@ -50,6 +52,7 @@ func TestSetupOriginHeadRowDistinguishesANonCheckout(t *testing.T) {
 
 // The bare invocation's verb table has to list setup now that it exists.
 func TestVerbUsageListsSetup(t *testing.T) {
+	t.Parallel()
 	var b strings.Builder
 	verbUsage(&b)
 	if !strings.Contains(b.String(), "\n  setup ") {
@@ -60,22 +63,35 @@ func TestVerbUsageListsSetup(t *testing.T) {
 // The same flags-only contract every other verb's entry point holds to; see
 // TestRunTidyRejectsAnArgument.
 func TestRunSetupRejectsAnArgument(t *testing.T) {
+	t.Parallel()
 	err := runSetup(context.Background(), []string{"12"}, strings.NewReader(""), &strings.Builder{}, report{})
 	if err == nil || !strings.Contains(err.Error(), "setup takes flags only") {
 		t.Errorf("err = %v, want a complaint about the argument", err)
 	}
 }
 
-func setupCfg(t *testing.T, checkout string) config {
+// setupCfg writes st to a fake gh state file and returns a config wired to
+// it, the handshake carried on config.env the way tidyCfg's is, so no test
+// here needs t.Setenv.
+func setupCfg(t *testing.T, st *ghState, checkout string) config {
 	t.Helper()
-	// Any mode does: every claude call setup makes (--version, --help,
-	// plugin list) is dispatched inside fakeClaude before its mode switch is
-	// ever reached. Without this set at all, TestMain cannot tell the child
-	// is meant to impersonate claude and falls through to re-running the
-	// whole suite as a subprocess instead (main_test.go's TestMain).
-	t.Setenv(fakeClaudeEnv, "stream")
+	if st.Repo == "" {
+		st.Repo = "example/repo"
+	}
+	path := filepath.Join(t.TempDir(), "gh-state.json")
+	if err := writeGhState(path, st); err != nil {
+		t.Fatalf("writing fake gh state: %v", err)
+	}
 	return config{
-		dir:         checkout,
+		dir: checkout,
+		// Any claude mode does: every claude call setup makes (--version,
+		// --help, plugin list) is dispatched inside fakeClaude before its
+		// mode switch is ever reached. Without one at all, TestMain cannot
+		// tell the child is meant to impersonate claude and falls through to
+		// re-running the whole suite as a subprocess instead (main_test.go's
+		// TestMain).
+		env:         fakeEnv(fakeGhEnv, path, fakeClaudeEnv, "stream"),
+		ui:          testUI(t),
 		ghBin:       fakeCLI(t),
 		claudeBin:   fakeCLI(t),
 		skill:       defaultSkill,
@@ -97,9 +113,9 @@ func findSetupRow(t *testing.T, rows []setupRow, name string) setupRow {
 // The point of the whole issue: a repository with none of the three labels
 // names all three as missing and fails the report.
 func TestReadSetupNamesMissingLabelsAndFails(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
-	tidyGh(t, &ghState{})
-	cfg := setupCfg(t, checkout)
+	cfg := setupCfg(t, &ghState{}, checkout)
 
 	_, rows := readSetup(context.Background(), cfg)
 
@@ -116,9 +132,9 @@ func TestReadSetupNamesMissingLabelsAndFails(t *testing.T) {
 
 // With every label already there, the same report is clean end to end.
 func TestReadSetupWithAllLabelsSucceeds(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
-	tidyGh(t, &ghState{Labels: []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel}})
-	cfg := setupCfg(t, checkout)
+	cfg := setupCfg(t, &ghState{Labels: []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel}}, checkout)
 
 	_, rows := readSetup(context.Background(), cfg)
 
@@ -138,9 +154,9 @@ func TestReadSetupWithAllLabelsSucceeds(t *testing.T) {
 // renderSetup, not its own pre-resolution copy, so the report's header
 // names the repo it actually checked rather than falling back to -dir.
 func TestReadSetupResolvesTheRepoName(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
-	tidyGh(t, &ghState{Repo: "example/widgets"})
-	cfg := setupCfg(t, checkout)
+	cfg := setupCfg(t, &ghState{Repo: "example/widgets"}, checkout)
 	if cfg.repo != "" {
 		t.Fatalf("test setup: cfg.repo = %q, want empty before readSetup resolves it", cfg.repo)
 	}
@@ -156,13 +172,13 @@ func TestReadSetupResolvesTheRepoName(t *testing.T) {
 // "couldn't tell", since this gh answered the question and the answer was
 // no.
 func TestReadSetupIssuesDisabledFailsTheReport(t *testing.T) {
+	t.Parallel()
 	disabled := false
 	_, checkout := upstream(t)
-	tidyGh(t, &ghState{
+	cfg := setupCfg(t, &ghState{
 		Labels:        []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel},
 		IssuesEnabled: &disabled,
-	})
-	cfg := setupCfg(t, checkout)
+	}, checkout)
 
 	_, rows := readSetup(context.Background(), cfg)
 
@@ -179,12 +195,12 @@ func TestReadSetupIssuesDisabledFailsTheReport(t *testing.T) {
 // row down with it — the same unknownJSONField fallback listOpenIssues
 // already uses for a gh too old for sub-issues.
 func TestReadSetupIssuesEnabledIsUnknownOnAnOldGh(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
-	tidyGh(t, &ghState{
+	cfg := setupCfg(t, &ghState{
 		Labels:               []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel},
 		NoIssuesEnabledField: true,
-	})
-	cfg := setupCfg(t, checkout)
+	}, checkout)
 
 	_, rows := readSetup(context.Background(), cfg)
 
@@ -203,9 +219,9 @@ func TestReadSetupIssuesEnabledIsUnknownOnAnOldGh(t *testing.T) {
 // row, and required, since the operator is about to point `polako work` at
 // it.
 func TestReadSetupChecksTheGateLabelToo(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
-	tidyGh(t, &ghState{Labels: []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel}})
-	cfg := setupCfg(t, checkout)
+	cfg := setupCfg(t, &ghState{Labels: []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel}}, checkout)
 	cfg.label = "ready"
 
 	_, rows := readSetup(context.Background(), cfg)
@@ -223,9 +239,9 @@ func TestReadSetupChecksTheGateLabelToo(t *testing.T) {
 // CLI answers nothing for `claude plugin list --json` unless a test opts in
 // (fakePluginEnv), which this one does not.
 func TestReadSetupPluginRowIsUnknownRatherThanFailingWithNoFixture(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
-	tidyGh(t, &ghState{Labels: []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel}})
-	cfg := setupCfg(t, checkout)
+	cfg := setupCfg(t, &ghState{Labels: []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel}}, checkout)
 
 	_, rows := readSetup(context.Background(), cfg)
 
@@ -242,12 +258,12 @@ func TestReadSetupPluginRowIsUnknownRatherThanFailingWithNoFixture(t *testing.T)
 // create` past its own --help probe — proved the way POLAKO_FAKE_GH_LOG
 // proves it for every other verb here.
 func TestReadSetupMakesReadsOnly(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
-	tidyGh(t, &ghState{})
-	cfg := setupCfg(t, checkout)
+	cfg := setupCfg(t, &ghState{}, checkout)
 
 	logPath := filepath.Join(t.TempDir(), "gh.log")
-	t.Setenv(fakeGhLogEnv, logPath)
+	setFakeEnv(&cfg, fakeGhLogEnv, logPath)
 
 	readSetup(context.Background(), cfg)
 
