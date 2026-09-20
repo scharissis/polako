@@ -17,7 +17,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -126,7 +125,7 @@ func notify(ctx context.Context, cfg config, n notification) {
 	// Deliberately no Dir: the command is one the operator typed on this
 	// command line, so it runs where they started the drain rather than in
 	// -dir, and a relative path in it resolves the way exec already resolves it.
-	cmd.Env = append(append(os.Environ(), n.env(cfg)...), cfg.env...)
+	cmd.Env = childEnv(append(n.env(cfg), cfg.env...))
 	// Captured rather than inherited, so a chatty notifier cannot interleave
 	// itself with the run log — and quoted back only when it failed, where it
 	// is usually the whole diagnosis.
