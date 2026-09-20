@@ -1064,7 +1064,7 @@ func TestStatusOmitsThePlanLineWhenTheProbeCannotAnswer(t *testing.T) {
 	}
 }
 
-// --- the update notice (docs/plans/update.md ticket 2) ---
+// --- the update notice ---
 
 // statusPluginVersion asks by explicit name (pluginName), not through a
 // -skill status doesn't carry — this pins that it still reads the real
