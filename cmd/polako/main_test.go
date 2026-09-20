@@ -2349,6 +2349,7 @@ func fakeClaudeConfig(t *testing.T, mode string) config {
 		permissionMode: "acceptEdits",
 		tools:          "Read",
 		stall:          10 * time.Second,
+		visualEvidence: true,
 	}
 }
 
@@ -2729,6 +2730,24 @@ func TestUnfinishedResumePromptContradictsTheBeliefThatItWasPaused(t *testing.T)
 	// And the crash flavour keeps saying what is true of it.
 	if crash := resumePrompt(defaultSkill, 12, reasonResume); !strings.Contains(crash, "incomplete") {
 		t.Errorf("the crash resume prompt stopped warning that the last action may be incomplete\ngot: %s", crash)
+	}
+}
+
+// -visual-evidence is a second slash argument the skill reads, not a claude
+// flag, so issueRun is the whole of its wiring: on (the default) leaves the
+// prompt exactly as it was before this flag existed, off appends the literal
+// value SKILL.md's `evidence` argument checks for.
+func TestIssueRunPassesTheEvidenceSwitch(t *testing.T) {
+	t.Parallel()
+	cfg := config{skill: defaultSkill, visualEvidence: true}
+	if _, prompt, _ := issueRun(cfg, 12); prompt != fmt.Sprintf("/%s 12", defaultSkill) {
+		t.Errorf("-visual-evidence on should leave the prompt unchanged, got %q", prompt)
+	}
+
+	cfg.visualEvidence = false
+	want := fmt.Sprintf("/%s 12 no-evidence", defaultSkill)
+	if _, prompt, _ := issueRun(cfg, 12); prompt != want {
+		t.Errorf("-visual-evidence off should append %q, got %q", "no-evidence", prompt)
 	}
 }
 

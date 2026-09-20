@@ -172,6 +172,12 @@ type config struct {
 	// documented, so the day a CLI registers headless runs there is one place to
 	// light it up again and the argument for it is already on issue #52.
 	remote bool
+	// visualEvidence is the skill's own `evidence` argument, minted per run:
+	// true (the default) sends nothing extra, so the prompt stays
+	// byte-identical to before this flag existed; false appends `no-evidence`,
+	// which SKILL.md reads as turning the whole evidence-ref channel off. See
+	// issueRun and docs/security.md's evidence-ref section.
+	visualEvidence bool
 	// queue is what a shift learns about listing its own backlog and only wants
 	// to find out — and say — once: that this gh is too old to see sub-issues,
 	// and that there are proposals it is leaving behind the curation gate. A
@@ -355,6 +361,8 @@ func parseFlags() config {
 		"command to run when polako needs a human, with context in "+notifyPrefix+"* (see docs/reference.md)")
 	flag.BoolVar(&cfg.remote, "remote", true,
 		"ask for each run to be watchable from claude.ai/code or the phone (no CLI registers headless runs yet)")
+	flag.BoolVar(&cfg.visualEvidence, "visual-evidence", true,
+		"let the skill publish before/after screenshots to the polako-evidence ref (false appends no-evidence to the skill invocation)")
 	flag.StringVar(&cfg.tag, "run-tag", "", "label recorded with every run, for comparing one batch against another")
 	flag.BoolVar(&cfg.postSummary, "post-summary", false,
 		"comment one line of run numbers on each merged PR (runs, tokens, dollars, wall time)")
