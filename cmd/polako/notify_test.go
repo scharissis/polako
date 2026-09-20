@@ -69,7 +69,7 @@ func notifyLog(t *testing.T, cfg *config) func() []string {
 func TestNotifyHandsTheHookItsContext(t *testing.T) {
 	t.Parallel()
 	captureLog(t)
-	cfg := config{repo: "owner/repo"}
+	cfg := config{repo: "owner/repo", ui: testUI(t)}
 	told := notifyLog(t, &cfg)
 
 	notify(context.Background(), cfg, notification{
