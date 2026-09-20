@@ -161,12 +161,21 @@ def load_events(stream_path):
     return events, note
 
 
+def content(ev):
+    """An event's content blocks. Not every event has them: a `system`
+    `permission_denied` event carries its message as a plain string, and one
+    of those in the stream used to crash grading — turning the run most worth
+    reading, one that hit a refusal, into a harness error."""
+    msg = ev.get("message")
+    return (msg.get("content") or []) if isinstance(msg, dict) else []
+
+
 def timeline(events):
     """One line per tool call, with a head of its result — enough for the
     ordering and did-it-block criteria without shipping the whole transcript."""
     lines, results, tools = [], {}, set()
     for ev in events:
-        for c in (ev.get("message") or {}).get("content") or []:
+        for c in content(ev):
             if isinstance(c, dict) and c.get("type") == "tool_result":
                 txt = c.get("content")
                 if isinstance(txt, list):
@@ -175,7 +184,7 @@ def timeline(events):
                 results[c.get("tool_use_id")] = str(txt)[:RESULT_HEAD]
     n = 0
     for ev in events:
-        for c in (ev.get("message") or {}).get("content") or []:
+        for c in content(ev):
             if isinstance(c, dict) and c.get("type") == "tool_use":
                 n += 1
                 tools.add(c["name"])
