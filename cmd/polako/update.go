@@ -86,10 +86,10 @@ func runUpdate(ctx context.Context, seed config, args []string, out io.Writer) e
 	}
 
 	cfg, err := updateConfig(opt)
-	cfg.env, cfg.ui = seed.env, seed.ui
 	if err != nil {
 		return err
 	}
+	cfg.env, cfg.ui = seed.env, seed.ui
 
 	published, err := publishedVersion(ctx, cfg)
 	if err != nil {
