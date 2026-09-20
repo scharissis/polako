@@ -116,7 +116,7 @@ Two things, one of them only on request:
 | What | Where it goes | Default |
 | --- | --- | --- |
 | [`-post-summary`](run-data.md#putting-it-on-the-pr--post-summary) | One line of run numbers, as a comment on your own merged PR — readable by exactly the people who can already see that PR. | Off. |
-| Evidence images | A PNG the skill captured as real output, pushed to the `polako-evidence` orphan branch on your own origin and embedded in the PR body by commit sha — readable by anyone who can already read that repo. | Nothing today: no step in the skill takes a screenshot yet. `no-evidence` as the skill's second argument will turn the channel off once one does; `polako work` doesn't drive any of this yet either. |
+| Evidence images | A PNG the skill captured as real output, pushed to the `polako-evidence` orphan branch on your own origin and embedded in the PR body by commit sha — readable by anyone who can already read that repo. | Nothing today: no step in the skill takes a screenshot yet, so the channel carries nothing regardless of this switch. [`-visual-evidence`](reference.md) on `polako work`, default on, is the off switch once one does — it appends `no-evidence`, the skill's own second argument, to the invocation. |
 
 `plan` and `health` don't change this — neither has a `-post-summary` of its
 own, and neither posts anything anywhere.
@@ -157,8 +157,8 @@ practice, not retractable once pushed. `skills/implement-issue/SKILL.md`
 carries the channel and the skill's own `evidence` argument today; nothing
 yet takes a screenshot, so in practice no run pushes anything through it —
 that's a later change to `docs/plans/visual-evidence.md`'s backlog, and it
-will say so here again when it lands. `no-evidence` is already the way to
-decline it once something does.
+will say so here again when it lands. `-visual-evidence=false` on `polako
+work` is already the way to decline it once something does.
 
 ### The published-version read, and why it isn't in that table either
 

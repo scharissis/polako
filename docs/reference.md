@@ -40,6 +40,7 @@ These are `polako work`'s own; the other six verbs take smaller sets —
 | `-dry-run` | `false` | Resolve the next issue, print the `claude` invocation it would get, and exit. Runs nothing and writes nothing — see [Looking before you leap](#looking-before-you-leap--dry-run). |
 | `-notify` | *(none)* | Command to run whenever polako needs a human, with context in `POLAKO_NOTIFY_*` — see [Being told when it needs you](#being-told-when-it-needs-you--notify). |
 | `-remote` | `true` | Ask for each run to be watchable from claude.ai/code or the app. **Inert today** — no `claude` CLI registers headless runs, so nothing is sent. See [Watching a shift from anywhere](#watching-a-shift-from-anywhere--remote). |
+| `-visual-evidence` | `true` | Let the skill publish before/after screenshots to the `polako-evidence` ref. `false` appends `no-evidence` to the skill invocation instead. See [Security](security.md#the-evidence-ref-and-what-its-staged-for). |
 | `-run-tag` | *(none)* | Freeform label recorded with every run, so one batch can be compared against another. |
 | `-metrics` | `~/.polako/metrics` | Directory for run-data records, or `off` to write nothing. |
 | `-log` | `~/.polako/logs` | Directory for the full per-shift log, or `off` to write none — see [The shift log](#the-shift-log--log). |
@@ -56,7 +57,6 @@ leap of faith. `-dry-run` takes it out:
 $ polako work -dir ../my-project -dry-run
 example/my-project — running /polako:implement-issue per issue, polling every 5m0s
   dry-run  resolving the next issue only — no claude run, no GitHub write, no run data
-  remote   on, but no claude CLI registers headless runs with Remote Control yet — runs stay on this machine and unwatched, and nothing is sent anywhere (-remote=false silences this line; a later polako lights the flag up once a CLI supports it)
 ready: #12, #14, #19
 waiting on an answer: #9
 issue #12 would be worked next; the invocation follows on stdout
