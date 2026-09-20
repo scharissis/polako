@@ -298,15 +298,17 @@ func main() {
 // command (GIT_SSH_COMMAND) that always refuses with a publickey rejection —
 // a real `git fetch` failing this specific way, hermetically: no network, no
 // real sshd, no real key. example.invalid is never looked up at all: the fake
-// answers before git gets far enough to resolve it.
-func denyGitAuth(t *testing.T, checkout string) {
+// answers before git gets far enough to resolve it. The variable rides on
+// cfg.env, not t.Setenv: git is a child this config spawns, which is the case
+// that seam exists for, and it leaves the caller free to run t.Parallel().
+func denyGitAuth(t *testing.T, cfg *config, checkout string) {
 	t.Helper()
 	gitAt(t, checkout, "remote", "set-url", "origin", "ssh://git@example.invalid/repo.git")
 	// Git for Windows runs GIT_SSH_COMMAND through its bundled sh, which
 	// treats backslashes as escapes — a native filepath.Join path there
 	// gets mangled ("C:\Users\..." becomes "C:Users...", "command not
 	// found"). Forward slashes work in both that sh and a Windows exec.
-	t.Setenv("GIT_SSH_COMMAND", filepath.ToSlash(fakeGitSSHDeny(t)))
+	setFakeEnv(cfg, "GIT_SSH_COMMAND", filepath.ToSlash(fakeGitSSHDeny(t)))
 }
 
 // Issue #425: git's own credentials being refused is a narrower, likelier-
@@ -315,12 +317,14 @@ func denyGitAuth(t *testing.T, checkout string) {
 // precedes still goes on, with st remembering why for the park that might
 // follow (see parkCleanExit).
 func TestSyncDefaultBranchDoesNotStopOnAnAuthFailure(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	_, checkout := upstream(t)
-	denyGitAuth(t, checkout)
+	cfg := config{dir: checkout, ui: testUI(t), ghRetryWait: 1}
+	denyGitAuth(t, &cfg, checkout)
 
 	st := &issueState{}
-	if err := syncDefaultBranch(context.Background(), config{dir: checkout, ui: testUI(t), ghRetryWait: 1}, st); err != nil {
+	if err := syncDefaultBranch(context.Background(), cfg, st); err != nil {
 		t.Fatalf("an auth failure must not stop the caller: %v", err)
 	}
 	if !st.fetchAuthFailed {
@@ -335,10 +339,12 @@ func TestSyncDefaultBranchDoesNotStopOnAnAuthFailure(t *testing.T) {
 // issue — and must not panic just because there is nothing to remember this
 // against.
 func TestSyncDefaultBranchDoesNotStopOnAnAuthFailureWithNilState(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
-	denyGitAuth(t, checkout)
+	cfg := config{dir: checkout, ui: testUI(t), ghRetryWait: 1}
+	denyGitAuth(t, &cfg, checkout)
 
-	if err := syncDefaultBranch(context.Background(), config{dir: checkout, ui: testUI(t), ghRetryWait: 1}, nil); err != nil {
+	if err := syncDefaultBranch(context.Background(), cfg, nil); err != nil {
 		t.Fatalf("an auth failure must not stop the caller: %v", err)
 	}
 }

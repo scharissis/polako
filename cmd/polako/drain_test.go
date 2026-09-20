@@ -1354,12 +1354,13 @@ func TestDrainParksAPermissionRefusalWithoutResuming(t *testing.T) {
 // the SSH agent; now the fetch failure leads the park's reason and the exit
 // summary totals it once, and neither carries git's own stderr to the thread.
 func TestDrainParkLeadsWithAFetchAuthFailure(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "permissionblocked", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 	})
 	_, checkout := upstream(t)
-	denyGitAuth(t, checkout)
+	denyGitAuth(t, &cfg, checkout)
 	cfg.dir = checkout
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
 	setFakeEnv(&cfg, fakeGhLogEnv, calls)
