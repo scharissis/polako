@@ -16,6 +16,7 @@ import (
 // claude process starts — which is what makes it safe to point at a repository
 // nobody here has drained before.
 func TestDryRunSaysWhatItWouldDoAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -96,6 +97,7 @@ func TestDryRunSaysWhatItWouldDoAndChangesNothing(t *testing.T) {
 // all: it derives it through the same call, so a proposal and a container are
 // no more offered here than they would be worked there.
 func TestDryRunInheritsTheCurationGate(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -125,6 +127,7 @@ func TestDryRunInheritsTheCurationGate(t *testing.T) {
 // A dry run names a finished container it would close, but not one a human has
 // held with needs-human — a real run would leave that alone too.
 func TestDryRunNamesOnlyContainersItWouldClose(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -152,6 +155,7 @@ func TestDryRunNamesOnlyContainersItWouldClose(t *testing.T) {
 // against the one a real run makes rather than against a second rendering of
 // itself — the pair that would otherwise drift the first time either changed.
 func TestDryRunPrintsTheInvocationARunWouldMake(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{Issues: map[string]*fakeIssue{"1": {Open: true}}})
 
@@ -177,6 +181,7 @@ func TestDryRunPrintsTheInvocationARunWouldMake(t *testing.T) {
 // reaches the printed invocation and the -remediation-* cell — which steers
 // only remediation runs — does not.
 func TestDryRunRoutesThroughThePolicySeam(t *testing.T) {
+	t.Parallel()
 	base := &ghState{Issues: map[string]*fakeIssue{"1": {Open: true}}}
 
 	cfg, _ := drainConfig(t, "stream", base)
@@ -203,6 +208,7 @@ func TestDryRunRoutesThroughThePolicySeam(t *testing.T) {
 // -model-by-size (#395) reaches -dry-run through the same policy seam: an S
 // issue prints the S cell's model, beating -model.
 func TestDryRunRoutesModelBySizeThroughThePolicySeam(t *testing.T) {
+	t.Parallel()
 	cfg, _ := drainConfig(t, "stream", &ghState{Issues: map[string]*fakeIssue{"1": {
 		Open: true,
 		Body: "Estimate: S\n",
@@ -230,6 +236,7 @@ func TestDryRunRoutesModelBySizeThroughThePolicySeam(t *testing.T) {
 // "waiting" for all three names the wrong next step, and the merged case is the
 // one where it would touch GitHub at all.
 func TestDryRunReportsWhatItWouldDoWithAnExistingPR(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		state string
 		want  string

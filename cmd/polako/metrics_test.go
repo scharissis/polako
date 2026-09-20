@@ -95,6 +95,7 @@ func samplePlanFacts() planFacts {
 // label pass had to enforce — and none of the per-issue fields, which mean
 // nothing for a run that works no issue.
 func TestPlanRecordIsSelfDescribing(t *testing.T) {
+	t.Parallel()
 	cfg := metricsConfig(t, metricsOff)
 	cfg.skill = defaultPlanSkill
 	got := decode(t, newPlanRecord(cfg, sampleReport(), samplePlanFacts()))
@@ -152,6 +153,7 @@ func TestPlanRecordIsSelfDescribing(t *testing.T) {
 // record does, because newPlanRecord shares that assembly rather than
 // re-deriving it.
 func TestPlanRecordFallsBackToObservedUsage(t *testing.T) {
+	t.Parallel()
 	cfg := metricsConfig(t, metricsOff)
 	rep := runReport{
 		sessionID: "sess-cap", exitCode: -1, turns: -1, stalled: false,
@@ -183,6 +185,7 @@ func TestPlanRecordFallsBackToObservedUsage(t *testing.T) {
 // which added requested_model and requested_effort to the shared head now that
 // plan and health take a real -model/-effort.
 func TestPlanAndHealthRecordsMarshalUnchanged(t *testing.T) {
+	t.Parallel()
 	cfg := metricsConfig(t, metricsOff)
 	cfg.skill = "skill-x"
 
@@ -210,6 +213,7 @@ func TestPlanAndHealthRecordsMarshalUnchanged(t *testing.T) {
 // vision/milestone, and none of the per-issue fields — the first coverage
 // newHealthRecord has had.
 func TestHealthRecordIsSelfDescribing(t *testing.T) {
+	t.Parallel()
 	cfg := metricsConfig(t, metricsOff)
 	cfg.skill = defaultHealthSkill
 	got := decode(t, newHealthRecord(cfg, sampleReport(), healthFacts{proposalFacts: sampleProposalFacts()}))
@@ -264,6 +268,7 @@ func TestHealthRecordIsSelfDescribing(t *testing.T) {
 // event; its record falls back to the streamed tally the same way plan's and
 // a run record's do, because newHealthRecord shares that assembly.
 func TestHealthRecordFallsBackToObservedUsage(t *testing.T) {
+	t.Parallel()
 	cfg := metricsConfig(t, metricsOff)
 	rep := runReport{
 		exitCode: -1, turns: -1,
@@ -284,6 +289,7 @@ func TestHealthRecordFallsBackToObservedUsage(t *testing.T) {
 }
 
 func TestRunRecordIsSelfDescribing(t *testing.T) {
+	t.Parallel()
 	cfg := metricsConfig(t, metricsOff)
 	rc := runContext{
 		issue: 12, pr: 34, reason: reasonImplement, outcome: outcomeOpenedPR,
@@ -356,6 +362,7 @@ func TestRunRecordIsSelfDescribing(t *testing.T) {
 // tokens. Dropping those runs would make exactly the configurations we need to
 // price look cheap, so they record what was seen going past instead.
 func TestRunRecordFallsBackToObservedUsage(t *testing.T) {
+	t.Parallel()
 	cfg := metricsConfig(t, metricsOff)
 	rc := runContext{
 		issue: 12, reason: reasonImplement, outcome: outcomeNothing,
@@ -394,6 +401,7 @@ func TestRunRecordFallsBackToObservedUsage(t *testing.T) {
 // A result that reports no tokens at all is not evidence that none were spent;
 // stamping that zero "result" would price every failing run at nothing.
 func TestRunRecordDistrustsAResultWithNoTokens(t *testing.T) {
+	t.Parallel()
 	cfg := metricsConfig(t, metricsOff)
 	rc := runContext{issue: 12, started: time.Now(), ended: time.Now()}
 	rep := runReport{
@@ -416,6 +424,7 @@ func TestRunRecordDistrustsAResultWithNoTokens(t *testing.T) {
 }
 
 func TestRunStatusPrecedence(t *testing.T) {
+	t.Parallel()
 	// Precedence matters because these overlap: an interrupted run is also a
 	// nonzero exit, and a stalled one was killed.
 	cases := []struct {
@@ -441,6 +450,7 @@ func TestRunStatusPrecedence(t *testing.T) {
 }
 
 func TestIssueRecordHoldsOnlyTheTerminalOutcome(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfg := metricsConfig(t, dir)
 	cfg.rec.recordIssue(cfg, 12, 34, issueMerged, "", prFacts{}, issueUsageSamples{}, "")
@@ -481,6 +491,7 @@ func readRecords(t *testing.T, dir, repo string) []string {
 }
 
 func TestRecorderAppendsOneLinePerRecord(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfg := metricsConfig(t, dir)
 	rc := runContext{issue: 12, reason: reasonImplement, outcome: outcomeOpenedPR,
@@ -513,6 +524,7 @@ func TestRecorderAppendsOneLinePerRecord(t *testing.T) {
 // drain loop never reads these, so a directory deleted mid-run is simply
 // recreated on the next write.
 func TestRecorderRecreatesADeletedDirectory(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "metrics")
 	cfg := metricsConfig(t, dir)
 	cfg.rec.recordIssue(cfg, 1, 0, issueMerged, "", prFacts{}, issueUsageSamples{}, "")
@@ -548,6 +560,7 @@ func TestRecorderOffWritesNothing(t *testing.T) {
 // A config built without a recorder — every caller that does not care — must
 // be safe to hand to any code path.
 func TestNilRecorderIsSafe(t *testing.T) {
+	t.Parallel()
 	var cfg config
 	cfg.rec.recordRun(cfg, runContext{started: time.Now(), ended: time.Now()}, runReport{})
 	cfg.rec.recordIssue(cfg, 1, 2, issueMerged, "", prFacts{}, issueUsageSamples{}, "")
@@ -576,6 +589,7 @@ func TestNewRecorderDefaultsUnderTheHomeDirectory(t *testing.T) {
 // Losing a metric must never fail a run, and an unattended log is a cost too —
 // so the warning comes once, not once per record.
 func TestRecorderFailsQuietlyAndOnlyOnce(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	blocked := filepath.Join(t.TempDir(), "not-a-directory")
 	if err := os.WriteFile(blocked, []byte("in the way"), 0o644); err != nil {
@@ -593,6 +607,7 @@ func TestRecorderFailsQuietlyAndOnlyOnce(t *testing.T) {
 // The files name private repositories and what they cost, so they are the
 // operator's to read and nobody else's on a shared machine.
 func TestRecordsAreNotWorldReadable(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("unix permission bits are not how Windows decides this")
 	}
@@ -612,6 +627,7 @@ func TestRecordsAreNotWorldReadable(t *testing.T) {
 }
 
 func TestRecordFilePartitionsPerRepository(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"scharissis/polako": "scharissis--polako.jsonl",
 		"Owner/Repo.js":     "Owner--Repo.js.jsonl",
@@ -629,6 +645,7 @@ func TestRecordFilePartitionsPerRepository(t *testing.T) {
 }
 
 func TestToolsHashDistinguishesAllowlists(t *testing.T) {
+	t.Parallel()
 	a := toolsHash(resolveTools(defaultTools, ""))
 	if a != toolsHash(defaultTools) {
 		t.Error("the same list must hash the same, or comparisons across runs mean nothing")
@@ -644,6 +661,7 @@ func TestToolsHashDistinguishesAllowlists(t *testing.T) {
 // The id's whole job is telling apart the drains a timestamp cannot: two
 // started in the same second, and one running while another finishes.
 func TestShiftIDsAreShortAndNeverRepeat(t *testing.T) {
+	t.Parallel()
 	seen := map[string]bool{}
 	for range 100 {
 		id := newShiftID()
@@ -661,6 +679,7 @@ func TestShiftIDsAreShortAndNeverRepeat(t *testing.T) {
 // that is what makes `stats -drain` a report on a drain rather than on some of
 // its runs.
 func TestEveryRecordOneDrainWritesCarriesItsID(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfg := metricsConfig(t, dir)
 	rc := runContext{issue: 12, reason: reasonImplement, outcome: outcomeOpenedPR,
@@ -697,6 +716,7 @@ func TestEveryRecordOneDrainWritesCarriesItsID(t *testing.T) {
 // The enrichment is the one thing an issue record holds that no run record
 // could reconstruct: what GitHub says the PR turned out to be.
 func TestIssueRecordCarriesTheGitHubEnrichment(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfg := metricsConfig(t, dir)
 	cfg.rec.recordIssue(cfg, 12, 34, issueMerged, "", prFacts{
@@ -728,6 +748,7 @@ func TestIssueRecordCarriesTheGitHubEnrichment(t *testing.T) {
 // the outcome is recorded either way, in the shape every reader written before
 // the enrichment already knows.
 func TestIssueRecordOmitsAnEnrichmentItNeverGot(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfg := metricsConfig(t, dir)
 	cfg.rec.recordIssue(cfg, 12, 0, issueNeedsHuman, parkNothing, prFacts{}, issueUsageSamples{}, "")
@@ -751,6 +772,7 @@ func TestIssueRecordOmitsAnEnrichmentItNeverGot(t *testing.T) {
 // nowhere else, and never omitted from one. That is what makes an absent field
 // mean "older than this field" and nothing else.
 func TestIssueRecordCarriesTheParkReasonOnHandBacksAlone(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfg := metricsConfig(t, dir)
 	cfg.rec.recordIssue(cfg, 12, 0, issueNeedsHuman, parkBudget, prFacts{}, issueUsageSamples{}, "")
@@ -777,6 +799,7 @@ func TestIssueRecordCarriesTheParkReasonOnHandBacksAlone(t *testing.T) {
 }
 
 func TestIssueTallySumsTheRunsThisDrainSaw(t *testing.T) {
+	t.Parallel()
 	var tally issueTally
 	tally.add(runRecord{Outcome: outcomeQuestions, CostUSD: 1.25, WallMS: 1200000,
 		Tokens: tokenCounts{In: 2000, Out: 30000, CacheRead: 4000000, CacheWrite: 200000}})
@@ -803,6 +826,7 @@ func TestIssueTallySumsTheRunsThisDrainSaw(t *testing.T) {
 // $2.50 here instead of $3.75, losing the resumed process's own spend. This
 // test exists so that rewrite trips something named.
 func TestIssueTallySumsBothHalvesOfAResumedSession(t *testing.T) {
+	t.Parallel()
 	const session = "3401260d-a25d-4583-b0af-ed7e2c6ed0e6"
 	var tally issueTally
 	tally.add(runRecord{Session: session, Outcome: outcomeNothing,
@@ -825,6 +849,7 @@ func TestIssueTallySumsBothHalvesOfAResumedSession(t *testing.T) {
 // wants no local files at all — so the record has to be built whether or not
 // anything is written.
 func TestRecordRunReturnsTheRecordEvenWithMetricsOff(t *testing.T) {
+	t.Parallel()
 	cfg := metricsConfig(t, metricsOff)
 	rec := cfg.rec.recordRun(cfg, runContext{issue: 12, reason: reasonImplement,
 		outcome: outcomeOpenedPR, started: time.Now(), ended: time.Now()}, sampleReport())
@@ -834,6 +859,7 @@ func TestRecordRunReturnsTheRecordEvenWithMetricsOff(t *testing.T) {
 }
 
 func TestSummaryCommentReportsTheNumbersAndSaysWhatTheyCover(t *testing.T) {
+	t.Parallel()
 	got := summaryComment(issueTally{runs: 3, questions: 1, costUSD: 6.12, wallMS: 8040000,
 		tokens: tokenCounts{In: 2000, Out: 40000, CacheRead: 12000000, CacheWrite: 400000}})
 	for _, want := range []string{"3 runs", "1 question round", "12.4M tokens", "$6.12", "2h14m"} {
@@ -858,6 +884,7 @@ func TestSummaryCommentReportsTheNumbersAndSaysWhatTheyCover(t *testing.T) {
 // one audience further out: a run that crashed, stalled or was interrupted
 // reports no cost at all, and an unqualified $0.00 on a PR reads as free work.
 func TestSummaryCommentSaysWhenItsNumbersAreUndercounts(t *testing.T) {
+	t.Parallel()
 	var tally issueTally
 	tally.add(runRecord{Outcome: outcomeNothing, UsageSource: usageObserved,
 		Tokens: tokenCounts{In: 500, Out: 6000}})

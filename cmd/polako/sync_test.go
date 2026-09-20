@@ -138,6 +138,7 @@ func upstream(t *testing.T) (work, checkout string) {
 // checkout before a branch is cut from it or a review resolves a base against
 // it. Without this the ref falls one commit behind per merged PR.
 func TestSyncDefaultBranchFastForwardsOntoOrigin(t *testing.T) {
+	t.Parallel()
 	work, checkout := upstream(t)
 	want := commit(t, work, "merged-while-we-were-away")
 	gitAt(t, work, "push", "origin", "main")
@@ -159,6 +160,7 @@ func TestSyncDefaultBranchFastForwardsOntoOrigin(t *testing.T) {
 // state to "fix" — advancing it would be moving work the drain knows nothing
 // about, and a drain must never do that to end up tidy.
 func TestSyncDefaultBranchLeavesAnotherBranchAlone(t *testing.T) {
+	t.Parallel()
 	work, checkout := upstream(t)
 	commit(t, work, "second")
 	gitAt(t, work, "push", "origin", "main")
@@ -183,6 +185,7 @@ func TestSyncDefaultBranchLeavesAnotherBranchAlone(t *testing.T) {
 // commit means refuse, never rebase and never reset. Rewriting someone's commit
 // to keep the base tidy would be a far worse bug than the one this fixes.
 func TestSyncDefaultBranchRefusesRatherThanRewriteALocalCommit(t *testing.T) {
+	t.Parallel()
 	work, checkout := upstream(t)
 	commit(t, work, "theirs")
 	gitAt(t, work, "push", "origin", "main")
@@ -213,6 +216,7 @@ func unreachableOrigin(t *testing.T, checkout string) {
 // a base nobody can date and then fail its push against the same remote, so the
 // error has to reach processIssue — and say what to go and fix.
 func TestSyncDefaultBranchReportsAnUnreachableOrigin(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	_, checkout := upstream(t)
 	unreachableOrigin(t, checkout)
@@ -343,6 +347,7 @@ func TestSyncDefaultBranchDoesNotStopOnAnAuthFailureWithNilState(t *testing.T) {
 // is a warning today and stays one. It is also what every drain test relies on,
 // running as they do in a directory that is not a checkout.
 func TestSyncDefaultBranchWithoutAnOriginIsNotFatal(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	_, checkout := upstream(t)
 	gitAt(t, checkout, "remote", "remove", "origin")

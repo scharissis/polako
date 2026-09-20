@@ -28,6 +28,7 @@ const usageSample = "You are currently using your subscription to power your Cla
 var usageNow = time.Date(2026, 8, 27, 9, 0, 0, 0, time.UTC)
 
 func TestParseUsageReadsTheSubscriptionSample(t *testing.T) {
+	t.Parallel()
 	snap, ok := parseUsage(usageSample, usageNow, "polako")
 	if !ok {
 		t.Fatal("parseUsage on the documented sample = false, want true")
@@ -72,6 +73,7 @@ func TestParseUsageReadsTheSubscriptionSample(t *testing.T) {
 // plugin under -skill sees their own plugin's share, not a hardcoded
 // "polako" that never matches their "Top plugins" line.
 func TestParseUsageAttributesToTheConfiguredPluginNotAlwaysPolako(t *testing.T) {
+	t.Parallel()
 	text := "Current session: 5% used\n\n" +
 		"Last 24h · 10 requests · 2 sessions\n" +
 		"  Top plugins: otherplugin 40%, polako 5%\n"
@@ -102,6 +104,7 @@ func TestParseUsageAttributesToTheConfiguredPluginNotAlwaysPolako(t *testing.T) 
 // An API-key account's answer carries no pool lines at all — the doctrine is
 // "no plan to report", never a wrong zero.
 func TestParseUsageAPIKeyAccountHasNoPlanToReport(t *testing.T) {
+	t.Parallel()
 	text := "You are not currently using a Claude subscription — usage under an API key " +
 		"is not tracked against a plan.\n"
 	snap, ok := parseUsage(text, usageNow, "polako")
@@ -116,6 +119,7 @@ func TestParseUsageAPIKeyAccountHasNoPlanToReport(t *testing.T) {
 // A wording change reads the same as the API-key case: nothing this parser
 // recognises, so nothing is reported, rather than a guess.
 func TestParseUsageWordingChangeParsesToNothing(t *testing.T) {
+	t.Parallel()
 	text := "The usage reporting endpoint changed shape, and this text matches nothing this " +
 		"binary knows how to read.\n"
 	if _, ok := parseUsage(text, usageNow, "polako"); ok {
@@ -126,6 +130,7 @@ func TestParseUsageWordingChangeParsesToNothing(t *testing.T) {
 // A payload readable in part yields the pools it understood rather than
 // nothing at all — the same doctrine limitRefusal/limitReset apply.
 func TestParseUsagePartialPayloadKeepsWhatParsed(t *testing.T) {
+	t.Parallel()
 	text := "Current session: 42% used · resets Aug 28 at 10:20pm (Europe/London)\n" +
 		// A percent outside 0-100 cannot be trusted, so this line is dropped
 		// rather than reported as a guess — the same "no guessed value"
@@ -144,6 +149,7 @@ func TestParseUsagePartialPayloadKeepsWhatParsed(t *testing.T) {
 // value outside 0-100 cannot be trusted, and the clause is left off the
 // banner rather than printing a guess.
 func TestParseUsageAttributionRejectsAnOutOfRangePluginPercent(t *testing.T) {
+	t.Parallel()
 	text := "Current session: 5% used\n\n" +
 		"Last 24h · 10 requests · 2 sessions\n" +
 		"  Top plugins: polako 999%\n"
@@ -160,6 +166,7 @@ func TestParseUsageAttributionRejectsAnOutOfRangePluginPercent(t *testing.T) {
 }
 
 func TestUsageResetReadsDatedClauses(t *testing.T) {
+	t.Parallel()
 	london, err := time.LoadLocation("Europe/London")
 	if err != nil {
 		t.Fatalf("loading Europe/London (time/tzdata is imported, so this must work everywhere): %v", err)
@@ -218,6 +225,7 @@ func TestUsageResetReadsDatedClauses(t *testing.T) {
 // upcoming leap day is 2028's. usageReset has to round-trip the month/day
 // rather than merely bounding it to 1-31.
 func TestUsageResetHandlesALeapDayAcrossANonLeapYear(t *testing.T) {
+	t.Parallel()
 	london, err := time.LoadLocation("Europe/London")
 	if err != nil {
 		t.Fatalf("loading Europe/London: %v", err)
@@ -231,6 +239,7 @@ func TestUsageResetHandlesALeapDayAcrossANonLeapYear(t *testing.T) {
 }
 
 func TestUsageLineOmitsWhatItDoesNotHave(t *testing.T) {
+	t.Parallel()
 	if got := usageLine(usageSnapshot{}); got != "" {
 		t.Errorf("usageLine(empty) = %q, want empty", got)
 	}
@@ -276,6 +285,7 @@ func fakeUsageConfig(t *testing.T, usageMode string) config {
 }
 
 func TestProbeUsageReadsTheFakeCLI(t *testing.T) {
+	t.Parallel()
 	cfg := fakeUsageConfig(t, "sub")
 	snap, ok := probeUsage(context.Background(), cfg)
 	if !ok {
@@ -291,6 +301,7 @@ func TestProbeUsageReadsTheFakeCLI(t *testing.T) {
 // unconfigured -skill on work would: this repo's own plugin, not a blank
 // match key that finds nothing.
 func TestProbeUsageWithNoSkillConfiguredStillAttributesToThisPlugin(t *testing.T) {
+	t.Parallel()
 	cfg := fakeUsageConfig(t, "sub")
 	cfg.skill = ""
 	snap, ok := probeUsage(context.Background(), cfg)
@@ -307,6 +318,7 @@ func TestProbeUsageWithNoSkillConfiguredStillAttributesToThisPlugin(t *testing.T
 // share, not this repo's — the bug a code review caught: parseUsageAttribution
 // used to search for a hardcoded "polako" no matter what -skill named.
 func TestProbeUsageWithAnotherSkillAttributesToThatPluginNotPolako(t *testing.T) {
+	t.Parallel()
 	cfg := fakeUsageConfig(t, "sub")
 	cfg.skill = "otherplugin:some-skill"
 	snap, ok := probeUsage(context.Background(), cfg)
@@ -325,6 +337,7 @@ func TestProbeUsageWithAnotherSkillAttributesToThatPluginNotPolako(t *testing.T)
 // An old CLI with no /usage command is the default fixture (fakeUsageEnv
 // unset) — fails soft, and says so in exactly one log line.
 func TestProbeUsageFailsSoftWithOneLogLineWhenTheCLIHasNoUsageCommand(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg := fakeUsageConfig(t, "")
 	if _, ok := probeUsage(context.Background(), cfg); ok {
@@ -343,6 +356,7 @@ func TestProbeUsageFailsSoftWithOneLogLineWhenTheCLIHasNoUsageCommand(t *testing
 // hanging the caller — proved with a timeout short enough that the test
 // itself stays fast, not the ~20s production default.
 func TestProbeUsageTimesOut(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg := fakeUsageConfig(t, "timeout")
 	cfg.usageTimeout = 200 * time.Millisecond

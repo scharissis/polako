@@ -1114,6 +1114,7 @@ func captureUI(t *testing.T, u *ui) {
 // can go on editing, commit, push the branch and open a PR, and a restarted
 // drain sees no PR yet and starts a second run on the same issue.
 func TestShutdownSignalsCoverMoreThanCtrlC(t *testing.T) {
+	t.Parallel()
 	got := shutdownSignals()
 	for _, want := range []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP} {
 		if !slices.Contains(got, want) {
@@ -1133,6 +1134,7 @@ func TestShutdownSignalsCoverMoreThanCtrlC(t *testing.T) {
 // under os.MkdirTemp, which cannot equal the running binary, so asking it is
 // asking a question that answers itself.
 func TestFakeCLIIsBuiltRatherThanReExecuted(t *testing.T) {
+	t.Parallel()
 	cfg, _ := drainConfig(t, "stream", &ghState{})
 	notifyLog(t, &cfg)
 	standalone := fakeClaudeConfig(t, "stream")
@@ -1152,6 +1154,7 @@ func TestFakeCLIIsBuiltRatherThanReExecuted(t *testing.T) {
 }
 
 func TestLogEventRendersProgressLines(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 
 	events := []string{
@@ -1198,6 +1201,7 @@ func TestLogEventRendersProgressLines(t *testing.T) {
 // is the only place it is ever announced. A run whose line does not carry it
 // cannot be found again, however completely it was recorded.
 func TestLogEventNamesTheSession(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	ev, ok := parseEvent([]byte(
 		`{"type":"system","subtype":"init","model":"claude-opus-5","session_id":"0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9"}`))
@@ -1215,6 +1219,7 @@ func TestLogEventNamesTheSession(t *testing.T) {
 // per-turn fields summed across every result event, not just the last one's
 // (issue #227).
 func TestFinishLineRendersFromTheReport(t *testing.T) {
+	t.Parallel()
 	feed := func(lines ...string) *runReport {
 		rep := &runReport{turns: -1}
 		for _, l := range lines {
@@ -1266,6 +1271,7 @@ func TestFinishLineRendersFromTheReport(t *testing.T) {
 // over the process, not the session: see stream.go's result case, and
 // TestIssueTallySumsBothHalvesOfAResumedSession for the other half.
 func TestObserveSumsPerTurnFieldsAcrossResultEvents(t *testing.T) {
+	t.Parallel()
 	rep := runReport{turns: -1}
 	rep.observe(streamEvent{Type: "result", Subtype: "success",
 		DurationMS: 61000, DurationAPIMS: 40000, NumTurns: 16, TotalCost: 29.57,
@@ -1296,6 +1302,7 @@ func TestObserveSumsPerTurnFieldsAcrossResultEvents(t *testing.T) {
 // One parse per line feeds both the progress log and the run report, so the
 // session ID every consumer depends on now comes out of parseEvent.
 func TestParseEventReadsTheSessionAndRejectsJunk(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		`{"type":"system","subtype":"init","session_id":"abc-123","model":"claude-opus-5"}`: "abc-123",
 		`{"type":"assistant","session_id":"abc-123","message":{"content":[]}}`:              "abc-123",
@@ -1319,6 +1326,7 @@ func TestParseEventReadsTheSessionAndRejectsJunk(t *testing.T) {
 }
 
 func TestToolDetailPrefersTheMostUsefulField(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in, want string
 	}{
@@ -1341,6 +1349,7 @@ func TestToolDetailPrefersTheMostUsefulField(t *testing.T) {
 }
 
 func TestClipFlattensAndTruncates(t *testing.T) {
+	t.Parallel()
 	if got := clip("  one\n two\tthree  ", 40); got != "one two three" {
 		t.Errorf("clip should collapse whitespace, got %q", got)
 	}
@@ -1351,6 +1360,7 @@ func TestClipFlattensAndTruncates(t *testing.T) {
 }
 
 func TestParseSkipIgnoresJunk(t *testing.T) {
+	t.Parallel()
 	got := parseSkip(" 12, 34 ,,notanumber,56,")
 	want := map[int]bool{12: true, 34: true, 56: true}
 	if len(got) != len(want) {
@@ -1367,6 +1377,7 @@ func TestParseSkipIgnoresJunk(t *testing.T) {
 }
 
 func TestParseEffortBySize(t *testing.T) {
+	t.Parallel()
 	got, err := parseEffortBySize(" S=medium , L=max ")
 	if err != nil {
 		t.Fatalf("parseEffortBySize: %v", err)
@@ -1389,6 +1400,7 @@ func TestParseEffortBySize(t *testing.T) {
 }
 
 func TestParseModelBySize(t *testing.T) {
+	t.Parallel()
 	got, err := parseModelBySize(" S=sonnet , L=opus ")
 	if err != nil {
 		t.Fatalf("parseModelBySize: %v", err)
@@ -1415,6 +1427,7 @@ func TestParseModelBySize(t *testing.T) {
 }
 
 func TestResolveToolsAppendsWithoutDuplicating(t *testing.T) {
+	t.Parallel()
 	got := resolveTools("Read,Write,", " Bash(cargo:*) ,Read")
 	if want := "Read,Write,Bash(cargo:*)"; got != want {
 		t.Errorf("resolveTools = %q, want %q", got, want)
@@ -1429,6 +1442,7 @@ func TestResolveToolsAppendsWithoutDuplicating(t *testing.T) {
 // Bash(evals/run.sh:*) is the same story for a run that changes a shipped
 // SKILL.md: the eval step in Phase 3 hangs without it.
 func TestDefaultToolsCoverWhatTheSkillNeeds(t *testing.T) {
+	t.Parallel()
 	have := strings.Split(defaultTools, ",")
 	for _, want := range []string{
 		"Bash(git:*)", "Bash(gh issue view:*)", "Bash(gh issue comment:*)", "Bash(gh pr create:*)",
@@ -1445,6 +1459,7 @@ func TestDefaultToolsCoverWhatTheSkillNeeds(t *testing.T) {
 // Each of these would hand attacker-supplied issue text something the skill
 // never needs and the design forbids.
 func TestDefaultToolsDoNotGrantGhWholesale(t *testing.T) {
+	t.Parallel()
 	have := strings.Split(defaultTools, ",")
 	for entry, why := range map[string]string{
 		"Bash(gh:*)":       "gh api, gh secret set and gh repo delete",
@@ -1463,6 +1478,7 @@ func TestDefaultToolsDoNotGrantGhWholesale(t *testing.T) {
 // A CI remediation reads the failing job logs, and a gh call that raises a
 // prompt hangs an unattended run silently.
 func TestDefaultToolsCoverDiagnosingARedBuild(t *testing.T) {
+	t.Parallel()
 	have := strings.Split(defaultTools, ",")
 	for _, want := range []string{"Bash(gh pr checks:*)", "Bash(gh run list:*)", "Bash(gh run view:*)"} {
 		if !slices.Contains(have, want) {
@@ -1475,6 +1491,7 @@ func TestDefaultToolsCoverDiagnosingARedBuild(t *testing.T) {
 // that run was dispatched for. In defaultTools it would have to be
 // `Bash(gh issue edit:*)`, which reaches every other issue in the repository.
 func TestIssueLabelToolsStayPinnedToOneIssue(t *testing.T) {
+	t.Parallel()
 	got := strings.Split(issueLabelTools(7), ",")
 	for _, want := range []string{
 		"Bash(gh issue edit 7 --add-label:*)",
@@ -1502,6 +1519,7 @@ func TestIssueLabelToolsStayPinnedToOneIssue(t *testing.T) {
 // that run was dispatched for. `Bash(gh api:*)` in defaultTools would hand a
 // prompt built out of attacker-supplied review text the whole GitHub API.
 func TestPRReviewToolsStayPinnedToOnePR(t *testing.T) {
+	t.Parallel()
 	got := prReviewTools("acme/widgets", 42)
 	if want := "Bash(gh api repos/acme/widgets/pulls/42/comments:*)"; got != want {
 		t.Errorf("prReviewTools = %q, want %q", got, want)
@@ -1525,6 +1543,7 @@ func TestPRReviewToolsStayPinnedToOnePR(t *testing.T) {
 // bare `gh pr comment 42` prefix would also match PR 420, and `gh pr comment`
 // in defaultTools would let a skill run comment on any PR in the repository.
 func TestPRCommentToolsStayPinnedToOnePR(t *testing.T) {
+	t.Parallel()
 	got := prCommentTools(42)
 	if want := "Bash(gh pr comment 42 --body-file:*)"; got != want {
 		t.Errorf("prCommentTools = %q, want %q", got, want)
@@ -1544,6 +1563,7 @@ func TestPRCommentToolsStayPinnedToOnePR(t *testing.T) {
 // payload alone, so that a drain restarted mid-flight reaches the same verdict
 // as the one that dispatched the run.
 func TestReviewOutstandingReadsOnePRView(t *testing.T) {
+	t.Parallel()
 	const (
 		old    = "2026-08-19T10:00:00Z"
 		newer  = "2026-08-20T10:00:00Z"
@@ -1650,6 +1670,7 @@ func TestReviewOutstandingReadsOnePRView(t *testing.T) {
 }
 
 func TestPickLowestHonoursSkip(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		numbers []int
@@ -1671,6 +1692,7 @@ func TestPickLowestHonoursSkip(t *testing.T) {
 }
 
 func TestPickPRPrefersOpenThenMerged(t *testing.T) {
+	t.Parallel()
 	closed := pullRequest{Number: 1, State: "CLOSED"}
 	merged := pullRequest{Number: 2, State: "MERGED"}
 	open := pullRequest{Number: 3, State: "OPEN"}
@@ -1703,6 +1725,7 @@ func TestPickPRPrefersOpenThenMerged(t *testing.T) {
 // about. Both node shapes GitHub can put in the array are exercised, because
 // the CheckRun/StatusContext split is decoded by which fields came back empty.
 func TestClassifyChecks(t *testing.T) {
+	t.Parallel()
 	run := func(status, conclusion, name string) checkNode {
 		return checkNode{Name: name, Status: status, Conclusion: conclusion}
 	}
@@ -1771,6 +1794,7 @@ func TestClassifyChecks(t *testing.T) {
 }
 
 func TestBuildArgs(t *testing.T) {
+	t.Parallel()
 	cfg := config{permissionMode: "acceptEdits", tools: "Read,Write"}
 
 	fresh := buildArgs(cfg, "/implement-issue 4", "")
@@ -1797,6 +1821,7 @@ func TestBuildArgs(t *testing.T) {
 // -model is what varies the thing being measured; a run that silently ignored
 // it would make every model comparison a comparison of the same model.
 func TestBuildArgsPassesTheRequestedModel(t *testing.T) {
+	t.Parallel()
 	cfg := config{permissionMode: "acceptEdits", tools: "Read", model: "claude-haiku-4-5"}
 	args := buildArgs(cfg, "p", "")
 	i := slices.Index(args, "--model")
@@ -1812,6 +1837,7 @@ func TestBuildArgsPassesTheRequestedModel(t *testing.T) {
 // says to pull before a model cascade — a run that dropped it silently would
 // make every effort comparison a comparison of the same effort.
 func TestBuildArgsPassesTheRequestedEffort(t *testing.T) {
+	t.Parallel()
 	cfg := config{permissionMode: "acceptEdits", tools: "Read", effort: "medium"}
 	args := buildArgs(cfg, "p", "")
 	i := slices.Index(args, "--effort")
@@ -1832,6 +1858,7 @@ func TestBuildArgsPassesTheRequestedEffort(t *testing.T) {
 // that the CLI then rejected would fail a run for a typo. ultracode is the one
 // the CLI's docs list that is refused on purpose.
 func TestValidateEffort(t *testing.T) {
+	t.Parallel()
 	for _, ok := range []string{"", "low", "medium", "high", "xhigh", "max"} {
 		if err := validateEffort("-effort", ok); err != nil {
 			t.Errorf("validateEffort(%q) = %v, want nil", ok, err)
@@ -1925,6 +1952,7 @@ func TestEffortFlagGate(t *testing.T) {
 // the flag", it is "would, once a CLI takes it", and off has to stay identical
 // to on for as long as that is true.
 func TestBuildArgsNeverAsksForRemoteControl(t *testing.T) {
+	t.Parallel()
 	off := config{permissionMode: "acceptEdits", tools: "Read", repo: "example/repo"}
 	on := off
 	on.remote = true
@@ -1946,6 +1974,7 @@ func TestBuildArgsNeverAsksForRemoteControl(t *testing.T) {
 }
 
 func TestBuildArgsAppliesAddTools(t *testing.T) {
+	t.Parallel()
 	cfg := config{permissionMode: "plan", tools: "Read", addTools: "Bash(zig:*)"}
 	args := buildArgs(cfg, "p", "")
 	i := slices.Index(args, "--allowedTools")
@@ -1955,6 +1984,7 @@ func TestBuildArgsAppliesAddTools(t *testing.T) {
 }
 
 func TestSampleTickScalesWithInterval(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		interval, want time.Duration
 	}{
@@ -1970,6 +2000,7 @@ func TestSampleTickScalesWithInterval(t *testing.T) {
 }
 
 func TestHeartbeatLine(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		elapsed  time.Duration
 		toolUses int
@@ -1994,6 +2025,7 @@ func TestHeartbeatLine(t *testing.T) {
 // every existing drain behaving as it did — and each reports in the words the
 // park comment and the summary go on to carry.
 func TestOverBudgetOnlySpeaksWhenACapIsSet(t *testing.T) {
+	t.Parallel()
 	spent := issueTally{costUSD: 9, wallMS: (2 * time.Hour).Milliseconds()}
 
 	if got := overBudget(config{}, spent); got != "" {
@@ -2020,6 +2052,7 @@ func TestOverBudgetOnlySpeaksWhenACapIsSet(t *testing.T) {
 // The limit handed to a run is what the cap has left, not the cap: an issue on
 // its fourth run does not get the whole allowance over again.
 func TestRunLimitLeavesOnlyWhatTheIssueHasLeft(t *testing.T) {
+	t.Parallel()
 	spent := issueTally{wallMS: (20 * time.Minute).Milliseconds()}
 
 	if got := runLimit(config{}, spent); got != 0 {
@@ -2038,6 +2071,7 @@ func TestRunLimitLeavesOnlyWhatTheIssueHasLeft(t *testing.T) {
 // A cap set in a shell profile is still a cap, so startup names the ones in
 // force rather than leaving a park to quote a flag nobody typed.
 func TestCapNotesNameEveryCapInForce(t *testing.T) {
+	t.Parallel()
 	if got := capNotes(config{}); got != "" {
 		t.Errorf("capNotes with no caps = %q, want nothing said", got)
 	}
@@ -2056,6 +2090,7 @@ func TestCapNotesNameEveryCapInForce(t *testing.T) {
 // unconditional epics disclosure — and nothing else. Every other row earns its
 // keep only when there is something to disclose.
 func TestPreflightPairsSaysNothingUnasked(t *testing.T) {
+	t.Parallel()
 	got := preflightPairs(config{})
 	if len(got) != 1 || got[0][0] != "epics" {
 		t.Errorf("preflightPairs(zero value) = %v, want only the epics row", got)
@@ -2070,6 +2105,7 @@ func TestPreflightPairsSaysNothingUnasked(t *testing.T) {
 // here is the order the old sentences printed in, which the row order is
 // meant to preserve (see preflightPairs's doc comment).
 func TestPreflightPairsGatesAndOrdersEveryRow(t *testing.T) {
+	t.Parallel()
 	cfg := config{
 		label:       "ready",
 		model:       "opus",
@@ -2115,6 +2151,7 @@ func TestPreflightPairsGatesAndOrdersEveryRow(t *testing.T) {
 // / POLAKO_EFFORT_BY_SIZE can set them silently — same reasoning as every
 // other unprompted preflight row.
 func TestModelEffortLine(t *testing.T) {
+	t.Parallel()
 	if got := modelEffortLine(config{}); got != "" {
 		t.Errorf("modelEffortLine(zero value) = %q, want empty", got)
 	}
@@ -2137,6 +2174,7 @@ func TestModelEffortLine(t *testing.T) {
 // and no to a PR that is merely waiting. A fourth kind of remediation added
 // without a line here is a hole in the budget.
 func TestRemediableCoversEveryDispatch(t *testing.T) {
+	t.Parallel()
 	reviewed := prView{changesRequested: true, reviewedAt: time.Now()}
 	for _, tc := range []struct {
 		name string
@@ -2163,6 +2201,7 @@ func TestRemediableCoversEveryDispatch(t *testing.T) {
 // looks like from the exit code, or the supervisor resumes it into the same
 // wall.
 func TestExecClaudeKillsARunPastItsBudget(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg := fakeClaudeConfig(t, "hang")
 	cfg.stall = 0 // only the budget may end this run
@@ -2200,6 +2239,7 @@ func TestExecClaudeKillsARunPastItsBudget(t *testing.T) {
 // merge however much its issue has already cost, and parking it would hand
 // back an issue whose work is finished and sitting on GitHub.
 func TestSupervisePRStillWaitsOutAnOverspentPRNobodyHasToFix(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -2226,6 +2266,7 @@ func TestSupervisePRStillWaitsOutAnOverspentPRNobodyHasToFix(t *testing.T) {
 // The other half: a PR that does need fixing is a run this issue can no longer
 // afford, so it parks instead of dispatching one.
 func TestSupervisePRParksRatherThanRemediateOnAnOverspentIssue(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, _ := drainConfig(t, "fixci", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -2251,6 +2292,7 @@ func TestSupervisePRParksRatherThanRemediateOnAnOverspentIssue(t *testing.T) {
 }
 
 func TestSleepReturnsOnCancel(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	start := time.Now()
@@ -2279,6 +2321,7 @@ func fakeClaudeConfig(t *testing.T, mode string) config {
 }
 
 func TestExecClaudeStreamsEventsAndCapturesSession(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg := fakeClaudeConfig(t, "stream")
 
@@ -2299,6 +2342,7 @@ func TestExecClaudeStreamsEventsAndCapturesSession(t *testing.T) {
 // The child's stderr is narration too: it reaches the shift log as whole
 // attributed lines rather than tearing raw across the terminal.
 func TestExecClaudeCarriesChildStderrIntoTheNarration(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg := fakeClaudeConfig(t, "deadsession")
 
@@ -2321,6 +2365,7 @@ func TestExecClaudeCarriesChildStderrIntoTheNarration(t *testing.T) {
 // is what the pair guards against coming back — a flag reintroduced anywhere
 // between buildArgs and exec would pass the unit test and still overpromise.
 func TestDispatchNeverSendsRemoteControlToTheCLI(t *testing.T) {
+	t.Parallel()
 	cfg := fakeClaudeConfig(t, "stream")
 	cfg.remote, cfg.repo = true, "example/repo"
 	args := watchClaudeArgs(t, &cfg)
@@ -2384,6 +2429,7 @@ func TestGhAndGitInheritTheOperatorsEnvironmentToo(t *testing.T) {
 // The tail is bounded because a six-hour run's stderr is not, and the bytes a
 // usage error lives in are the last ones.
 func TestTailWriterKeepsTheEnd(t *testing.T) {
+	t.Parallel()
 	w := &tailWriter{}
 	fmt.Fprint(w, strings.Repeat("x", maxStderrTail))
 	fmt.Fprint(w, "the last thing it said")
@@ -2397,6 +2443,7 @@ func TestTailWriterKeepsTheEnd(t *testing.T) {
 }
 
 func TestExecClaudeReportsCrashesWithTheSessionToResume(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "crash")
 
@@ -2418,6 +2465,7 @@ func TestExecClaudeReportsCrashesWithTheSessionToResume(t *testing.T) {
 }
 
 func TestExecClaudeKillsAStalledRun(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "hang")
 	cfg.stall = 300 * time.Millisecond
@@ -2445,6 +2493,7 @@ func TestExecClaudeKillsAStalledRun(t *testing.T) {
 // per -heartbeat, naming the stage and counting the tool calls, and never
 // after the finish line.
 func TestExecClaudeHeartbeatSpeaksWhileTheTerminalIsQuiet(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg := fakeClaudeConfig(t, "heartbeat")
 	cfg.heartbeat = 300 * time.Millisecond
@@ -2470,6 +2519,7 @@ func TestExecClaudeHeartbeatSpeaksWhileTheTerminalIsQuiet(t *testing.T) {
 // the heartbeat stays silent — a consequence of measuring terminal silence,
 // not a special case.
 func TestExecClaudeHeartbeatIsSilentUnderVerbose(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	captureUI(t, &ui{terminal: &buf, verbose: true})
 	cfg := fakeClaudeConfig(t, "heartbeat")
@@ -2487,6 +2537,7 @@ func TestExecClaudeHeartbeatIsSilentUnderVerbose(t *testing.T) {
 // terminal: a stalled run's last heartbeats are the run-up that makes the
 // -stall kill legible rather than a first word at fifteen minutes.
 func TestExecClaudeHeartbeatIsTheRunUpToAStallKill(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg := fakeClaudeConfig(t, "hang") // an init event, then total silence
 	cfg.heartbeat = 200 * time.Millisecond
@@ -2510,6 +2561,7 @@ func TestExecClaudeHeartbeatIsTheRunUpToAStallKill(t *testing.T) {
 // reported as a stall, which is the one thing it was not. It has to fail
 // straight away, and say what actually happened.
 func TestExecClaudeReportsAnEventTooLargeToRead(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "giant")
 	cfg.stall = 0 // the watchdog must not be what rescues this
@@ -2535,6 +2587,7 @@ func TestExecClaudeReportsAnEventTooLargeToRead(t *testing.T) {
 }
 
 func TestExecClaudeStopsWhenTheContextIsCancelled(t *testing.T) {
+	t.Parallel()
 	cfg := fakeClaudeConfig(t, "hang")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
@@ -2549,6 +2602,7 @@ func TestExecClaudeStopsWhenTheContextIsCancelled(t *testing.T) {
 }
 
 func TestRunClaudeResumesRatherThanRestartingTheSkill(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg := fakeClaudeConfig(t, "stream")
 
@@ -2578,6 +2632,7 @@ func TestRunClaudeResumesRatherThanRestartingTheSkill(t *testing.T) {
 // interruption arrives mid-action, so the resumed run has to look before it
 // carries on.
 func TestResumePromptAsksTheRunToRederiveItsState(t *testing.T) {
+	t.Parallel()
 	// Both flavours, because the re-derive discipline and the two structural
 	// properties below belong to every resume, not to the crash one.
 	for _, reason := range []string{reasonResume, reasonUnfinished} {
@@ -2619,6 +2674,7 @@ func TestResumePromptAsksTheRunToRederiveItsState(t *testing.T) {
 // contradicts the belief — so it has every reason to end its turn waiting
 // again, and the resume buys a second identical run.
 func TestUnfinishedResumePromptContradictsTheBeliefThatItWasPaused(t *testing.T) {
+	t.Parallel()
 	prompt := resumePrompt(defaultSkill, 12, reasonUnfinished)
 
 	for _, want := range []string{
@@ -2649,6 +2705,7 @@ func TestUnfinishedResumePromptContradictsTheBeliefThatItWasPaused(t *testing.T)
 // at zero turns, and without this fallback the supervisor reports only "no PR
 // and no questions".
 func TestExecClaudeFlagsARunThatTookNoTurns(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "noturns")
 
@@ -2662,6 +2719,7 @@ func TestExecClaudeFlagsARunThatTookNoTurns(t *testing.T) {
 // — two turns on paper, nothing done — so the zero-turn fallback never fires.
 // The init event's command inventory is the tell that still does.
 func TestExecClaudeFlagsASkillTheSessionDoesNotList(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "unknownskill")
 
@@ -2682,6 +2740,7 @@ func TestExecClaudeFlagsASkillTheSessionDoesNotList(t *testing.T) {
 // the -skill, or a misconfigured -skill would break remediation of a PR that
 // already exists.
 func TestExecClaudeLeavesPlainPromptsAloneWhenTheSkillIsMissing(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "unknownskill")
 
@@ -2694,6 +2753,7 @@ func TestExecClaudeLeavesPlainPromptsAloneWhenTheSkillIsMissing(t *testing.T) {
 // The near-match hint is what turns "no such command" into a fix, and the
 // bare-vs-namespaced confusion is symmetrical, so both directions must hit.
 func TestNearMatchesBridgesPluginNamespacing(t *testing.T) {
+	t.Parallel()
 	inv := []string{"compact", "polako:implement-issue"}
 	if got := nearMatches(inv, "implement-issue"); !slices.Equal(got, []string{"/polako:implement-issue"}) {
 		t.Errorf("a bare -skill should surface the namespaced spelling, got %v", got)
@@ -2709,6 +2769,7 @@ func TestNearMatchesBridgesPluginNamespacing(t *testing.T) {
 // A wrong "missing" verdict kills a healthy run, so the check may only fire
 // on positive evidence: an inventory that is present and lacks the command.
 func TestLacksCommandNeedsPositiveEvidence(t *testing.T) {
+	t.Parallel()
 	list := []string{"compact", "cost", "polako:implement-issue"}
 	if lacksCommand(list, "polako:implement-issue") {
 		t.Error("a listed command must be found")
@@ -2730,6 +2791,7 @@ func TestLacksCommandNeedsPositiveEvidence(t *testing.T) {
 // --- run-data capture, end to end against the fake CLI ---
 
 func TestExecClaudeCapturesTheResultUsage(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "stream")
 
@@ -2764,6 +2826,7 @@ func TestExecClaudeCapturesTheResultUsage(t *testing.T) {
 // of resuming, throwing away the crashed run's research context — so one
 // unparseable line must not cost it.
 func TestExecClaudeSalvagesTheSessionFromAnUnparseableLine(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "oddshape")
 
@@ -2779,6 +2842,7 @@ func TestExecClaudeSalvagesTheSessionFromAnUnparseableLine(t *testing.T) {
 
 // Older CLI versions report a result with no per-model breakdown at all.
 func TestExecClaudeToleratesAResultWithoutModelUsage(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "oldcli")
 
@@ -2801,6 +2865,7 @@ func TestExecClaudeToleratesAResultWithoutModelUsage(t *testing.T) {
 // tokens. Recording zero for it would make whatever configuration crashes most
 // look like the cheapest one.
 func TestExecClaudeKeepsTheUsageObservedBeforeACrash(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "partial")
 
@@ -2832,6 +2897,7 @@ func TestExecClaudeKeepsTheUsageObservedBeforeACrash(t *testing.T) {
 // PR text is sensitive and, on a repo open to outside issues, attacker
 // controlled — so nothing the model said may reach a record file.
 func TestRecordsNeverCarryWhatTheRunSaid(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "stream")
 	dir := t.TempDir()
@@ -2859,6 +2925,7 @@ func TestRecordsNeverCarryWhatTheRunSaid(t *testing.T) {
 // identical 401, so the classification has to survive at the boundary where
 // the retry decision is made.
 func TestExecClaudeStopsOnRefusedCredentials(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg := fakeClaudeConfig(t, "authfail")
 
@@ -2882,6 +2949,7 @@ func TestExecClaudeStopsOnRefusedCredentials(t *testing.T) {
 // The advice is the whole point of stopping early, so it has to name the
 // commands that fix it rather than only what broke.
 func TestAuthAdviceSaysHowToFixIt(t *testing.T) {
+	t.Parallel()
 	got := authAdvice(errAuth).Error()
 	for _, want := range []string{"could not authenticate", "claude auth status", "claude auth login"} {
 		if !strings.Contains(got, want) {
@@ -2894,6 +2962,7 @@ func TestAuthAdviceSaysHowToFixIt(t *testing.T) {
 // own backlog is what makes both necessary: it contains OAuth issues, so runs
 // legitimately talk about authentication errors while succeeding.
 func TestAuthFailureNeedsAFailedResultThatLeadsWithIt(t *testing.T) {
+	t.Parallel()
 	const refused = `Failed to authenticate. API Error: 401 {"type":"error",` +
 		`"error":{"type":"authentication_error","message":"OAuth access token is invalid."}}`
 	const mentions = "Fixed the OAuth issue: an authentication_error no longer retries."
@@ -2923,6 +2992,7 @@ func TestAuthFailureNeedsAFailedResultThatLeadsWithIt(t *testing.T) {
 }
 
 func TestAuthFailureMatchesTheWaysTheCLIReportsIt(t *testing.T) {
+	t.Parallel()
 	refused := []string{
 		`Failed to authenticate. API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth access token is invalid."},"request_id":null}`,
 		"OAuth token has expired. Please run /login",
@@ -2961,6 +3031,7 @@ func TestAuthFailureMatchesTheWaysTheCLIReportsIt(t *testing.T) {
 // verbatim one. observe now classifies it on a success result too, since
 // #138's run ended cleanly.
 func TestObserveClassifiesACleanExitsFinalText(t *testing.T) {
+	t.Parallel()
 	const asked = "This requires user confirmation to switch the session's " +
 		"working directory into the worktree. Can you approve entering `/tmp/x`?"
 	const ordinary = "Opened a PR for issue 7."
@@ -2990,6 +3061,7 @@ func TestObserveClassifiesACleanExitsFinalText(t *testing.T) {
 // permissions that gets quoted back mid-message must not park the issue over
 // a run that actually succeeded.
 func TestPermissionRefusalMatchesTheWaysARunAsksApproval(t *testing.T) {
+	t.Parallel()
 	asks := []string{
 		"This requires user confirmation to switch the session's working " +
 			"directory into the worktree. Can you approve entering `/tmp/x`?",
@@ -3060,6 +3132,7 @@ func TestPermissionRefusalMatchesTheWaysARunAsksApproval(t *testing.T) {
 // the same session that is *not* this: a working-directory security block,
 // which must not be mistaken for a refused permission.
 func TestToolResultRefusalMatchesTheCLIsOwnWrapperText(t *testing.T) {
+	t.Parallel()
 	refused := []string{
 		"This command requires approval",
 		"This Bash command contains multiple operations. The following " +
@@ -3094,6 +3167,7 @@ func TestToolResultRefusalMatchesTheCLIsOwnWrapperText(t *testing.T) {
 // resume budget) and names the refused command, correlated back to its
 // tool_use by id since a single-command refusal's own text does not name it.
 func TestObserveLatchesOnARefusedToolResult(t *testing.T) {
+	t.Parallel()
 	toolUse := func(id, name string, input string) streamEvent {
 		ev, ok := parseEvent([]byte(`{"type":"assistant","message":{"content":[` +
 			`{"type":"tool_use","id":` + strconv.Quote(id) + `,"name":` + strconv.Quote(name) +
@@ -3155,6 +3229,7 @@ func TestObserveLatchesOnARefusedToolResult(t *testing.T) {
 // and parked as "no PR and no questions". observe now reads every assistant
 // turn, not only the result text, so the ask is not lost.
 func TestObserveReadsAPermissionAskFromAnEarlierTurn(t *testing.T) {
+	t.Parallel()
 	turn := func(text string) streamEvent {
 		ev, ok := parseEvent([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":` +
 			strconv.Quote(text) + `}]}}`))
@@ -3209,6 +3284,7 @@ func TestObserveReadsAPermissionAskFromAnEarlierTurn(t *testing.T) {
 }
 
 func TestParsePRFactsCountsReviewsWithoutQuotingThem(t *testing.T) {
+	t.Parallel()
 	// The shape `gh pr view --json additions,deletions,changedFiles,createdAt,mergedAt,reviews`
 	// returns, reviews and all.
 	raw := []byte(`{"additions":412,"deletions":38,"changedFiles":7,` +
@@ -3233,6 +3309,7 @@ func TestParsePRFactsCountsReviewsWithoutQuotingThem(t *testing.T) {
 }
 
 func TestParsePRFactsToleratesAPRThatNeverMerged(t *testing.T) {
+	t.Parallel()
 	// mergedAt is null on a closed-unmerged PR, and a PR nobody reviewed comes
 	// back with an empty list.
 	got, err := parsePRFacts([]byte(`{"additions":3,"deletions":1,"changedFiles":1,` +
@@ -3253,6 +3330,7 @@ func TestParsePRFactsToleratesAPRThatNeverMerged(t *testing.T) {
 // never reaches it. The recorder is off here, which is also the combination
 // the README offers to an operator who wants no local files at all.
 func TestSummaryCommentNeverCarriesWhatTheRunSaid(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg := fakeClaudeConfig(t, "stream")
 	cfg.repo, cfg.rec = "owner/repo", newRecorder(metricsOff)
@@ -3282,6 +3360,7 @@ func TestSummaryCommentNeverCarriesWhatTheRunSaid(t *testing.T) {
 // --- environment defaults ---
 
 func TestEnvVarNameMapsAFlagToItsVariable(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"post-summary": "POLAKO_POST_SUMMARY",
 		"metrics":      "POLAKO_METRICS",

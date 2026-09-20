@@ -47,6 +47,7 @@ func statusConfigFor(t *testing.T, st *ghState) (config, string) {
 // operator, what is parked, which issue a drain would pick up, and what state
 // the open PR is in.
 func TestStatusReportsWhereTheBacklogStands(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			"3":  {Open: true},
@@ -139,6 +140,7 @@ needs you: reply on #7; review and merge PR #40; decide what to do about #9 (dro
 // text test's own assertions translated field by field, so the two reports
 // cannot silently disagree about the same backlog.
 func TestStatusJSONMatchesTheTextReport(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			"3":  {Open: true},
@@ -218,6 +220,7 @@ func ptrInt64(n int64) *int64 { return &n }
 // `null` — a script doing `.queue.ready[]` must not have to special-case the
 // quiet case.
 func TestStatusJSONKeepsArraysEmptyNotNull(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: false}}})
 
 	snap, err := readStatus(context.Background(), cfg, statusNow)
@@ -249,6 +252,7 @@ func TestStatusJSONKeepsArraysEmptyNotNull(t *testing.T) {
 // one the text report shows without a "(quiet ...)" suffix — and it must not
 // collapse into quiet_seconds: 0, which would claim the thread just spoke.
 func TestStatusJSONLeavesQuietSecondsAbsentWhenUnreadable(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			"4": {Open: true, Labels: []string{awaitingAnswerLabel}, Comments: 1, CommentedAt: "not a date"},
@@ -283,6 +287,7 @@ func TestStatusJSONLeavesQuietSecondsAbsentWhenUnreadable(t *testing.T) {
 // alone everywhere else (a plain "mergeable" cell, "clear" review), with the
 // columns still aligned once the ANSI is stripped back out.
 func TestRenderStatusAppliesThePaletteOnAColourTTY(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			"3": {Open: true},
@@ -353,6 +358,7 @@ func stripANSI(s string) string {
 // exactly what a drain excludes — which is why it derives the queue through the
 // drain's own call rather than a second copy of it.
 func TestStatusInheritsTheCurationGate(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			"1": {Open: true, Labels: []string{proposedLabel}},
@@ -409,6 +415,7 @@ func TestStatusInheritsTheCurationGate(t *testing.T) {
 // JSON document: a live epic still in progress, a finished one the next shift
 // will close on its own, and a finished one a human has held open.
 func TestStatusReportsFinishedAndLiveContainers(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6},
@@ -463,6 +470,7 @@ func TestStatusReportsFinishedAndLiveContainers(t *testing.T) {
 // the two are released differently — so the report names which is holding it
 // rather than sending an operator to drop a label nothing carries.
 func TestStatusDoesNotCallAGatedBacklogCleared(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			"1": {Open: true, Labels: []string{proposedLabel}},
@@ -491,6 +499,7 @@ func TestStatusDoesNotCallAGatedBacklogCleared(t *testing.T) {
 // when q.open() is empty, and parked issues are counted in it), so this is a
 // regression guard rather than a fix.
 func TestStatusDoesNotCallAParkedBacklogCleared(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			"1": {Open: true, Labels: []string{needsHumanLabel}},
@@ -515,6 +524,7 @@ func TestStatusDoesNotCallAParkedBacklogCleared(t *testing.T) {
 // The one promise that makes it safe to run against a repository somebody else
 // is draining: every call is a read, and nothing on GitHub moves.
 func TestStatusMakesOnlyReadCalls(t *testing.T) {
+	t.Parallel()
 	cfg, path := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			"1": {Open: true},
@@ -581,6 +591,7 @@ func TestStatusMakesOnlyReadCalls(t *testing.T) {
 // find out whether the reply is already on the thread. Saying "next: nothing"
 // there would send an operator looking for a drain that had stopped.
 func TestStatusNamesTheAnswerItWouldChase(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			"4": {Open: true, Labels: []string{awaitingAnswerLabel}, Comments: 1},
@@ -612,6 +623,7 @@ func TestStatusNamesTheAnswerItWouldChase(t *testing.T) {
 // ready issues behind it wait. A report that ignored it would name an issue
 // the drain it describes is not going to touch.
 func TestStatusHonoursStrictOrder(t *testing.T) {
+	t.Parallel()
 	state := func() *ghState {
 		return &ghState{Issues: map[string]*fakeIssue{
 			"4": {Open: true, Labels: []string{awaitingAnswerLabel}, Comments: 1},
@@ -651,6 +663,7 @@ func TestStatusHonoursStrictOrder(t *testing.T) {
 // An empty backlog is a real answer, and the one an operator most wants said
 // plainly rather than inferred from three absent sections.
 func TestStatusSaysWhenTheBacklogIsDrained(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: false}}})
 
 	snap, err := readStatus(context.Background(), cfg, statusNow)
@@ -671,6 +684,7 @@ func TestStatusSaysWhenTheBacklogIsDrained(t *testing.T) {
 // A silently shorter table would read as a repository with fewer open PRs than
 // it has.
 func TestStatusSaysWhichPRsItLeftUndetailed(t *testing.T) {
+	t.Parallel()
 	issues := map[string]*fakeIssue{}
 	prs := map[string]*fakePR{}
 	for n := 1; n <= statusPRs+2; n++ {
@@ -704,6 +718,7 @@ func TestStatusSaysWhichPRsItLeftUndetailed(t *testing.T) {
 // "not read" in the fields nobody queried, the same distinction unknownCell
 // preserves in the text table.
 func TestStatusJSONSaysWhichPRsItLeftUndetailed(t *testing.T) {
+	t.Parallel()
 	issues := map[string]*fakeIssue{}
 	prs := map[string]*fakePR{}
 	for n := 1; n <= statusPRs+2; n++ {
@@ -754,6 +769,7 @@ func TestStatusJSONSaysWhichPRsItLeftUndetailed(t *testing.T) {
 // gh spells "this repository" two ways: a flag on every subcommand here, and
 // nothing at all on `gh api`, whose path placeholders have to be filled in.
 func TestGhArgsNamesTheRepository(t *testing.T) {
+	t.Parallel()
 	list := []string{"issue", "list", "--state", "open"}
 	if got := ghArgs("", list); !slices.Equal(got, list) {
 		t.Errorf("with no repo, args = %v, want them untouched", got)
@@ -776,6 +792,7 @@ func TestGhArgsNamesTheRepository(t *testing.T) {
 // The other end of the naming contract: the supervisor finds a PR by the branch
 // the skill named, and this finds the issue by the same rule.
 func TestIssueForBranch(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		branch, prefix string
 		want           int
@@ -797,6 +814,7 @@ func TestIssueForBranch(t *testing.T) {
 }
 
 func TestBranchPRsKeepsOnlyOpenIssuesInQueueOrder(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`[{"number":7,"headRefName":"issue-9","url":"u9"},
 		{"number":5,"headRefName":"issue-2","url":"u2"},
 		{"number":4,"headRefName":"issue-88","url":"u88"},
@@ -818,6 +836,7 @@ func TestBranchPRsKeepsOnlyOpenIssuesInQueueOrder(t *testing.T) {
 }
 
 func TestQuietForReadsTheNewestComment(t *testing.T) {
+	t.Parallel()
 	stamp := func(d time.Duration) issueComment {
 		var c issueComment
 		c.CreatedAt = statusNow.Add(d).Format(time.RFC3339)
@@ -842,6 +861,7 @@ func TestQuietForReadsTheNewestComment(t *testing.T) {
 // Every review state a PR can be in gets its own words, including the one
 // prView.reviewNote deliberately leaves blank.
 func TestReviewCell(t *testing.T) {
+	t.Parallel()
 	earlier := statusNow.Add(-time.Hour)
 	for _, tc := range []struct {
 		name string
@@ -865,6 +885,7 @@ func TestReviewCell(t *testing.T) {
 // A red build is a fact about named checks; "failing" alone sends an operator
 // to the PR to find out which.
 func TestChecksCellNamesWhatFailed(t *testing.T) {
+	t.Parallel()
 	pr := statusPR{detailed: true, view: prView{checks: checksFailing, failing: []string{"build", "lint"}}}
 	if want := "failing (build, lint)"; checksCell(pr) != want {
 		t.Errorf("checksCell = %q, want %q", checksCell(pr), want)
@@ -877,6 +898,7 @@ func TestChecksCellNamesWhatFailed(t *testing.T) {
 // A PR a drain would remediate itself is not yours yet, and one whose checks
 // are still running is nobody's.
 func TestNeedsYouOnlyNamesWhatAPersonMustMove(t *testing.T) {
+	t.Parallel()
 	detailed := func(n int, v prView) statusPR { return statusPR{number: n, detailed: true, view: v} }
 	snap := statusSnapshot{prs: []statusPR{
 		detailed(1, prView{mergeable: "MERGEABLE", checks: checksPassing}),
@@ -899,6 +921,7 @@ func TestNeedsYouOnlyNamesWhatAPersonMustMove(t *testing.T) {
 // supervised, never re-run. Saying otherwise sends an operator looking for a
 // Claude run that will not happen.
 func TestStatusNextRespectsRestartSafetyOnAFlaggedIssue(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			"4": {Open: true, Labels: []string{awaitingAnswerLabel}, Comments: 1},
@@ -922,6 +945,7 @@ func TestStatusNextRespectsRestartSafetyOnAFlaggedIssue(t *testing.T) {
 // never defined gets the same message `work`'s preflight would refuse with,
 // downgraded to a note, and status carries on regardless.
 func TestStatusLabelNoteWarnsOnAMissingLabel(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{})
 	cfg.label = "typo"
 
@@ -935,6 +959,7 @@ func TestStatusLabelNoteWarnsOnAMissingLabel(t *testing.T) {
 }
 
 func TestStatusLabelNoteIsSilentWhenTheLabelExists(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{Labels: []string{"ready-for-claude"}})
 	cfg.label = "ready-for-claude"
 
@@ -951,6 +976,7 @@ func TestStatusLabelNoteIsSilentWhenTheLabelExists(t *testing.T) {
 // the usage and plan-doc reads get: it must not be reported as a missing
 // label, whatever retryRead's own transient-retry narration says along the way.
 func TestStatusLabelNoteIsSilentWhenTheLookupFails(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		FailReads: map[string]int{"api label": ghReads},
 	})
@@ -966,6 +992,7 @@ func TestStatusLabelNoteIsSilentWhenTheLookupFails(t *testing.T) {
 }
 
 func TestRunStatusRejectsAnArgument(t *testing.T) {
+	t.Parallel()
 	err := runStatus(context.Background(), []string{"12"}, &strings.Builder{}, statusNow, report{})
 	if err == nil || !strings.Contains(err.Error(), "status takes flags only") {
 		t.Errorf("err = %v, want a complaint about the argument", err)
@@ -975,6 +1002,7 @@ func TestRunStatusRejectsAnArgument(t *testing.T) {
 // status prints the same "plan" line work's startup banner does, read from
 // the same usage probe — one renderer per fact, not two.
 func TestStatusReportsThePlanLineWhenTheProbeAnswers(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: true}}})
 	setFakeEnv(&cfg, fakeUsageEnv, "sub")
 
@@ -1010,6 +1038,7 @@ func TestStatusReportsThePlanLineWhenTheProbeAnswers(t *testing.T) {
 // /usage — leaves the row out of both renderers entirely: absent, never a
 // zero standing in for "could not tell".
 func TestStatusOmitsThePlanLineWhenTheProbeCannotAnswer(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: true}}})
 
 	snap, err := readStatus(context.Background(), cfg, statusNow)
@@ -1042,6 +1071,7 @@ func TestStatusOmitsThePlanLineWhenTheProbeCannotAnswer(t *testing.T) {
 // installed version, the way runStatus wires cfg.pluginVersion for both
 // renderers.
 func TestStatusPluginVersionReadsThisRepoSOwnPlugin(t *testing.T) {
+	t.Parallel()
 	cfg := fakeClaudeConfig(t, "stream")
 	cfg.usageTimeout = 5 * time.Second
 	setFakeEnv(&cfg, fakePluginEnv, "0.3.0")
@@ -1053,6 +1083,7 @@ func TestStatusPluginVersionReadsThisRepoSOwnPlugin(t *testing.T) {
 }
 
 func TestStatusReportsTheUpdateNoticeWhenAheadOfEitherHalf(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues:       map[string]*fakeIssue{"1": {Open: true}},
 		PublishedRef: "polako--v0.24.0",
@@ -1095,6 +1126,7 @@ func TestStatusReportsTheUpdateNoticeWhenAheadOfEitherHalf(t *testing.T) {
 // plugin are both current. -json still names the release, unlike the text
 // notice, since a caller may want to know the current release either way.
 func TestStatusJSONCarriesThePublishedVersionEvenWhenCurrent(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues:       map[string]*fakeIssue{"1": {Open: true}},
 		PublishedRef: "polako--v0.23.0",
@@ -1130,6 +1162,7 @@ func TestStatusJSONCarriesThePublishedVersionEvenWhenCurrent(t *testing.T) {
 // shape — the same silence the text notice keeps, absent rather than a
 // fake empty string, in -json too.
 func TestStatusOmitsThePublishedVersionWhenTheReadFails(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: true}}})
 
 	snap, err := readStatus(context.Background(), cfg, statusNow)
@@ -1179,6 +1212,7 @@ func writePlanDoc(t *testing.T, dir, name string) {
 // The whole state table docs/plans/plan-conventions.md describes, one doc per
 // case, plus a container and its open-children count.
 func TestPlanDocsDerivesState(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			// backlog-fill.md: one issue open past the gate makes it active,
@@ -1240,6 +1274,7 @@ func TestPlanDocsDerivesState(t *testing.T) {
 // A footer naming a document that no longer exists prints under gone, with
 // the issue that names it — a deleted plan's leftovers, kept visible.
 func TestPlanDocsGoneWhenFileMissing(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			"7": {Open: true, Labels: []string{proposedLabel}, Body: planFooterFor("docs/plans/deleted.md", "0000000")},
@@ -1263,6 +1298,7 @@ func TestPlanDocsGoneWhenFileMissing(t *testing.T) {
 // run reporting on a repository the checkout does not hold, most likely —
 // every footer-named doc is reported plainly, never guessed to be gone.
 func TestPlanDocsWithNoLocalCheckoutReportsNothingRatherThanGuessing(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			"1": {Open: true, Body: planFooterFor("docs/plans/somewhere.md", "1111111")},
@@ -1284,6 +1320,7 @@ func TestPlanDocsWithNoLocalCheckoutReportsNothingRatherThanGuessing(t *testing.
 // The search call is bounded, and a repo whose stamped issues outgrow it
 // gets a warning naming the bound rather than a silently incomplete state.
 func TestPlanDocsWarnsWhenTheSearchIsTruncated(t *testing.T) {
+	t.Parallel()
 	// One past the bound: readPlanDocs asks for planDocsLimit+1 rows
 	// precisely so this case — more than the bound — is distinguishable
 	// from landing exactly on it (see the next test).
@@ -1313,6 +1350,7 @@ func TestPlanDocsWarnsWhenTheSearchIsTruncated(t *testing.T) {
 // the search asks for one row past planDocsLimit precisely so this case
 // reads back false rather than a false positive.
 func TestPlanDocsNotTruncatedExactlyAtTheLimit(t *testing.T) {
+	t.Parallel()
 	issues := make(map[string]*fakeIssue, planDocsLimit)
 	for i := 1; i <= planDocsLimit; i++ {
 		issues[strconv.Itoa(i)] = &fakeIssue{Open: true, Body: planFooterFor("docs/plans/flood.md", "abc0000")}
@@ -1333,6 +1371,7 @@ func TestPlanDocsNotTruncatedExactlyAtTheLimit(t *testing.T) {
 // the same rule statusDocFrom's own comment states for everything else in
 // the snapshot.
 func TestRenderStatusAndJSONIncludePlanDocuments(t *testing.T) {
+	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			"1": {Open: true, Body: planFooterFor("docs/plans/backlog-fill.md", "1a2b3c4")},

@@ -10,6 +10,7 @@ import (
 // -label and no -ungated — because that is the one shape where "anyone can
 // open an issue" and "an unattended agent implements open issues" meet.
 func TestQueueGateRefusesOnlyThePublicUnlabelledQueue(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		visibility string
@@ -50,6 +51,7 @@ func TestQueueGateRefusesOnlyThePublicUnlabelledQueue(t *testing.T) {
 // The wiring: preflight reads visibility off the same `gh repo view` call that
 // names the repository, and refuses before anything is written or run.
 func TestPreflightRefusesAnUngatedPublicQueue(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{Visibility: "PUBLIC", Labels: []string{"ready-for-claude"}})
 	cfg.dir = checkout
@@ -77,6 +79,7 @@ func TestPreflightRefusesAnUngatedPublicQueue(t *testing.T) {
 // seeing the queue is how an operator decides what to label — but the gate
 // still tells them a real run would refuse.
 func TestPreflightLetsADryRunLookThroughTheGate(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	logged := captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{Visibility: "PUBLIC"})
@@ -96,6 +99,7 @@ func TestPreflightLetsADryRunLookThroughTheGate(t *testing.T) {
 // The gate itself: only a missing label refuses, and the refusal names both
 // the label and the fix.
 func TestLabelGateRefusesOnlyAMissingLabel(t *testing.T) {
+	t.Parallel()
 	if err := labelGate("ready-for-claude", true); err != nil {
 		t.Errorf("labelGate refused a label the repository has: %v", err)
 	}
@@ -114,6 +118,7 @@ func TestLabelGateRefusesOnlyAMissingLabel(t *testing.T) {
 // naming the fix — and lets a run through once the label is one the
 // repository actually has.
 func TestPreflightRefusesALabelTheRepoDoesNotHave(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{Labels: []string{"ready-for-claude"}})
 	cfg.dir = checkout
@@ -135,6 +140,7 @@ func TestPreflightRefusesALabelTheRepoDoesNotHave(t *testing.T) {
 // A dry run still says a real run would refuse — the same carve-out
 // queueGate gets, through the same refuseOrNote.
 func TestPreflightLetsADryRunLookThroughTheLabelGate(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{})
 	cfg.dir = checkout
@@ -155,6 +161,7 @@ func TestPreflightLetsADryRunLookThroughTheLabelGate(t *testing.T) {
 // not be reported as a missing label, and it must fail preflight outright
 // rather than being carved around by -dry-run the way a real refusal is.
 func TestPreflightFailsOutrightWhenTheLabelLookupCannotAnswer(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Labels:    []string{"ready-for-claude"},
@@ -176,6 +183,7 @@ func TestPreflightFailsOutrightWhenTheLabelLookupCannotAnswer(t *testing.T) {
 // --- version skew between the two halves ---
 
 func TestPluginVersionReadsTheInstalledPlugin(t *testing.T) {
+	t.Parallel()
 	cfg := fakeClaudeConfig(t, "stream")
 	setFakeEnv(&cfg, fakePluginEnv, "0.3.0")
 
@@ -195,6 +203,7 @@ func TestPluginVersionReadsTheInstalledPlugin(t *testing.T) {
 // directly — what status uses, since it carries no -skill to derive one
 // from.
 func TestInstalledPluginVersionReadsByExplicitName(t *testing.T) {
+	t.Parallel()
 	cfg := fakeClaudeConfig(t, "stream")
 	setFakeEnv(&cfg, fakePluginEnv, "0.3.0")
 
@@ -206,6 +215,7 @@ func TestInstalledPluginVersionReadsByExplicitName(t *testing.T) {
 }
 
 func TestNamesThisPlugin(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, skill string
 		want        bool
@@ -227,6 +237,7 @@ func TestNamesThisPlugin(t *testing.T) {
 // It carries no version, and asking the CLI about a plugin by that name would
 // answer about something else.
 func TestPluginVersionIsEmptyForAHandInstalledSkill(t *testing.T) {
+	t.Parallel()
 	cfg := fakeClaudeConfig(t, "stream")
 	cfg.skill = skillDir
 	setFakeEnv(&cfg, fakePluginEnv, "0.3.0")
@@ -237,6 +248,7 @@ func TestPluginVersionIsEmptyForAHandInstalledSkill(t *testing.T) {
 }
 
 func TestPluginVersionIsEmptyWhenTheCLICannotAnswer(t *testing.T) {
+	t.Parallel()
 	cfg := fakeClaudeConfig(t, "stream")
 
 	if got, _, _ := pluginVersion(context.Background(), cfg); got != "" {
@@ -248,6 +260,7 @@ func TestPluginVersionIsEmptyWhenTheCLICannotAnswer(t *testing.T) {
 // not always the first one. Fed straight to the selection so the shapes a real
 // `plugin list --json` produces can be written out literally.
 func TestPluginVersionPicksTheCopyThatWillRun(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		list      string
@@ -340,6 +353,7 @@ func TestPluginVersionPicksTheCopyThatWillRun(t *testing.T) {
 }
 
 func TestWarnOnVersionSkew(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name           string
 		skill          string
@@ -393,6 +407,7 @@ func TestWarnOnVersionSkew(t *testing.T) {
 // #239 showed a real cost regression in — a newer or ambiguous mismatch stays
 // warnOnVersionSkew's business alone, unchanged by this gate.
 func TestVersionSkewGateRefusesOnlyWhenTheSkillIsBehind(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name           string
 		skill          string
@@ -440,6 +455,7 @@ func TestVersionSkewGateRefusesOnlyWhenTheSkillIsBehind(t *testing.T) {
 }
 
 func TestSemverLess(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		a, b [3]int
 		want bool
@@ -461,6 +477,7 @@ func TestSemverLess(t *testing.T) {
 // is the canonical wording of how to fix a mismatch, so if the two can
 // disagree, one is wrong the next time either changes.
 func TestVersionSkewRemedyAgreesWithInstallDocs(t *testing.T) {
+	t.Parallel()
 	const wantCmd = "polako update"
 	if docs := readRepoFile(t, "docs", "install.md"); !strings.Contains(docs, wantCmd) {
 		t.Fatalf("docs/install.md no longer shows %q — move this test and warnOnVersionSkew's remedy with it", wantCmd)
@@ -475,6 +492,7 @@ func TestVersionSkewRemedyAgreesWithInstallDocs(t *testing.T) {
 // The manifests are the source of truth for the version, so a release binary
 // and the plugin it drives compare equal only if this holds.
 func TestParseSemverRejectsWhatIsNotARelease(t *testing.T) {
+	t.Parallel()
 	for _, ok := range []string{"0.0.0", "0.4.0", "10.20.30"} {
 		if _, err := parseSemver(ok); err != nil {
 			t.Errorf("parseSemver(%q) = %v, want it accepted", ok, err)
@@ -491,6 +509,7 @@ func TestParseSemverRejectsWhatIsNotARelease(t *testing.T) {
 // most likely to be mistaken for a release, and warning on it would fire on
 // every developer build.
 func TestReleaseVersionRejectsAPseudoVersion(t *testing.T) {
+	t.Parallel()
 	if v, _, ok := releaseVersion("v0.0.0-20260825064232-a0aabd243c60"); ok {
 		t.Errorf("releaseVersion accepted a pseudo-version as %q", v)
 	}

@@ -102,10 +102,9 @@ const (
 )
 
 // narrate emits one milestone line at the severity its caller declares.
-// logf is the plain-progress shorthand (the old bare log.Printf), detailf
-// the second channel — lines kept in the shift log but off the terminal
-// unless -verbose. All three take a value receiver so a config's thin
-// wrappers can forward straight through.
+// logf is the plain-progress shorthand, detailf the second channel — lines
+// kept in the shift log but off the terminal unless -verbose. config's thin
+// wrappers forward straight to these.
 func (u *ui) narrate(sev severity, format string, args ...any) {
 	s := fmt.Sprintf(format, args...)
 	if len(s) == 0 || s[len(s)-1] != '\n' {
@@ -141,8 +140,7 @@ func (u *ui) detailf(format string, args ...any) {
 	u.emit([]byte(s), false, sevProgress)
 }
 
-// fatal narrates at error severity, then ends the process the same way
-// log.Fatalf always did.
+// fatal narrates at error severity, then exits 1.
 func (u *ui) fatal(format string, args ...any) {
 	u.narrate(sevError, format, args...)
 	os.Exit(1)

@@ -15,6 +15,7 @@ import (
 // repository carries the refusal verbatim in its body, and a run implementing
 // it can end with a final message that repeats the text mid-sentence.
 func TestLimitRefusalMatchesTheRefusalNotAQuote(t *testing.T) {
+	t.Parallel()
 	refusals := []string{
 		"You've hit your session limit · resets 10:50am (Europe/London)",
 		"You've hit your usage limit · resets 9pm (America/New_York)",
@@ -42,6 +43,7 @@ func TestLimitRefusalMatchesTheRefusalNotAQuote(t *testing.T) {
 }
 
 func TestLimitResetReadsTheRefusalsClock(t *testing.T) {
+	t.Parallel()
 	london, err := time.LoadLocation("Europe/London")
 	if err != nil {
 		t.Fatalf("loading Europe/London (time/tzdata is imported, so this must work everywhere): %v", err)
@@ -100,6 +102,7 @@ func TestLimitResetReadsTheRefusalsClock(t *testing.T) {
 // and instead of burning resumes into a park the drain waits and then resumes
 // the refused session, which finishes the job.
 func TestDrainWaitsOutASessionLimitThenShips(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "limitedthenships", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -139,6 +142,7 @@ func TestDrainWaitsOutASessionLimitThenShips(t *testing.T) {
 // the interrupt path did not. The refused run is also recorded as "unknown",
 // not "nothing": the account cut it off, it did not decide to produce nothing.
 func TestDrainInterruptedMidLimitWaitNamesTheResumableSession(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "limitedrepeatthenships", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -204,6 +208,7 @@ func TestDrainInterruptedMidLimitWaitNamesTheResumableSession(t *testing.T) {
 // before the reset on the old path. They are not crashes, so they spend
 // neither that budget nor the resume ceiling: the sixth attempt ships.
 func TestDrainDoesNotSpendRetriesOnASessionLimit(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, path := drainConfig(t, "limitedrepeatthenships", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},

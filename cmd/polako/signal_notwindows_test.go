@@ -22,6 +22,7 @@ import (
 // a supervisor killed without cancelling leaves it behind, still able to push a
 // branch and open a PR behind a restarted drain's back.
 func TestSigtermCancelsTheRun(t *testing.T) {
+	t.Parallel()
 	// Checked before raising anything. With SIGTERM absent from the list
 	// nothing would catch it and the default disposition would take the whole
 	// test binary down — a regression should fail by name, not by killing the

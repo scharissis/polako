@@ -152,8 +152,7 @@ func dispatchVerb() bool {
 	runReport := func(name string, run func() error) {
 		// Narration (transient retries, gh warnings, the proposed-issues
 		// notice) goes through the same sinks and rendering rules work's
-		// does, rather than the bare stdlib logger this used to leave it
-		// on — colour on a capable stderr TTY, plain otherwise. Stamps stay
+		// does — colour on a capable stderr TTY, plain otherwise. Stamps stay
 		// off unconditionally: unlike work, status and stats never open a
 		// shift log, so there's no stamped copy elsewhere to justify a
 		// terminal that drops them, and turning stamps on here would put a

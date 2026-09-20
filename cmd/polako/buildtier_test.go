@@ -10,6 +10,7 @@ import (
 // debug.BuildInfo rather than needing a real stamped/module/VCS build to
 // exercise each branch.
 func TestBuildTierFrom(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name     string
 		stamped  string

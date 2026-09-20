@@ -442,9 +442,8 @@ func registerPolicyFlags(cfg *config) {
 // validatePolicyFlags checks the six flags registerPolicyFlags registers,
 // once Parse has filled cfg from the command line and the environment, and
 // fills cfg.sizeEffort / cfg.sizeModel. Split out of parseFlags alongside
-// registerPolicyFlags; the caller turns a non-nil error into the same
-// log.Fatalf parseFlags always used, before the process commits to anything
-// else.
+// registerPolicyFlags; the caller turns a non-nil error into sinks.fatal,
+// before the process commits to anything else.
 func validatePolicyFlags(cfg *config) error {
 	if err := validateEffort("-effort", cfg.effort); err != nil {
 		return err

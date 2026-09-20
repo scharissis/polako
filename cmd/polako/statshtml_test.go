@@ -29,6 +29,7 @@ func htmlReportOf(t *testing.T, dir string, extra ...string) string {
 // operator's private numbers, so opening it must not tell anybody it was
 // opened. It has to render with the network cable pulled.
 func TestStatsHTMLLoadsNothingExternal(t *testing.T) {
+	t.Parallel()
 	page := htmlReportOf(t, fixtureDir(t), "-runs", "-by", byTag)
 
 	// Every way a browser is made to fetch something while rendering.
@@ -66,6 +67,7 @@ func TestStatsHTMLLoadsNothingExternal(t *testing.T) {
 // The page is a second view of the report, not a second derivation of it. Every
 // figure here was read off the text output of the same fixture.
 func TestStatsHTMLShowsTheSameNumbersAsTheText(t *testing.T) {
+	t.Parallel()
 	dir := fixtureDir(t)
 	page := htmlReportOf(t, dir, "-runs")
 	text := stats(t, "-metrics", dir, "-runs")
@@ -93,6 +95,7 @@ func TestStatsHTMLShowsTheSameNumbersAsTheText(t *testing.T) {
 // -html adds an output; it never swaps one out. Anybody who asked for a file
 // still wants to see what went into it.
 func TestStatsHTMLLeavesTheTextReportAlone(t *testing.T) {
+	t.Parallel()
 	dir := fixtureDir(t)
 	plain := stats(t, "-metrics", dir)
 
@@ -109,6 +112,7 @@ func TestStatsHTMLLeavesTheTextReportAlone(t *testing.T) {
 }
 
 func TestStatsHTMLHonoursTheFilters(t *testing.T) {
+	t.Parallel()
 	page := htmlReportOf(t, fixtureDir(t), "-repo", "scharissis/other")
 	if !strings.Contains(page, "scharissis/other#5") {
 		t.Errorf("the filtered repo's issue is missing:\n%s", page)
@@ -124,6 +128,7 @@ func TestStatsHTMLHonoursTheFilters(t *testing.T) {
 // The shift tables are the point of the per-shift half of the page, so they are
 // there whether or not -by asked for one.
 func TestStatsHTMLAlwaysBreaksDownByShiftAndIssue(t *testing.T) {
+	t.Parallel()
 	page := htmlReportOf(t, drainFixtureDir(t))
 	for _, want := range []string{"by shift", "by issue"} {
 		if !strings.Contains(page, ">"+want+"<") {
@@ -143,6 +148,7 @@ func TestStatsHTMLAlwaysBreaksDownByShiftAndIssue(t *testing.T) {
 // The run log costs a wide table, so it stays behind the same flag it does in
 // text rather than appearing because the output happens to be a page.
 func TestStatsHTMLIncludesTheRunLogOnlyWithRuns(t *testing.T) {
+	t.Parallel()
 	dir := fixtureDir(t)
 	if page := htmlReportOf(t, dir); strings.Contains(page, ">run log<") {
 		t.Errorf("the run log should need -runs, as it does in text:\n%s", page)
@@ -155,6 +161,7 @@ func TestStatsHTMLIncludesTheRunLogOnlyWithRuns(t *testing.T) {
 // An empty directory still gets a file. A nightly `stats -html` that skipped
 // the write would leave yesterday's numbers on disk looking like today's.
 func TestStatsHTMLOnAnEmptyDirectory(t *testing.T) {
+	t.Parallel()
 	page := htmlReportOf(t, filepath.Join(t.TempDir(), "never-drained"))
 	if !strings.Contains(page, "No run data here") {
 		t.Errorf("want a page that says there is nothing to report:\n%s", page)
@@ -168,6 +175,7 @@ func TestStatsHTMLOnAnEmptyDirectory(t *testing.T) {
 // recording was off, and the text report says nothing of the sort. Blaming
 // -metrics here would send the operator after the wrong thing.
 func TestStatsHTMLOnAnEmptyWindowOverFullFiles(t *testing.T) {
+	t.Parallel()
 	page := htmlReportOf(t, fixtureDir(t), "-since", "1h")
 	if !strings.Contains(page, "No run data here in the last 1h.") {
 		t.Errorf("want a page that says the window is empty:\n%s", page)
@@ -207,6 +215,7 @@ func TestStatsHTMLSaysWhatToDoAboutABadPath(t *testing.T) {
 // The page is the private records laid out, so it inherits their mode. A
 // default umask would show them to everyone with an account on the machine.
 func TestStatsHTMLIsNotWorldReadable(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("unix permission bits are not how Windows decides this")
 	}
@@ -235,6 +244,7 @@ func TestStatsHTMLIsNotWorldReadable(t *testing.T) {
 // Record fields are copied out of a file that another shift, or another person,
 // may have written. html/template is chosen for exactly this.
 func TestStatsHTMLEscapesWhatItReadFromTheRecords(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	body := `{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T09:10:00Z","repo":"r/r","issue":1,"reason":"implement","status":"ok","outcome":"opened_pr","pr":2,"cost_usd":1.5,"turns":9,"tag":"<script>alert(1)</script>"}
 `
@@ -256,6 +266,7 @@ func TestStatsHTMLEscapesWhatItReadFromTheRecords(t *testing.T) {
 // GitHub path at all. A fabricated link that 404s is worse for a reader than a
 // cell that is plainly not a link.
 func TestIssueURLLinksOnlyPlainRepoNames(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		repo  string
 		issue int
@@ -283,6 +294,7 @@ func TestIssueURLLinksOnlyPlainRepoNames(t *testing.T) {
 // A year of daily bars is 365 slivers with no room to label them, so the bucket
 // widens with the window.
 func TestChartUnitWidensWithTheWindow(t *testing.T) {
+	t.Parallel()
 	day := 24 * time.Hour
 	cases := map[time.Duration]string{
 		0:         "day",
@@ -304,6 +316,7 @@ func TestChartUnitWidensWithTheWindow(t *testing.T) {
 // in — so a bar and the run log row behind it always agree about which day it
 // was. Weeks start Monday, which means the same thing wherever the file is read.
 func TestBucketStartSnapsInUTC(t *testing.T) {
+	t.Parallel()
 	// A Saturday, late enough that a westward local clock would call it Friday.
 	ts := time.Date(2026, 8, 22, 23, 30, 0, 0, time.UTC)
 	cases := map[string]string{
@@ -321,6 +334,7 @@ func TestBucketStartSnapsInUTC(t *testing.T) {
 // A gap in the work is part of the shape. Skipping the quiet days would draw a
 // batch that ran solidly for a fortnight.
 func TestCostChartKeepsTheQuietDays(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	body := `{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T09:10:00Z","repo":"r/r","issue":1,"reason":"implement","status":"ok","outcome":"nothing","cost_usd":1}
 {"v":1,"kind":"run","ts":"2026-08-24T09:00:00Z","ended":"2026-08-24T09:10:00Z","repo":"r/r","issue":2,"reason":"implement","status":"ok","outcome":"nothing","cost_usd":3}
@@ -354,6 +368,7 @@ func TestCostChartKeepsTheQuietDays(t *testing.T) {
 // A record whose timestamp will not parse cannot be put on an axis, and dating
 // it to year 1 would stretch the chart across two millennia.
 func TestCostChartSkipsUndatableRuns(t *testing.T) {
+	t.Parallel()
 	ds := dataset{runs: []runRecord{
 		{TS: "not a timestamp", CostUSD: 5},
 		{TS: "2026-08-20T09:00:00Z", CostUSD: 2},
@@ -369,6 +384,7 @@ func TestCostChartSkipsUndatableRuns(t *testing.T) {
 // bucket there is. Charting it anyway would be a hundred thousand rectangles
 // and a page weighing megabytes.
 func TestCostChartRefusesAnAbsurdSpan(t *testing.T) {
+	t.Parallel()
 	chart := costChart(dataset{runs: []runRecord{
 		{TS: "2026-08-20T09:00:00Z", CostUSD: 2},
 		{TS: "9999-01-01T00:00:00Z", CostUSD: 1},
@@ -382,6 +398,7 @@ func TestCostChartRefusesAnAbsurdSpan(t *testing.T) {
 }
 
 func TestCostChartWithNothingDatable(t *testing.T) {
+	t.Parallel()
 	chart := costChart(dataset{runs: []runRecord{{TS: "", CostUSD: 5}}})
 	if chart.Empty == "" {
 		t.Errorf("a chart with no usable timestamps should say so rather than draw an empty axis")
@@ -394,6 +411,7 @@ func TestCostChartWithNothingDatable(t *testing.T) {
 // The breakdown shows in-flight issues as one of the slices. Leaving them out
 // would make the shares add up to less than everything and say so nowhere.
 func TestIssueBarsCountTheOnesStillInFlight(t *testing.T) {
+	t.Parallel()
 	merged := issueRecord{Outcome: issueMerged}
 	breakdown := issueBreakdown([]*issueStats{
 		{terminal: &merged},
@@ -421,6 +439,7 @@ func TestIssueBarsCountTheOnesStillInFlight(t *testing.T) {
 // A status this version has never seen belongs to a newer writer. It is shown
 // rather than dropped, and it is not coloured as bad news on a guess.
 func TestProportionBarsKeepUnknownValuesNeutral(t *testing.T) {
+	t.Parallel()
 	bars := proportionBars(map[string]int{"ok": 3, "brand_new": 1}, []string{"ok"})
 	if len(bars) != 2 {
 		t.Fatalf("want both values shown, got %+v", bars)
@@ -440,6 +459,7 @@ func TestProportionBarsKeepUnknownValuesNeutral(t *testing.T) {
 // public runStats: this fixture has samples, so a real "claude" resolved off
 // PATH would otherwise be probed for the cross-check.
 func TestStatsHTMLPlanCostCard(t *testing.T) {
+	t.Parallel()
 	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second,
 		env: fakeEnv(fakeClaudeEnv, "stream", fakeUsageEnv, "sub")}
 	ds, issues, summary, err := statsReport(context.Background(), cfg, statsOptions{}, planCostDir(t), fixtureNow)
@@ -466,6 +486,7 @@ func TestStatsHTMLPlanCostCard(t *testing.T) {
 // No terminal issue anywhere in this fixture carries a sample, so the card
 // is absent — never a card reporting a percentage nobody measured.
 func TestStatsHTMLOmitsPlanCostCardWithoutSamples(t *testing.T) {
+	t.Parallel()
 	page := htmlReportOf(t, fixtureDir(t))
 	if strings.Contains(page, "plan cost per issue") {
 		t.Errorf("no samples in this fixture, want no plan-cost card:\n%s", page)

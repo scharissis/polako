@@ -24,6 +24,7 @@ func emitM(u *ui, p []byte) { u.emit(p, true, sevProgress) }
 func emitD(u *ui, p []byte) { u.emit(p, false, sevProgress) }
 
 func TestMilestonesReachTerminalAndShiftLog(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
 	u := &ui{terminal: &term, file: &file}
 
@@ -40,6 +41,7 @@ func TestMilestonesReachTerminalAndShiftLog(t *testing.T) {
 }
 
 func TestDetailReachesTheShiftLogAlone(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
 	u := &ui{terminal: &term, file: &file}
 
@@ -62,6 +64,7 @@ func (f *failWriter) Write(p []byte) (int, error) {
 }
 
 func TestShiftLogFailureWarnsOnceAndNeverStopsNarration(t *testing.T) {
+	t.Parallel()
 	var term bytes.Buffer
 	fw := &failWriter{}
 	u := &ui{terminal: &term, file: fw}
@@ -84,6 +87,7 @@ func TestShiftLogFailureWarnsOnceAndNeverStopsNarration(t *testing.T) {
 }
 
 func TestOpenShiftLogNamesAndProtectsTheFile(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "logs")
 	var term bytes.Buffer
 	u := &ui{terminal: &term}
@@ -154,6 +158,7 @@ func replayStream(t *testing.T, u *ui, lines ...string) *runReport {
 // The terminal's audience is an operator glancing over: a healthy run is a
 // pair of lines, and the conversation between them belongs to the shift log.
 func TestQuietTerminalShowsARunAsMilestones(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
 	u := &ui{terminal: &term, file: &file}
 
@@ -184,6 +189,7 @@ func TestQuietTerminalShowsARunAsMilestones(t *testing.T) {
 // An error's result text is the whole diagnosis for a run the CLI answered
 // itself, so unlike a healthy run's it stays on the terminal.
 func TestQuietTerminalStillShowsAnErrorsResultText(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
 	u := &ui{terminal: &term, file: &file}
 
@@ -204,6 +210,7 @@ func TestQuietTerminalStillShowsAnErrorsResultText(t *testing.T) {
 // returning and belong in the shift log, or a healthy run reads as a crash
 // loop that cost several times what it did (issue #224).
 func TestBackgroundTaskWakeupsDoNotRepeatTheMilestones(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
 	u := &ui{terminal: &term, file: &file}
 
@@ -237,6 +244,7 @@ func TestBackgroundTaskWakeupsDoNotRepeatTheMilestones(t *testing.T) {
 // finish, and a run that ends in error must say so however healthy it looked
 // on the way.
 func TestFinishLineReflectsTheFinalState(t *testing.T) {
+	t.Parallel()
 	t.Run("a later ok finish is not buried by an earlier error", func(t *testing.T) {
 		var term, file bytes.Buffer
 		u := &ui{terminal: &term, file: &file}
@@ -269,6 +277,7 @@ func TestFinishLineReflectsTheFinalState(t *testing.T) {
 }
 
 func TestVerboseMirrorsDetailToTheTerminal(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
 	u := &ui{terminal: &term, file: &file, verbose: true}
 
@@ -287,6 +296,7 @@ func TestVerboseMirrorsDetailToTheTerminal(t *testing.T) {
 var ttyStamped = regexp.MustCompile(`^\x1b\[2m\d{2}:\d{2}:\d{2} \x1b\[0m`)
 
 func TestVerboseTTYStampsDetailTimeOnlyAndDim(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
 	u := &ui{terminal: &term, stamp: stampTTYDim, style: styler{on: true}, file: &file, verbose: true}
 
@@ -301,6 +311,7 @@ func TestVerboseTTYStampsDetailTimeOnlyAndDim(t *testing.T) {
 }
 
 func TestTTYStampIsTimeOnlyAndDim(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
 	u := &ui{terminal: &term, stamp: stampTTYDim, style: styler{on: true}, file: &file}
 
@@ -318,6 +329,7 @@ func TestTTYStampIsTimeOnlyAndDim(t *testing.T) {
 // all three land here, at the styler being off. The stamp must stay
 // time-only rather than either reverting to the full layout or disappearing.
 func TestTTYStampUnstyledWithoutColour(t *testing.T) {
+	t.Parallel()
 	var term bytes.Buffer
 	u := &ui{terminal: &term, stamp: stampTTYDim, file: &bytes.Buffer{}}
 
@@ -336,6 +348,7 @@ func TestTTYStampUnstyledWithoutColour(t *testing.T) {
 }
 
 func TestPipedStampStaysFullLayout(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
 	u := &ui{terminal: &term, file: &file} // stampFull, the zero value
 
@@ -350,6 +363,7 @@ func TestPipedStampStaysFullLayout(t *testing.T) {
 }
 
 func TestStampOffOmitsTheTerminalStampEntirely(t *testing.T) {
+	t.Parallel()
 	var term bytes.Buffer
 	u := &ui{terminal: &term, stamp: stampOff}
 
@@ -361,6 +375,7 @@ func TestStampOffOmitsTheTerminalStampEntirely(t *testing.T) {
 }
 
 func TestShiftLogFailureWarningStampsTTYTimeOnlyAndDim(t *testing.T) {
+	t.Parallel()
 	var term bytes.Buffer
 	fw := &failWriter{}
 	u := &ui{terminal: &term, stamp: stampTTYDim, style: styler{on: true}, file: fw}
@@ -381,6 +396,7 @@ func TestShiftLogFailureWarningStampsTTYTimeOnlyAndDim(t *testing.T) {
 // whole attributed lines, blank ones dropped, the unterminated remainder
 // flushed when the run ends.
 func TestLineWriterSplitsPrefixesAndFlushes(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
 	u := &ui{terminal: &term, file: &file}
 
@@ -435,6 +451,7 @@ func TestStyleForGatesColour(t *testing.T) {
 // the severity declared alongside it, and unrelated wording sharing a
 // severity gets the same colour — proving render never looks at the text.
 func TestRenderStylesBySeverityNotWording(t *testing.T) {
+	t.Parallel()
 	s := styler{on: true}
 	cases := []struct {
 		sev  severity
@@ -477,6 +494,7 @@ func TestNewReportGoesThroughStyleFor(t *testing.T) {
 }
 
 func TestReportRendersPlainAtTheZeroValue(t *testing.T) {
+	t.Parallel()
 	var rpt report
 	for _, s := range []string{"by issue", "not read", "failing (build)", "1 issue — parked"} {
 		if got := rpt.bold(s); got != s {
@@ -492,6 +510,7 @@ func TestReportRendersPlainAtTheZeroValue(t *testing.T) {
 }
 
 func TestReportBoldAndDimWrapWholeStrings(t *testing.T) {
+	t.Parallel()
 	rpt := report{style: styler{on: true}}
 	if got, want := rpt.bold("by issue"), "\x1b[1mby issue\x1b[0m"; got != want {
 		t.Errorf("bold = %q, want %q", got, want)
@@ -502,6 +521,7 @@ func TestReportBoldAndDimWrapWholeStrings(t *testing.T) {
 }
 
 func TestReportCellHighlightsAttentionMarkersOnly(t *testing.T) {
+	t.Parallel()
 	rpt := report{style: styler{on: true}}
 	for in, want := range map[string]string{
 		"failing (build, lint)":         "\x1b[33mfailing (build, lint)\x1b[0m",
@@ -518,6 +538,7 @@ func TestReportCellHighlightsAttentionMarkersOnly(t *testing.T) {
 }
 
 func TestResolveLogDirHonoursOff(t *testing.T) {
+	t.Parallel()
 	if got := resolveLogDir("off"); got != "" {
 		t.Errorf(`resolveLogDir("off") = %q, want ""`, got)
 	}

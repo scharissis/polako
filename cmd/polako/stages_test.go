@@ -48,6 +48,7 @@ func narratedStages(t *testing.T, events ...string) []string {
 }
 
 func TestStageNarrationHappyPath(t *testing.T) {
+	t.Parallel()
 	got := narratedStages(t,
 		bash("gh issue view 214 --json number,title,state,body,comments"),
 		bash("git worktree list"),
@@ -77,6 +78,7 @@ func TestStageNarrationHappyPath(t *testing.T) {
 // planned anything. That write is housekeeping, not a change: narrated as
 // "implementing…" it would, forward only, swallow the study and plan lines.
 func TestStageNarrationIgnoresScratchDirWrites(t *testing.T) {
+	t.Parallel()
 	got := narratedStages(t,
 		bash("git worktree add .worktrees/issue-214 -b issue-214 origin/main"),
 		toolUse("Write", `{"file_path":"/Users/x/polako/.worktrees/issue-214/`+scratchDir+`/.gitignore","content":"*\n"}`),
@@ -92,6 +94,7 @@ func TestStageNarrationIgnoresScratchDirWrites(t *testing.T) {
 // whose stream opens on the PLAN.md write does not backfill "reading the
 // issue…" and "preparing the branch…".
 func TestStageNarrationNeverBackfills(t *testing.T) {
+	t.Parallel()
 	got := narratedStages(t,
 		toolUse("Write", `{"file_path":"PLAN.md","content":"..."}`),
 		toolUse("Read", `{"file_path":"main.go"}`), // study < plan: silent
@@ -105,6 +108,7 @@ func TestStageNarrationNeverBackfills(t *testing.T) {
 
 // A repeated signal for a phase already reported says nothing the second time.
 func TestStageNarrationEmitsEachPhaseAtMostOnce(t *testing.T) {
+	t.Parallel()
 	got := narratedStages(t,
 		bash("gh issue view 214 --json body"),
 		bash("gh issue view 214 --json comments"),
@@ -120,6 +124,7 @@ func TestStageNarrationEmitsEachPhaseAtMostOnce(t *testing.T) {
 // A stream of calls the recognizer does not know contributes nothing — no
 // fallback stage, no filler.
 func TestStageNarrationStaysSilentOnAnUnrecognisedStream(t *testing.T) {
+	t.Parallel()
 	got := narratedStages(t,
 		`{"type":"system","subtype":"init","model":"claude-opus-5"}`,
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"thinking it over"}]}}`,
@@ -137,6 +142,7 @@ func TestStageNarrationStaysSilentOnAnUnrecognisedStream(t *testing.T) {
 // code minutes after the gate opened. Monotonicity is what keeps that from
 // reporting "preparing the branch…" on the way to a PR.
 func TestStageNarrationIgnoresThePostReviewWorktree(t *testing.T) {
+	t.Parallel()
 	got := narratedStages(t,
 		toolUse("Skill", `{"skill":"code-review","args":"high --fix issue-139"}`),
 		bash("git worktree add /tmp/issue139-wt issue-139"),
@@ -153,6 +159,7 @@ func TestStageNarrationIgnoresThePostReviewWorktree(t *testing.T) {
 // The asking line fires at most once, from any position, and neither advances
 // nor blocks the chain.
 func TestStageNarrationAskingLine(t *testing.T) {
+	t.Parallel()
 	got := narratedStages(t,
 		bash("gh issue view 214 --json body"),
 		bash("gh issue comment 214 --body-file q.md"),
@@ -166,6 +173,7 @@ func TestStageNarrationAskingLine(t *testing.T) {
 }
 
 func TestStageNarrationAskingFromFirstPosition(t *testing.T) {
+	t.Parallel()
 	got := narratedStages(t, bash("gh issue comment 214 --body-file q.md"))
 	if !slices.Equal(got, []string{"asking on the issue thread…"}) {
 		t.Errorf("stage lines = %v", got)
@@ -176,6 +184,7 @@ func TestStageNarrationAskingFromFirstPosition(t *testing.T) {
 // holds, so a Read alongside `gh issue view` lands on the later phase only when
 // the block order puts context first.
 func TestStageNarrationHandlesParallelToolCalls(t *testing.T) {
+	t.Parallel()
 	got := narratedStages(t,
 		`{"type":"assistant","message":{"content":[`+
 			`{"type":"tool_use","name":"Bash","input":{"command":"gh issue view 214 --json body"}},`+
@@ -190,6 +199,7 @@ func TestStageNarrationHandlesParallelToolCalls(t *testing.T) {
 // Wired through eventLog.event, a stage line is a milestone: it reaches the
 // terminal and the shift log on the same terms as "session started".
 func TestStageNarrationIsAMilestoneOnBothSinks(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
 	el := eventLog{u: &ui{terminal: &term, file: &file}}
 	for _, e := range []string{
@@ -253,6 +263,7 @@ func narratedIntake(t *testing.T, events ...string) []string {
 // map called that scratch write "implementing…"; the intake map says what the
 // run is doing, and names each issue as gh confirms it.
 func TestIntakeStageNarration(t *testing.T) {
+	t.Parallel()
 	create := `{"command":"gh issue create --title T --label proposed --body-file ISSUE_BODY.md"}`
 	got := narratedIntake(t,
 		toolUse("Read", `{"file_path":"/x/docs/VISION.md"}`),
@@ -274,6 +285,7 @@ func TestIntakeStageNarration(t *testing.T) {
 // Only what gh confirmed is named: a failed create, a result with no issue URL
 // in it, a --help probe and the result of some other call all say nothing.
 func TestIntakeNarrationOnlyNamesAnIssueGhConfirmed(t *testing.T) {
+	t.Parallel()
 	create := `{"command":"gh issue create --title T --body-file B.md --parent 12"}`
 	got := narratedIntake(t,
 		toolUseID("h", "Bash", `{"command":"gh issue create --help"}`),
@@ -294,6 +306,7 @@ func TestIntakeNarrationOnlyNamesAnIssueGhConfirmed(t *testing.T) {
 // The drain's map is untouched by intake mode existing: a `gh issue create`
 // inside an implement-issue run is not a stage, and its result names nothing.
 func TestDrainNarrationIgnoresIssueCreates(t *testing.T) {
+	t.Parallel()
 	got := narratedStages(t,
 		toolUseID("t1", "Bash", `{"command":"gh issue create --title T --body-file B.md"}`),
 		toolResult("t1", "https://github.com/o/r/issues/399", false),

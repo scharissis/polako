@@ -47,6 +47,7 @@ func healthTestConfig(t *testing.T, st *ghState) (cfg config, statePath, checkou
 
 // The bare invocation's verb table has to list health now that it exists.
 func TestVerbUsageListsHealth(t *testing.T) {
+	t.Parallel()
 	var b strings.Builder
 	verbUsage(&b)
 	if !strings.Contains(b.String(), "\n  health ") {
@@ -57,6 +58,7 @@ func TestVerbUsageListsHealth(t *testing.T) {
 // healthConfig needs nothing but a sane -max-issues: unlike plan there is no
 // vision/brief pair to require.
 func TestHealthConfigRequiresAtLeastOneIssue(t *testing.T) {
+	t.Parallel()
 	if _, err := healthConfig(&healthOptions{maxIssues: 0}); err == nil {
 		t.Error("healthConfig accepted -max-issues 0")
 	}
@@ -67,6 +69,7 @@ func TestHealthConfigRequiresAtLeastOneIssue(t *testing.T) {
 
 // The capability probe reads `gh issue create --help`, exactly like plan's.
 func TestHealthPreflightProbesParentSupport(t *testing.T) {
+	t.Parallel()
 	cfg, _, _ := healthTestConfig(t, &ghState{})
 	if hierarchical, err := healthPreflight(context.Background(), &cfg, &healthOptions{maxIssues: 10, dryRun: true}); err != nil {
 		t.Fatalf("healthPreflight: %v", err)
@@ -85,6 +88,7 @@ func TestHealthPreflightProbesParentSupport(t *testing.T) {
 // A real run's preflight declares the `proposed` label and nothing else —
 // review-health attaches no milestone, unlike plan.
 func TestHealthPreflightDeclaresOnlyTheLabel(t *testing.T) {
+	t.Parallel()
 	cfg, statePath, _ := healthTestConfig(t, &ghState{})
 
 	if _, err := healthPreflight(context.Background(), &cfg, &healthOptions{maxIssues: 10}); err != nil {
@@ -107,6 +111,7 @@ func TestHealthPreflightDeclaresOnlyTheLabel(t *testing.T) {
 // positions cwd at the target repo (see healthPrompt), so there is nothing
 // else to pass.
 func TestHealthDryRunWritesNothingAndPrintsTheInvocation(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, statePath, _ := healthTestConfig(t, &ghState{})
 	before, err := os.ReadFile(statePath)
@@ -187,6 +192,7 @@ func TestHealthDryRunWritesNothingAndPrintsTheInvocation(t *testing.T) {
 // With no -focus, healthPrompt is the bare slash command — no trailing `""`
 // placeholder nobody needed.
 func TestHealthPromptOmitsArgumentsWhenFocusIsEmpty(t *testing.T) {
+	t.Parallel()
 	cfg, _, _ := healthTestConfig(t, &ghState{})
 	cfg.skill = defaultHealthSkill
 	if got, want := healthPrompt(cfg, healthOptions{}), "/"+defaultHealthSkill; got != want {
@@ -207,6 +213,7 @@ func healthRunConfig(t *testing.T, st *ghState, claudeMode string) (config, stri
 // End to end: a real run spawns the skill through execClaude and the pass
 // normalises what it filed — no milestone attached, unlike plan's.
 func TestHealthRunSpawnsTheSkillAndNormalisesWhatItCreated(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, statePath := healthRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plan")
 
@@ -247,6 +254,7 @@ func TestHealthRunSpawnsTheSkillAndNormalisesWhatItCreated(t *testing.T) {
 // kind:"health" record whatever its status, and — because it proposed
 // something — one `proposed` notification.
 func TestHealthRunRecordsAndNotifies(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, _ := healthRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plan")
 	records := t.TempDir()
@@ -302,6 +310,7 @@ func TestHealthRunRecordsAndNotifies(t *testing.T) {
 // rather than raising it, and the label pass still normalises everything that
 // was filed. Nothing is closed.
 func TestHealthRunCapsIssueCreationAndStillNormalises(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, statePath := healthRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plancap")
 
@@ -339,6 +348,7 @@ func TestHealthRunCapsIssueCreationAndStillNormalises(t *testing.T) {
 // A health run that proposed nothing fires no notification but still writes
 // its record.
 func TestHealthRunWithNoProposalsRecordsButDoesNotNotify(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, _ := healthRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "planempty")
 	records := t.TempDir()
@@ -367,6 +377,7 @@ func TestHealthRunWithNoProposalsRecordsButDoesNotNotify(t *testing.T) {
 // A shutdown signal mid-run surfaces as context.Canceled, and the label pass
 // still ran on its own detached deadline — the same contract planRun holds.
 func TestHealthRunInterruptReportsAsCancelled(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, statePath := healthRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plancap")
 
@@ -393,6 +404,7 @@ func TestHealthRunInterruptReportsAsCancelled(t *testing.T) {
 
 // The -skill default resolves to the skill this repo actually ships.
 func TestHealthSkillDefaultMatchesTheShippedSkill(t *testing.T) {
+	t.Parallel()
 	if defaultHealthSkill != "polako:"+healthSkillDir {
 		t.Fatalf("defaultHealthSkill = %q, want polako:%s", defaultHealthSkill, healthSkillDir)
 	}

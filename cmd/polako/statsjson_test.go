@@ -98,6 +98,7 @@ func TestStatsJSONGoldenDocument(t *testing.T) {
 // One document, no header, no trailing prose — stdout only, so a pipe into
 // jq sees exactly the facts and nothing else.
 func TestStatsJSONIsTheWholeOfStdout(t *testing.T) {
+	t.Parallel()
 	out := stats(t, "-metrics", fixtureDir(t), "-json")
 	if !json.Valid([]byte(out)) {
 		t.Fatalf("stats -json is not valid JSON on its own:\n%s", out)
@@ -112,6 +113,7 @@ func TestStatsJSONIsTheWholeOfStdout(t *testing.T) {
 // same statsSummary, but this is the test that would catch it if they ever
 // stopped agreeing about a figure.
 func TestStatsJSONMatchesTheTextReport(t *testing.T) {
+	t.Parallel()
 	dir := fixtureDir(t)
 	out := stats(t, "-metrics", dir, "-json")
 	var doc statsDoc
@@ -151,6 +153,7 @@ func TestStatsJSONMatchesTheTextReport(t *testing.T) {
 // Every array and breakdown map stays [] / {}, never null, whatever the
 // fixture — a script doing `.source.unread[]` must not special-case empty.
 func TestStatsJSONKeepsCollectionsEmptyNotNull(t *testing.T) {
+	t.Parallel()
 	out := stats(t, "-metrics", t.TempDir(), "-json")
 	for _, unwanted := range []string{
 		`"unread":null`, `"repos":null`, `"terminal":null`,
@@ -165,6 +168,7 @@ func TestStatsJSONKeepsCollectionsEmptyNotNull(t *testing.T) {
 // -by and -runs are typed sections present only when asked for, over the
 // full fixture so every kind of row has real data behind it.
 func TestStatsJSONByAndRunLog(t *testing.T) {
+	t.Parallel()
 	dir := fixtureDir(t)
 
 	t.Run("by issue", func(t *testing.T) {
@@ -255,6 +259,7 @@ func findIssueRow(t *testing.T, rows []statsDocIssueRow, repo string, issue int)
 // keep them apart: reviews_median present-and-0 for the former, the whole
 // field absent for the latter.
 func TestStatsJSONReviewsMedianSurvivesAGenuineZero(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	body := `{"v":1,"kind":"issue","ts":"2026-08-20T09:00:00Z","repo":"r/r","issue":1,"pr":1,"outcome":"merged","additions":10,"deletions":2,"changed_files":1,"reviews":0}
 {"v":1,"kind":"issue","ts":"2026-08-20T10:00:00Z","repo":"r/r","issue":2,"pr":2,"outcome":"merged","additions":20,"deletions":4,"changed_files":2,"reviews":0}
@@ -314,6 +319,7 @@ func TestStatsJSONHTMLConfirmationGoesToStderr(t *testing.T) {
 // rather than depending on runStats's default claudeBin ("claude") failing
 // to resolve on whatever machine runs the suite.
 func TestStatsJSONWindow(t *testing.T) {
+	t.Parallel()
 	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second,
 		env: fakeEnv(fakeClaudeEnv, "stream")}
 	now := time.Date(2026, 8, 25, 15, 0, 0, 0, time.UTC)
@@ -349,6 +355,7 @@ func TestStatsJSONWindow(t *testing.T) {
 // plan carries the same figures planCostPairs' text line does, cross-check
 // included, and is nil exactly when that line is absent.
 func TestStatsJSONPlan(t *testing.T) {
+	t.Parallel()
 	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second,
 		env: fakeEnv(fakeClaudeEnv, "stream", fakeUsageEnv, "sub")}
 
