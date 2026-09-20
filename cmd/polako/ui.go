@@ -316,8 +316,12 @@ func (r report) dim(s string) string { return r.style.dim(s) }
 // looked up. Substring match because a cell can carry more than the marker
 // alone — checksCell appends the failing checks' names, for one. "proposed"
 // belongs beside "parked": needsYou treats curating one and deciding the
-// other with the same urgency, so the report should too.
-var attentionMarkers = []string{"failing", "changes requested", "parked", "proposed", unknownCell}
+// other with the same urgency, so the report should too. setupMissing and
+// setupUnknown are setup's own two words for the same two ideas — a failing
+// row and one nobody could answer — so its rows highlight on a TTY exactly
+// as status's and tidy's already do.
+var attentionMarkers = []string{"failing", "changes requested", "parked", "proposed", unknownCell,
+	setupMissing, setupUnknown}
 
 // cell styles one printPairs/printTable cell — key or value alike, so a
 // "parked" row label gets the same yellow a "not read" value cell does.
