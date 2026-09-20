@@ -291,7 +291,7 @@ func preflight(ctx context.Context, cfg *config) error {
 	// Everything logged from here on lands in the shift log too — including a
 	// preflight refusal below, which is often the diagnosis an operator wants.
 	if cfg.logDir != "" {
-		path, err := sinks.openShiftLog(cfg.logDir, cfg.repo, cfg.shiftID)
+		path, err := cfg.sink().openShiftLog(cfg.logDir, cfg.repo, cfg.shiftID)
 		if err != nil {
 			cfg.narrate(sevWarning, logLostFmt, err)
 		} else {
