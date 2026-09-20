@@ -9,9 +9,11 @@
 /evals/results/
 
 # Skill run artifacts: `implement-issue` writes PLAN.md into the worktree it
-# works in, the same way it writes PR_BODY.md. Both are scratch, neither ships.
+# works in, and every throwaway file — PR body, review diff dumps — under
+# .polako-scratch/. Neither ships. The scratch dir also ignores itself, since
+# the skill runs in repos without this line.
 /PLAN.md
-/PR_BODY.md
+/.polako-scratch/
 
 # Where `implement-issue` puts the worktree it creates per issue — anchored
 # inside the checkout so `git worktree add` needs no `cd`, and dot-prefixed so

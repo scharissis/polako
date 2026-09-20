@@ -224,6 +224,46 @@ func TestReclaimRemovesAWorktreeHoldingOnlyThePlanAndEvidence(t *testing.T) {
 	}
 }
 
+// The review agent dumps a diff too big for Bash output to a file, and nothing
+// deletes it. Under scratchDir it is not left work; the same file in the
+// worktree root still is — the root stays strict on purpose, since no pattern
+// tells an improvised scratch name from a file somebody meant to keep.
+func TestReclaimDiscountsTheScratchDirButNotARootLevelDump(t *testing.T) {
+	_, checkout := upstream(t)
+	mergeIssueBranch(t, checkout, "issue-9", "feature-9")
+	mergeIssueBranch(t, checkout, "issue-10", "feature-10")
+	scratched := filepath.Join(t.TempDir(), "issue-9-worktree")
+	gitAt(t, checkout, "worktree", "add", scratched, "issue-9")
+	if err := os.MkdirAll(filepath.Join(scratched, scratchDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scratched, scratchDir, "review.diff"), []byte("diff --git\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stray := filepath.Join(t.TempDir(), "issue-10-worktree")
+	gitAt(t, checkout, "worktree", "add", stray, "issue-10")
+	if err := os.WriteFile(filepath.Join(stray, "issue10.diff"), []byte("diff --git\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"9": {Open: false}, "10": {Open: false}}})
+	cfg := tidyCfg(t, checkout)
+
+	results, err := reclaim(context.Background(), cfg, true, 0)
+	if err != nil {
+		t.Fatalf("reclaim: %v", err)
+	}
+	if r := findTidyResult(t, results, 9); !r.reclaimed {
+		t.Errorf("issue #9 was not reclaimed — a diff dump under %s is not work left behind: %+v", scratchDir, r)
+	}
+	if _, err := os.Stat(scratched); !os.IsNotExist(err) {
+		t.Errorf("worktree %s still exists", scratched)
+	}
+	if r := findTidyResult(t, results, 10); r.reclaimed || r.reason != "1 uncommitted file" {
+		t.Errorf("issue #10 holds a file in the worktree root and must still be refused: %+v", r)
+	}
+}
+
 // An open issue is left entirely alone, whatever its branch looks like.
 func TestReclaimSkipsAnOpenIssue(t *testing.T) {
 	_, checkout := upstream(t)

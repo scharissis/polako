@@ -72,6 +72,21 @@ func TestStageNarrationHappyPath(t *testing.T) {
 	}
 }
 
+// Phase 1 writes the scratch dir's .gitignore before the run has studied or
+// planned anything. That write is housekeeping, not a change: narrated as
+// "implementing…" it would, forward only, swallow the study and plan lines.
+func TestStageNarrationIgnoresScratchDirWrites(t *testing.T) {
+	got := narratedStages(t,
+		bash("git worktree add .worktrees/issue-214 -b issue-214 origin/main"),
+		toolUse("Write", `{"file_path":"/Users/x/polako/.worktrees/issue-214/`+scratchDir+`/.gitignore","content":"*\n"}`),
+		toolUse("Write", `{"file_path":"/Users/x/polako/.worktrees/issue-214/PLAN.md","content":"..."}`),
+	)
+	want := []string{"preparing the branch…", "writing the plan…"}
+	if !slices.Equal(got, want) {
+		t.Errorf("stage lines =\n%v\nwant\n%v", got, want)
+	}
+}
+
 // The first recognised signal names its own phase and nothing before it: a run
 // whose stream opens on the PLAN.md write does not backfill "reading the
 // issue…" and "preparing the branch…".

@@ -484,7 +484,7 @@ these, not any one:
   refresh a shift does before picking up an issue — except right after a
   merge a shift itself watched, where GitHub's event is proof enough;
 - its worktree, if it has one, has no uncommitted or untracked changes
-  (`PLAN.md` doesn't count, same exception `-dry-run`'s park messages carry);
+  (`PLAN.md` and `.polako-scratch/` don't count, in park messages either);
 - nothing about it is unpushed.
 
 Anything that fails is named and left alone — the feature, not a
