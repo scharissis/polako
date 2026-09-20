@@ -727,8 +727,13 @@ don't post again, and stop.
      auto-closing the issue is what advances the automation.
    - Leave the body file where it is. The scratch directory ignores itself,
      so it can't be committed, and no `rm` is in this run's grant.
-   - Once `gh pr create` returns, and only if this step's shoot actually
-     ran: `git -C <worktree> clean -fdq -- .polako-evidence`. Not before —
-     a failed `gh pr create` still wants the shots on hand to retry
-     against.
+   - Once `gh pr create` returns, and only if the `## Visual evidence`
+     block reads `Decision: capture`: `git -C <worktree> clean -fdq --
+     .polako-evidence`. Not before — a failed `gh pr create` still wants
+     the shots on hand to retry against. This has to run whether this
+     turn's own shoot ran or not: a run that shoots and publishes, then
+     dies before `gh pr create` succeeds, leaves `After: captured @ <sha>`
+     for the next run to find already done — that resumed run skips
+     straight to `gh pr create` without re-shooting, and the cleanup still
+     has to fire once that succeeds.
 4. Report the PR URL.
