@@ -5,7 +5,7 @@ package main
 // default branch, which is what merging the publish PR (docs/releasing.md)
 // exposes to anyone installing or updating. Never `@latest`, which can land
 // ahead of what the plugin side resolves to in the window between the two
-// tags landing (docs/plans/update.md, "What exists today").
+// tags landing.
 //
 // It never runs inside a drain — `work` never updates itself, so a shift's
 // binary and skill don't change under it by polako's hand. It is a verb a
@@ -248,10 +248,9 @@ func resolvePluginPlanFrom(list []byte, plugin string) pluginPlan {
 
 // applyPlugin runs the two `claude plugin` commands a ready plan calls for.
 // Never called for any other state — the caller already decided what to say
-// about those. `--json` is passed on `plugin update` per docs/plans/update.md
-// ticket 1's own spec, but its output is never parsed: comparing versions
-// first and trusting the exit status is that ticket's own open question 2,
-// resolved by not answering it yet.
+// about those. `--json` is passed on `plugin update`, but its output is
+// never parsed: this compares versions first and trusts the exit status
+// instead, unresolved on what a no-op update prints.
 func applyPlugin(ctx context.Context, cfg config, p pluginPlan) error {
 	if _, err := capture(ctx, cfg.dir, cfg.env, cfg.claudeBin, "plugin", "marketplace", "update", p.marketplace); err != nil {
 		return fmt.Errorf("updating the %s marketplace: %w", p.marketplace, err)
@@ -578,10 +577,10 @@ func binarySummary(ctx context.Context, cfg config, b binaryPlan, published stri
 
 // --- the passive notice ---
 //
-// docs/plans/update.md ticket 2: work's preflight and status make the same
-// published-version read `update -check` does, and say one line when it is
-// ahead of either half — the only way a release reaches an operator who
-// never runs `update` by hand.
+// work's preflight and status make the same published-version read
+// `update -check` does, and say one line when it is ahead of either half —
+// the only way a release reaches an operator who never runs `update` by
+// hand.
 
 // publishedVersionQuiet is publishedVersion best-effort: "" on a failed or
 // timed-out read rather than an error, the same tolerance probeUsage has —

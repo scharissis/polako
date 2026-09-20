@@ -139,7 +139,7 @@ func TestPublishedVersionQuietReadsTheMarketplaceFile(t *testing.T) {
 	}
 }
 
-// --- the passive notice (docs/plans/update.md ticket 2) ---
+// --- the passive notice ---
 
 func TestUpdateAvailableLine(t *testing.T) {
 	t.Parallel()
