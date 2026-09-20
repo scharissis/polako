@@ -41,8 +41,14 @@ const docsBudget = 500
 // already at the ceiling, and documenting that a refused git credential no
 // longer stops the shift the way a dead remote does could not fit without
 // cutting an existing paragraph the issue did not ask to touch.
+//
+// reference.md's ceiling moved again in issue #403, for the same reason
+// once more: documenting -visual-evidence's new row had no slack left at
+// 509, and the only cut on offer — the -dry-run example's `remote`
+// narration line — would have left that example showing less than a
+// default-flags run actually prints, which is worse than the line it saves.
 var docsDebt = map[string]int{
-	"reference.md": 509,
+	"reference.md": 510,
 	"behaviour.md": 501,
 }
 

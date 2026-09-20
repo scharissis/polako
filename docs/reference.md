@@ -57,6 +57,7 @@ leap of faith. `-dry-run` takes it out:
 $ polako work -dir ../my-project -dry-run
 example/my-project — running /polako:implement-issue per issue, polling every 5m0s
   dry-run  resolving the next issue only — no claude run, no GitHub write, no run data
+  remote   on, but no claude CLI registers headless runs with Remote Control yet — runs stay on this machine and unwatched, and nothing is sent anywhere (-remote=false silences this line; a later polako lights the flag up once a CLI supports it)
 ready: #12, #14, #19
 waiting on an answer: #9
 issue #12 would be worked next; the invocation follows on stdout
