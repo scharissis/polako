@@ -130,7 +130,8 @@ worktree while invoking the main checkout's copy of this script, so the tool
 grant can stay a fixed `Bash(evals/run.sh:*)`), then grade what the run left
 behind (`lib/grade.py`). `file_exists` and `no_leak` graders are checked
 mechanically — the latter is this runner's own invention, a case-insensitive
-substring search over everything under `.eval/` for one `term`, and it exists
+substring search over everything under `.eval/` but the scratch origin (the
+seeded hook names the terms itself) for one `term`, and it exists
 because "the run never quoted this string anywhere" is a claim a judge can
 mishear as easily as confirm; `push-blocked` is the one case that uses it.
 `llm` graders go to a judge session — haiku, the CLI's own default judge,
