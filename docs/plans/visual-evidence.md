@@ -162,10 +162,10 @@ The lifecycle, every step inside the grant:
 5. Stop the server. This is not optional: a server left up holds the port the
    repo's own e2e suite wants during the test run.
 
-Whether a headless run can stop a background shell under this allowlist is
-open question 1. If it can't, the fallback is one blocking command, `npx --yes
-start-server-and-test "<start>" <url> "<shots>"`, at the cost of one more
-ad-hoc package and a port known up front.
+Probe 1 says a headless run can stop its own background shell under this
+allowlist, so this is the lifecycle. The fallback it would have needed — one
+blocking `npx --yes start-server-and-test "<start>" <url> "<shots>"`, one more
+ad-hoc package and a port known up front — stays unused.
 
 **Look before publishing.** The run Reads each PNG. It drops an error overlay,
 a blank page, a login wall, and anything that looks like a credential or
@@ -276,8 +276,8 @@ the fake CLI finds the issue number with `lastNumber` (`main_test.go:965`).
   the ref. The skill fetches it only to find a parent to append to. Delete the
   branch and no drain behaves differently; old PRs lose their pictures.
 - **Unattended means no prompts.** Every command is `git -C`, a package
-  manager with a path flag, `npx`, Read or Write. Stopping the server is the
-  one open item, and it is probe 1.
+  manager with a path flag, `npx`, Read or Write. Stopping the server is
+  TaskStop, which probe 1 saw run ungranted and unprompted.
 - **Issue text is data**, and **issue text never makes a run dearer.** Routes,
   counts and sizes are fixed by the skill and the diff. The flag is the only
   switch.
@@ -485,8 +485,30 @@ assumes:
 
 Probes 3 to 6, run 2026-09-20 with a real push to this repo — one orphan
 commit, `bee66f1`, on `polako-evidence` — and written up on issue #402.
-Probes 1, 2 and 7 are still open; ticket 4 needs them.
+Probes 1, 2 and 7, run the same day on claude 2.1.274, macOS arm64, node 24,
+with no Playwright cache on the box, and written up on issue #404.
 
+1. Yes to all three. `claude -p --permission-mode acceptEdits` with exactly
+   `defaultTools` started `npm --prefix <dir> run dev` with Bash's
+   `run_in_background`. The tool result names an output file; Read on that
+   file showed the `Local:` line. No BashOutput, `sleep` or `curl` needed.
+   TaskStop stopped the shell — it is a deferred tool, not in the grant, and
+   ran with no prompt and no entry in `permission_denials`. A second server
+   left running was gone once the session exited: the shell dies with the
+   session. So the lifecycle is background-and-stop. Unchecked: a server slow
+   to print its URL, where the run has to Read the file more than once.
+2. No, it doesn't fetch Chromium itself. With no browser cached, `npx --yes
+   playwright screenshot` exits 1 in about 13s on `Error: command.parse:
+   Executable doesn't exist at <cache>/chromium_headless_shell-<rev>/…` plus a
+   boxed "Please run … npx playwright install". Match on `Executable doesn't
+   exist`. `npx --yes playwright install chromium` then ran clean with stdin
+   at `/dev/null`: 66s, a 277 MiB download, 557 MB on disk under
+   `~/Library/Caches/ms-playwright` (`~/.cache/ms-playwright` on Linux). Two
+   CDN mirrors timed out at 30s each and it fell through to the next by
+   itself, still exit 0. The retried shot took 3.5s and wrote a 13 KB
+   1280x800 PNG. Unchecked: the failure text on a Linux box missing system
+   libraries — no such box to hand — so the ladder treats any second failure
+   as the rung, whatever it says.
 3. Yes, on a public repo, web: the image renders inline in an issue comment,
    and the URL answers 200 `image/png`. A private repo, the mobile app and
    GHES are unchecked.
@@ -504,6 +526,10 @@ Probes 1, 2 and 7 are still open; ticket 4 needs them.
    is made, and a push from a stale parent is rejected as non-fast-forward
    without `--force`. `ls-remote --heads` exits 0 either way: absent is empty
    output, not a failed command. Older git and Windows are unchecked.
+7. Yes. Read on a 1280x800 PNG returns an image block headless, and the model
+   described it correctly. Context grew by 1,488 tokens across the Read,
+   about 1,400 of that the image. Four shots are under 6k tokens and four
+   pairs under 12k, so four stays the cap.
 
 ## Work items
 
@@ -514,7 +540,7 @@ without its switch — with an Operator impact line naming the dev server, the
 one-time Chromium download, the `polako-evidence` branch and the flag. 6
 follows in the next. 7 waits for a row to ask for it.
 
-- [ ] The seven probes have answers, recorded here
+- [x] The seven probes have answers, recorded here
 - [ ] The evidence scratch dir is not left work (ticket 1)
 - [ ] Eval case `visual-change` (ticket 2)
 - [ ] Evidence images get a channel (ticket 3)
