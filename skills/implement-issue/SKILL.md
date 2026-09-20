@@ -515,15 +515,26 @@ don't post again, and stop.
         lint, the same tools step 1 used — a fix commit that breaks the
         build is only caught here if this looks again — then check every
         "fixed" finding's commit (a "not fixed" one has none, by design, and
-        isn't part of this check) against `git -C <worktree> log --oneline`
-        for issue-$issue's own commits. Bare `git log --oneline` reads
-        whatever branch the session's cwd happens to have checked out, not
-        issue-$issue's, and "own" here means this branch's commits, this
-        run's or an earlier run's, not only ones made in this exact turn.
-        Every "fixed" finding has to sit on one of them; one that names a
-        file or commit from outside this branch's own history means the
-        base in a was wrong at the time c ran — `git revert` that one
-        finding's commit specifically (not a broader reset, which would
+        isn't part of this check) against `git -C <worktree> log
+        <base>..HEAD --oneline` for issue-$issue's own commits, `<base>` the
+        `origin/…` ref Phase 1 resolved — the same one a just
+        fast-forwarded the main checkout to, and c already diffed against.
+        Bare `git log --oneline` reads whatever branch the session's cwd
+        happens to have checked out, not issue-$issue's, and "own" here
+        means this branch's commits, this run's or an earlier run's, not
+        only ones made in this exact turn — both reasons the command names
+        `<worktree>` explicitly. Unranged, it would also list every commit
+        reachable from HEAD, inherited ones included — a fix landed on
+        already-merged code would pass the very check this audit exists to
+        catch — which is why `<base>..` is there too. The range still holds
+        on a resumed gate, which can span several runs and several base
+        refreshes: a re-fetches and re-resolves `<base>` unconditionally
+        before b's decision, every time step 2 reaches this point, so it's
+        current wherever d reads it, not a snapshot from whichever run
+        first reviewed.
+        Every "fixed" finding has to sit in that range; one that doesn't
+        means the base in a was wrong at the time c ran — `git revert` that
+        one finding's commit specifically (not a broader reset, which would
         undo later findings' legitimate fixes too), set its line back to
         "pending", correct the
         base, and invoke c again.
