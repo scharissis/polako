@@ -29,6 +29,18 @@ const planFile = "PLAN.md"
 // would otherwise make tidy refuse the worktree and pad a park message.
 const evidenceDir = ".polako-evidence"
 
+// scratchDir is where the skill tells a run — and the review agent it forks —
+// to put every throwaway file: a diff too big to read from Bash output, the
+// body file behind a `--body-file` comment. Discounted like evidenceDir, and
+// for a measured reason: the review agent's first reach is /tmp, which the
+// session refuses, and its fallback was an improvised name in the worktree
+// root (`issue425.diff`, `.review389.diff`, `pr_diff.txt`...), which no
+// pattern could discount and nothing deleted — so tidy refused the worktree
+// of every merged issue whose review had dumped a diff. One fixed directory
+// is the only spelling both halves can agree on; discounting untracked
+// `*.diff` instead would loosen the check on the one verb that can't be undone.
+const scratchDir = ".polako-scratch"
+
 // gitAuthFailure reports whether a git fetch's error is git's own credentials
 // being refused, SSH or HTTPS, rather than a dead remote, a down network or a
 // bad path. Substring rather than head-anchored like authFailure in

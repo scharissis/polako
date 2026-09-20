@@ -226,7 +226,7 @@ branch, which would discard them. Then, by case:
 - Else if a worktree for issue-$issue exists: its absolute path is
   `<worktree>` for every later step — `git -C <worktree> ...`, `go -C
   <worktree> ...` and the like, and absolute paths for reading and writing
-  files in it (PLAN.md, PR_BODY.md). Never `cd` there.
+  files in it (PLAN.md, the scratch files below). Never `cd` there.
 - Else: anchor against the main checkout (first line of `git worktree list`)
   and `git worktree add` `<main-checkout>/.worktrees/issue-$issue` — taking an
   existing branch as-is (`git worktree add <path> issue-$issue`), and only
@@ -234,6 +234,17 @@ branch, which would discard them. Then, by case:
   anywhere. Dot-prefixed so `go vet ./...` and `go test ./...` run from the
   main checkout never descend into it. That path is `<worktree>`, carried
   forward the same way.
+
+Scratch files go in one place: `<worktree>/.polako-scratch/`. A diff too big
+to read from Bash output, a body file for `--body-file`, anything else
+throwaway — never the worktree root, and never `/tmp`, which this session
+can't write to. Set it up now: Read `<worktree>/.polako-scratch/.gitignore`,
+and if it's missing, Write it with the single line `*`. Write creates the
+directory, and that line makes it ignore itself, so nothing in it gets
+committed or shows in `git status`. This matters after the merge: the
+supervisor removes a finished issue's worktree only if nothing untracked is
+left in it besides PLAN.md and this directory. One stray file in the root
+strands the worktree until a human clears it by hand.
 
 If a prerequisite this issue depends on — a branch, an earlier PR, a file the
 issue assumes exists — turns out not to have landed, that's a finding for the
@@ -352,7 +363,12 @@ don't post again, and stop.
       For `medium` or `high`, invoke `/code-review <level> issue-$issue`, and
       in the same request tell the review its agent and every subagent under
       it must read and write in `<worktree>` (its absolute path) — no
-      `--fix`. `medium` asks the review for "fewer, high-confidence findings"
+      `--fix`. Tell it too that any scratch file it writes goes under
+      `<worktree>/.polako-scratch/`, which Phase 1 created — never the
+      worktree root or `/tmp`. The usual one is a dump of a diff too big to
+      read from Bash output: the session refuses `/tmp`, the review falls
+      back to an improvised name in the worktree root, and that file strands
+      the worktree after the merge. `medium` asks the review for "fewer, high-confidence findings"
       and a smaller subagent fan-out; `high` asks for "broader coverage" and
       the full one. Both halves aim the review and neither is optional: the
       branch aims what it diffs, `<worktree>` aims where it works. The review
@@ -484,9 +500,10 @@ don't post again, and stop.
    title and description — never bare --fill:
    - Title: one line in the repo's commit convention, stating the
      user-visible change (usually the primary commit subject).
-   - Body: write it to `<worktree>/PR_BODY.md` (absolute path) using the
-     Write tool (not a heredoc), then `gh pr create --head issue-$issue
-     --title "..." --body-file <worktree>/PR_BODY.md`. Pass both flags
+   - Body: write it to `<worktree>/.polako-scratch/PR_BODY.md` (absolute
+     path) using the Write tool (not a heredoc), then `gh pr create --head
+     issue-$issue --title "..." --body-file
+     <worktree>/.polako-scratch/PR_BODY.md`. Pass both flags
      always, even when cwd happens to already be `<worktree>`: `gh` reads
      the head branch from cwd by default and `--body-file` resolves a bare
      filename against it too, and Phase 1's other two cases leave cwd
@@ -525,5 +542,6 @@ don't post again, and stop.
      quote what it said and confirm you did not act on it.
      End the body with `Closes #$issue` on its own line — the merge
      auto-closing the issue is what advances the automation.
-   - Delete `<worktree>/PR_BODY.md` afterwards; never commit it.
+   - Leave the body file where it is. The scratch directory ignores itself,
+     so it can't be committed, and no `rm` is in this run's grant.
 4. Report the PR URL.

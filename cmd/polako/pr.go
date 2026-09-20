@@ -394,11 +394,14 @@ func prCommentTools(prNumber int) string {
 
 // prCommentHow is the sentence every remediation prompt shares: the one form
 // of `gh pr comment` that prCommentTools grants. A run left to pick its own
-// spelling picks an inline --body, which is refused.
+// spelling picks an inline --body, which is refused. The file goes under
+// scratchDir and stays there: the run has no `rm` to delete it with, and a
+// stray body file in the worktree root is one tidy counts as left work.
 func prCommentHow(prNumber int) string {
-	return fmt.Sprintf("To comment, write the text to a file in the worktree, run "+
+	return fmt.Sprintf("To comment, write the text to a file under `%s/` in the worktree "+
+		"— never the worktree root, and never commit it — and run "+
 		"`gh pr comment %d --body-file <file>` — PR number first, that spelling, the "+
-		"only form this run is granted — then delete the file. ", prNumber)
+		"only form this run is granted. ", scratchDir, prNumber)
 }
 
 // remediationMaySayWhy is the clause every remediation park reason ends

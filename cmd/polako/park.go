@@ -229,10 +229,19 @@ func inspectLeftWork(ctx context.Context, cfg config, issue int) leftWork {
 			w.path = ""
 		}
 		for _, line := range strings.Split(string(out), "\n") {
-			if p := porcelainPath(line); p != "" && p != planFile && !strings.HasPrefix(p, evidenceDir+"/") {
+			if p := porcelainPath(line); p != "" && !skillScratch(p) {
 				w.dirty++
 			}
 		}
 	}
 	return w
+}
+
+// skillScratch reports whether a porcelain path is one of the skill's own
+// throwaway files rather than work a run left behind: the plan note, or
+// anything under the two scratch directories.
+func skillScratch(p string) bool {
+	return p == planFile ||
+		strings.HasPrefix(p, evidenceDir+"/") ||
+		strings.HasPrefix(p, scratchDir+"/")
 }

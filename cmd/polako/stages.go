@@ -188,9 +188,16 @@ func recognizeStage(name string, in map[string]any) stage {
 	case "Write", "Edit":
 		// planFile is the package's one name for this file; match it whichever
 		// separator the run's platform hands the model in an absolute path.
-		if fp := strOf(in, "file_path"); fp == planFile ||
+		fp := strOf(in, "file_path")
+		if fp == planFile ||
 			strings.HasSuffix(fp, "/"+planFile) || strings.HasSuffix(fp, `\`+planFile) {
 			return stagePlan
+		}
+		// Phase 1 writes scratchDir's .gitignore before anything is studied or
+		// planned. Narrated as a change, that one write would say
+		// "implementing…" and — forward only — swallow the two stages before it.
+		if strings.Contains(fp, "/"+scratchDir+"/") || strings.Contains(fp, `\`+scratchDir+`\`) {
+			return stageNone
 		}
 		return stageImplement
 	case "Skill":

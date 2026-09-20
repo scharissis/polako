@@ -901,6 +901,41 @@ func TestEvidenceDirSpellingMatchesTheSkill(t *testing.T) {
 	}
 }
 
+// scratchDir is a contract the same way planFile is: the supervisor discounts
+// left-work paths under that exact string, so the skill has to send every
+// throwaway file there by that spelling. The review gate is asserted apart
+// from the rest because its forked agent is the one that actually leaks — it
+// never reads SKILL.md, so it only knows the directory if the gate's request
+// names it. Before this, a diff dumped to an improvised name in the worktree
+// root made tidy refuse every such worktree after its merge.
+func TestSkillSendsScratchFilesToTheScratchDir(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+	flat := strings.Join(strings.Fields(skill), " ")
+
+	if !strings.Contains(flat, "<worktree>/"+scratchDir+"/.gitignore") {
+		t.Errorf("SKILL.md no longer sets up <worktree>/%s/.gitignore — without it the directory"+
+			" does not exist for a Bash redirect to land in, and does not ignore itself", scratchDir)
+	}
+	if !strings.Contains(flat, "--body-file <worktree>/"+scratchDir+"/PR_BODY.md") {
+		t.Errorf("SKILL.md no longer writes the PR body under %s — left in the worktree root, with"+
+			" no `rm` granted to delete it, it is one more file tidy counts as left work", scratchDir)
+	}
+
+	loc := regexp.MustCompile(`/code-review \S+ issue-\$issue`).FindStringIndex(flat)
+	if loc == nil {
+		t.Fatal("SKILL.md no longer invokes `/code-review <level> issue-$issue`")
+	}
+	window := flat[loc[0]:]
+	if len(window) > 600 {
+		window = window[:600]
+	}
+	if !strings.Contains(window, "<worktree>/"+scratchDir+"/") {
+		t.Errorf("the review gate invokes /code-review without telling it where scratch files go,"+
+			" so its agent dumps large diffs into the worktree root and the worktree can't be"+
+			" reclaimed after the merge:\n\t%s", window)
+	}
+}
+
 // Under headless `claude -p` — the only way the supervisor invokes the skill —
 // the model ending its turn is the process exiting. So a run that stops to wait
 // on something does not pause, it terminates: exit 0, no error, work left
