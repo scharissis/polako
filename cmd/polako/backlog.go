@@ -471,7 +471,7 @@ func (c config) dropExtendedFields() {
 	if c.queue != nil && c.queue.extendedFieldsOff.Swap(true) {
 		return
 	}
-	narrate(sevWarning, "gh too old to see sub-issues or blockedBy dependencies; "+
+	c.narrate(sevWarning, "gh too old to see sub-issues or blockedBy dependencies; "+
 		"container issues will be treated as workable and blocked issues will be treated as ready — upgrade gh")
 }
 
@@ -487,6 +487,6 @@ func (c config) sayProposals(n int) {
 	if c.queue != nil && c.queue.saidProposed.Swap(true) {
 		return
 	}
-	narrate(sevWarning, "ignoring %d proposed issue(s) awaiting curation — remove the %s label to queue them",
+	c.narrate(sevWarning, "ignoring %d proposed issue(s) awaiting curation — remove the %s label to queue them",
 		n, proposedLabel)
 }

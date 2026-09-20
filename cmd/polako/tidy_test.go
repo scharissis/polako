@@ -39,6 +39,7 @@ func tidyCfg(t *testing.T, st *ghState, dir string) config {
 	return config{
 		dir:          dir,
 		env:          fakeEnv(fakeGhEnv, path),
+		ui:           testUI(t),
 		ghBin:        fakeCLI(t),
 		repo:         "example/repo",
 		ghRepo:       "example/repo",

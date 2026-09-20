@@ -264,6 +264,7 @@ func fakeUsageConfig(t *testing.T, usageMode string) config {
 	// check in fakeClaude dispatches before the mode switch does.
 	return config{
 		env: fakeEnv(fakeClaudeEnv, "warmup", fakeUsageEnv, usageMode),
+		ui:  testUI(t),
 		dir: t.TempDir(),
 		// skill names this repo's own plugin, the same as an unconfigured
 		// -skill would default to — probeUsage cuts this the way

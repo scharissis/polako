@@ -23,6 +23,7 @@ func homeDir(t *testing.T) string {
 func metricsConfig(t *testing.T, spec string) config {
 	t.Helper()
 	return config{
+		ui:             testUI(t),
 		repo:           "scharissis/polako",
 		skill:          defaultSkill,
 		permissionMode: "acceptEdits",

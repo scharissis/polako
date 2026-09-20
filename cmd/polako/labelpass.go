@@ -13,7 +13,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -153,7 +152,7 @@ func normaliseProposals(ctx context.Context, cfg config, before map[int]bool, mi
 				clean = false
 				continue
 			}
-			log.Printf("%s: stripped %q from #%d — a proposal carries only %s", logTag, l.Name, r.Number, proposedLabel)
+			cfg.logf("%s: stripped %q from #%d — a proposal carries only %s", logTag, l.Name, r.Number, proposedLabel)
 			out.stripped++
 		}
 		if !hasProposed {
@@ -162,7 +161,7 @@ func normaliseProposals(ctx context.Context, cfg config, before map[int]bool, mi
 					fmt.Sprintf("could not add %s to #%d: %v", proposedLabel, r.Number, err))
 				clean = false
 			} else {
-				log.Printf("%s: labelled #%d %s", logTag, r.Number, proposedLabel)
+				cfg.logf("%s: labelled #%d %s", logTag, r.Number, proposedLabel)
 				out.added++
 			}
 		}
@@ -175,7 +174,7 @@ func normaliseProposals(ctx context.Context, cfg config, before map[int]bool, mi
 				out.failures = append(out.failures,
 					fmt.Sprintf("could not attach the %q milestone to #%d: %v", milestone, r.Number, err))
 			} else {
-				log.Printf("%s: attached the %q milestone to #%d", logTag, milestone, r.Number)
+				cfg.logf("%s: attached the %q milestone to #%d", logTag, milestone, r.Number)
 				out.milestone = append(out.milestone, r.Number)
 			}
 		}
@@ -191,20 +190,20 @@ func normaliseProposals(ctx context.Context, cfg config, before map[int]bool, mi
 // prefix is the narration tag the caller's own log lines already use ("plan"
 // or "health"), so a mixed shift's terminal still says which run this line
 // belongs to.
-func (o labelPassOutcome) report(prefix string, maxCost float64, rep runReport) {
+func (o labelPassOutcome) report(cfg config, prefix string, maxCost float64, rep runReport) {
 	if o.listErr != nil {
-		narrate(sevError, "%s: could not list what the run created to normalise it (%v) — "+
+		cfg.narrate(sevError, "%s: could not list what the run created to normalise it (%v) — "+
 			"check the backlog for issues missing the %s label", prefix, o.listErr, proposedLabel)
 		return
 	}
 	if maxCost > 0 && rep.costUSD >= maxCost {
-		narrate(sevWarning, "%s: the run cost $%.2f, at or past the -max-cost of $%.2f", prefix, rep.costUSD, maxCost)
+		cfg.narrate(sevWarning, "%s: the run cost $%.2f, at or past the -max-cost of $%.2f", prefix, rep.costUSD, maxCost)
 	}
 	sev := sevSuccess
 	if rep.capped || len(o.failures) > 0 {
 		sev = sevWarning
 	}
-	narrate(sev, "%s: %s", prefix, o.summary(rep))
+	cfg.narrate(sev, "%s: %s", prefix, o.summary(rep))
 }
 
 func (o labelPassOutcome) summary(rep runReport) string {

@@ -16,7 +16,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 )
@@ -318,7 +317,7 @@ func (r *issueLoop) dispatchRun() (*pullRequest, error) {
 	// context, so a resume interrupted before its first event looks exactly
 	// like a dead session and is not one.
 	if resumeTarget != "" && runErr != nil && ctx.Err() == nil && !rep.started {
-		narrate(sevWarning, "session %s could not be resumed — the next attempt starts a fresh run, "+
+		cfg.narrate(sevWarning, "session %s could not be resumed — the next attempt starts a fresh run, "+
 			"which re-derives where the last one got to from the worktree", resumeTarget)
 		r.st.session = ""
 	}
@@ -338,7 +337,7 @@ func (r *issueLoop) dispatchRun() (*pullRequest, error) {
 				"a skill copied into ~/.claude/skills is not",
 				runErr, cfg.skill))
 		}
-		log.Printf("claude run ended with error (%v) — checking what it left behind", runErr)
+		cfg.logf("claude run ended with error (%v) — checking what it left behind", runErr)
 	}
 
 	pr, err := prForBranch(ctx, cfg, r.branch)
@@ -463,11 +462,11 @@ func (a *runAttempt) waitOutLimit() (*pullRequest, error) {
 		// Slack behind the CLI's own clock: a resume dispatched on the named
 		// minute can still be refused by it.
 		wait = time.Until(reset) + 90*time.Second
-		log.Printf("claude is over its usage limit until %s — waiting %s, then resuming "+
+		a.cfg.logf("claude is over its usage limit until %s — waiting %s, then resuming "+
 			"(Ctrl+C is safe: state is on GitHub, and rerunning after the reset "+
 			"picks this issue back up)", reset.Format("15:04 MST"), dur(wait))
 	} else {
-		log.Printf("claude is over its usage limit, and the refusal names no reset time "+
+		a.cfg.logf("claude is over its usage limit, and the refusal names no reset time "+
 			"this supervisor can read (%q) — retrying every %s until it lifts "+
 			"(Ctrl+C is safe: state is on GitHub, and rerunning later picks this "+
 			"issue back up)", clip(a.rep.limitMsg, 120), dur(a.cfg.poll))
@@ -505,12 +504,12 @@ func (a *runAttempt) handOffQuestion() (*pullRequest, error) {
 		// no-conflict guarantee is untouched.
 		return nil, &deferredError{baseline: baseline}
 	}
-	log.Printf("issue #%d is labelled %q — waiting for a reply on the thread",
+	cfg.logf("issue #%d is labelled %q — waiting for a reply on the thread",
 		issue, awaitingAnswerLabel)
 	if err := waitForReply(ctx, cfg, issue, baseline); err != nil {
 		return nil, err
 	}
-	log.Printf("somebody replied on #%d — re-running to fold the answers in", issue)
+	cfg.logf("somebody replied on #%d — re-running to fold the answers in", issue)
 	a.ledger.clearRetries()
 	a.st.answered = true
 	return nil, nil
@@ -542,11 +541,11 @@ func (a *runAttempt) resumeCrash() (*pullRequest, error) {
 		// anyone here knows — so it was not the crash loop -retries exists to
 		// stop. A host that sleeps four times across one long issue must not
 		// park it.
-		log.Printf("%s (retry %d/%d; the last run got work done before it "+
+		cfg.logf("%s (retry %d/%d; the last run got work done before it "+
 			"ended, so the -retries budget starts over) in %s",
 			mode, a.ledger.resumes, cfg.resumeCeiling, cfg.retryWait)
 	} else {
-		log.Printf("%s (attempt %d/%d) in %s",
+		cfg.logf("%s (attempt %d/%d) in %s",
 			mode, a.ledger.fruitless, cfg.retries, cfg.retryWait)
 	}
 	if err := sleep(a.ctx, cfg.retryWait); err != nil {
@@ -617,7 +616,7 @@ func (a *runAttempt) afterCleanExit() (*pullRequest, error) {
 		// an API drop, a rate limit, a host that woke mid-run — and this is
 		// not: the process ended because the model ended its turn, and waiting
 		// changes nothing about what the next attempt finds.
-		log.Printf("the run ended its turn without opening a PR but left work "+
+		a.cfg.logf("the run ended its turn without opening a PR but left work "+
 			"behind — resuming it to finish (%d/%d)", a.ledger.cleanResumes, cleanExitResumeCeiling)
 		return nil, nil
 	}
@@ -720,7 +719,7 @@ func (r *issueLoop) superviseToClose(pr *pullRequest) error {
 	ctx, cfg, issue := r.ctx, r.cfg, r.issue
 	switch pr.State {
 	case "OPEN":
-		log.Printf("PR #%d open — waiting for merge (%s)", pr.Number, pr.URL)
+		cfg.logf("PR #%d open — waiting for merge (%s)", pr.Number, pr.URL)
 		state, err := supervisePR(ctx, cfg, issue, pr.Number, r.tally)
 		if err != nil {
 			if ctx.Err() == nil { // not Ctrl+C: remediation ran out of attempts
@@ -732,7 +731,7 @@ func (r *issueLoop) superviseToClose(pr *pullRequest) error {
 		fallthrough
 	case "MERGED", "CLOSED":
 		if pr.State == "MERGED" {
-			narrate(sevSuccess, "PR #%d merged — cleaning up and advancing", pr.Number)
+			cfg.narrate(sevSuccess, "PR #%d merged — cleaning up and advancing", pr.Number)
 			// Reclaims this issue's worktree and branch, plus anything else a
 			// hand-merge between shifts left finished. The sweep fast-forwards
 			// the mirror before it judges anything, which is also the sync this

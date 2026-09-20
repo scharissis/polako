@@ -31,7 +31,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -166,7 +165,7 @@ func planRun(ctx context.Context, cfg config, opt planOptions, milestone string,
 	}
 
 	prompt := planPrompt(cfg, opt)
-	log.Printf("running %s from %s — capped at %s", cfg.skill, planPromptLabel(opt), plural(opt.maxIssues, "issue"))
+	cfg.logf("running %s from %s — capped at %s", cfg.skill, planPromptLabel(opt), plural(opt.maxIssues, "issue"))
 	started := time.Now()
 	rep, runErr := execClaude(ctx, cfg, prompt, "", cfg.skill, 0)
 	// Timed here, before the label pass, so the record's wall time is the run's
@@ -184,17 +183,17 @@ func planRun(ctx context.Context, cfg config, opt planOptions, milestone string,
 	passCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 	defer cancel()
 	if ctx.Err() != nil {
-		narrate(sevWarning, "the run was interrupted — still normalising anything it created before exiting")
+		cfg.narrate(sevWarning, "the run was interrupted — still normalising anything it created before exiting")
 	}
 	pass := normaliseProposals(passCtx, cfg, before, milestone, "plan")
-	pass.report("plan", opt.maxCost, rep)
+	pass.report(cfg, "plan", opt.maxCost, rep)
 
 	// The pricing line: what the operator's own history says this batch will
 	// cost to implement. After the label pass, because it prices the proposals
 	// the pass just counted; only when there are proposals, because a batch of
 	// nothing has nothing to price and nothing to curate.
 	if pass.created > 0 {
-		narrate(sevProgress, "plan: %s", proposalPricingLine(cfg.rec.metricsDir(), cfg.repo, pass.created, time.Now()))
+		cfg.narrate(sevProgress, "plan: %s", proposalPricingLine(cfg.rec.metricsDir(), cfg.repo, pass.created, time.Now()))
 	}
 
 	// The two traces the run leaves, both after the label pass so they carry
@@ -523,25 +522,25 @@ func ensureMilestone(ctx context.Context, cfg config, title string) error {
 // leaves that repository exactly as it found it.
 func planDryRun(cfg config, opt planOptions, milestone string, hierarchical bool, out io.Writer) error {
 	if opt.vision != "" {
-		log.Printf("planning from %s", opt.vision)
+		cfg.logf("planning from %s", opt.vision)
 	} else {
-		log.Printf("planning from an inline brief (%d characters)", len(strings.TrimSpace(opt.brief)))
+		cfg.logf("planning from an inline brief (%d characters)", len(strings.TrimSpace(opt.brief)))
 	}
 	if opt.focus != "" {
-		log.Printf("focus: %s", opt.focus)
+		cfg.logf("focus: %s", opt.focus)
 	}
-	log.Printf("issue cap: %d, epics included", opt.maxIssues)
+	cfg.logf("issue cap: %d, epics included", opt.maxIssues)
 	if milestone == "" {
-		log.Println("milestone: off")
+		cfg.logf("milestone: off")
 	} else {
-		log.Printf("milestone: %q — a real run would create it at preflight", milestone)
+		cfg.logf("milestone: %q — a real run would create it at preflight", milestone)
 	}
 	if hierarchical {
-		log.Println("issue shape: hierarchical — epics with sub-issues")
+		cfg.logf("issue shape: hierarchical — epics with sub-issues")
 	} else {
-		log.Println("issue shape: flat — this gh has no `gh issue create --parent`, so a tracking issue holds the design")
+		cfg.logf("issue shape: flat — this gh has no `gh issue create --parent`, so a tracking issue holds the design")
 	}
-	log.Println("dry run — no proposed label, no milestone, no run data; the invocation follows on stdout")
+	cfg.logf("dry run — no proposed label, no milestone, no run data; the invocation follows on stdout")
 
 	_, err := fmt.Fprintln(out, commandLine(cfg.claudeBin, planArgs(cfg, opt)))
 	return err

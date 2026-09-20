@@ -87,7 +87,7 @@ func retryRead[T any](ctx context.Context, cfg config, what string, read func() 
 		if attempt >= ghReads {
 			return zero, err
 		}
-		narrate(sevWarning, "transient: %s failed (%v) — will retry in %s (%d of %d)",
+		cfg.narrate(sevWarning, "transient: %s failed (%v) — will retry in %s (%d of %d)",
 			what, err, dur(cfg.ghRetryWait), attempt, ghReads)
 		if err := sleep(ctx, cfg.ghRetryWait); err != nil {
 			return zero, err

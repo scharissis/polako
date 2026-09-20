@@ -30,6 +30,7 @@ func statusConfigFor(t *testing.T, st *ghState) (config, string) {
 	return config{
 		dir:          drainCfg.dir,
 		env:          slices.Clone(drainCfg.env), // fake gh/claude handshake, for the child
+		ui:           testUI(t),
 		ghBin:        drainCfg.ghBin,
 		claudeBin:    drainCfg.claudeBin,
 		repo:         drainCfg.repo,

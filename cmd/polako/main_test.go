@@ -920,20 +920,52 @@ func lastNumber(prompt string) string {
 	return n
 }
 
-// captureLog redirects both narration loggers into one buffer and returns it.
-// The union is the shift-log view: these tests pin what happened, not how the
-// terminal chose to present it, so a line moving between channels breaks
-// nothing here. Presentation has its own tests in ui_test.go.
-//
-// Wired through a ui rather than pointing both loggers at the buffer, because
-// the buffer needs what production has: one mutex ordering the two loggers'
-// writers — the stderr copier goroutine writes detail while the scan loop and
-// the watchdogs write log, and two loggers' own locks do not know each other.
+// testCaptureUI maps a running test to its one ui. Keyed by *testing.T — which
+// every test and subtest owns uniquely — so parallel tests never see each
+// other's entry; this is the per-test replacement for the global logger
+// redirect that used to make narration tests serial. Every config builder
+// sets cfg.ui to testUI(t), so all of a test's production narration lands in
+// one buffer it can assert on, whatever order the test builds things in.
+var testCaptureUI sync.Map // *testing.T -> *ui
+
+// testUI is this test's ui, created on first use: an io.Discard terminal and
+// a buffer for everything (captureLog hands that buffer back). Presentation
+// tests that need the terminal and file sinks kept apart, or -verbose, call
+// captureUI first with a ui of their own.
+func testUI(t *testing.T) *ui {
+	if u, ok := testCaptureUI.Load(t); ok {
+		return u.(*ui)
+	}
+	u := &ui{terminal: io.Discard, file: &bytes.Buffer{}}
+	actual, loaded := testCaptureUI.LoadOrStore(t, u)
+	if !loaded {
+		t.Cleanup(func() { testCaptureUI.Delete(t) })
+	}
+	return actual.(*ui)
+}
+
+// captureLog returns the buffer this test's narration is captured into — the
+// shift-log view these tests assert on, terminal presentation and the
+// milestone/detail split alike collapsed into one stream (ui_test.go covers
+// presentation separately). No global to redirect, so the test is free to
+// run t.Parallel(). Order-independent with the config builders: both resolve
+// the same ui through testUI.
 func captureLog(t *testing.T) *bytes.Buffer {
 	t.Helper()
-	var buf bytes.Buffer
-	wireSinks(t, &ui{terminal: io.Discard, file: &buf})
-	return &buf
+	return testUI(t).file.(*bytes.Buffer)
+}
+
+// captureUI registers a caller-built ui for this test, for the presentation
+// tests that need the terminal and file sinks kept apart or -verbose set —
+// what testUI's io.Discard terminal collapses. Config builders route
+// production narration into it the same way. Call it before anything that
+// reaches testUI.
+func captureUI(t *testing.T, u *ui) {
+	t.Helper()
+	if _, loaded := testCaptureUI.LoadOrStore(t, u); loaded {
+		t.Fatal("captureUI: this test already has a ui — call it before captureLog or any config builder")
+	}
+	t.Cleanup(func() { testCaptureUI.Delete(t) })
 }
 
 // Only SIGINT used to cancel the run. A SIGTERM — a machine shutting down, a
@@ -995,7 +1027,7 @@ func TestLogEventRendersProgressLines(t *testing.T) {
 		`{"type":"result","subtype":"success","duration_ms":1141000,"num_turns":74,"total_cost_usd":4.12,"is_error":false,` +
 			`"result":"Unknown skill: polako:implement-issue"}`,
 	}
-	var el eventLog
+	el := eventLog{u: testUI(t)}
 	for _, e := range events {
 		if ev, ok := parseEvent([]byte(e)); ok {
 			el.event(ev)
@@ -1033,7 +1065,7 @@ func TestLogEventNamesTheSession(t *testing.T) {
 	if !ok {
 		t.Fatal("init event should parse")
 	}
-	(&eventLog{}).event(ev)
+	(&eventLog{u: testUI(t)}).event(ev)
 	if want := "session started (model claude-opus-5, session 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9)"; !strings.Contains(buf.String(), want) {
 		t.Errorf("output missing %q\ngot:\n%s", want, buf.String())
 	}
@@ -1890,6 +1922,7 @@ func fakeClaudeConfig(t *testing.T, mode string) config {
 	t.Helper()
 	return config{
 		env:            fakeEnv(fakeClaudeEnv, mode), // handed to the child, not set on the parent
+		ui:             testUI(t),
 		dir:            t.TempDir(),
 		claudeBin:      fakeCLI(t), // this test package, re-entered via TestMain
 		skill:          defaultSkill,
@@ -2092,7 +2125,7 @@ func TestExecClaudeHeartbeatSpeaksWhileTheTerminalIsQuiet(t *testing.T) {
 // not a special case.
 func TestExecClaudeHeartbeatIsSilentUnderVerbose(t *testing.T) {
 	var buf bytes.Buffer
-	wireSinks(t, &ui{terminal: &buf, verbose: true})
+	captureUI(t, &ui{terminal: &buf, verbose: true})
 	cfg := fakeClaudeConfig(t, "heartbeat")
 	cfg.heartbeat = 300 * time.Millisecond
 

@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
-	"os"
 	"strings"
 	"testing"
 )
@@ -80,13 +78,10 @@ func TestPreflightRefusesAnUngatedPublicQueue(t *testing.T) {
 // still tells them a real run would refuse.
 func TestPreflightLetsADryRunLookThroughTheGate(t *testing.T) {
 	_, checkout := upstream(t)
+	logged := captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{Visibility: "PUBLIC"})
 	cfg.dir = checkout
 	cfg.dryRun = true
-
-	var logged strings.Builder
-	log.SetOutput(&logged)
-	defer log.SetOutput(os.Stderr)
 
 	if err := preflight(context.Background(), &cfg); err != nil {
 		t.Fatalf("the gate stopped a dry run, which changes nothing: %v", err)
@@ -253,7 +248,7 @@ func TestWarnOnVersionSkew(t *testing.T) {
 			if skill == "" {
 				skill = defaultSkill
 			}
-			warnOnVersionSkew(tc.binary, config{skill: skill, pluginVersion: tc.plugin, pluginID: tc.id})
+			warnOnVersionSkew(tc.binary, config{ui: testUI(t), skill: skill, pluginVersion: tc.plugin, pluginID: tc.id})
 
 			out := buf.String()
 			got := strings.Contains(out, "version skew")
@@ -368,6 +363,7 @@ func TestVersionSkewRemedyAgreesWithInstallDocs(t *testing.T) {
 	}
 	buf := captureLog(t)
 	warnOnVersionSkew("0.4.0", config{
+		ui:            testUI(t),
 		skill:         defaultSkill,
 		pluginVersion: "0.3.0",
 		pluginID:      "polako@scharissis",

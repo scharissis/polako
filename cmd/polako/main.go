@@ -33,7 +33,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -106,14 +105,11 @@ func main() {
 	runReport := func(name string, run func() error) {
 		// Narration (transient retries, gh warnings, the proposed-issues
 		// notice) goes through the same sinks and rendering rules work's
-		// does, rather than the bare stdlib logger this used to leave it
-		// on — colour on a capable stderr TTY, plain otherwise. Stamps stay
-		// off unconditionally: unlike work, status and stats never open a
-		// shift log, so there's no stamped copy elsewhere to justify a
+		// does — colour on a capable stderr TTY, plain otherwise. Stamps
+		// stay off unconditionally: unlike work, status and stats never open
+		// a shift log, so there's no stamped copy elsewhere to justify a
 		// terminal that drops them, and turning stamps on here would put a
 		// timestamp on piped output that never had one.
-		log.SetFlags(0) // a report, not a log
-		log.SetOutput(milestoneWriter{u: sinks})
 		sinks.stamp = stampOff
 		if isTerminal(os.Stderr) {
 			sinks.style = styleFor(true)
@@ -122,7 +118,7 @@ func main() {
 			if errors.Is(err, errFlagsReported) {
 				os.Exit(2) // the usage is already on screen
 			}
-			log.Fatalf("%s: %v", name, err)
+			sinks.fatal("%s: %v", name, err)
 		}
 	}
 	switch os.Args[1] {
@@ -203,8 +199,6 @@ func main() {
 	// dropping it — worn quietly rather than shown or hidden outright, and
 	// deliberately not conditioned on whether a shift log exists this run —
 	// plus colour when the platform and NO_COLOR allow it.
-	log.SetFlags(0)
-	log.SetOutput(milestoneWriter{u: sinks})
 	sinks.verbose = cfg.verbose
 	if isTerminal(os.Stderr) {
 		sinks.stamp = stampTTYDim
@@ -216,10 +210,10 @@ func main() {
 			// would mean hand-rolling NotifyContext to record which one arrived,
 			// and what an operator does about it — rerun, everything is on
 			// GitHub — is the same in all three cases.
-			log.Println("interrupted — state is on GitHub; rerun to resume")
+			sinks.logf("interrupted — state is on GitHub; rerun to resume")
 			os.Exit(130)
 		}
-		fatal("stopping: %v", err)
+		sinks.fatal("stopping: %v", err)
 	}
 }
 
@@ -282,7 +276,7 @@ func preflight(ctx context.Context, cfg *config) error {
 	if cfg.logDir != "" {
 		path, err := sinks.openShiftLog(cfg.logDir, cfg.repo, cfg.shiftID)
 		if err != nil {
-			narrate(sevWarning, logLostFmt, err)
+			cfg.narrate(sevWarning, logLostFmt, err)
 		} else {
 			logPath = path
 		}
@@ -292,14 +286,14 @@ func preflight(ctx context.Context, cfg *config) error {
 	// operator decides what to change. refuseOrNote is that one carve-out,
 	// shared so a real refusal and its dry-run preview can never say it two
 	// different ways.
-	if err := refuseOrNote(queueGate(repoView.Visibility, cfg.label, cfg.ungated), cfg.dryRun); err != nil {
+	if err := refuseOrNote(*cfg, queueGate(repoView.Visibility, cfg.label, cfg.ungated), cfg.dryRun); err != nil {
 		return err
 	}
 	if cfg.ungated && strings.EqualFold(repoView.Visibility, "PUBLIC") {
 		// Said out loud like -remote and -post-summary are, and for the same
 		// reason: the environment can set this too, and it is the one flag that
 		// hands the queue to whoever can open an issue.
-		log.Printf("-ungated on a public repository — every open issue is in the queue, whoever filed it")
+		cfg.logf("-ungated on a public repository — every open issue is in the queue, whoever filed it")
 	}
 	// Defined up front rather than when a run first needs it: GitHub refuses to
 	// apply a label the repository never declared, and the run that applies this
@@ -318,9 +312,9 @@ func preflight(ctx context.Context, cfg *config) error {
 	if snap, ok := probeUsage(ctx, *cfg); ok {
 		cfg.usage = &snap
 	}
-	log.Printf("%s — running /%s per issue, polling every %s", cfg.repo, cfg.skill, cfg.poll)
+	cfg.logf("%s — running /%s per issue, polling every %s", cfg.repo, cfg.skill, cfg.poll)
 	skewErr := versionSkewGate(polakoVersion(), *cfg)
-	if err := refuseOrNote(skewErr, cfg.dryRun); err != nil {
+	if err := refuseOrNote(*cfg, skewErr, cfg.dryRun); err != nil {
 		return err
 	}
 	if skewErr == nil {
@@ -330,7 +324,7 @@ func preflight(ctx context.Context, cfg *config) error {
 			// cfg.ignoreSkew, same as queueGate reads cfg.ungated), so this
 			// is the operator's own line recording that an override actually
 			// fired, not silent normal operation.
-			log.Printf("-ignore-skew: the installed %s plugin (%s) is behind this binary (%s) — running anyway",
+			cfg.logf("-ignore-skew: the installed %s plugin (%s) is behind this binary (%s) — running anyway",
 				pluginName, plugin, self)
 		}
 		// Only the "behind" case above ever refuses; a newer or ambiguous
@@ -342,7 +336,7 @@ func preflight(ctx context.Context, cfg *config) error {
 		// worded line about the same skew.
 		warnOnVersionSkew(polakoVersion(), *cfg)
 	}
-	settingsBlock(preflightPairs(*cfg, logPath))
+	settingsBlock(*cfg, preflightPairs(*cfg, logPath))
 	return nil
 }
 
@@ -435,9 +429,9 @@ func preflightPairs(cfg config, logPath string) [][2]string {
 // it writes straight to an io.Writer, bypassing emit() entirely, which would
 // lose both of those. pairWidth is what the two share, so the startup block
 // lines up the same way status and stats already do.
-func settingsBlock(pairs [][2]string) {
+func settingsBlock(cfg config, pairs [][2]string) {
 	width := pairWidth(pairs)
 	for _, p := range pairs {
-		narrate(sevSettings, "  %-*s  %s", width, p[0], p[1])
+		cfg.narrate(sevSettings, "  %-*s  %s", width, p[0], p[1])
 	}
 }

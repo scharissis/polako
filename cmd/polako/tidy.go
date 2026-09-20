@@ -20,7 +20,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -344,7 +343,7 @@ func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply
 func tidySweep(ctx context.Context, cfg config, watched int) {
 	results, err := reclaim(ctx, cfg, true, watched)
 	if err != nil {
-		narrate(sevWarning, "could not sweep finished worktrees (%v) — nothing was reclaimed; "+
+		cfg.narrate(sevWarning, "could not sweep finished worktrees (%v) — nothing was reclaimed; "+
 			"run `polako tidy` by hand to clear them", err)
 		return
 	}
@@ -361,14 +360,14 @@ func tidySweep(ctx context.Context, cfg config, watched int) {
 			// Nothing is wrong: the operator clears the label when they are
 			// ready, and that is their cue, not something for the drain to
 			// raise an alarm about.
-			detail.Printf("left %s%d alone: %s", cfg.branchPrefix, r.issue, r.reason)
+			cfg.detailf("left %s%d alone: %s", cfg.branchPrefix, r.issue, r.reason)
 		case r.issue == watched:
 			// The issue whose merge just advanced the drain, and its worktree
 			// could not be reclaimed — almost always uncommitted work the merge
 			// did not take. That is the operator's to resolve now, not a line to
 			// bury: `git worktree remove --force` is the manual escape once
 			// they have saved or discarded it.
-			narrate(sevWarning, "PR merged but the worktree for %s%d could not be reclaimed: %s — "+
+			cfg.narrate(sevWarning, "PR merged but the worktree for %s%d could not be reclaimed: %s — "+
 				"clear it by hand once you have dealt with what is in it",
 				cfg.branchPrefix, r.issue, r.reason)
 		case r.reason == "still open":
@@ -379,13 +378,13 @@ func tidySweep(ctx context.Context, cfg config, watched int) {
 		default:
 			// A branch that looked finished but failed a safety check: worth a
 			// line in the shift log, though it is nobody's to act on mid-drain.
-			detail.Printf("left %s%d alone: %s", cfg.branchPrefix, r.issue, r.reason)
+			cfg.detailf("left %s%d alone: %s", cfg.branchPrefix, r.issue, r.reason)
 		}
 	}
 	if len(reclaimed) > 0 {
 		// The branch is always deleted, the worktree only when one was there —
 		// so this counts issues, and names them by branch.
-		log.Printf("reclaimed %s: %s", plural(len(reclaimed), "finished issue"), strings.Join(reclaimed, ", "))
+		cfg.logf("reclaimed %s: %s", plural(len(reclaimed), "finished issue"), strings.Join(reclaimed, ", "))
 	}
 }
 

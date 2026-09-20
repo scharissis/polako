@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"slices"
 	"strconv"
 	"strings"
@@ -38,14 +37,14 @@ func queueGate(visibility, label string, ungated bool) error {
 // nothing and writes nothing. queueGate and versionSkewGate both go through
 // this so a real refusal and its dry-run preview can never drift into saying
 // it two different ways.
-func refuseOrNote(err error, dryRun bool) error {
+func refuseOrNote(cfg config, err error, dryRun bool) error {
 	if err == nil {
 		return nil
 	}
 	if !dryRun {
 		return err
 	}
-	log.Printf("note: a real run would refuse to start here — %v", err)
+	cfg.logf("note: a real run would refuse to start here — %v", err)
 	return nil
 }
 
@@ -173,7 +172,7 @@ func warnOnVersionSkew(binary string, cfg config) {
 	if !ok {
 		return
 	}
-	log.Printf("version skew: this binary is %s but the installed %s plugin is %s — "+
+	cfg.logf("version skew: this binary is %s but the installed %s plugin is %s — "+
 		"they are meant to ship together, and the supervisor finds a PR by the "+
 		"branch name the skill chooses. To fix, %s", self, pluginName, plugin, skewRemedy(cfg))
 }

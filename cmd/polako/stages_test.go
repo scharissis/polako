@@ -29,13 +29,14 @@ func jsonString(s string) string {
 func narratedStages(t *testing.T, events ...string) []string {
 	t.Helper()
 	buf := captureLog(t)
+	u := testUI(t)
 	var n stageNarrator
 	for _, e := range events {
 		ev, ok := parseEvent([]byte(e))
 		if !ok {
 			t.Fatalf("parseEvent rejected %s", e)
 		}
-		n.observe(ev)
+		n.observe(u, ev)
 	}
 	var got []string
 	for _, ln := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
@@ -175,9 +176,7 @@ func TestStageNarrationHandlesParallelToolCalls(t *testing.T) {
 // terminal and the shift log on the same terms as "session started".
 func TestStageNarrationIsAMilestoneOnBothSinks(t *testing.T) {
 	var term, file bytes.Buffer
-	wireSinks(t, &ui{terminal: &term, file: &file})
-
-	var el eventLog
+	el := eventLog{u: &ui{terminal: &term, file: &file}}
 	for _, e := range []string{
 		`{"type":"system","subtype":"init","model":"claude-opus-5","session_id":"s1"}`,
 		bash("gh issue view 214 --json body"),

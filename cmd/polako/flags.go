@@ -9,7 +9,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -49,7 +48,12 @@ type config struct {
 	// suite uses it to hand a child its fake-CLI handshake variables without
 	// calling t.Setenv on the parent, which would bar the test from
 	// t.Parallel(). See capture, dispatchClaude and notify.
-	env          []string
+	env []string
+	// ui is where this config's work narrates — the process-wide sinks in
+	// production (parseFlags leaves it nil and the wrappers below fall back
+	// to sinks), a test's own capturing ui under the suite. Threaded rather
+	// than global so parallel tests do not share one logger. See ui.go.
+	ui           *ui
 	skill        string
 	branchPrefix string
 	label        string
@@ -344,7 +348,7 @@ func parseFlags() config {
 	// Before Parse, so an argument on the command line always wins over a
 	// preference set in the environment.
 	if err := applyEnvDefaults(flag.CommandLine); err != nil {
-		log.Fatalf("%v", err)
+		sinks.fatal("%v", err)
 	}
 	flag.Parse()
 
@@ -375,7 +379,7 @@ func parseFlags() config {
 	cfg.skip = parseSkip(skip)
 	abs, err := filepath.Abs(cfg.dir)
 	if err != nil {
-		log.Fatalf("resolving -dir: %v", err)
+		sinks.fatal("resolving -dir: %v", err)
 	}
 	cfg.dir = abs
 	return cfg

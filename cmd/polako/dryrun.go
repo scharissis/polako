@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"slices"
 	"strings"
 )
@@ -35,7 +34,7 @@ func dryRun(ctx context.Context, cfg config, out io.Writer) error {
 	}
 	for _, c := range containers {
 		if c.finished() && !c.held {
-			log.Printf("epic #%d: all %s closed — would comment on it and close it", c.number, plural(c.total, "sub-issue"))
+			cfg.logf("epic #%d: all %s closed — would comment on it and close it", c.number, plural(c.total, "sub-issue"))
 		}
 	}
 	// What the operator would see if they ran it for real, in the two queues
@@ -47,12 +46,12 @@ func dryRun(ctx context.Context, cfg config, out io.Writer) error {
 		return queue
 	}
 	if queue := workable(ready); len(queue) > 0 {
-		log.Printf("ready: %s", issueRefs(queue))
+		cfg.logf("ready: %s", issueRefs(queue))
 	}
 	if waiting := workable(blocked); len(waiting) > 0 {
-		log.Printf("waiting on an answer: %s", issueRefs(waiting))
+		cfg.logf("waiting on an answer: %s", issueRefs(waiting))
 	}
-	logHeldBack(heldBack, cfg.skip)
+	logHeldBack(cfg, heldBack, cfg.skip)
 	// The drain takes the lowest ready issue. With none, it runs the lowest
 	// issue waiting on an answer, to find out whether the reply is already on
 	// the thread — which is what awaitAnswer does on a drain that flagged none
@@ -62,7 +61,7 @@ func dryRun(ctx context.Context, cfg config, out io.Writer) error {
 		issue = pickLowest(blocked, cfg.skip)
 	}
 	if issue == 0 {
-		log.Println("no open issues — nothing to work")
+		cfg.logf("no open issues — nothing to work")
 		return nil
 	}
 	// Restart safety is the first thing an issue is put through, and the answer
@@ -85,12 +84,12 @@ func dryRun(ctx context.Context, cfg config, out io.Writer) error {
 		default:
 			next = "park the issue for a human"
 		}
-		log.Printf("issue #%d already has PR #%d (%s) on branch %s — it would %s "+
+		cfg.logf("issue #%d already has PR #%d (%s) on branch %s — it would %s "+
 			"rather than run claude: %s", issue, pr.Number, pr.State, branch, next, pr.URL)
 		return nil
 	}
 	runCfg, prompt, _ := issueRun(cfg, issue)
-	log.Printf("issue #%d would be worked next; the invocation follows on stdout", issue)
+	cfg.logf("issue #%d would be worked next; the invocation follows on stdout", issue)
 	_, err = fmt.Fprintln(out, commandLine(cfg.claudeBin, buildArgs(runCfg, prompt, "")))
 	return err
 }

@@ -9,7 +9,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -396,6 +395,7 @@ func isIssueCreate(name string, input json.RawMessage) bool {
 // exact. The stage narrator lives here for the same per-invocation reason —
 // see stages.go.
 type eventLog struct {
+	u       *ui // where each line narrates — the dispatch's config.ui
 	started bool
 	stages  stageNarrator
 }
@@ -409,7 +409,7 @@ type eventLog struct {
 // one milestone per phase (stages.go): a watching terminal sees a run as its
 // phases, and the shift log keeps the whole conversation.
 func (el *eventLog) event(ev streamEvent) {
-	el.stages.observe(ev)
+	el.stages.observe(el.u, ev)
 	switch ev.Type {
 	case "system":
 		if ev.Subtype == "init" {
@@ -425,21 +425,21 @@ func (el *eventLog) event(ev streamEvent) {
 				// A later init is the main loop waking on a finished background
 				// task, not a new session — same model, same id. To the shift
 				// log, so a heavy review gate does not read as a crash loop.
-				detail.Printf("[claude] resumed after a background task (model %s%s)", ev.Model, session)
+				el.u.detailf("[claude] resumed after a background task (model %s%s)", ev.Model, session)
 				return
 			}
 			el.started = true
-			log.Printf("[claude] session started (model %s%s)", ev.Model, session)
+			el.u.logf("[claude] session started (model %s%s)", ev.Model, session)
 		}
 	case "assistant":
 		for _, c := range ev.Message.Content {
 			switch c.Type {
 			case "text":
 				if t := strings.TrimSpace(c.Text); t != "" {
-					detail.Printf("[claude] %s", clip(t, 160))
+					el.u.detailf("[claude] %s", clip(t, 160))
 				}
 			case "tool_use":
-				detail.Printf("[claude] → %s%s", c.Name, toolDetail(c.Input))
+				el.u.detailf("[claude] → %s%s", c.Name, toolDetail(c.Input))
 			}
 		}
 	case "result":
@@ -452,9 +452,9 @@ func (el *eventLog) event(ev streamEvent) {
 		// of those read as a run that cost ten times what it did.
 		if t := strings.TrimSpace(ev.Result); t != "" {
 			if ev.IsError {
-				log.Printf("[claude] %s", clip(t, 160))
+				el.u.logf("[claude] %s", clip(t, 160))
 			} else {
-				detail.Printf("[claude] %s", clip(t, 160))
+				el.u.detailf("[claude] %s", clip(t, 160))
 			}
 		}
 	}

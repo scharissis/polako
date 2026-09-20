@@ -25,7 +25,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -770,7 +769,7 @@ func resolveDataDir(spec, sub, flagName, noun string) string {
 	if dir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			log.Printf("no home directory %s (%v) — continuing without it; "+
+			sinks.logf("no home directory %s (%v) — continuing without it; "+
 				"pass -%s <dir> to choose a location, or -%s off to stop asking", noun, err, flagName, flagName)
 			return ""
 		}
@@ -911,7 +910,7 @@ func (r *recorder) warn(err error) {
 		return
 	}
 	r.warned = true
-	narrate(sevWarning, "run data not recorded (%v) — the shift continues; -metrics off silences this", err)
+	sinks.narrate(sevWarning, "run data not recorded (%v) — the shift continues; -metrics off silences this", err)
 }
 
 // recordFile partitions records one file per repository, so deleting one

@@ -8,7 +8,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"strings"
 )
 
@@ -74,13 +73,13 @@ func worktreeFor(list, branch string) string {
 // loudly because a skipped sync is what puts a stale base under the next review.
 func syncDefaultBranch(ctx context.Context, cfg config) {
 	if _, err := git(ctx, cfg, "fetch", "origin", "--quiet"); err != nil {
-		narrate(sevWarning, "could not fetch origin, so the default branch may be behind "+
+		cfg.narrate(sevWarning, "could not fetch origin, so the default branch may be behind "+
 			"and a review may run against a stale base: %v", err)
 		return
 	}
 	head, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short")
 	if err != nil {
-		narrate(sevWarning, "could not resolve origin's default branch, so %s is left as it is "+
+		cfg.narrate(sevWarning, "could not resolve origin's default branch, so %s is left as it is "+
 			"— run `git remote set-head origin -a` there if reviews look mis-scoped: %v", cfg.dir, err)
 		return
 	}
@@ -91,18 +90,18 @@ func syncDefaultBranch(ctx context.Context, cfg config) {
 		return
 	}
 	if got := strings.TrimSpace(string(on)); got != local {
-		log.Printf("%s is on %s, not %s — leaving it alone, but a run's review base "+
+		cfg.logf("%s is on %s, not %s — leaving it alone, but a run's review base "+
 			"comes from %s, so check it before trusting a review's scope", cfg.dir, got, local, local)
 		return
 	}
 	before, _ := git(ctx, cfg, "rev-parse", "HEAD")
 	if _, err := git(ctx, cfg, "merge", "--ff-only", remote); err != nil {
-		narrate(sevWarning, "could not fast-forward %s to %s, so a review may run against a stale "+
+		cfg.narrate(sevWarning, "could not fast-forward %s to %s, so a review may run against a stale "+
 			"base — commit, stash or discard whatever is in the way in %s: %v",
 			local, remote, cfg.dir, err)
 		return
 	}
 	if after, _ := git(ctx, cfg, "rev-parse", "HEAD"); string(after) != string(before) {
-		detail.Printf("fast-forwarded %s to %s", local, remote)
+		cfg.detailf("fast-forwarded %s to %s", local, remote)
 	}
 }

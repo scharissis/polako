@@ -675,6 +675,7 @@ func drainConfig(t *testing.T, mode string, st *ghState) (config, string) {
 	}
 	return config{
 		env: fakeEnv(fakeGhEnv, path, fakeClaudeEnv, mode),
+		ui:  testUI(t),
 		// Not a checkout at all, which is deliberate: worktree cleanup is
 		// best-effort, and so is the probe that says what a parked run left
 		// behind — every git call here fails, so every park in these tests

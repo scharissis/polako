@@ -27,7 +27,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os/exec"
 	"path/filepath"
 	"time"
@@ -146,7 +145,7 @@ func healthRun(ctx context.Context, cfg config, opt healthOptions, out io.Writer
 	}
 
 	prompt := healthPrompt(cfg, opt)
-	log.Printf("running %s against %s — capped at %s", cfg.skill, cfg.dir, plural(opt.maxIssues, "issue"))
+	cfg.logf("running %s against %s — capped at %s", cfg.skill, cfg.dir, plural(opt.maxIssues, "issue"))
 	started := time.Now()
 	rep, runErr := execClaude(ctx, cfg, prompt, "", cfg.skill, 0)
 	ended := time.Now()
@@ -156,13 +155,13 @@ func healthRun(ctx context.Context, cfg config, opt healthOptions, out io.Writer
 	passCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 	defer cancel()
 	if ctx.Err() != nil {
-		narrate(sevWarning, "the run was interrupted — still normalising anything it created before exiting")
+		cfg.narrate(sevWarning, "the run was interrupted — still normalising anything it created before exiting")
 	}
 	pass := normaliseProposals(passCtx, cfg, before, "", "health")
-	pass.report("health", opt.maxCost, rep)
+	pass.report(cfg, "health", opt.maxCost, rep)
 
 	if pass.created > 0 {
-		narrate(sevProgress, "health: %s", proposalPricingLine(cfg.rec.metricsDir(), cfg.repo, pass.created, time.Now()))
+		cfg.narrate(sevProgress, "health: %s", proposalPricingLine(cfg.rec.metricsDir(), cfg.repo, pass.created, time.Now()))
 	}
 
 	cfg.rec.recordHealth(cfg, rep, healthFacts{
@@ -285,17 +284,17 @@ func healthPreflight(ctx context.Context, cfg *config, opt *healthOptions) (hier
 // records nothing: pointing it at an unfamiliar repository leaves that
 // repository exactly as it found it.
 func healthDryRun(cfg config, opt healthOptions, hierarchical bool, out io.Writer) error {
-	log.Printf("auditing %s", cfg.dir)
+	cfg.logf("auditing %s", cfg.dir)
 	if opt.focus != "" {
-		log.Printf("focus: %s", opt.focus)
+		cfg.logf("focus: %s", opt.focus)
 	}
-	log.Printf("issue cap: %d, epics included", opt.maxIssues)
+	cfg.logf("issue cap: %d, epics included", opt.maxIssues)
 	if hierarchical {
-		log.Println("issue shape: hierarchical — epics with sub-issues")
+		cfg.logf("issue shape: hierarchical — epics with sub-issues")
 	} else {
-		log.Println("issue shape: flat — this gh has no `gh issue create --parent`, so a tracking issue holds the design")
+		cfg.logf("issue shape: flat — this gh has no `gh issue create --parent`, so a tracking issue holds the design")
 	}
-	log.Println("dry run — no proposed label, no run data; the invocation follows on stdout")
+	cfg.logf("dry run — no proposed label, no run data; the invocation follows on stdout")
 
 	_, err := fmt.Fprintln(out, commandLine(cfg.claudeBin, healthArgs(cfg, opt)))
 	return err

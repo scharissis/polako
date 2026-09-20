@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os/exec"
 	"strings"
 	"sync/atomic"
@@ -246,7 +245,7 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes strin
 	// is the operator's own doing, not a cause to explain.
 	if err != nil && ctx.Err() == nil && !cfg.verbose {
 		if t := strings.TrimSpace(rep.stderrTail); t != "" {
-			log.Printf("last stderr: %s", clip(t, 300))
+			cfg.logf("last stderr: %s", clip(t, 300))
 		}
 	}
 	return rep, err
@@ -288,7 +287,8 @@ func (t *tailWriter) String() string { return string(t.buf) }
 func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes string, limit time.Duration) (runReport, error) {
 	rep := runReport{sessionID: resumeID, turns: -1, exitCode: -1}
 	args := buildArgs(cfg, prompt, resumeID)
-	detail.Printf("running: %s %s", cfg.claudeBin, strings.Join(args, " "))
+	sink := cfg.sink()
+	sink.detailf("running: %s %s", cfg.claudeBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.claudeBin, args...)
 	cmd.Dir = cfg.dir
 	cmd.Env = childEnv(cfg.env) // nil in production, so os/exec passes the parent env through
@@ -298,7 +298,7 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	// cannot carry: a CLI that refuses the registration flags prints a usage
 	// error and emits no events at all, and a crashed run's last words are
 	// often the only cause on record.
-	stderrLines := &lineWriter{prefix: "[claude stderr]"}
+	stderrLines := &lineWriter{u: sink, prefix: "[claude stderr]"}
 	errTail := &tailWriter{}
 	cmd.Stderr = io.MultiWriter(stderrLines, errTail)
 	// A writer that is not an *os.File makes os/exec hand the child a pipe
@@ -334,7 +334,7 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 				case <-t.C:
 					idle := time.Since(time.Unix(0, lastEvent.Load()))
 					if idle > cfg.stall {
-						narrate(sevWarning, "no activity for %s — killing the run to resume it",
+						sink.narrate(sevWarning, "no activity for %s — killing the run to resume it",
 							idle.Round(time.Millisecond))
 						stalled.Store(true)
 						_ = cmd.Process.Kill()
@@ -353,7 +353,7 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	var overspent atomic.Bool
 	if limit > 0 {
 		budget := time.AfterFunc(limit, func() {
-			log.Printf("this run has used the %s of -max-issue-time the issue had left — killing it",
+			sink.logf("this run has used the %s of -max-issue-time the issue had left — killing it",
 				dur(limit))
 			overspent.Store(true)
 			_ = cmd.Process.Kill()
@@ -401,17 +401,17 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 						return
 					default:
 					}
-					// max(lastTerm, invokeStart): sinks outlives one
+					// max(lastTerm, invokeStart): the ui outlives one
 					// invocation, so a previous issue's last line must not
 					// read as this run's silence.
 					since := invokeStart
-					if lt := time.Unix(0, activeUI().lastTerm.Load()); lt.After(since) {
+					if lt := time.Unix(0, sink.lastTerm.Load()); lt.After(since) {
 						since = lt
 					}
 					if time.Since(since) < cfg.heartbeat {
 						continue
 					}
-					narrate(sevProgress, "[claude] %s", heartbeatLine(
+					sink.narrate(sevProgress, "[claude] %s", heartbeatLine(
 						time.Since(invokeStart), int(hbTools.Load()), stage(hbPhase.Load())))
 				}
 			}
@@ -423,7 +423,7 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 64*1024), maxEventBytes)
 	missing := "" // the diagnosis, once the inventory rules the prompt's command out
-	var el eventLog
+	el := eventLog{u: sink}
 	for sc.Scan() {
 		lastEvent.Store(time.Now().UnixNano())
 		ev, ok := parseEvent(sc.Bytes())
@@ -453,7 +453,7 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 				missing += " (it does list " + strings.Join(near, ", ") + ")"
 			}
 			rep.skillMissing = true
-			log.Printf("%s — stopping the run", missing)
+			sink.logf("%s — stopping the run", missing)
 			_ = cmd.Process.Kill()
 		}
 		// The issue cap, plan's and health's alike. Killed here, in the reader,
@@ -462,7 +462,7 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 		// the label pass (runPlan, runHealth) would keep. Normalised, not stranded.
 		if cfg.maxIssues > 0 && rep.issueCreates >= cfg.maxIssues && !rep.capped {
 			rep.capped = true
-			narrate(sevWarning, "the run has filed %s, the whole of -max-issues — killing it; "+
+			sink.narrate(sevWarning, "the run has filed %s, the whole of -max-issues — killing it; "+
 				"the label pass still normalises what it created", plural(cfg.maxIssues, "issue"))
 			_ = cmd.Process.Kill()
 		}
@@ -509,7 +509,7 @@ func dispatchClaude(ctx context.Context, cfg config, prompt, resumeID, invokes s
 	// each is reported as itself below, not as a finish.
 	if rep.hasResult {
 		sev, line := finishLine(&rep)
-		narrate(sev, "%s", line)
+		sink.narrate(sev, "%s", line)
 	}
 	if rep.skillMissing {
 		return rep, fmt.Errorf("%w: %s", errNoWork, missing)

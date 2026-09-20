@@ -30,6 +30,7 @@ func planTestConfig(t *testing.T, st *ghState) (cfg config, statePath, checkout 
 	cfg = config{
 		dir:            checkout,
 		env:            slices.Clone(drainCfg.env), // the fake gh and claude handshake, for the child
+		ui:             testUI(t),
 		ghBin:          drainCfg.ghBin,
 		claudeBin:      drainCfg.claudeBin,
 		ghRetryWait:    time.Millisecond,
