@@ -866,6 +866,7 @@ func drainConfig(t *testing.T, mode string, st *ghState) (config, string) {
 		branchPrefix:   "issue-",
 		permissionMode: "acceptEdits",
 		tools:          "Read",
+		visualEvidence: true,
 		poll:           10 * time.Millisecond,
 		stall:          10 * time.Second,
 		ghRetryWait:    time.Millisecond,

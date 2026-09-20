@@ -145,7 +145,11 @@ func resumePrompt(skill string, issue int, reason string) string {
 // changing with every issue number.
 func issueRun(cfg config, issue int) (config, string, string) {
 	cfg.addTools = resolveTools(cfg.addTools, issueLabelTools(issue)+","+issueCloseTool(issue))
-	return cfg, fmt.Sprintf("/%s %d", cfg.skill, issue), cfg.skill
+	prompt := fmt.Sprintf("/%s %d", cfg.skill, issue)
+	if !cfg.visualEvidence {
+		prompt += " no-evidence"
+	}
+	return cfg, prompt, cfg.skill
 }
 
 // issueLabelTools grants a run the two commands it needs to raise and lower

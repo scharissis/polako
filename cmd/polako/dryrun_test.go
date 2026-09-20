@@ -175,6 +175,20 @@ func TestDryRunPrintsTheInvocationARunWouldMake(t *testing.T) {
 	if !strings.Contains(buf.String(), want) {
 		t.Errorf("the dry run printed an invocation no run makes\nwant: %s\ngot:\n%s", want, buf.String())
 	}
+
+	// -visual-evidence=false is the one flag that changes the slash prompt
+	// itself, not a claude flag, so the dry run's whole promise — print the
+	// exact invocation — depends on it reaching the printed argv too. A fresh
+	// config and issue: the one above already got worked by the drain call.
+	offCfg, _ := drainConfig(t, "stream", &ghState{Issues: map[string]*fakeIssue{"2": {Open: true}}})
+	offCfg.visualEvidence = false
+	var offOut strings.Builder
+	if err := dryRun(context.Background(), offCfg, &offOut); err != nil {
+		t.Fatalf("dryRun: %v", err)
+	}
+	if !strings.Contains(offOut.String(), "no-evidence") {
+		t.Errorf("-visual-evidence=false should print the no-evidence argument, got:\n%s", offOut.String())
+	}
 }
 
 // The dry run routes through the policy seam, so an implement run's -effort
