@@ -824,6 +824,30 @@ func TestReviewGateRecordsResumeMarkers(t *testing.T) {
 	}
 }
 
+// Issue #464: the post-fix audit used to check "fixed" findings' commits
+// against a bare `git log --oneline`, which lists every commit reachable
+// from HEAD, inherited ones included — so a fix landed on already-merged
+// code passed the very check meant to catch a stale base. The audit needs a
+// range, not the whole history, and it must not regress back to the
+// unranged spelling silently.
+func TestReviewGateAuditsARangeNotWholeHistory(t *testing.T) {
+	t.Parallel()
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	flat := strings.Join(strings.Fields(skill), " ")
+	if !regexp.MustCompile("`git -C <worktree> log <base>\\.\\.HEAD --oneline`").MatchString(flat) {
+		t.Error("the post-fix audit no longer ranges its `git log` call with `<base>..HEAD` —" +
+			" a bare `git -C <worktree> log --oneline` lists every commit reachable from HEAD," +
+			" inherited ones included, so a fix landed on a stale, already-merged base would pass" +
+			" the check this audit exists to catch (issue #464)")
+	}
+	if !strings.Contains(flat, "re-fetches and re-resolves `<base>` unconditionally") {
+		t.Error("the audit's range no longer explains that `<base>` is re-resolved unconditionally" +
+			" by step a on every pass — without that, the range can't be trusted to stay current" +
+			" across a gate resumed over several runs and base refreshes")
+	}
+}
+
 // The base refresh has to be unconditional — not nested under the resume
 // shortcut, and not something the code-review-unavailable fallback could
 // read as skippable — or a resumed run, or one using the substitute review
