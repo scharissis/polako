@@ -1479,6 +1479,21 @@ func TestPRCommentToolsStayPinnedToOnePR(t *testing.T) {
 	}
 }
 
+// issue #386: a remediation run pasted raw `git push` stderr — naming the
+// operator's SSH key — into a PR comment, twice on the same PR. All three
+// remediation prompts (remediateConflicts, remediateChecks, remediateReview)
+// share this one sentence, so one assertion covers all three.
+func TestPRCommentHowSaysDescribeDontPaste(t *testing.T) {
+	how := prCommentHow(42)
+	for _, marker := range []string{"own words", "never paste raw git, ssh, gh or env output"} {
+		if !strings.Contains(how, marker) {
+			t.Errorf("prCommentHow no longer says %q — without it a remediation run has"+
+				" nothing telling it not to paste raw command output into a PR comment"+
+				" (issue #386): %q", marker, how)
+		}
+	}
+}
+
 // Whether a review is still owed an answer is decided from one `pr view`
 // payload alone, so that a drain restarted mid-flight reaches the same verdict
 // as the one that dispatched the run.

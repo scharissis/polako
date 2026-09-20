@@ -1,6 +1,6 @@
 # Eval suite for the shipped skills
 
-Eight cases that grade what a run *does*, not what a `SKILL.md` says. Each one
+Nine cases that grade what a run *does*, not what a `SKILL.md` says. Each one
 scaffolds a scratch git repo, points a stand-in `gh` at fixtures, runs a real
 skill invocation, and scores the artifacts left behind.
 
@@ -12,6 +12,7 @@ skill invocation, and scores the artifacts left behind.
 | `resume-existing-plan` | implement-issue | an existing worktree and PLAN.md are resumed, not rewritten |
 | `one-turn` | implement-issue | a slow verification step is waited out in the turn, not deferred to one that never comes |
 | `visual-change` | implement-issue | a screenshot reaches `polako-evidence` and the PR body's blob link names a real commit on it |
+| `push-blocked` | implement-issue | a rejected push is described in the run's own words, in a question on the thread — never with the rejection's raw text, which names a key, a home path and a username |
 | `plan-vision` | plan-backlog | a vision document becomes labelled, sized, parented proposals — and the gap the backlog already covers is not re-proposed |
 | `review-health` | review-health | a repo's planted structural problems become labelled, sized proposals, each resting on a measurement or a named location, the missing size gate proposed as its own issue, and the overlap the backlog already covers left alone |
 
@@ -27,6 +28,14 @@ what the skill does today — the capture pipeline it grades ships across
 `docs/plans/visual-evidence.md`'s tickets 3–6, so most of its graders read red
 until then; `case.yaml` says so, and one of them stays red on purpose even
 after capture ships, until the before shot lands.
+
+`push-blocked` seeds a pre-receive hook on the scratch origin that rejects
+every branch but `main`, with a rejection message shaped like a real one — an
+identity-check failure naming a fake key file, home path and username. `gh pr
+create` in the stand-in pushes the head branch first, the same as the real
+`gh` does when a branch has no upstream, so the rejection surfaces exactly
+where issue #386 found it: a blocked run with nothing to post but a
+description of the failure.
 
 `plan-vision` and `review-health` are the odd shape: their subjects write no
 code at all. `plan-vision` seeds a `VISION.md` and an open backlog that already
@@ -119,8 +128,13 @@ case's prompt in a headless session with the plugin loaded (from this checkout,
 or from `--plugin-dir` — how an `implement-issue` run drives the suite from its
 worktree while invoking the main checkout's copy of this script, so the tool
 grant can stay a fixed `Bash(evals/run.sh:*)`), then grade what the run left
-behind (`lib/grade.py`). `file_exists` graders are checked mechanically; `llm`
-graders go to a judge session — haiku, the CLI's own default judge,
+behind (`lib/grade.py`). `file_exists` and `no_leak` graders are checked
+mechanically — the latter is this runner's own invention, a case-insensitive
+substring search over everything under `.eval/` but the scratch origin (the
+seeded hook names the terms itself) for one `term`, and it exists
+because "the run never quoted this string anywhere" is a claim a judge can
+mishear as easily as confirm; `push-blocked` is the one case that uses it.
+`llm` graders go to a judge session — haiku, the CLI's own default judge,
 `--judge-model` to override — fed the recorded artifacts, repository state and a
 tool-call timeline, all of which is also written to each case's `evidence.md` so
 a verdict can be audited rather than trusted. Exit 0 is green; 1 means a grader
@@ -230,7 +244,11 @@ the graders are no longer read-only theory. What that run settled:
 top of "Running it" — so everything CLI-specific is still unverified: the
 grader key spellings beyond what `--help` shows (including the `regex` grader
 recovered from the binary — `name` + `target` + `pattern`, `target:
-last_message` reading the agent's final message — which no case uses yet);
+last_message` reading the agent's final message — which no case uses yet, and
+`no_leak`, which no CLI grader answers to at all: `push-blocked` runs today
+only through `run.sh`, and a `plugin eval` run of it would need `no_leak`
+translated to `regex` once it is clear whether `target` can read a workspace
+file rather than only the final message);
 whether the real runner's cwd is the workspace the scaffold assumes (if not,
 set `EVAL_WORKSPACE` — `lib/scaffold.sh` honours it — rather than rewriting
 paths in every case; `run.sh` guarantees the assumption by construction, so
@@ -239,5 +257,5 @@ workspace settings the scaffold writes (if it does, #126 is a by-hand quirk;
 if not, every case fails loudly on its first `gh` call); whether its `llm`
 graders can read workspace files or only the transcript; and whether
 `--ablation none` scores `tool_used` graders it would otherwise treat as
-indicators. Check those five on the first entitled run, before reading
+indicators. Check those six on the first entitled run, before reading
 anything into scores — then fold the answers in above and delete this section.

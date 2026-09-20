@@ -234,6 +234,21 @@ func TestHealthSkillCarriesTheHouseStyle(t *testing.T) {
 	}
 }
 
+// issue #386: same gap as implement-issue and plan-backlog. Mirrors
+// TestSkillDescribesDontPaste and TestPlanSkillDescribesDontPaste.
+func TestHealthSkillDescribesDontPaste(t *testing.T) {
+	skill := healthSkill(t)
+
+	flat := strings.Join(strings.Fields(skill), " ")
+	for _, marker := range []string{"Describe, don't paste", "never as raw"} {
+		if !strings.Contains(flat, marker) {
+			t.Errorf("SKILL.md's house-style copy no longer says %q — without it a run"+
+				" reporting a gh rejection or a degraded mode has nothing telling it not to"+
+				" paste raw command output into a proposal (issue #386)", marker)
+		}
+	}
+}
+
 // Mirrors TestPlanSkillStatesTheTitleConvention (issue #292): this skill told
 // a run to spell `--title "..."` and never said what belonged in the quotes,
 // so titles were conventional only by accident of which repo loads polako's

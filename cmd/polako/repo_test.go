@@ -467,6 +467,20 @@ func TestPlanSkillCarriesTheHouseStyle(t *testing.T) {
 	}
 }
 
+// issue #386: same gap, plan-backlog's copy. Mirrors TestSkillDescribesDontPaste.
+func TestPlanSkillDescribesDontPaste(t *testing.T) {
+	skill := planSkill(t)
+
+	flat := strings.Join(strings.Fields(skill), " ")
+	for _, marker := range []string{"Describe, don't paste", "never as raw"} {
+		if !strings.Contains(flat, marker) {
+			t.Errorf("SKILL.md's house-style copy no longer says %q — without it a run"+
+				" reporting a gh rejection or a degraded mode has nothing telling it not to"+
+				" paste raw command output into a proposal (issue #386)", marker)
+		}
+	}
+}
+
 // issue #292: both proposal-filing skills told a run to spell `--title "..."`
 // and never said what belonged in the quotes, so titles were conventional
 // only by accident of which repo happened to load CLAUDE.md. Mirrors
@@ -1257,6 +1271,24 @@ func TestSkillCarriesTheHouseStyle(t *testing.T) {
 		if !strings.Contains(flat, marker) {
 			t.Errorf("SKILL.md's house-style copy no longer says %q — the skill runs where"+
 				" polako's CLAUDE.md is not loaded, so this is the only copy of the rule", marker)
+		}
+	}
+}
+
+// issue #386: a blocked run pasted raw `git push` stderr — naming the
+// operator's SSH key — into a comment on a public issue, twice. Nothing told
+// it not to; House style said what a question must contain, not what it must
+// leave out. Mirrors TestPlanSkillDescribesDontPaste and
+// TestHealthSkillDescribesDontPaste.
+func TestSkillDescribesDontPaste(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	flat := strings.Join(strings.Fields(skill), " ")
+	for _, marker := range []string{"Describe, don't paste", "never as raw"} {
+		if !strings.Contains(flat, marker) {
+			t.Errorf("SKILL.md's house-style copy no longer says %q — without it a blocked"+
+				" run has nothing telling it not to paste raw git/ssh/gh/env output onto a"+
+				" public thread (issue #386)", marker)
 		}
 	}
 }
