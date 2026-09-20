@@ -98,11 +98,11 @@ citing an unidentified developer, clear the quarantine attribute yourself:
 By hand, that's the same two commands as always — `update` wants the full
 `plugin@marketplace` id; the bare name it reports as not found, even
 installed — followed by the binary, pinned to the published version rather
-than `@latest`:
+than `@latest`. `polako update -check` prints that version as `published:`:
 
 ```bash
 claude plugin marketplace update scharissis && claude plugin update polako@scharissis
-go install github.com/scharissis/polako/cmd/polako@v0.23.0
+go install github.com/scharissis/polako/cmd/polako@vX.Y.Z
 ```
 
 If they end up mismatched anyway, the supervisor says so at startup and names

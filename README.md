@@ -159,6 +159,7 @@ scharissis/polako
   awaiting you  1 issue — #9 (quiet 26h)
   parked        1 issue — #5, labelled needs-human
   proposed      2 issues — #27, #28, labelled proposed
+  containers    1 issue — #12 (2/5 closed)
   next          #14 — its branch already has PR #61, so it would wait on that rather than run the skill again
 
 open prs on issue branches
@@ -168,7 +169,9 @@ open prs on issue branches
 needs you: reply on #9; review and merge PR #61; decide what to do about #5 (drop needs-human to requeue); curate #27, #28 (drop proposed to queue them)
 ```
 
-A shift ends the same way — merged, parked and why, dollars spent — see
+On a repository with plans under `docs/plans/`, a `plan documents` table sits
+above the `needs you:` line: one row per plan, and how far along its issues
+are. A shift ends the same way — merged, parked and why, dollars spent — see
 [docs/behaviour.md](docs/behaviour.md) for a worked example.
 
 See what the runs cost, from the records every run leaves on your machine:

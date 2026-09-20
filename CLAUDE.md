@@ -8,7 +8,10 @@ turns a vision document into proposals behind the `proposed` gate. A third,
 `review-health`, fills that same backlog from the codebase itself: pointed at
 any repository it measures that repo's shape and files the outliers as
 `proposed` issues — the whole-repo pass that diff-scoped review cannot do.
-Both have a supervisor verb: `plan` and `health`.
+Both have a supervisor verb: `plan` and `health`. The binary's other four
+verbs start no runs: `status` reads GitHub, `stats` reads the run data, `tidy`
+reclaims finished worktrees and branches, `update` moves both halves to the
+published release.
 
 ## Invariants
 
