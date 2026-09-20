@@ -13,6 +13,19 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.25.0]
+
+### What's Changed
+* docs: record answers to visual-evidence probes 3 to 6 by @scharissis in https://github.com/scharissis/polako/pull/454
+* fix: a fetch auth failure no longer stops the shift, and a park after it leads with the real cause by @scharissis in https://github.com/scharissis/polako/pull/456 (closes #425)
+* docs: name all seven verbs in the README, demo and docs by @scharissis in https://github.com/scharissis/polako/pull/455
+* docs: retire docs/plans/tiered-orchestration.md — every issue it proposed is closed by @scharissis in https://github.com/scharissis/polako/pull/457 (closes #428)
+* fix: review diff dumps no longer strand a merged issue's worktree by @scharissis in https://github.com/scharissis/polako/pull/458
+* feat: evidence images get a channel, the polako-evidence ref by @scharissis in https://github.com/scharissis/polako/pull/462 (closes #402)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.24.0...v0.25.0
+
 ## [0.24.0]
 
 ### What's Changed
