@@ -157,7 +157,9 @@ func reclaim(ctx context.Context, cfg config, apply bool, watched int) ([]tidyRe
 	// itself follows picking up an issue. An unreachable origin stops a pickup
 	// but not a sweep: a tidy-up must not take a backlog down, and against a
 	// stale mirror the ancestor check only ever errs towards keeping a branch.
-	if err := syncDefaultBranch(ctx, cfg); err != nil {
+	// nil: this sweep isn't about any one about-to-run issue, so there is
+	// nothing to remember a fetch auth failure against.
+	if err := syncDefaultBranch(ctx, cfg, nil); err != nil {
 		narrate(sevWarning, "sweeping against the default branch as it is: %v", err)
 	}
 

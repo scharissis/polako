@@ -213,7 +213,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 	// moment that matters is the one just before a branch is cut and a review
 	// resolves its base. It is also the gate: an origin that cannot be fetched
 	// ends the shift here, before a run is paid for that could not push.
-	if err := syncDefaultBranch(ctx, cfg); err != nil {
+	if err := syncDefaultBranch(ctx, cfg, st); err != nil {
 		return err
 	}
 
@@ -716,9 +716,21 @@ func (a *runAttempt) cleanExitDisposition(left leftWork) (bound, boundWhy string
 	}
 }
 
+// fetchAuthParkReason leads a clean-exit park's reason when this leg's own
+// pickup fetch couldn't authenticate (issue #425): polako's own words, no raw
+// git stderr, since this reaches the issue thread verbatim. It doesn't say
+// the run's own classification is wrong — a permission refusal drawn along
+// the way is still worth knowing — only that this is the likelier root cause,
+// named first rather than left for #390's misattribution to repeat.
+const fetchAuthParkReason = "polako's own fetch couldn't authenticate just before this run; " +
+	"fix git access in -dir (`ssh-add -l`, or an https remote), then remove needs-human"
+
 // parkCleanExit parks a clean exit under category, with left's summary of
 // what is on disk appended to reason for the person picking it up.
 func (a *runAttempt) parkCleanExit(category, reason, refusedCmd string, left leftWork) error {
+	if a.st.fetchAuthFailed {
+		reason = fetchAuthParkReason + "; " + reason
+	}
 	if d := left.describe(); d != "" {
 		reason += "; " + d
 	}

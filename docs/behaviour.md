@@ -28,12 +28,14 @@ fast-forwards `-dir`'s default branch before each issue and after every
 merge — it never pulls, so that branch falls a commit behind on every merge
 it only watches, and it's what the skill branches from and a review diffs
 against. Left stale, a review folds an already-merged PR into what it's
-diffing. It's `--ff-only` and nothing else: a commit of its own, work in
-the way, or a checkout on another branch, and polako logs it and leaves the
+diffing. It's `--ff-only` and nothing else: a commit of its own, work in the
+way, or a checkout on another branch, and polako logs it and leaves the
 checkout alone. An origin it can't fetch at all is different: after a few
 tries the shift stops, with a `stopped` notification, rather than pay for a
-run on a base of unknown age that couldn't push its work anyway. Nothing is
-parked — fix the network or unlock the ssh-agent and start it again.
+run on a base of unknown age that couldn't push its work anyway — nothing is
+parked, fix the network or unlock the ssh-agent and start it again. Refused
+credentials are narrower and not fatal: the run goes on, and a park after it
+leads with the real cause.
 
 **A finished issue's worktree and branch get reclaimed, not left to pile
 up.** At shift start — catching PRs merged by hand between shifts — and

@@ -36,8 +36,14 @@ const docsBudget = 500
 // ceiling with no slack, and documenting the new `status` plans section
 // (required by #324's own acceptance criteria) could not fit without cutting
 // existing content the issue did not ask to touch.
+//
+// behaviour.md entered here in issue #425, for the same reason: it was
+// already at the ceiling, and documenting that a refused git credential no
+// longer stops the shift the way a dead remote does could not fit without
+// cutting an existing paragraph the issue did not ask to touch.
 var docsDebt = map[string]int{
 	"reference.md": 509,
+	"behaviour.md": 501,
 }
 
 func TestDocsStayWithinLineBudget(t *testing.T) {

@@ -29,6 +29,27 @@ const planFile = "PLAN.md"
 // would otherwise make tidy refuse the worktree and pad a park message.
 const evidenceDir = ".polako-evidence"
 
+// gitAuthFailure reports whether a git fetch's error is git's own credentials
+// being refused, SSH or HTTPS, rather than a dead remote, a down network or a
+// bad path. Substring rather than head-anchored like authFailure in
+// refusals.go: git's captured stderr here wraps a transport's own wording
+// (ssh, or libcurl for https) ahead of git's own "fatal: Could not read..."
+// line, so there is no fixed head to anchor on the way there is for the CLI's
+// own text.
+func gitAuthFailure(err error) bool {
+	msg := err.Error()
+	for _, sig := range []string{
+		"Permission denied (publickey)",
+		"Authentication failed",
+		"could not read Username",
+	} {
+		if strings.Contains(msg, sig) {
+			return true
+		}
+	}
+	return false
+}
+
 // porcelainPath is the path out of one `git status --porcelain` line, or "" for
 // a blank one. The format is two status columns and a space, then the path.
 func porcelainPath(line string) string {
@@ -91,7 +112,29 @@ func worktreeFor(list, branch string) string {
 // dead remote, so parking would label the whole backlog needs-human one issue
 // at a time. No origin remote at all is a different condition — there is no
 // mirror to keep — and stays a warning.
-func syncDefaultBranch(ctx context.Context, cfg config) error {
+//
+// Git refusing polako's own credentials is a third case, carved out from the
+// fatal one by issue #425: unlike a dead remote it is often transient — five
+// straight auth failures on 2026-09-19 sat in the same window #396 and #400
+// both opened PRs in — so stopping the whole shift over it is the wrong fix.
+// This warns (raw stderr is fine in the log, an operator's to read) and
+// records it on st instead of returning the fatal error, so the run this
+// precedes goes on; st is nil for the tidy sweep's call, which isn't about
+// any one about-to-run issue. If that run then ends with no PR, the park
+// leads with the real cause — see parkCleanExit — rather than whatever else
+// it drew along the way, which is what actually misled #390.
+//
+// st.fetchAuthFailed is reset to false on every call before anything can
+// fail: it means "this leg's own pickup fetch just failed to authenticate",
+// not "ever did". An issue can carry the same *issueState across legs (put
+// down for a human answer, then resumed once one lands), and without the
+// reset a leg whose own fetch succeeded would still inherit an earlier leg's
+// stale true — leading that leg's own clean-exit park with a cause that
+// wasn't its.
+func syncDefaultBranch(ctx context.Context, cfg config, st *issueState) error {
+	if st != nil {
+		st.fetchAuthFailed = false
+	}
 	if _, err := git(ctx, cfg, "remote", "get-url", "origin"); err != nil {
 		narrate(sevWarning, "no origin remote to fetch in %s, so the default branch is left as it is "+
 			"and a review may run against a stale base: %v", cfg.dir, err)
@@ -104,6 +147,14 @@ func syncDefaultBranch(ctx context.Context, cfg config) error {
 	}); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if gitAuthFailure(err) {
+			narrate(sevWarning, "polako's own git fetch could not authenticate in %s — the run will "+
+				"go on, but expect a stale base or a failed push until git access is fixed: %v", cfg.dir, err)
+			if st != nil {
+				st.fetchAuthFailed = true
+			}
+			return nil
 		}
 		return fmt.Errorf("could not fetch origin, so a run would start from a base of unknown age "+
 			"and could not push its work — check the network and git's credentials (is the ssh-agent "+

@@ -1338,6 +1338,49 @@ func TestDrainParksAPermissionRefusalWithoutResuming(t *testing.T) {
 	}
 }
 
+// Issue #425, and the exact shape #390 was: this pickup's own fetch couldn't
+// authenticate, and the run it still went on to run then drew an unrelated
+// permission refusal along the way. Before this fix the park blamed only the
+// refusal, and the operator was told to grant a tool when the real fix was
+// the SSH agent; now the fetch failure leads the park's reason and the exit
+// summary totals it once, and neither carries git's own stderr to the thread.
+func TestDrainParkLeadsWithAFetchAuthFailure(t *testing.T) {
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "permissionblocked", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	_, checkout := upstream(t)
+	denyGitAuth(t, checkout)
+	cfg.dir = checkout
+	calls := filepath.Join(t.TempDir(), "gh-calls.log")
+	t.Setenv(fakeGhLogEnv, calls)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("an auth failure that lets the run go on must not end the drain: %v", err)
+	}
+
+	out := buf.String()
+	if want := "parked  #1 ($0.10) — polako's own fetch couldn't authenticate just before this run; " +
+		"fix git access in -dir (`ssh-add -l`, or an https remote), then remove needs-human; " +
+		"the run stopped to ask for a permission"; !strings.Contains(out, want) {
+		t.Errorf("park reason does not lead with the fetch auth failure\ngot:\n%s", out)
+	}
+	if want := "auth    polako's own git fetch failed to authenticate before 1 run this shift"; !strings.Contains(out, want) {
+		t.Errorf("exit summary does not total the fetch auth failures once\ngot:\n%s", out)
+	}
+
+	posted, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatalf("reading the fake gh call log: %v", err)
+	}
+	if want := "polako's own fetch couldn't authenticate"; !strings.Contains(string(posted), want) {
+		t.Errorf("no gh call carried the fetch auth explanation to the thread\ngot:\n%s", posted)
+	}
+	if strings.Contains(string(posted), "Permission denied (publickey)") {
+		t.Errorf("the park comment carries raw git stderr\ngot:\n%s", posted)
+	}
+}
+
 // Issue #209: #126's actual shape — a refused tool_result mid-run, the CLI's
 // own stated fact, with a clean final result that reads as ordinary prose
 // (permissionRefusal's head anchor would miss it). Before this fix the run
