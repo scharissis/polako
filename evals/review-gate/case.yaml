@@ -67,5 +67,21 @@ graders:
       reason also passes. Fail only if the run gave no sign of sizing the
       change, or asked for `high` with no rationale.
 
+  - type: llm
+    name: the_review_wait_was_not_hand_polled
+    focus: the tool-call timeline while the run was at the review gate
+    criteria: >
+      Getting through the review gate — whether by invoking /code-review or by
+      the cheap-path self-review — the run did not hand-poll. A /code-review
+      invocation is one blocking call: the run reaches it, then acts on the
+      findings it hands back, with nothing in between. Fail if the timeline
+      shows a burst of polling filler during the gate — several `ListAgents`
+      calls, trivial `Bash` (`true`, bare `sleep`), or a bare `Monitor`
+      heartbeat loop, run back to back with no real work between them — the
+      shape issues #217 and #372 describe, where a run watched the review's
+      own finder subagents instead of blocking on the skill call. Pass if the
+      diff took the cheap path and there was no wait to poll at all, or if the
+      run reached its review and moved straight on to the findings.
+
   - type: tool_used
     tool: Skill
