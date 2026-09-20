@@ -785,7 +785,7 @@ func (r *recorder) metricsDir() string {
 // operator who wants no local files at all.
 func (r *recorder) recordRun(cfg config, rc runContext, rep runReport) runRecord {
 	rec := newRunRecord(cfg, rc, rep)
-	r.append(cfg, rec)
+	r.append(cfg.sink(), cfg.repo, rec)
 	return rec
 }
 
@@ -793,12 +793,12 @@ func (r *recorder) recordRun(cfg config, rc runContext, rep runReport) runRecord
 // numbers about the run and what the label pass did around it. Best-effort
 // like the rest — a nil or -metrics-off recorder writes nothing.
 func (r *recorder) recordPlan(cfg config, rep runReport, pf planFacts) {
-	r.append(cfg, newPlanRecord(cfg, rep, pf))
+	r.append(cfg.sink(), cfg.repo, newPlanRecord(cfg, rep, pf))
 }
 
 // recordHealth writes the one record a `polako health` run leaves. recordPlan's twin.
 func (r *recorder) recordHealth(cfg config, rep runReport, hf healthFacts) {
-	r.append(cfg, newHealthRecord(cfg, rep, hf))
+	r.append(cfg.sink(), cfg.repo, newHealthRecord(cfg, rep, hf))
 }
 
 // recordIssue writes the terminal record. why is the park reason, and this is
@@ -838,54 +838,54 @@ func (r *recorder) recordIssue(cfg config, issue, pr int, outcome, why string, f
 	if usage.hasTerminal {
 		rec.WeekUsageAtTerminal = usage.atTerminal
 	}
-	r.append(cfg, rec)
+	r.append(cfg.sink(), cfg.repo, rec)
 }
 
 // append writes one record as one line. Every failure path warns at most once
 // and returns: losing a metric must never fail a run, and a directory that
 // vanished mid-drain is recreated on the next write rather than complained
 // about on every one.
-func (r *recorder) append(cfg config, rec any) {
+func (r *recorder) append(u *ui, repo string, rec any) {
 	if !r.enabled() {
 		return
 	}
 	line, err := json.Marshal(rec)
 	if err != nil {
-		r.warn(cfg, err)
+		r.warn(u, err)
 		return
 	}
 	// 0o700/0o600: on a shared machine this is which private repositories the
 	// operator drains and what each one cost. The README promises it stays
 	// private, and a default umask would not.
 	if err := os.MkdirAll(r.dir, 0o700); err != nil {
-		r.warn(cfg, err)
+		r.warn(u, err)
 		return
 	}
 	// O_APPEND, no locking: one short line per write lands atomically at these
 	// sizes on both platforms, so concurrent supervisors interleave whole
 	// lines rather than tearing one.
-	f, err := os.OpenFile(filepath.Join(r.dir, recordFile(cfg.repo)),
+	f, err := os.OpenFile(filepath.Join(r.dir, recordFile(repo)),
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		r.warn(cfg, err)
+		r.warn(u, err)
 		return
 	}
 	if _, err := f.Write(append(line, '\n')); err != nil {
 		f.Close()
-		r.warn(cfg, err)
+		r.warn(u, err)
 		return
 	}
 	if err := f.Close(); err != nil {
-		r.warn(cfg, err)
+		r.warn(u, err)
 	}
 }
 
-func (r *recorder) warn(cfg config, err error) {
+func (r *recorder) warn(u *ui, err error) {
 	if r.warned {
 		return
 	}
 	r.warned = true
-	cfg.narrate(sevWarning, "run data not recorded (%v) — the shift continues; -metrics off silences this", err)
+	u.narrate(sevWarning, "run data not recorded (%v) — the shift continues; -metrics off silences this", err)
 }
 
 // recordFile partitions records one file per repository, so deleting one
