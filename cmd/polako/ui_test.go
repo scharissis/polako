@@ -528,6 +528,8 @@ func TestReportCellHighlightsAttentionMarkersOnly(t *testing.T) {
 		"changes requested":             "\x1b[33mchanges requested\x1b[0m",
 		"1 issue — #9, labelled parked": "\x1b[33m1 issue — #9, labelled parked\x1b[0m",
 		"not read":                      "\x1b[33mnot read\x1b[0m",
+		"missing":                       "\x1b[33mmissing\x1b[0m",
+		"couldn't tell":                 "\x1b[33mcouldn't tell\x1b[0m",
 		"clear":                         "clear", // no marker: passed through plain
 		"mergeable":                     "mergeable",
 	} {

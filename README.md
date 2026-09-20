@@ -308,11 +308,12 @@ retro checklist, the tagging rule, and the recipes for reading run data back.
 
 ## Flags
 
-`polako work` takes around two dozen flags, and the other six verbs have their
-own smaller sets. [docs/reference.md](docs/reference.md) has `work`, `plan`,
-`health`, `status` and `tidy`, together with `-dry-run`, `-notify`, `-remote`
-and the `POLAKO_*` environment defaults; `stats` is in
-[docs/run-data.md](docs/run-data.md) and `update` in
+`polako work` takes around two dozen flags, and the other seven verbs have
+their own smaller sets. [docs/reference.md](docs/reference.md) has `work`,
+`plan`, `health`, `status` and `tidy`, together with `-dry-run`, `-notify`,
+`-remote` and the `POLAKO_*` environment defaults; `stats` is in
+[docs/run-data.md](docs/run-data.md), `setup` in
+[docs/setup.md](docs/setup.md), and `update` in
 [docs/install.md](docs/install.md#update), each beside what it describes.
 Any flag can take its default from the environment, so a preference you always
 want can live in your shell profile.
@@ -350,6 +351,7 @@ happens when it breaks something at 3am.
 | [docs/behaviour.md](docs/behaviour.md) | What polako does when a run crashes, an issue stalls, a PR goes red, or it needs a human. FAQ at the bottom. |
 | [docs/install.md](docs/install.md) | Every install path, `polako update` and its flags, pinning, and using it on another project. |
 | [docs/reference.md](docs/reference.md) | Every flag for `work`, `plan`, `health`, `status` and `tidy`, plus `-dry-run`, `-notify`, `-remote` and environment defaults. |
+| [docs/setup.md](docs/setup.md) | `polako setup`, the read-only report on whether a repository is ready. |
 | [docs/run-data.md](docs/run-data.md) | What each run records (`work`, `plan` and `health` alike), spending caps, and the `polako stats` report. |
 | [docs/security.md](docs/security.md) | The threat model, the tool allowlist, the `-label` gate, and what leaves your machine. |
 | [docs/hardening.md](docs/hardening.md) | Wrapping a shift in an egress firewall of your own, and why polako does not ship one. |

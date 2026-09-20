@@ -213,6 +213,14 @@ func dispatchVerb() bool {
 		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 		defer stop()
 		runReport("update", func() error { return runUpdate(ctx, config{}, os.Args[2:], os.Stdout) })
+	case "setup":
+		// Its own context for the same reason status gets one: this makes gh
+		// and git calls, and Ctrl+C partway through should end them rather
+		// than be ignored.
+		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
+		defer stop()
+		rpt := newReport(isTerminal(os.Stdout))
+		runReport("setup", func() error { return runSetup(ctx, os.Args[2:], os.Stdin, os.Stdout, rpt) })
 	case "version", "-version", "--version":
 		// Reachable without a verb, because it is what an operator asks
 		// exactly when they are unsure what they are running.
