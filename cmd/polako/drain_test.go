@@ -1353,7 +1353,7 @@ func TestDrainParkLeadsWithAFetchAuthFailure(t *testing.T) {
 	denyGitAuth(t, checkout)
 	cfg.dir = checkout
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("an auth failure that lets the run go on must not end the drain: %v", err)
@@ -3463,7 +3463,7 @@ func TestDrainFilesARetireIssueWhenAContainerCloses(t *testing.T) {
 		Labels: []string{proposedLabel},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("drain: %v", err)
@@ -3571,7 +3571,7 @@ func TestRetireOrphanedDocSkipsADocumentAlreadyRetiredThisCall(t *testing.T) {
 		},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 
 	filedThisCall := map[string]bool{"docs/plans/foo.md": true}
 	_, ok, err := retireOrphanedDoc(context.Background(), cfg,

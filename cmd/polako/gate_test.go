@@ -196,7 +196,7 @@ func TestPluginVersionReadsTheInstalledPlugin(t *testing.T) {
 // from.
 func TestInstalledPluginVersionReadsByExplicitName(t *testing.T) {
 	cfg := fakeClaudeConfig(t, "stream")
-	t.Setenv(fakePluginEnv, "0.3.0")
+	setFakeEnv(&cfg, fakePluginEnv, "0.3.0")
 
 	got, id, scope := installedPluginVersion(context.Background(), cfg, pluginName)
 	if got != "0.3.0" || id != "polako@scharissis" || scope != "user" {

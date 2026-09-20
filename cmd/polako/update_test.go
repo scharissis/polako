@@ -89,8 +89,8 @@ func updateGhCfg(t *testing.T, st *ghState) config {
 	if err := writeGhState(path, st); err != nil {
 		t.Fatalf("writing fake gh state: %v", err)
 	}
-	t.Setenv(fakeGhEnv, path)
 	return config{
+		env:         fakeEnv(fakeGhEnv, path),
 		dir:         t.TempDir(),
 		ghBin:       fakeCLI(t),
 		ghRetryWait: time.Millisecond,
@@ -371,7 +371,7 @@ func TestNormalizeBuildVersion(t *testing.T) {
 
 func TestBinarySummary(t *testing.T) {
 	cfg := config{dir: t.TempDir(), goBin: fakeCLI(t)}
-	t.Setenv(fakeGoEnv, "1")
+	setFakeEnv(&cfg, fakeGoEnv, "1")
 
 	for _, tc := range []struct {
 		name       string
@@ -428,9 +428,9 @@ func TestBinarySummary(t *testing.T) {
 
 func TestGoInstallDirPrefersGOBINOverGOPATH(t *testing.T) {
 	cfg := config{dir: t.TempDir(), goBin: fakeCLI(t)}
-	t.Setenv(fakeGoEnv, "1")
-	t.Setenv(fakeGoGOBINEnv, "/gobin")
-	t.Setenv(fakeGoGOPATHEnv, "/gopath")
+	setFakeEnv(&cfg, fakeGoEnv, "1")
+	setFakeEnv(&cfg, fakeGoGOBINEnv, "/gobin")
+	setFakeEnv(&cfg, fakeGoGOPATHEnv, "/gopath")
 
 	got, err := goInstallDir(context.Background(), cfg)
 	if err != nil {
@@ -443,8 +443,8 @@ func TestGoInstallDirPrefersGOBINOverGOPATH(t *testing.T) {
 
 func TestGoInstallDirFallsBackToGOPATHBin(t *testing.T) {
 	cfg := config{dir: t.TempDir(), goBin: fakeCLI(t)}
-	t.Setenv(fakeGoEnv, "1")
-	t.Setenv(fakeGoGOPATHEnv, "/gopath")
+	setFakeEnv(&cfg, fakeGoEnv, "1")
+	setFakeEnv(&cfg, fakeGoGOPATHEnv, "/gopath")
 
 	got, err := goInstallDir(context.Background(), cfg)
 	if err != nil {
@@ -464,8 +464,8 @@ func TestGoInstallWarningSilentWhenRunningFromTheInstallDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config{dir: t.TempDir(), goBin: fakeCLI(t)}
-	t.Setenv(fakeGoEnv, "1")
-	t.Setenv(fakeGoGOBINEnv, dir)
+	setFakeEnv(&cfg, fakeGoEnv, "1")
+	setFakeEnv(&cfg, fakeGoGOBINEnv, dir)
 
 	exe := filepath.Join(dir, exeBaseName())
 	if got := goInstallWarning(context.Background(), cfg, exe); got != "" {
@@ -480,8 +480,8 @@ func TestGoInstallWarningNamesBothDirsWhenTheyDiffer(t *testing.T) {
 	}
 	installDir := t.TempDir()
 	cfg := config{dir: t.TempDir(), goBin: fakeCLI(t)}
-	t.Setenv(fakeGoEnv, "1")
-	t.Setenv(fakeGoGOBINEnv, installDir)
+	setFakeEnv(&cfg, fakeGoEnv, "1")
+	setFakeEnv(&cfg, fakeGoGOBINEnv, installDir)
 
 	exe := filepath.Join(running, exeBaseName())
 	got := goInstallWarning(context.Background(), cfg, exe)
@@ -492,8 +492,8 @@ func TestGoInstallWarningNamesBothDirsWhenTheyDiffer(t *testing.T) {
 
 func TestGoInstallWarningSilentWithNoExe(t *testing.T) {
 	cfg := config{dir: t.TempDir(), goBin: fakeCLI(t)}
-	t.Setenv(fakeGoEnv, "1")
-	t.Setenv(fakeGoGOBINEnv, t.TempDir())
+	setFakeEnv(&cfg, fakeGoEnv, "1")
+	setFakeEnv(&cfg, fakeGoGOBINEnv, t.TempDir())
 
 	if got := goInstallWarning(context.Background(), cfg, ""); got != "" {
 		t.Errorf("goInstallWarning = %q, want silence with no known exe path", got)
@@ -519,8 +519,7 @@ func stampedGhCfg(t *testing.T, release *fakeRelease) config {
 	if err := writeGhState(path, &ghState{Repo: "example/repo", Release: release}); err != nil {
 		t.Fatalf("writing fake gh state: %v", err)
 	}
-	t.Setenv(fakeGhEnv, path)
-	return config{dir: t.TempDir(), ghBin: fakeCLI(t)}
+	return config{dir: t.TempDir(), env: fakeEnv(fakeGhEnv, path), ghBin: fakeCLI(t)}
 }
 
 func TestChecksumFor(t *testing.T) {
@@ -714,8 +713,8 @@ func TestRemoveStaleOldBinaryNoOpWithNothingThere(t *testing.T) {
 
 func TestApplyUpdateChecksWithoutWriting(t *testing.T) {
 	cfg := config{dir: t.TempDir(), ui: testUI(t), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeGoEnv, "1")
+	setFakeEnv(&cfg, fakeClaudeEnv, "stream")
+	setFakeEnv(&cfg, fakeGoEnv, "1")
 	argsOf := watchClaudeArgs(t, &cfg)
 	buf := captureLog(t)
 
@@ -739,8 +738,8 @@ func TestApplyUpdateChecksWithoutWriting(t *testing.T) {
 
 func TestApplyUpdateRunsBothHalvesWhenBehind(t *testing.T) {
 	cfg := config{dir: t.TempDir(), ui: testUI(t), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeGoEnv, "1")
+	setFakeEnv(&cfg, fakeClaudeEnv, "stream")
+	setFakeEnv(&cfg, fakeGoEnv, "1")
 	argsOf := watchClaudeArgs(t, &cfg)
 
 	plugin := pluginPlan{state: pluginFound, version: "0.23.0", id: "polako@scharissis", scope: "user", marketplace: "scharissis"}
@@ -810,8 +809,8 @@ func TestApplyUpdateRemovesAStaleOldBinaryOnARealRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config{dir: t.TempDir(), ui: testUI(t), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeGoEnv, "1")
+	setFakeEnv(&cfg, fakeClaudeEnv, "stream")
+	setFakeEnv(&cfg, fakeGoEnv, "1")
 
 	plugin := pluginPlan{state: pluginFound, version: "0.24.0"}
 	binary := binaryPlan{tier: tierStamped, current: "0.24.0", exe: exe} // already current — nothing else to run
@@ -841,8 +840,8 @@ func TestApplyUpdateLeavesAnOldFileAloneForANonStampedTier(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config{dir: t.TempDir(), ui: testUI(t), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeGoEnv, "1")
+	setFakeEnv(&cfg, fakeClaudeEnv, "stream")
+	setFakeEnv(&cfg, fakeGoEnv, "1")
 
 	plugin := pluginPlan{state: pluginFound, version: "0.24.0"}
 	binary := binaryPlan{tier: tierModule, current: "0.24.0", exe: exe}
@@ -870,8 +869,8 @@ func TestApplyUpdateLeavesAStaleOldBinaryUnderCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config{dir: t.TempDir(), ui: testUI(t), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeGoEnv, "1")
+	setFakeEnv(&cfg, fakeClaudeEnv, "stream")
+	setFakeEnv(&cfg, fakeGoEnv, "1")
 
 	plugin := pluginPlan{state: pluginFound, version: "0.24.0"}
 	binary := binaryPlan{tier: tierStamped, current: "0.24.0", exe: exe}
@@ -977,8 +976,8 @@ func TestRunUpdateEndToEndBothCurrentRunsNothing(t *testing.T) {
 
 func TestApplyUpdateRunsNothingWhenAlreadyCurrent(t *testing.T) {
 	cfg := config{dir: t.TempDir(), ui: testUI(t), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeGoEnv, "1")
+	setFakeEnv(&cfg, fakeClaudeEnv, "stream")
+	setFakeEnv(&cfg, fakeGoEnv, "1")
 	argsOf := watchClaudeArgs(t, &cfg)
 
 	plugin := pluginPlan{state: pluginFound, version: "0.24.0", id: "polako@scharissis", scope: "user", marketplace: "scharissis"}

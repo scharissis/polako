@@ -1044,7 +1044,7 @@ func TestStatusOmitsThePlanLineWhenTheProbeCannotAnswer(t *testing.T) {
 func TestStatusPluginVersionReadsThisRepoSOwnPlugin(t *testing.T) {
 	cfg := fakeClaudeConfig(t, "stream")
 	cfg.usageTimeout = 5 * time.Second
-	t.Setenv(fakePluginEnv, "0.3.0")
+	setFakeEnv(&cfg, fakePluginEnv, "0.3.0")
 
 	got, _, _ := statusPluginVersion(context.Background(), cfg)
 	if got != "0.3.0" {
