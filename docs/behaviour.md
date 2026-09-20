@@ -472,6 +472,18 @@ answer — an old CLI with no `/usage`, no subscription, an unparseable
 reply — trips nothing: it logs once and carries on as if neither flag were
 set, for that pass.
 
+## A visual change shows itself
+
+**A PR for a visual change carries a screenshot, not just a claim.** Once a
+run's diff touches browser-rendered files and the repo has a script to serve
+them, it starts that server from its own worktree, shoots up to four routes
+it found in the repo's own routing code, and pushes the PNGs to one orphan
+branch on your origin, `polako-evidence`, embedded in the PR body by commit
+sha. Any failure along that chain — no serving script, a missing browser, a
+shot that looks like an error or a login wall — drops back to no images and
+one `## Verification` line; it never parks the issue or asks a question.
+`-visual-evidence=false` on `work` turns the whole thing off.
+
 ## Human touchpoints
 
 Deliberately just two, both on GitHub:
