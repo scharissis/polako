@@ -32,6 +32,35 @@ func readRepoFile(t *testing.T, parts ...string) string {
 	return string(b)
 }
 
+// skillFrontmatter splits a skill's YAML frontmatter from its body — the
+// split every test that reads a skill's calling convention needs. label
+// names the file in the failure message.
+func skillFrontmatter(t *testing.T, label, skill string) (front, body string) {
+	t.Helper()
+	front, body, ok := strings.Cut(strings.TrimPrefix(skill, "---\n"), "\n---")
+	if !ok {
+		t.Fatalf("%s has no YAML frontmatter", label)
+	}
+	return front, body
+}
+
+// declaredArguments returns the names in frontmatter's `arguments: [a, b]`
+// list, or fails the test if that line isn't in the [name, name] form.
+func declaredArguments(t *testing.T, front string) []string {
+	t.Helper()
+	m := regexp.MustCompile(`(?m)^arguments:\s*\[([^\]]*)\]`).FindStringSubmatch(front)
+	if m == nil {
+		t.Fatalf("frontmatter's `arguments:` is not the [name, name] list form:\n%s", front)
+	}
+	var names []string
+	for _, name := range strings.Split(m[1], ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // moduleName is the last path element of the go.mod module directive; the
 // plugin, the binary and the repository all take their name from it.
 func moduleName(t *testing.T) string {
@@ -224,10 +253,7 @@ func TestDefaultSkillIsNamespacedForThePlugin(t *testing.T) {
 func TestShippedSkillMatchesTheDefaultFlag(t *testing.T) {
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
-	front, _, ok := strings.Cut(strings.TrimPrefix(skill, "---\n"), "\n---")
-	if !ok {
-		t.Fatalf("skills/%s/SKILL.md has no YAML frontmatter", skillDir)
-	}
+	front, _ := skillFrontmatter(t, "skills/"+skillDir+"/SKILL.md", skill)
 	for _, key := range []string{"description:", "argument-hint:", "arguments:"} {
 		if !strings.Contains(front, key) {
 			t.Errorf("SKILL.md frontmatter is missing %q\ngot:\n%s", key, front)
@@ -257,24 +283,14 @@ func planSkill(t *testing.T) string {
 func TestPlanSkillDeclaresItsArguments(t *testing.T) {
 	skill := planSkill(t)
 
-	front, body, ok := strings.Cut(strings.TrimPrefix(skill, "---\n"), "\n---")
-	if !ok {
-		t.Fatalf("skills/%s/SKILL.md has no YAML frontmatter", planSkillDir)
-	}
+	front, body := skillFrontmatter(t, "skills/"+planSkillDir+"/SKILL.md", skill)
 	for _, key := range []string{"description:", "argument-hint:", "arguments:", "disable-model-invocation: true"} {
 		if !strings.Contains(front, key) {
 			t.Errorf("SKILL.md frontmatter is missing %q\ngot:\n%s", key, front)
 		}
 	}
 
-	declared := regexp.MustCompile(`(?m)^arguments:\s*\[([^\]]*)\]`).FindStringSubmatch(front)
-	if declared == nil {
-		t.Fatalf("frontmatter's `arguments:` is not the [name, name] list form:\n%s", front)
-	}
-	for _, name := range strings.Split(declared[1], ",") {
-		if name = strings.TrimSpace(name); name == "" {
-			continue
-		}
+	for _, name := range declaredArguments(t, front) {
 		if !strings.Contains(body, "$"+name) {
 			t.Errorf("frontmatter declares argument %q but the body never interpolates $%s,"+
 				" so whatever the operator typed for it is silently dropped", name, name)
@@ -882,12 +898,10 @@ func TestPlanExistenceCheckUsesReadNotBash(t *testing.T) {
 	}
 }
 
-// issue #400: the visual-evidence capture flow that will write shots to
-// evidenceDir hasn't landed in SKILL.md yet — that's a later ticket in
-// docs/plans/visual-evidence.md — so this arms itself only once SKILL.md
-// does name the directory, rather than asserting today on wording that
-// doesn't exist yet. Once it lands, this catches a spelling that drifts from
-// the Go constant inspectLeftWork actually discounts.
+// issue #402 landed the "Evidence ref" section this pins against, naming
+// the scratch dir alongside the polako-evidence branch. The early return
+// guards a SKILL.md that stops naming either — this catches a spelling that
+// drifts from the Go constant inspectLeftWork actually discounts.
 func TestEvidenceDirSpellingMatchesTheSkill(t *testing.T) {
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
@@ -933,6 +947,89 @@ func TestSkillSendsScratchFilesToTheScratchDir(t *testing.T) {
 		t.Errorf("the review gate invokes /code-review without telling it where scratch files go,"+
 			" so its agent dumps large diffs into the worktree root and the worktree can't be"+
 			" reclaimed after the merge:\n\t%s", window)
+	}
+}
+
+// issue #402 (ticket 3 of docs/plans/visual-evidence.md): the publish
+// recipe is git plumbing a run executes unattended, so its sharpest edges —
+// the exact ref name, the flag that would silently clobber a concurrent
+// pusher, the URL-building command, and the scratch dir it reads shots
+// from — are pinned together in the section that documents them.
+func TestEvidenceRefSectionIsPinned(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	start := strings.Index(skill, "## Evidence ref")
+	end := strings.Index(skill, "## Phase 0")
+	if start < 0 || end < 0 || end < start {
+		t.Fatal("SKILL.md no longer has an `## Evidence ref` section before Phase 0")
+	}
+	flat := strings.Join(strings.Fields(skill[start:end]), " ")
+
+	if !strings.Contains(flat, "polako-evidence") {
+		t.Error("the Evidence ref section never names the polako-evidence branch")
+	}
+	if !strings.Contains(flat, "Never `--force`") {
+		t.Error("the Evidence ref section no longer forbids --force beside the push step —" +
+			" without it a resumed or concurrent run could clobber another push to the same ref")
+	}
+	if !strings.Contains(flat, "config --get remote.origin.url") {
+		t.Error("the Evidence ref section no longer builds its URL from" +
+			" `config --get remote.origin.url` — `remote get-url` expands insteadOf and would" +
+			" hand back an ssh rewrite instead of a browsable address")
+	}
+	if !strings.Contains(flat, evidenceDir) {
+		t.Errorf("the Evidence ref section no longer names the scratch dir %q — it has to match"+
+			" the Go constant inspectLeftWork discounts, or tidy and park would treat real"+
+			" shots as left work", evidenceDir)
+	}
+}
+
+// issue #402: the frontmatter is the calling convention, and the skill's own
+// `no-evidence` value means nothing if the argument it rides on was never
+// declared, or the body never reads it.
+func TestSkillDeclaresTheEvidenceArgument(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	front, body := skillFrontmatter(t, "skills/"+skillDir+"/SKILL.md", skill)
+	declared := declaredArguments(t, front)
+	if !slices.Contains(declared, "evidence") {
+		t.Errorf("frontmatter's `arguments:` no longer declares `evidence`: %v", declared)
+	}
+	for _, name := range declared {
+		if !strings.Contains(body, "$"+name) {
+			t.Errorf("frontmatter declares argument %q but the body never interpolates $%s,"+
+				" so whatever the operator typed for it is silently dropped", name, name)
+		}
+	}
+	if !strings.Contains(body, "no-evidence") {
+		t.Error("SKILL.md never spells the `no-evidence` value that turns the evidence channel off")
+	}
+}
+
+// issue #402: the PR body's Evidence section gained a hard shot cap and a
+// narrower upload ban once a second channel — the evidence ref — existed to
+// publish through; a rewrite that drops either silently reopens "upload
+// anything anywhere" or lets a run pad the section past what a reviewer
+// reads in a minute.
+func TestEvidenceSectionCapsShotsAndNarrowsTheUploadBan(t *testing.T) {
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	start := strings.Index(skill, "## Evidence — add only when")
+	end := strings.Index(skill, "## Design decisions")
+	if start < 0 || end < 0 || end < start {
+		t.Fatal("SKILL.md's PR body spec no longer has an `## Evidence` bullet before `## Design decisions`")
+	}
+	flat := strings.Join(strings.Fields(skill[start:end]), " ")
+
+	if !strings.Contains(flat, "at most four shots or pairs") {
+		t.Error("the Evidence section's budget no longer caps shots at four — without a" +
+			" number, a run captured evidence could pad the PR body past a minute's read")
+	}
+	if !strings.Contains(flat, "the evidence ref is the one sanctioned channel; never any other upload") {
+		t.Error("the Evidence section no longer narrows the upload ban to name the evidence ref" +
+			" as the one sanctioned channel — without it the ban still reads as a blanket" +
+			" 'no upload tool is in this run's grant', which the evidence ref itself is now an" +
+			" exception to")
 	}
 }
 

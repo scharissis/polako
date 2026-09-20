@@ -45,8 +45,9 @@ in the PR body rather than doing it quietly.
   rules apply: nothing reads it back, deleting it mid-drain changes nothing,
   it never leaves the machine, no exception — and a read from it anywhere in
   the binary is the same design error as a read from the records.
-- **One thing leaves the machine, and it is named here.** `-post-summary`
-  above. `-remote` was meant to be the second but isn't one today: no `claude`
+- **What leaves the machine is named here.** `-post-summary`
+  above is the one thing that actually does. `-remote` was meant to be the
+  second but isn't one today: no `claude`
   CLI registers headless runs with Remote Control — the current one takes
   `--remote-control` under `-p`, runs a normal session, and never starts the
   bridge, with no in-band signal to detect the ignore (issue #82). So nothing
@@ -58,8 +59,16 @@ in the PR body rather than doing it quietly.
   Re-arming against a CLI that does register brings that argument back into
   force, not a new one; it must still degrade to an unwatched run rather than
   hang, prompt or fail one, and nothing durable may remember whether it
-  worked. A second destination, or widening `-post-summary`, is a change to
-  argue for out loud, not slip in.
+  worked. A third is staged the same way: the `polako-evidence` orphan
+  branch on origin. `skills/implement-issue/SKILL.md`'s publish recipe
+  writes through it, chosen per run by the skill's own `evidence` argument
+  (`no-evidence` turns it off). Nothing drives a capture yet — no step
+  takes a screenshot — so today the channel carries nothing; issue #402
+  ships the channel and the argument only. Once a later ticket wires a
+  capture behind it, the destination still isn't new. The content is
+  pixels, sha-pinned and, on a public repo, not retractable in practice. A
+  new destination beyond these three, or widening `-post-summary`, is a
+  change to argue for out loud, not slip in.
 - **`update` runs only between shifts, and its write surface is the two
   release channels.** `work` never updates itself — a shift's binary and
   skill don't change under it by polako's hand. Checking what's published is

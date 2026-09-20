@@ -111,11 +111,12 @@ and [`health`](reference.md#auditing-repository-health-unattended-polako-health)
 
 ## What leaves the machine
 
-One thing, and only on request:
+Two things, one of them only on request:
 
 | What | Where it goes | Default |
 | --- | --- | --- |
 | [`-post-summary`](run-data.md#putting-it-on-the-pr--post-summary) | One line of run numbers, as a comment on your own merged PR — readable by exactly the people who can already see that PR. | Off. |
+| Evidence images | A PNG the skill captured as real output, pushed to the `polako-evidence` orphan branch on your own origin and embedded in the PR body by commit sha — readable by anyone who can already read that repo. | Nothing today: no step in the skill takes a screenshot yet. `no-evidence` as the skill's second argument will turn the channel off once one does; `polako work` doesn't drive any of this yet either. |
 
 `plan` and `health` don't change this — neither has a `-post-summary` of its
 own, and neither posts anything anywhere.
@@ -146,6 +147,18 @@ model and holding the transcript — reaching you and nobody else, the same
 visibility an interactive `claude --remote-control` session has.
 `-remote=false` would again be the way to decline it. Until then there's
 nothing to decline.
+
+### The evidence ref, and what it's staged for
+
+The destination isn't new — the operator's own repo, where the code and the
+PR body already go. The content is pixels. A screenshot can render whatever
+a rendered page reads, and a sha-pinned image on a public repo is, in
+practice, not retractable once pushed. `skills/implement-issue/SKILL.md`
+carries the channel and the skill's own `evidence` argument today; nothing
+yet takes a screenshot, so in practice no run pushes anything through it —
+that's a later change to `docs/plans/visual-evidence.md`'s backlog, and it
+will say so here again when it lands. `no-evidence` is already the way to
+decline it once something does.
 
 ### The published-version read, and why it isn't in that table either
 

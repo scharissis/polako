@@ -1,7 +1,7 @@
 ---
 description: Take a GitHub issue from planning to PR, resumable across clarification waits
-argument-hint: [issue-number]
-arguments: [issue]
+argument-hint: [issue-number] [no-evidence]
+arguments: [issue, evidence]
 disable-model-invocation: true
 ---
 
@@ -153,6 +153,68 @@ When it does qualify:
    No worktree, branch or PR is needed for this ending — if Phase 1 already
    created a worktree before this became clear, leave it; it is simply
    unused, the same as any issue whose worktree outlives it.
+
+## Evidence ref
+The `polako-evidence` branch on origin is the one sanctioned channel for
+publishing an image this run captured as real output. GitHub's own
+drag-and-drop attachments have no API, so this is a git ref, written with
+tools already granted (`Bash(git:*)`) — never a `gh release upload`, a gist
+or `gh api`. It's an orphan: it shares no history with any other branch, and
+no PR ever points at it.
+
+This run's optional second argument is `$evidence`. `no-evidence` turns the
+whole channel off for this run: no push, and step 3's `## Evidence` bullet
+below is written as omitted. Nothing in this skill takes a screenshot yet —
+that's a later ticket — so today this section is the channel a future
+capture step pushes through, not something every run exercises.
+
+Shots wait in `<worktree>/.polako-evidence/` between capture and publish,
+untracked — never staged with `git add`, and never present in any commit on
+issue-$issue's own branch. Layout on the evidence ref itself:
+`issue-$issue/<head sha7>/{before,after}-<slug>.png`, append-only — a
+re-shoot gets a new directory, so a URL never changes meaning. Commit
+subject: `evidence: issue-$issue @ <sha7>, <k> shots [skip ci]` — no
+`#$issue`, which would put a cross-reference on the issue's own timeline.
+
+Publish, each step one `git -C … <subcommand>` — no pipes, no env-var
+prefixes, no stdin, all of which fall outside `Bash(git:*)`'s prefix match:
+
+1. `ls-remote --heads origin polako-evidence` — absent, or present. Absent
+   is empty output, not a failed command.
+2. If present, fetch it to `refs/remotes/origin/polako-evidence`. That's
+   parent P.
+3. `worktree add --no-checkout --detach
+   <main-checkout>/.worktrees/evidence-tmp [P]` — a private index; nothing
+   is ever checked out into it. If this fails because a run died between
+   this step and step 8's cleanup on an earlier attempt, `worktree remove
+   --force` the leftover `evidence-tmp` first, then retry this step once.
+4. If P: `-C <main-checkout>/.worktrees/evidence-tmp read-tree P`.
+5. Per PNG: `-C <main-checkout>/.worktrees/evidence-tmp hash-object -w
+   <abs.png>`, then `-C <main-checkout>/.worktrees/evidence-tmp
+   update-index --add --cacheinfo 100644,<blob>,<path>`.
+6. `-C <main-checkout>/.worktrees/evidence-tmp write-tree`, then
+   `-C <main-checkout>/.worktrees/evidence-tmp commit-tree <tree> [-p P]
+   -m "<subject>"`. With no parent, that commit is the orphan root. Steps
+   4 to 6 all run `-C` the private worktree step 3 made — never
+   `<worktree>`, issue-$issue's own checkout, or a stray PNG ends up staged
+   in the branch actually under review.
+7. `push origin <commit>:refs/heads/polako-evidence`. Never `--force` — a
+   non-fast-forward push means a concurrent pusher. Refetch once: the
+   commit from step 6 is parented on the old P, so pushing it again fails
+   the same way. Redo steps 3 to 6 against the newly fetched parent, then
+   retry the push once; if that still fails, give up quietly rather than
+   force it.
+8. `worktree remove --force` the temp worktree.
+
+The URL: `https://<host>/<owner>/<repo>/blob/<evidence-commit-sha>/<path>?raw=true`.
+Host, owner and repo come from `git -C <worktree> config --get remote.origin.url`
+— not `remote get-url`, which expands `insteadOf` and would hand back an ssh
+rewrite instead of the address a browser needs.
+
+If the push never lands (a refused ruleset, an unparseable origin URL, the
+retry in step 7 still failing), there's no sha to embed: write step 3's
+`## Evidence` bullet as omitted, the same as `no-evidence` — never a made-up
+URL, and never a reason to stop or ask.
 
 ## Phase 0 — Gather context (every run, before anything else)
 1. Run `gh issue view $issue --json number,title,state,body,comments,blockedBy`
@@ -518,15 +580,17 @@ don't post again, and stop.
          message, a report layout. Capture it when you run the manual check
          in step 1 and reuse it here rather than reproducing it later — a
          fenced block of the real output (before/after when you can still
-         reproduce both, after alone otherwise), or a link to an image
-         already committed on the branch. Never quote test or lint output
-         here — that's what Verification is for. A mermaid diagram of a flow
-         or state change is the one exception to "captured": it documents
-         the actual structure rather than claiming to be a transcript, so
-         author it, don't invent it. Beyond these forms, never hand-type
-         output pretending it was captured, and never attempt an asset
-         upload — no upload tool is in this run's grant. Budget: the fenced
-         block or link, plus at most a sentence of framing around each.
+         reproduce both, after alone otherwise), a link to an image already
+         committed on the branch, or an image pushed to the evidence ref
+         (see "Evidence ref" above) and embedded by its commit sha. Never
+         quote test or lint output here — that's what Verification is for.
+         A mermaid diagram of a flow or state change is the one exception to
+         "captured": it documents the actual structure rather than claiming
+         to be a transcript, so author it, don't invent it. Beyond these
+         forms, never hand-type output pretending it was captured: the
+         evidence ref is the one sanctioned channel; never any other upload.
+         Budget: at most four shots or pairs, plus at most a sentence of
+         framing around each.
          Omit this section entirely when the change alters nothing a human sees,
          or when nothing above can represent what it produced; most PRs hit
          the first case.
