@@ -50,7 +50,7 @@ func fakeNotify(dest string) int {
 func notifyLog(t *testing.T, cfg *config) func() []string {
 	t.Helper()
 	dest := filepath.Join(t.TempDir(), "notifications")
-	t.Setenv(fakeNotifyEnv, dest)
+	setFakeEnv(cfg, fakeNotifyEnv, dest)
 	// Quoted, because a test binary's path is not guaranteed to be free of
 	// spaces — which is the case splitCommand exists for.
 	cfg.notifyCmd = `"` + fakeCLI(t) + `"`
@@ -67,8 +67,9 @@ func notifyLog(t *testing.T, cfg *config) func() []string {
 }
 
 func TestNotifyHandsTheHookItsContext(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
-	cfg := config{repo: "owner/repo"}
+	cfg := config{repo: "owner/repo", ui: testUI(t)}
 	told := notifyLog(t, &cfg)
 
 	notify(context.Background(), cfg, notification{
@@ -101,10 +102,11 @@ func TestNotifyHandsTheHookItsContext(t *testing.T) {
 // The flag is a courtesy. A notifier that is broken, slow or missing must cost
 // the operator notifications and nothing else.
 func TestNotifyFailureNeverBreaksTheRun(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
-	cfg := config{repo: "owner/repo"}
+	cfg := config{repo: "owner/repo", ui: testUI(t)}
 	notifyLog(t, &cfg)
-	t.Setenv(fakeNotifyEnv, "fail")
+	setFakeEnv(&cfg, fakeNotifyEnv, "fail")
 
 	notify(context.Background(), cfg, notification{event: notifyParked, issue: 3, reason: "no"})
 
@@ -122,6 +124,7 @@ func TestNotifyFailureNeverBreaksTheRun(t *testing.T) {
 
 // No -notify is the default, and it must cost nothing: no process, no log line.
 func TestNotifyDoesNothingWithoutACommand(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	notify(context.Background(), config{repo: "owner/repo"},
 		notification{event: notifyCleared})
@@ -137,6 +140,7 @@ func TestNotifyDoesNothingWithoutACommand(t *testing.T) {
 // notify command. A collision would have a notification quietly reconfigure the
 // process it notifies.
 func TestNotifyVariablesNeverShadowAFlag(t *testing.T) {
+	t.Parallel()
 	flags := declaredFlags(t)
 	for _, kv := range (notification{event: "e", issue: 1, reason: "r"}).env(config{repo: "o/r"}) {
 		name, _, _ := strings.Cut(kv, "=")
@@ -152,6 +156,7 @@ func TestNotifyVariablesNeverShadowAFlag(t *testing.T) {
 }
 
 func TestSplitCommandHonoursQuotes(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		in   string
 		want []string
@@ -184,6 +189,7 @@ func TestSplitCommandHonoursQuotes(t *testing.T) {
 // is caught at startup rather than at the first one — hours in, on a backlog
 // that was going fine.
 func TestCheckNotifyCommandFailsFastOnAMissingProgram(t *testing.T) {
+	t.Parallel()
 	if err := checkNotifyCommand(""); err != nil {
 		t.Errorf("no -notify at all must be fine: %v", err)
 	}
@@ -212,6 +218,7 @@ func TestCheckNotifyCommandFailsFastOnAMissingProgram(t *testing.T) {
 // still open, parked, and a hook watching only for `cleared` must not read
 // this as the backlog having drained (issue #389).
 func TestNotifyFiresWhenAnIssueParksAndThenNothingIsLeftToWork(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -251,6 +258,7 @@ func TestNotifyFiresWhenAnIssueParksAndThenNothingIsLeftToWork(t *testing.T) {
 // it and never mentions it again, so without a hook the only sign is a label on
 // a thread nobody is watching.
 func TestNotifyFiresOnceForAnIssueBlockedOnAnAnswer(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, _ := drainConfig(t, "asks", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -288,6 +296,7 @@ func TestNotifyFiresOnceForAnIssueBlockedOnAnAnswer(t *testing.T) {
 // is the 2am case: a token the API has started refusing ends everything, and
 // nothing else says so until somebody looks at the terminal.
 func TestNotifyFiresWhenTheDrainStopsEarly(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, _ := drainConfig(t, "authfail", &ghState{Issues: map[string]*fakeIssue{"1": {Open: true}}})
 	cfg.retries = 0
@@ -316,6 +325,7 @@ func TestNotifyFiresWhenTheDrainStopsEarly(t *testing.T) {
 // finished container, carrying the container's number and its closed-child
 // count.
 func TestNotifyFiresWhenAnEpicsLastChildCloses(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -350,6 +360,7 @@ func TestNotifyFiresWhenAnEpicsLastChildCloses(t *testing.T) {
 // just finished — closeFinishedContainers only acts on c.finished(), and
 // notify must follow the same gate.
 func TestNotifyDoesNotFireForAPartlyFinishedEpic(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -373,6 +384,7 @@ func TestNotifyDoesNotFireForAPartlyFinishedEpic(t *testing.T) {
 // to hold open: needs-human on the container is that choice, and a held
 // container fires epic-done on no shift, first or later.
 func TestNotifyDoesNotPageEveryShiftForAHeldEpic(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -399,6 +411,7 @@ func TestNotifyDoesNotPageEveryShiftForAHeldEpic(t *testing.T) {
 // hanging hook must cost the operator that notification and nothing else —
 // the epic is still commented on and closed, and the shift still completes.
 func TestNotifyFailureForEpicDoneDoesNotAffectTheShift(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -406,7 +419,7 @@ func TestNotifyFailureForEpicDoneDoesNotAffectTheShift(t *testing.T) {
 		},
 	})
 	notifyLog(t, &cfg)
-	t.Setenv(fakeNotifyEnv, "fail")
+	setFakeEnv(&cfg, fakeNotifyEnv, "fail")
 
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("a broken -notify must not end the drain: %v", err)

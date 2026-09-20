@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"maps"
 	"slices"
 	"strconv"
@@ -121,15 +120,15 @@ func resumeHint(cfg config, issue int, st *issueState) {
 		return
 	}
 	if st.remediationSession != "" {
-		log.Printf("issue #%d: `claude --resume %s` reopens the remediation run that gave up",
+		cfg.logf("issue #%d: `claude --resume %s` reopens the remediation run that gave up",
 			issue, st.remediationSession)
 	}
 	if st.session != "" {
-		log.Printf("issue #%d: `claude --resume %s` reopens what the last skill run on it did",
+		cfg.logf("issue #%d: `claude --resume %s` reopens what the last skill run on it did",
 			issue, st.session)
 	}
 	if cfg.shiftID != "" {
-		log.Printf("issue #%d: `polako stats -shift %s` reports on this shift alone",
+		cfg.logf("issue #%d: `polako stats -shift %s` reports on this shift alone",
 			issue, cfg.shiftID)
 	}
 	// A permission park's reason names "this shift's log" but cannot carry its
@@ -138,7 +137,7 @@ func resumeHint(cfg config, issue int, st *issueState) {
 	// one park-adjacent line an operator reading only the terminal (or its
 	// scrollback later) is guaranteed to see.
 	if cfg.logPath != "" {
-		log.Printf("issue #%d: %s has the full transcript, including any refused tool call",
+		cfg.logf("issue #%d: %s has the full transcript, including any refused tool call",
 			issue, cfg.logPath)
 	}
 }
@@ -196,9 +195,9 @@ func drain(ctx context.Context, cfg config) error {
 	// dies on its first issue has nothing to summarize and says nothing.
 	finish := func(err error) error {
 		if lines := drainSummary(append(results, stillWaiting(states)...), lastContainers, closedEpics, retiredDocs, time.Since(started)); len(lines) > 0 {
-			narrate(sevSection, "%s", lines[0]) // the shift's own closing heading
+			cfg.narrate(sevSection, "%s", lines[0]) // the shift's own closing heading
 			for _, line := range lines[1:] {
-				log.Print(line)
+				cfg.logf("%s", line)
 			}
 		}
 		// A drain that ended before the backlog did needs somebody. Ctrl+C is
@@ -227,7 +226,7 @@ func drain(ctx context.Context, cfg config) error {
 			reason := fmt.Sprintf("this shift has spent %s of its -max-session-cost of %s — stopping here; "+
 				"everything is on GitHub, so raise the budget and start it again to carry on",
 				usd(spent), usd(cfg.maxSessionCost))
-			log.Print(reason)
+			cfg.logf("%s", reason)
 			// A clean exit, but the backlog is not drained and only a person can
 			// decide to raise the budget — which is what notifyStopped is for.
 			notify(ctx, cfg, notification{event: notifyStopped, reason: reason})
@@ -242,7 +241,7 @@ func drain(ctx context.Context, cfg config) error {
 		// during the wait returns context.Canceled from sleep, which finish
 		// prints a summary for and reports without a notify.
 		if wait, reason, tripped := usageGateReason(ctx, cfg); tripped {
-			log.Print(reason)
+			cfg.logf("%s", reason)
 			if err := sleep(ctx, wait); err != nil {
 				return finish(err)
 			}
@@ -253,7 +252,7 @@ func drain(ctx context.Context, cfg config) error {
 			return finish(err)
 		}
 		lastContainers = containers
-		logHeldBack(heldBack, skip)
+		logHeldBack(cfg, heldBack, skip)
 		closedNow, retiredNow, err := closeFinishedContainers(ctx, cfg, containers, commentedContainers, closedContainers)
 		closedEpics = append(closedEpics, closedNow...)
 		retiredDocs = append(retiredDocs, retiredNow...)
@@ -277,7 +276,7 @@ func drain(ctx context.Context, cfg config) error {
 				continue // the queue moved while waiting — ask GitHub again
 			}
 		}
-		narrate(sevSection, "=== issue #%d ===", issue)
+		cfg.narrate(sevSection, "=== issue #%d ===", issue)
 
 		st := states[issue]
 		if st == nil {
@@ -294,7 +293,7 @@ func drain(ctx context.Context, cfg config) error {
 		switch deferred, isDeferred := deferReason(err); {
 		case isDeferred:
 			st.awaiting, st.baseline = true, deferred.baseline
-			log.Printf("issue #%d is labelled %q — leaving it for a human and working the queue behind it",
+			cfg.logf("issue #%d is labelled %q — leaving it for a human and working the queue behind it",
 				issue, awaitingAnswerLabel)
 		case parked:
 			skip[issue] = true
@@ -313,7 +312,7 @@ func drain(ctx context.Context, cfg config) error {
 			delete(states, issue)
 		}
 		if cfg.once {
-			log.Println("-once set — exiting after one issue")
+			cfg.logf("-once set — exiting after one issue")
 			return finish(nil)
 		}
 	}
@@ -358,12 +357,12 @@ func sessionSpend(results []issueResult, states map[int]*issueState) float64 {
 func awaitAnswer(ctx context.Context, cfg config, blocked []int, states map[int]*issueState) (int, error) {
 	for _, issue := range blocked {
 		if st := states[issue]; st == nil || !st.awaiting {
-			log.Printf("issue #%d was already labelled %q when this shift reached it — re-running it "+
+			cfg.logf("issue #%d was already labelled %q when this shift reached it — re-running it "+
 				"to see whether the answer is on the thread", issue, awaitingAnswerLabel)
 			return issue, nil
 		}
 	}
-	log.Printf("nothing else to work — waiting for a reply on %s, next check in %s",
+	cfg.logf("nothing else to work — waiting for a reply on %s, next check in %s",
 		issueRefs(blocked), cfg.poll)
 	if err := sleep(ctx, cfg.poll); err != nil {
 		return 0, err
@@ -374,17 +373,17 @@ func awaitAnswer(ctx context.Context, cfg config, blocked []int, states map[int]
 			if ctx.Err() != nil {
 				return 0, ctx.Err()
 			}
-			narrate(sevWarning, "transient: checking #%d comments failed (%v) — will retry", issue, err)
+			cfg.narrate(sevWarning, "transient: checking #%d comments failed (%v) — will retry", issue, err)
 			continue
 		}
 		baseline := states[issue].baseline
 		if replyArrived(comments, baseline) {
-			log.Printf("somebody replied on #%d — re-running to fold the answers in", issue)
+			cfg.logf("somebody replied on #%d — re-running to fold the answers in", issue)
 			states[issue].answered = true
 			return issue, nil
 		}
 		if note := botsOnly(comments, baseline); note != "" {
-			log.Printf("issue #%d still awaiting a reply%s", issue, note)
+			cfg.logf("issue #%d still awaiting a reply%s", issue, note)
 		}
 	}
 	return 0, nil
@@ -423,7 +422,7 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string) {
 		}
 	}
 	if err != nil {
-		narrate(sevWarning, "could not label issue #%d %q (%v) — the next shift will pick it up again "+
+		cfg.narrate(sevWarning, "could not label issue #%d %q (%v) — the next shift will pick it up again "+
 			"unless you label it yourself or close it", issue, needsHumanLabel, err)
 	}
 	// Parking supersedes any question still flagged on the issue: what it now
@@ -436,7 +435,7 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string) {
 		"Nothing will run on it again until the `%s` label is removed — "+
 		"`gh issue edit %s --remove-label %s`.", reason, needsHumanLabel, n, needsHumanLabel)
 	if _, cerr := gh(ctx, cfg, "issue", "comment", n, "--body", body); cerr != nil {
-		narrate(sevWarning, "could not comment on issue #%d (%v) — the reason is in this log and in the exit summary",
+		cfg.narrate(sevWarning, "could not comment on issue #%d (%v) — the reason is in this log and in the exit summary",
 			issue, cerr)
 	}
 }
@@ -446,11 +445,11 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string) {
 // from this shift's queue by the time this runs — split out so the loop body
 // reads as one step per line.
 func parkAndMoveOn(ctx context.Context, cfg config, issue int, st *issueState, reason string, err error) {
-	narrate(sevWarning, "issue #%d needs a human: %s — parking it and moving on", issue, reason)
+	cfg.narrate(sevWarning, "issue #%d needs a human: %s — parking it and moving on", issue, reason)
 	// Whatever the park had to say that the issue thread must not carry. Today
 	// that is where on this disk the work it left is sitting.
 	if aside := parkAsideOf(err); aside != "" {
-		log.Printf("issue #%d: %s", issue, aside)
+		cfg.logf("issue #%d: %s", issue, aside)
 	}
 	// A park is exactly when somebody wants to read what the run actually did,
 	// and the session is the whole transcript of it.
@@ -539,7 +538,7 @@ func closeFinishedContainers(ctx context.Context, cfg config, containers []conta
 				if ctx.Err() != nil {
 					return closed, retired, ctx.Err()
 				}
-				narrate(sevWarning, "could not read #%d's thread to check for the epic-finished note (%v) — "+
+				cfg.narrate(sevWarning, "could not read #%d's thread to check for the epic-finished note (%v) — "+
 					"will try again next pass", c.number, err)
 				continue
 			}
@@ -551,7 +550,7 @@ func closeFinishedContainers(ctx context.Context, cfg config, containers []conta
 					if ctx.Err() != nil {
 						return closed, retired, ctx.Err()
 					}
-					narrate(sevWarning, "could not comment on finished epic #%d (%v) — will try again next pass", c.number, err)
+					cfg.narrate(sevWarning, "could not comment on finished epic #%d (%v) — will try again next pass", c.number, err)
 					continue
 				}
 			}
@@ -562,13 +561,13 @@ func closeFinishedContainers(ctx context.Context, cfg config, containers []conta
 				return closed, retired, ctx.Err()
 			}
 			closedThisShift[c.number] = true
-			narrate(sevWarning, "could not close finished epic #%d (%v) — the comment saying why is on the thread; "+
+			cfg.narrate(sevWarning, "could not close finished epic #%d (%v) — the comment saying why is on the thread; "+
 				"the close is retried next shift", c.number, err)
 			continue
 		}
 		closedThisShift[c.number] = true
 		closed = append(closed, c)
-		log.Printf("epic #%d: all %s closed — commented and closed it", c.number, plural(c.total, "sub-issue"))
+		cfg.logf("epic #%d: all %s closed — commented and closed it", c.number, plural(c.total, "sub-issue"))
 		notify(ctx, cfg, notification{event: notifyEpicDone, issue: c.number,
 			reason: fmt.Sprintf("all %s closed — closed it", plural(c.total, "sub-issue"))})
 		if r, ok, err := retireOrphanedDoc(ctx, cfg, c, retiredThisCall); err != nil {
@@ -756,7 +755,7 @@ func reportNothingLeftToWork(ctx context.Context, cfg config, parked []int) {
 		// the notification must not think the work is done.
 		reason := fmt.Sprintf("nothing left to work — %s, waiting on a human",
 			plural(len(parked), "parked issue"))
-		narrate(sevWarning, "%s", reason)
+		cfg.narrate(sevWarning, "%s", reason)
 		notify(ctx, cfg, notification{event: notifyStuck, reason: reason})
 		return
 	}
@@ -764,7 +763,7 @@ func reportNothingLeftToWork(ctx context.Context, cfg config, parked []int) {
 	// flag this drain raised and can no longer see was closed, parked or
 	// cleared by hand while it worked elsewhere. Naming those in the summary
 	// would send an operator to a thread with nothing left to do on it.
-	narrate(sevSuccess, "no open issues — backlog cleared")
+	cfg.narrate(sevSuccess, "no open issues — backlog cleared")
 	notify(ctx, cfg, notification{event: notifyCleared, reason: "no open issues left to work"})
 }
 
@@ -773,12 +772,12 @@ func reportNothingLeftToWork(ctx context.Context, cfg config, parked []int) {
 // openIssues is called once per pass and this is called once per that call.
 // -skip already told the operator once about a number they typed themselves,
 // so it is quiet about those.
-func logHeldBack(heldBack []heldBackInfo, skip map[int]bool) {
+func logHeldBack(cfg config, heldBack []heldBackInfo, skip map[int]bool) {
 	for _, h := range heldBack {
 		if skip[h.number] {
 			continue
 		}
-		log.Printf("issue #%d blocked by %s — skipping this pass", h.number, issueRefs(h.blockers))
+		cfg.logf("issue #%d blocked by %s — skipping this pass", h.number, issueRefs(h.blockers))
 	}
 }
 

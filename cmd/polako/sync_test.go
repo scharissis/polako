@@ -138,6 +138,7 @@ func upstream(t *testing.T) (work, checkout string) {
 // checkout before a branch is cut from it or a review resolves a base against
 // it. Without this the ref falls one commit behind per merged PR.
 func TestSyncDefaultBranchFastForwardsOntoOrigin(t *testing.T) {
+	t.Parallel()
 	work, checkout := upstream(t)
 	want := commit(t, work, "merged-while-we-were-away")
 	gitAt(t, work, "push", "origin", "main")
@@ -145,7 +146,7 @@ func TestSyncDefaultBranchFastForwardsOntoOrigin(t *testing.T) {
 	if head := gitAt(t, checkout, "rev-parse", "HEAD"); head == want {
 		t.Fatal("checkout is already current, so this proves nothing")
 	}
-	if err := syncDefaultBranch(context.Background(), config{dir: checkout}, nil); err != nil {
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout, ui: testUI(t)}, nil); err != nil {
 		t.Fatalf("a reachable origin must never stop a pickup: %v", err)
 	}
 
@@ -159,6 +160,7 @@ func TestSyncDefaultBranchFastForwardsOntoOrigin(t *testing.T) {
 // state to "fix" — advancing it would be moving work the drain knows nothing
 // about, and a drain must never do that to end up tidy.
 func TestSyncDefaultBranchLeavesAnotherBranchAlone(t *testing.T) {
+	t.Parallel()
 	work, checkout := upstream(t)
 	commit(t, work, "second")
 	gitAt(t, work, "push", "origin", "main")
@@ -166,7 +168,7 @@ func TestSyncDefaultBranchLeavesAnotherBranchAlone(t *testing.T) {
 	gitAt(t, checkout, "checkout", "-b", "operators-own-work")
 	want := commit(t, checkout, "not-yours-to-move")
 
-	if err := syncDefaultBranch(context.Background(), config{dir: checkout}, nil); err != nil {
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout, ui: testUI(t)}, nil); err != nil {
 		t.Fatalf("a reachable origin must never stop a pickup: %v", err)
 	}
 
@@ -183,13 +185,14 @@ func TestSyncDefaultBranchLeavesAnotherBranchAlone(t *testing.T) {
 // commit means refuse, never rebase and never reset. Rewriting someone's commit
 // to keep the base tidy would be a far worse bug than the one this fixes.
 func TestSyncDefaultBranchRefusesRatherThanRewriteALocalCommit(t *testing.T) {
+	t.Parallel()
 	work, checkout := upstream(t)
 	commit(t, work, "theirs")
 	gitAt(t, work, "push", "origin", "main")
 
 	want := commit(t, checkout, "mine-committed-straight-to-main")
 
-	if err := syncDefaultBranch(context.Background(), config{dir: checkout}, nil); err != nil {
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout, ui: testUI(t)}, nil); err != nil {
 		t.Fatalf("a reachable origin must never stop a pickup: %v", err)
 	}
 
@@ -213,11 +216,12 @@ func unreachableOrigin(t *testing.T, checkout string) {
 // a base nobody can date and then fail its push against the same remote, so the
 // error has to reach processIssue — and say what to go and fix.
 func TestSyncDefaultBranchReportsAnUnreachableOrigin(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	_, checkout := upstream(t)
 	unreachableOrigin(t, checkout)
 
-	err := syncDefaultBranch(context.Background(), config{dir: checkout, ghRetryWait: 1}, nil)
+	err := syncDefaultBranch(context.Background(), config{dir: checkout, ui: testUI(t), ghRetryWait: 1}, nil)
 	if err == nil {
 		t.Fatal("err = nil, want the failed fetch reported so the pickup can stop on it")
 	}
@@ -294,15 +298,17 @@ func main() {
 // command (GIT_SSH_COMMAND) that always refuses with a publickey rejection —
 // a real `git fetch` failing this specific way, hermetically: no network, no
 // real sshd, no real key. example.invalid is never looked up at all: the fake
-// answers before git gets far enough to resolve it.
-func denyGitAuth(t *testing.T, checkout string) {
+// answers before git gets far enough to resolve it. The variable rides on
+// cfg.env, not t.Setenv: git is a child this config spawns, which is the case
+// that seam exists for, and it leaves the caller free to run t.Parallel().
+func denyGitAuth(t *testing.T, cfg *config, checkout string) {
 	t.Helper()
 	gitAt(t, checkout, "remote", "set-url", "origin", "ssh://git@example.invalid/repo.git")
 	// Git for Windows runs GIT_SSH_COMMAND through its bundled sh, which
 	// treats backslashes as escapes — a native filepath.Join path there
 	// gets mangled ("C:\Users\..." becomes "C:Users...", "command not
 	// found"). Forward slashes work in both that sh and a Windows exec.
-	t.Setenv("GIT_SSH_COMMAND", filepath.ToSlash(fakeGitSSHDeny(t)))
+	setFakeEnv(cfg, "GIT_SSH_COMMAND", filepath.ToSlash(fakeGitSSHDeny(t)))
 }
 
 // Issue #425: git's own credentials being refused is a narrower, likelier-
@@ -311,12 +317,14 @@ func denyGitAuth(t *testing.T, checkout string) {
 // precedes still goes on, with st remembering why for the park that might
 // follow (see parkCleanExit).
 func TestSyncDefaultBranchDoesNotStopOnAnAuthFailure(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	_, checkout := upstream(t)
-	denyGitAuth(t, checkout)
+	cfg := config{dir: checkout, ui: testUI(t), ghRetryWait: 1}
+	denyGitAuth(t, &cfg, checkout)
 
 	st := &issueState{}
-	if err := syncDefaultBranch(context.Background(), config{dir: checkout, ghRetryWait: 1}, st); err != nil {
+	if err := syncDefaultBranch(context.Background(), cfg, st); err != nil {
 		t.Fatalf("an auth failure must not stop the caller: %v", err)
 	}
 	if !st.fetchAuthFailed {
@@ -331,10 +339,12 @@ func TestSyncDefaultBranchDoesNotStopOnAnAuthFailure(t *testing.T) {
 // issue — and must not panic just because there is nothing to remember this
 // against.
 func TestSyncDefaultBranchDoesNotStopOnAnAuthFailureWithNilState(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
-	denyGitAuth(t, checkout)
+	cfg := config{dir: checkout, ui: testUI(t), ghRetryWait: 1}
+	denyGitAuth(t, &cfg, checkout)
 
-	if err := syncDefaultBranch(context.Background(), config{dir: checkout, ghRetryWait: 1}, nil); err != nil {
+	if err := syncDefaultBranch(context.Background(), cfg, nil); err != nil {
 		t.Fatalf("an auth failure must not stop the caller: %v", err)
 	}
 }
@@ -343,11 +353,12 @@ func TestSyncDefaultBranchDoesNotStopOnAnAuthFailureWithNilState(t *testing.T) {
 // is a warning today and stays one. It is also what every drain test relies on,
 // running as they do in a directory that is not a checkout.
 func TestSyncDefaultBranchWithoutAnOriginIsNotFatal(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	_, checkout := upstream(t)
 	gitAt(t, checkout, "remote", "remove", "origin")
 
-	if err := syncDefaultBranch(context.Background(), config{dir: checkout}, nil); err != nil {
+	if err := syncDefaultBranch(context.Background(), config{dir: checkout, ui: testUI(t)}, nil); err != nil {
 		t.Fatalf("err = %v, want a warning and nothing more", err)
 	}
 	if !strings.Contains(buf.String(), "no origin remote to fetch") {

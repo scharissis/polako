@@ -21,6 +21,7 @@ import (
 // --- mondayStart ---
 
 func TestMondayStart(t *testing.T) {
+	t.Parallel()
 	cases := map[string]time.Time{
 		// A Wednesday rolls back to that week's Monday.
 		"2026-08-26T15:00:00Z": time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC),
@@ -43,6 +44,7 @@ func TestMondayStart(t *testing.T) {
 // --- resolveWindowBounds: today/month, DST and month-end ---
 
 func TestResolveWindowBoundsTodaySurvivesSpringForwardDST(t *testing.T) {
+	t.Parallel()
 	ny, err := time.LoadLocation("America/New_York")
 	if err != nil {
 		t.Fatalf("loading America/New_York (time/tzdata is imported, so this must work everywhere): %v", err)
@@ -73,6 +75,7 @@ func TestResolveWindowBoundsTodaySurvivesSpringForwardDST(t *testing.T) {
 }
 
 func TestResolveWindowBoundsMonthSurvivesAYearBoundary(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 12, 15, 9, 0, 0, 0, time.UTC)
 	bounds, _, err := resolveWindowBounds(context.Background(), config{}, statsOptions{window: windowMonth}, "", now)
 	if err != nil {
@@ -86,6 +89,7 @@ func TestResolveWindowBoundsMonthSurvivesAYearBoundary(t *testing.T) {
 }
 
 func TestResolveWindowBoundsMonthSurvivesA31DayMonth(t *testing.T) {
+	t.Parallel()
 	// Jan has 31 days; a fixed 30-day add would leave periodEnd a day short
 	// of Feb 1. now is Jan 31 itself, the sharpest edge of the month.
 	now := time.Date(2026, 1, 31, 23, 0, 0, 0, time.UTC)
@@ -107,6 +111,7 @@ func TestResolveWindowBoundsMonthSurvivesA31DayMonth(t *testing.T) {
 // tested against a hand-built snapshot instead.
 
 func TestWeekAnchorFromProbeRollsBackToTheMostRecentOccurrence(t *testing.T) {
+	t.Parallel()
 	reset := time.Date(2026, 9, 2, 18, 0, 0, 0, time.UTC) // the *next* reset, named by the probe
 	now := time.Date(2026, 8, 29, 9, 0, 0, 0, time.UTC)   // three days before it
 	snap := usageSnapshot{pools: []usagePool{{name: "week (all models)", percent: 52, reset: reset, hasReset: true}}}
@@ -130,6 +135,7 @@ func TestWeekAnchorFromProbeRollsBackToTheMostRecentOccurrence(t *testing.T) {
 // Two resets ago rather than one: the loop has to keep stepping back until
 // it lands at or before now, not stop after a single 7-day step.
 func TestWeekAnchorFromProbeRollsBackMultipleSteps(t *testing.T) {
+	t.Parallel()
 	reset := time.Date(2026, 9, 2, 18, 0, 0, 0, time.UTC)
 	now := time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC) // more than two weeks before it
 	snap := usageSnapshot{pools: []usagePool{{name: "week", percent: 10, reset: reset, hasReset: true}}}
@@ -147,6 +153,7 @@ func TestWeekAnchorFromProbeRollsBackMultipleSteps(t *testing.T) {
 }
 
 func TestWeekAnchorFromProbeFalseWithoutAReadableReset(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 8, 29, 9, 0, 0, 0, time.UTC)
 	cases := map[string]usageSnapshot{
 		"no week pool at all":     {pools: []usagePool{{name: "session", percent: 10, hasReset: true}}},
@@ -162,9 +169,10 @@ func TestWeekAnchorFromProbeFalseWithoutAReadableReset(t *testing.T) {
 // --- week: the fallback path, exercised through the live (fake) probe ---
 
 func TestResolveWeekWindowFallsBackToMondayWhenTheProbeCannotAnswer(t *testing.T) {
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeUsageEnv, "") // unset: an old CLI with no /usage, per fakeUsageProbe
-	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second}
+	t.Parallel()
+	// fakeUsageEnv left out: an old CLI with no /usage, per fakeUsageProbe.
+	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second,
+		env: fakeEnv(fakeClaudeEnv, "stream")}
 	now := time.Date(2026, 8, 26, 15, 0, 0, 0, time.UTC) // a Wednesday
 
 	bounds, probe, err := resolveWindowBounds(context.Background(), cfg, statsOptions{window: windowWeek}, "", now)
@@ -189,9 +197,9 @@ func TestResolveWeekWindowFallsBackToMondayWhenTheProbeCannotAnswer(t *testing.T
 // wall clock (see the pure-math tests above for that) — only that the probe
 // fired and the bounds it returned are internally consistent.
 func TestResolveWeekWindowUsesTheProbeWhenItAnswers(t *testing.T) {
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeUsageEnv, "sub")
-	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second}
+	t.Parallel()
+	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second,
+		env: fakeEnv(fakeClaudeEnv, "stream", fakeUsageEnv, "sub")}
 
 	bounds, probe, err := resolveWindowBounds(context.Background(), cfg, statsOptions{window: windowWeek}, "", time.Now())
 	if err != nil {
@@ -221,6 +229,7 @@ func sessionFixtureDir(t *testing.T, lines ...string) string {
 }
 
 func TestSessionAnchorFindsTheEarliestRunInTheLast5h(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	dir := sessionFixtureDir(t,
 		// Outside the 5h lookback: not a candidate.
@@ -240,6 +249,7 @@ func TestSessionAnchorFindsTheEarliestRunInTheLast5h(t *testing.T) {
 }
 
 func TestSessionAnchorFalseWithNoRecentRun(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	dir := sessionFixtureDir(t,
 		`{"v":1,"kind":"run","ts":"2026-08-25T06:00:00Z","repo":"r/r","issue":1,"cost_usd":1}`,
@@ -250,6 +260,7 @@ func TestSessionAnchorFalseWithNoRecentRun(t *testing.T) {
 }
 
 func TestResolveWindowBoundsSessionFallsBackToAPlain5hWhenNothingRecent(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	dir := t.TempDir() // empty: no runs at all
 	bounds, probe, err := resolveWindowBounds(context.Background(), config{}, statsOptions{window: windowSession}, dir, now)
@@ -274,6 +285,7 @@ func TestResolveWindowBoundsSessionFallsBackToAPlain5hWhenNothingRecent(t *testi
 // --- -window end to end, through the text report ---
 
 func TestStatsWindowTodayFiltersToLocalMidnight(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 8, 25, 15, 0, 0, 0, time.UTC)
 	dir := sessionFixtureDir(t,
 		// Yesterday: outside today's window.
@@ -329,9 +341,10 @@ func planCostDir(t *testing.T) string {
 // otherwise be probed for the cross-check — exactly the trap status_test.go
 // avoids by never exercising a live probe through anything but a fake CLI.
 func TestPlanCostPerIssueLine(t *testing.T) {
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeUsageEnv, "") // unset: no cross-check figure, so the line is pinned in full
-	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second}
+	t.Parallel()
+	// fakeUsageEnv left out: no cross-check figure, so the line is pinned in full.
+	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second,
+		env: fakeEnv(fakeClaudeEnv, "stream")}
 
 	_, _, summary, err := statsReport(context.Background(), cfg, statsOptions{}, planCostDir(t), fixtureNow)
 	if err != nil {
@@ -350,6 +363,7 @@ func TestPlanCostPerIssueLine(t *testing.T) {
 // line already gets: no terminal issue anywhere carries a usable sample, so
 // the line does not appear at all.
 func TestPlanCostOmittedWithoutAnySamples(t *testing.T) {
+	t.Parallel()
 	out := stats(t, "-metrics", fixtureDir(t))
 	if strings.Contains(out, "plan cost per issue") {
 		t.Errorf("no samples in this fixture, want no plan-cost line:\n%s", out)
@@ -360,9 +374,10 @@ func TestPlanCostOmittedWithoutAnySamples(t *testing.T) {
 // self-reported window — sits beside the mean/median and is fetched once,
 // through statsReport directly since it needs a cfg pointed at the fake CLI.
 func TestPlanCostCrossCheckFromTheLiveProbe(t *testing.T) {
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeUsageEnv, "sub") // usageSample: "Top plugins: polako 29%" over "Last 24h"
-	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second}
+	t.Parallel()
+	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second,
+		// usageSample: "Top plugins: polako 29%" over "Last 24h"
+		env: fakeEnv(fakeClaudeEnv, "stream", fakeUsageEnv, "sub")}
 
 	_, _, summary, err := statsReport(context.Background(), cfg, statsOptions{}, planCostDir(t), fixtureNow)
 	if err != nil {
@@ -381,10 +396,10 @@ func TestPlanCostCrossCheckFromTheLiveProbe(t *testing.T) {
 // point of gating it on issuesHaveUsageSamples rather than probing on every
 // invocation regardless.
 func TestPlanCostNoProbeCallWithoutSamples(t *testing.T) {
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeUsageEnv, "sub")
-	args := watchClaudeArgs(t)
-	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second}
+	t.Parallel()
+	cfg := config{claudeBin: fakeCLI(t), usageTimeout: 5 * time.Second,
+		env: fakeEnv(fakeClaudeEnv, "stream", fakeUsageEnv, "sub")}
+	args := watchClaudeArgs(t, &cfg)
 
 	_, _, _, err := statsReport(context.Background(), cfg, statsOptions{}, fixtureDir(t), fixtureNow)
 	if err != nil {
@@ -405,7 +420,6 @@ func TestPlanCostNoProbeCallWithoutSamples(t *testing.T) {
 // a POLAKO_WINDOW default sitting in the environment, not be silently
 // overridden by it once resolveWindowBounds runs.
 func TestExplicitSinceBeatsAWindowEnvDefault(t *testing.T) {
-	clearEnvDefaults(t)
 	t.Setenv(envVarName("window"), "week")
 	var out bytes.Buffer
 	if err := runStats([]string{"-since", "1h", "-metrics", fixtureDir(t)}, &out, io.Discard, fixtureNow, report{}); err != nil {
@@ -421,7 +435,6 @@ func TestExplicitSinceBeatsAWindowEnvDefault(t *testing.T) {
 
 // The mirror image: an explicit -window must beat a POLAKO_SINCE default.
 func TestExplicitWindowBeatsASinceEnvDefault(t *testing.T) {
-	clearEnvDefaults(t)
 	t.Setenv(envVarName("since"), "1h")
 	var out bytes.Buffer
 	if err := runStats([]string{"-window", "today", "-metrics", fixtureDir(t)}, &out, io.Discard, fixtureNow, report{}); err != nil {

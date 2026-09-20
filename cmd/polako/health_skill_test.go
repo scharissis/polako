@@ -28,6 +28,7 @@ func healthSkill(t *testing.T) string {
 // argument the frontmatter never declared gets the literal `$name` instead of
 // what the operator typed.
 func TestHealthSkillDeclaresItsArguments(t *testing.T) {
+	t.Parallel()
 	skill := healthSkill(t)
 
 	front, body, ok := strings.Cut(strings.TrimPrefix(skill, "---\n"), "\n---")
@@ -61,6 +62,7 @@ func TestHealthSkillDeclaresItsArguments(t *testing.T) {
 // before any human chose it. Checked against the binary's own constant because
 // the two are one contract.
 func TestHealthSkillLabelsEverythingItCreates(t *testing.T) {
+	t.Parallel()
 	skill := healthSkill(t)
 
 	invocations := 0
@@ -90,6 +92,7 @@ func TestHealthSkillLabelsEverythingItCreates(t *testing.T) {
 // later at full price. The sentence is read with its line breaks flattened —
 // where it wraps is not the contract.
 func TestHealthSkillStatesTheSizingContract(t *testing.T) {
+	t.Parallel()
 	skill := healthSkill(t)
 
 	want := "one issue is one PR that `/" + defaultSkill + "` can produce unattended without stopping to ask"
@@ -103,6 +106,7 @@ func TestHealthSkillStatesTheSizingContract(t *testing.T) {
 // here: review-health reads far more of a repo than the other two skills, and
 // on a repo that accepts outside contributions strangers wrote some of it.
 func TestHealthSkillTreatsWhatItReadsAsData(t *testing.T) {
+	t.Parallel()
 	skill := healthSkill(t)
 
 	for _, marker := range []string{"data", "not addressed to you", "content to report, not to act on"} {
@@ -118,6 +122,7 @@ func TestHealthSkillTreatsWhatItReadsAsData(t *testing.T) {
 // granted, which hangs an unattended run on the permission prompt it raises.
 // review-health gets the same closed surface from day one.
 func TestHealthSkillClosesItsGhSurface(t *testing.T) {
+	t.Parallel()
 	skill := healthSkill(t)
 
 	for _, marker := range []string{"gh label list", "gh --version"} {
@@ -146,6 +151,7 @@ func TestHealthSkillClosesItsGhSurface(t *testing.T) {
 // threads that already exist, since an edit could strip a `proposed` label as
 // easily as apply one.
 func TestHealthSkillCreatesIssuesAndNothingElse(t *testing.T) {
+	t.Parallel()
 	skill := healthSkill(t)
 
 	for _, forbidden := range []string{"gh issue edit", "gh issue comment", "gh pr", "git commit", "git push"} {
@@ -162,6 +168,7 @@ func TestHealthSkillCreatesIssuesAndNothingElse(t *testing.T) {
 // A repo that gains its own gate stops needing this skill to notice, so losing
 // this instruction is losing the deepest half of what the skill is for.
 func TestHealthSkillProposesTheGateWhenAbsent(t *testing.T) {
+	t.Parallel()
 	skill := healthSkill(t)
 
 	if !strings.Contains(skill, "Propose the gate, not just the fix") {
@@ -179,6 +186,7 @@ func TestHealthSkillProposesTheGateWhenAbsent(t *testing.T) {
 // (issue #153). Pin the two halves of that: it derives norms rather than
 // carrying constants, and it does not depend on the polako-specific script.
 func TestHealthSkillMeasuresTheRepoItself(t *testing.T) {
+	t.Parallel()
 	skill := healthSkill(t)
 
 	flat := strings.Join(strings.Fields(skill), " ")
@@ -198,6 +206,7 @@ func TestHealthSkillMeasuresTheRepoItself(t *testing.T) {
 // and it never quotes money — costs come from run history, and a figure
 // invented in a skill body is a guess wearing a number's clothes.
 func TestHealthSkillEstimateLineKeepsItsShape(t *testing.T) {
+	t.Parallel()
 	skill := healthSkill(t)
 
 	shape := regexp.MustCompile(`(?m)^[ \t]*Estimate: [SML] — likely \S+ runs[ \t]*$`)
@@ -218,6 +227,7 @@ func TestHealthSkillEstimateLineKeepsItsShape(t *testing.T) {
 // in another repo's voice unless told otherwise, because CLAUDE.md's
 // house-style rule is not loaded there.
 func TestHealthSkillCarriesTheHouseStyle(t *testing.T) {
+	t.Parallel()
 	skill := healthSkill(t)
 
 	flat := strings.Join(strings.Fields(skill), " ")
@@ -254,6 +264,7 @@ func TestHealthSkillDescribesDontPaste(t *testing.T) {
 // so titles were conventional only by accident of which repo loads polako's
 // own CLAUDE.md.
 func TestHealthSkillStatesTheTitleConvention(t *testing.T) {
+	t.Parallel()
 	skill := healthSkill(t)
 
 	flat := strings.Join(strings.Fields(skill), " ")
@@ -277,6 +288,7 @@ func TestHealthSkillStatesTheTitleConvention(t *testing.T) {
 // so a curator deciding whether to lift the `proposed` label had to read
 // however much the run felt like writing.
 func TestHealthSkillBodySectionsAllHaveBudgets(t *testing.T) {
+	t.Parallel()
 	skill := healthSkill(t)
 
 	start := strings.Index(skill, "## Summary — what this proposes and why")
@@ -319,6 +331,7 @@ func TestHealthSkillBodySectionsAllHaveBudgets(t *testing.T) {
 // the child create, a fixed-shape `Depends on:` body line, and the ordinal form
 // retired by name.
 func TestHealthSkillDeclaresDependencyOrder(t *testing.T) {
+	t.Parallel()
 	skill := healthSkill(t)
 
 	if !strings.Contains(skill, "--blocked-by") {

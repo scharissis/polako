@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"slices"
 	"strconv"
 	"strings"
@@ -85,13 +84,13 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, st *issue
 			if ctx.Err() != nil {
 				return "", ctx.Err()
 			}
-			narrate(sevWarning, "transient: checking PR #%d failed (%v) — will retry", prNumber, err)
+			cfg.narrate(sevWarning, "transient: checking PR #%d failed (%v) — will retry", prNumber, err)
 		case pr.state != "OPEN":
 			return pr.state, nil
 		case overspent != "" && pr.remediable():
 			return "", park(parkBudget, "%s", overspent)
 		case pr.mergeable == "CONFLICTING":
-			log.Printf("PR #%d has merge conflicts — dispatching remediation", prNumber)
+			cfg.logf("PR #%d has merge conflicts — dispatching remediation", prNumber)
 			if rerr := remediateConflicts(ctx, cfg, issue, prNumber, pr.head, st, tally, remChoice); rerr != nil {
 				if ctx.Err() != nil {
 					return "", ctx.Err()
@@ -100,7 +99,7 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, st *issue
 					return "", authAdvice(rerr)
 				}
 				failures++
-				log.Printf("remediation attempt %d/%d failed (%v)", failures, cfg.retries, rerr)
+				cfg.logf("remediation attempt %d/%d failed (%v)", failures, cfg.retries, rerr)
 				if failures >= cfg.retries {
 					return "", park(parkConflicts,
 						"conflict remediation for PR #%d failed %d times — needs a human."+
@@ -108,7 +107,7 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, st *issue
 				}
 			} else {
 				failures = 0
-				log.Printf("remediation pushed — GitHub will recompute mergeability")
+				cfg.logf("remediation pushed — GitHub will recompute mergeability")
 			}
 		case pr.checks == checksFailing:
 			if err := handleFailingChecks(ctx, cfg, issue, prNumber, pr, st, tally,
@@ -121,7 +120,7 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, st *issue
 				return "", err
 			}
 		default:
-			log.Printf("PR #%d still open (mergeable: %s, checks: %s%s) — next check in %s",
+			cfg.logf("PR #%d still open (mergeable: %s, checks: %s%s) — next check in %s",
 				prNumber, pr.mergeable, pr.checks, pr.reviewNote(), cfg.poll)
 		}
 		if serr := sleep(ctx, cfg.poll); serr != nil {
@@ -154,7 +153,7 @@ func handleFailingChecks(ctx context.Context, cfg config, issue, prNumber int, p
 	}
 	*redRuns++
 	*remediatedHead = pr.head
-	log.Printf("PR #%d has %s failing (%s) — dispatching remediation",
+	cfg.logf("PR #%d has %s failing (%s) — dispatching remediation",
 		prNumber, plural(len(pr.failing), "check"), strings.Join(pr.failing, ", "))
 	if rerr := remediateChecks(ctx, cfg, issue, prNumber, pr.failing, pr.head, st, tally, remChoice); rerr != nil {
 		if ctx.Err() != nil {
@@ -170,9 +169,9 @@ func handleFailingChecks(ctx context.Context, cfg config, issue, prNumber int, p
 		// head; clearing it just avoids a stale match against whatever the
 		// next dispatch's own head turns out to be.
 		*remediatedHead = ""
-		log.Printf("check remediation %d/%d failed (%v)", *redRuns, max(cfg.retries, 1), rerr)
+		cfg.logf("check remediation %d/%d failed (%v)", *redRuns, max(cfg.retries, 1), rerr)
 	} else {
-		log.Printf("remediation finished — GitHub will re-run the checks")
+		cfg.logf("remediation finished — GitHub will re-run the checks")
 	}
 	return nil
 }
@@ -204,7 +203,7 @@ func handleReviewOutstanding(ctx context.Context, cfg config, issue, prNumber in
 	}
 	*reviewRuns++
 	*remediatedReview, *remediatedReviewHead = pr.reviewedAt, pr.head
-	log.Printf("PR #%d has changes requested — dispatching remediation", prNumber)
+	cfg.logf("PR #%d has changes requested — dispatching remediation", prNumber)
 	if rerr := remediateReview(ctx, cfg, issue, prNumber, pr.head, st, tally, remChoice); rerr != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -218,9 +217,9 @@ func handleReviewOutstanding(ctx context.Context, cfg config, issue, prNumber in
 		// left for the cross-poll comparison above to add by remembering
 		// this review/head pair.
 		*remediatedReview, *remediatedReviewHead = time.Time{}, ""
-		log.Printf("review remediation %d/%d failed (%v)", *reviewRuns, max(cfg.retries, 1), rerr)
+		cfg.logf("review remediation %d/%d failed (%v)", *reviewRuns, max(cfg.retries, 1), rerr)
 	} else {
-		log.Printf("remediation finished — waiting for the reviewer to look again")
+		cfg.logf("remediation finished — waiting for the reviewer to look again")
 	}
 	return nil
 }
@@ -283,7 +282,7 @@ func runRemediation(ctx context.Context, cfg config, issue, prNumber int, reason
 	runCfg := choice.apply(cfg)
 	runCfg.addTools = resolveTools(cfg.addTools, resolveTools(extraTools, prCommentTools(prNumber)))
 	if line := choice.dispatchLine(issue); line != "" {
-		log.Print(line)
+		cfg.logf("%s", line)
 	}
 	started := time.Now()
 	rep, err := execClaude(ctx, runCfg, prompt, "", "", runLimit(cfg, *tally))
@@ -716,7 +715,7 @@ func lookupPRFacts(ctx context.Context, cfg config, prNumber int) prFacts {
 		facts, err = parsePRFacts(out)
 	}
 	if err != nil {
-		log.Printf("run data: GitHub could not say what PR #%d changed (%v) — recording the outcome without it",
+		cfg.logf("run data: GitHub could not say what PR #%d changed (%v) — recording the outcome without it",
 			prNumber, err)
 		return prFacts{}
 	}
@@ -763,14 +762,14 @@ func postSummary(ctx context.Context, cfg config, prNumber int, tally issueTally
 	if tally.runs == 0 {
 		// This drain only waited on a PR an earlier one opened, so it has
 		// nothing to report — and "0 runs, $0.00" would read as a free PR.
-		log.Printf("-post-summary: no runs for PR #%d in this shift — leaving it uncommented", prNumber)
+		cfg.logf("-post-summary: no runs for PR #%d in this shift — leaving it uncommented", prNumber)
 		return
 	}
 	if _, err := gh(ctx, cfg, "pr", "comment", strconv.Itoa(prNumber), "--body", summaryComment(tally)); err != nil {
-		narrate(sevWarning, "could not comment the run summary on PR #%d (%v) — the shift continues", prNumber, err)
+		cfg.narrate(sevWarning, "could not comment the run summary on PR #%d (%v) — the shift continues", prNumber, err)
 		return
 	}
-	log.Printf("commented the run summary on PR #%d", prNumber)
+	cfg.logf("commented the run summary on PR #%d", prNumber)
 }
 
 func waitForReply(ctx context.Context, cfg config, issue int, baseline int64) error {
@@ -780,13 +779,13 @@ func waitForReply(ctx context.Context, cfg config, issue int, baseline int64) er
 		}
 		comments, err := issueComments(ctx, cfg, issue)
 		if err != nil {
-			narrate(sevWarning, "transient: checking #%d comments failed (%v) — will retry", issue, err)
+			cfg.narrate(sevWarning, "transient: checking #%d comments failed (%v) — will retry", issue, err)
 			continue
 		}
 		if replyArrived(comments, baseline) {
 			return nil
 		}
-		log.Printf("issue #%d still awaiting a reply%s — next check in %s",
+		cfg.logf("issue #%d still awaiting a reply%s — next check in %s",
 			issue, botsOnly(comments, baseline), cfg.poll)
 	}
 }

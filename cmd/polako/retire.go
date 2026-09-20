@@ -16,7 +16,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 )
@@ -50,7 +49,7 @@ func retireOrphanedDoc(ctx context.Context, cfg config, c containerInfo, filedTh
 		if ctx.Err() != nil {
 			return retiredDoc{}, false, ctx.Err()
 		}
-		narrate(sevWarning, "could not read #%d's body to check for a plan footer (%v) — no retire issue filed",
+		cfg.narrate(sevWarning, "could not read #%d's body to check for a plan footer (%v) — no retire issue filed",
 			c.number, err)
 		return retiredDoc{}, false, nil
 	}
@@ -67,7 +66,7 @@ func retireOrphanedDoc(ctx context.Context, cfg config, c containerInfo, filedTh
 		if ctx.Err() != nil {
 			return retiredDoc{}, false, ctx.Err()
 		}
-		narrate(sevWarning, "could not search for other open issues naming %s (%v) — no retire issue filed",
+		cfg.narrate(sevWarning, "could not search for other open issues naming %s (%v) — no retire issue filed",
 			footer.doc, err)
 		return retiredDoc{}, false, nil
 	}
@@ -80,11 +79,11 @@ func retireOrphanedDoc(ctx context.Context, cfg config, c containerInfo, filedTh
 		if ctx.Err() != nil {
 			return retiredDoc{}, false, ctx.Err()
 		}
-		narrate(sevWarning, "could not file a retire issue for %s (%v) — file one by hand, or wait for "+
+		cfg.narrate(sevWarning, "could not file a retire issue for %s (%v) — file one by hand, or wait for "+
 			"the next epic close on this document", footer.doc, err)
 		return retiredDoc{}, false, nil
 	}
-	log.Printf("epic #%d: filed #%d to retire %s", c.number, issue, footer.doc)
+	cfg.logf("epic #%d: filed #%d to retire %s", c.number, issue, footer.doc)
 	return retiredDoc{container: c.number, doc: footer.doc, issue: issue}, true, nil
 }
 

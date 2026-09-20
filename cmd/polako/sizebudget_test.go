@@ -83,6 +83,7 @@ func splitFuncHint() string {
 }
 
 func TestSourceStaysWithinSizeBudget(t *testing.T) {
+	t.Parallel()
 	files, funcs := surveyBudget(t, ".")
 
 	seenFile := map[string]bool{}

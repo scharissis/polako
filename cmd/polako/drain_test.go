@@ -851,9 +851,9 @@ func drainConfig(t *testing.T, mode string, st *ghState) (config, string) {
 	if err := writeGhState(path, st); err != nil {
 		t.Fatalf("writing fake gh state: %v", err)
 	}
-	t.Setenv(fakeGhEnv, path)
-	t.Setenv(fakeClaudeEnv, mode)
 	return config{
+		env: fakeEnv(fakeGhEnv, path, fakeClaudeEnv, mode),
+		ui:  testUI(t),
 		// Not a checkout at all, which is deliberate: worktree cleanup is
 		// best-effort, and so is the probe that says what a parked run left
 		// behind — every git call here fails, so every park in these tests
@@ -906,6 +906,7 @@ func finalGhState(t *testing.T, path string) *ghState {
 // The point of the whole issue: issue 1 cannot be finished, and the drain has
 // to park it and go on to issue 2 rather than ending the session on it.
 func TestDrainParksADeadIssueAndKeepsGoing(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -977,6 +978,7 @@ func TestDrainParksADeadIssueAndKeepsGoing(t *testing.T) {
 // parked — issue 2 would meet the same dead remote, and a park apiece would
 // label the whole backlog needs-human for a fault that is none of theirs.
 func TestDrainStopsWhenOriginCannotBeFetched(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -1014,6 +1016,7 @@ func TestDrainStopsWhenOriginCannotBeFetched(t *testing.T) {
 // success line, so an operator reading just that would think the work was
 // done.
 func TestDrainDoesNotCallAParkedBacklogCleared(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -1040,6 +1043,7 @@ func TestDrainDoesNotCallAParkedBacklogCleared(t *testing.T) {
 // says "cleared" — the split must not eat the case it was already right
 // about.
 func TestDrainStillCallsAGenuinelyEmptyBacklogCleared(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -1065,6 +1069,7 @@ func TestDrainStillCallsAGenuinelyEmptyBacklogCleared(t *testing.T) {
 // comment, and the summary calls it out by name rather than folding it into
 // "merged".
 func TestDrainClosesAnIssueThatNeedsNoCodeChange(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	// Two "issue view" reads happen before dispatchRun's own close check would
 	// see anything: the pre-run awaiting-answer check, then the post-run
@@ -1135,12 +1140,13 @@ func leftBehind(t *testing.T, cfg *config) {
 // the message this test is about takes running the resumes out first — which is
 // what the fake does here, ending every turn without a PR.
 func TestDrainParkSaysWhatTheRunLeftBehind(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 	leftBehind(t, &cfg)
 	records := t.TempDir()
 	cfg.rec = newRecorder(records)
@@ -1199,6 +1205,7 @@ func TestDrainParkSaysWhatTheRunLeftBehind(t *testing.T) {
 // with nothing uncommitted in it, is a run that really did decide nothing — and
 // the sentence that has always meant that has to go on meaning only that.
 func TestDrainParkSaysNothingExtraWhenTheRunLeftNothing(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -1241,6 +1248,7 @@ func TestDrainParkSaysNothingExtraWhenTheRunLeftNothing(t *testing.T) {
 // same way PLAN.md above isn't — a dead run's shots must not pad the park
 // message's file count.
 func TestDrainParkSaysNothingExtraWhenTheRunLeftOnlyEvidence(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -1282,6 +1290,7 @@ func TestDrainParkSaysNothingExtraWhenTheRunLeftOnlyEvidence(t *testing.T) {
 // parks on the first clean exit rather than spending the resume budget
 // rediscovering the same wall.
 func TestDrainParksAPermissionRefusalWithoutResuming(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "permissionblocked", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -1289,7 +1298,7 @@ func TestDrainParksAPermissionRefusalWithoutResuming(t *testing.T) {
 	cfg.shiftID = "shift99"
 	cfg.logPath = "/tmp/fake-shift.log"
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 	records := t.TempDir()
 	cfg.rec = newRecorder(records)
 
@@ -1345,15 +1354,16 @@ func TestDrainParksAPermissionRefusalWithoutResuming(t *testing.T) {
 // the SSH agent; now the fetch failure leads the park's reason and the exit
 // summary totals it once, and neither carries git's own stderr to the thread.
 func TestDrainParkLeadsWithAFetchAuthFailure(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "permissionblocked", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 	})
 	_, checkout := upstream(t)
-	denyGitAuth(t, checkout)
+	denyGitAuth(t, &cfg, checkout)
 	cfg.dir = checkout
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("an auth failure that lets the run go on must not end the drain: %v", err)
@@ -1389,12 +1399,13 @@ func TestDrainParkLeadsWithAFetchAuthFailure(t *testing.T) {
 // parks it on the first run, under the same permission category, with the
 // refused command named for the operator.
 func TestDrainParksARefusedToolResultWithoutResuming(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "toolrefused", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 	records := t.TempDir()
 	cfg.rec = newRecorder(records)
 
@@ -1440,6 +1451,7 @@ func TestDrainParksARefusedToolResultWithoutResuming(t *testing.T) {
 // A permission ask read off any turn now names the fix in the park reason —
 // without changing that the issue parks, or when.
 func TestDrainNamesAPermissionAskMadeMidRun(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "permissionmidrun", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -1481,6 +1493,7 @@ func TestDrainNamesAPermissionAskMadeMidRun(t *testing.T) {
 // is the case that matters most — it is the one that reads as nothing happened
 // and is not.
 func TestLeftWorkDescribe(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		w    leftWork
@@ -1521,6 +1534,7 @@ func TestLeftWorkDescribe(t *testing.T) {
 // path names the operator's account and how their disk is laid out. So it
 // travels beside the park rather than inside its reason.
 func TestLeftWorkWhereIsForTheLogAlone(t *testing.T) {
+	t.Parallel()
 	w := leftWork{branch: "issue-42", counted: true, path: "/src/repo-issue-42", dirty: 6}
 	if got, want := w.where(), "the work it left is in /src/repo-issue-42"; got != want {
 		t.Errorf("where() = %q, want %q", got, want)
@@ -1546,6 +1560,7 @@ func TestLeftWorkWhereIsForTheLogAlone(t *testing.T) {
 // convention would never look. A detached worktree in the way must not be
 // mistaken for it.
 func TestWorktreeForFindsTheWorktreeHoldingABranch(t *testing.T) {
+	t.Parallel()
 	list := "worktree /repo\nHEAD aaa\nbranch refs/heads/main\n\n" +
 		"worktree /tmp/detached\nHEAD bbb\ndetached\n\n" +
 		"worktree /elsewhere/wt\nHEAD ccc\nbranch refs/heads/issue-7\n\n"
@@ -1561,6 +1576,7 @@ func TestWorktreeForFindsTheWorktreeHoldingABranch(t *testing.T) {
 // the table above: what git counts as changed, and what it says about a
 // worktree whose directory is gone.
 func TestInspectLeftWorkAgainstARealCheckout(t *testing.T) {
+	t.Parallel()
 	t.Run("a whole new directory is counted file by file", func(t *testing.T) {
 		_, checkout := upstream(t)
 		wt := filepath.Join(t.TempDir(), "checkout-issue-3")
@@ -1633,6 +1649,7 @@ func TestInspectLeftWorkAgainstARealCheckout(t *testing.T) {
 // worktree and branch no merge-moment cleanup will ever revisit. The next
 // shift reclaims them before it picks up an issue.
 func TestDrainReclaimsALeftoverWorktreeAtShiftStart(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	_, checkout := upstream(t)
 	mergeIssueBranch(t, checkout, "issue-1", "feature-1")
@@ -1666,6 +1683,7 @@ func TestDrainReclaimsALeftoverWorktreeAtShiftStart(t *testing.T) {
 // minutes ago is exactly the case. needs-human outranks even a merged PR: if a
 // human finished a parked issue by hand, clearing the label is still theirs.
 func TestDrainLeavesAParkedIssuesWorktreeAlone(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	mergeIssueBranch(t, checkout, "issue-1", "feature-1")
 	wt := filepath.Join(t.TempDir(), "issue-1-worktree")
@@ -1693,6 +1711,7 @@ func TestDrainLeavesAParkedIssuesWorktreeAlone(t *testing.T) {
 // the merge did not take — is the operator's to deal with now, so it is said
 // out loud rather than left at detail level like an old leftover branch.
 func TestDrainWarnsWhenTheMergedWorktreeHoldsUncommittedWork(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	_, checkout := upstream(t)
 	mergeIssueBranch(t, checkout, "issue-1", "feature-1")
@@ -1737,6 +1756,7 @@ func TestDrainWarnsWhenTheMergedWorktreeHoldsUncommittedWork(t *testing.T) {
 // — is narrated and stepped over. Nothing here is fatal: a tidy-up must not
 // take a backlog down.
 func TestDrainSurvivesASweepThatCannotRun(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -1762,6 +1782,7 @@ func TestDrainSurvivesASweepThatCannotRun(t *testing.T) {
 // checked too — the run can only raise the flag if the allowlist it was handed
 // permits it, pinned to this issue and no other.
 func TestDrainWaitsForAnAnswerThenFoldsItIn(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "asks", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -1804,6 +1825,7 @@ func TestDrainWaitsForAnAnswerThenFoldsItIn(t *testing.T) {
 // crash has to be treated as a crash: resume it, and park when the resumes run
 // out, the same as any other run that dies with nothing to show.
 func TestDrainDoesNotWaitTwiceOnOneQuestion(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "askscrash", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -1849,6 +1871,7 @@ func TestDrainDoesNotWaitTwiceOnOneQuestion(t *testing.T) {
 // picked back up once nothing else is left and the reply has landed, so both
 // still ship — and only ever one at a time.
 func TestDrainWorksALaterIssueWhileOneAwaitsAnAnswer(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "asks", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}, "2": {Open: true}},
@@ -1902,6 +1925,7 @@ func TestDrainWorksALaterIssueWhileOneAwaitsAnAnswer(t *testing.T) {
 // new. Waiting instead would sit forever on an answer given while this drain
 // was not running.
 func TestDrainRetriesAnIssueFlaggedBeforeItStarted(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "asks", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true, Labels: []string{awaitingAnswerLabel}, Comments: 2}},
@@ -1930,6 +1954,7 @@ func TestDrainRetriesAnIssueFlaggedBeforeItStarted(t *testing.T) {
 // nor a park — refused credentials here — must not sign off by sending the
 // operator to a thread they have already replied on.
 func TestDrainStopsCallingAnIssueWaitingOnceItIsPickedBackUp(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "asksthenauth", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -1955,6 +1980,7 @@ func TestDrainStopsCallingAnIssueWaitingOnceItIsPickedBackUp(t *testing.T) {
 // down and a human then closed themselves is gone from the queue, and naming it
 // in the summary would send somebody to a thread with nothing left to do on it.
 func TestDrainForgetsAQuestionAHumanClosedInstead(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "asks", &ghState{
 		// Issue 1 asks something, and is closed by hand on the third listing —
@@ -1989,6 +2015,7 @@ func TestDrainForgetsAQuestionAHumanClosedInstead(t *testing.T) {
 // a person is as done with as this process can make it. It must not spend the
 // night polling a thread, and it must say what it left behind.
 func TestDrainOnceExitsOnAQuestion(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "asks", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}, "2": {Open: true}},
@@ -2032,6 +2059,7 @@ func TestDrainOnceExitsOnAQuestion(t *testing.T) {
 // Only the label says a question was asked, so a noisy thread now ends the way
 // any other run that produced nothing does.
 func TestDrainDoesNotReadStrayCommentsAsQuestions(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "noisy", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -2060,6 +2088,7 @@ func TestDrainDoesNotReadStrayCommentsAsQuestions(t *testing.T) {
 // run to discover that. Under -strict-order, where the drain sits on the thread
 // itself.
 func TestDrainKeepsWaitingThroughABotComment(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "asksbot", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -2104,6 +2133,7 @@ func TestDrainKeepsWaitingThroughABotComment(t *testing.T) {
 // issue 2 worked, and the poll that decides whether to pick issue 1 back up has
 // to ignore the bot exactly as the in-place wait does.
 func TestDrainDoesNotPickAnIssueBackUpForABotComment(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "asksbot", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}, "2": {Open: true}},
@@ -2157,6 +2187,7 @@ func TestDrainDoesNotPickAnIssueBackUpForABotComment(t *testing.T) {
 // run exits and treats an unmoved head as the failed attempt it is, the same
 // as a Go error from execClaude.
 func TestDrainParksWhenConflictRemediationChangesNothing(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -2214,6 +2245,7 @@ func TestDrainParksWhenConflictRemediationChangesNothing(t *testing.T) {
 // to dispatch one remediation run — one, not one per poll — and the PR goes on
 // to merge once that run has pushed.
 func TestDrainRemediatesAFailingCheck(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "fixci", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -2260,11 +2292,12 @@ func TestDrainRemediatesAFailingCheck(t *testing.T) {
 // run's argv carries no --model/--effort and its record inherits; the rebase
 // run's argv carries both and its record names them as the remediation cell.
 func TestDrainRemediationFlagsSteerOnlyTheRemediationRun(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementthenrebase", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 	cfg.remediationModel, cfg.remediationEffort = "sonnet", "medium"
 	records := t.TempDir()
 	cfg.rec = newRecorder(records)
@@ -2321,11 +2354,12 @@ func TestDrainRemediationFlagsSteerOnlyTheRemediationRun(t *testing.T) {
 // the -model/-effort flags: the implement run's argv carries the label's
 // values and its record names them as sourceLabel.
 func TestDrainHonoursModelAndEffortLabels(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true, Labels: []string{"effort:low", "model:sonnet"}}},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 	cfg.model, cfg.effort = "opus", "high" // the flags the label must beat
 	records := t.TempDir()
 	cfg.rec = newRecorder(records)
@@ -2372,14 +2406,15 @@ func TestDrainHonoursModelAndEffortLabels(t *testing.T) {
 // Estimate: line: an S issue dispatches at the S cell, the run record names
 // the source as size, and the terminal issue record carries the size letter.
 func TestDrainEffortBySizeFromTheEstimateLine(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		Issues: map[string]*fakeIssue{"1": {
 			Open: true,
 			Body: "## Summary\n\nDo the thing.\n\nEstimate: S — likely one run\n",
 		}},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 	cfg.effort = "high" // the flag the S cell must beat
 	cfg.effortBySize = "S=medium,L=max"
 	cfg.sizeEffort = map[string]string{"S": "medium", "L": "max"}
@@ -2423,14 +2458,15 @@ func TestDrainEffortBySizeFromTheEstimateLine(t *testing.T) {
 // S cell's model, the run record names the source as size, and the terminal
 // issue record carries the size letter.
 func TestDrainModelBySizeFromTheEstimateLine(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		Issues: map[string]*fakeIssue{"1": {
 			Open: true,
 			Body: "## Summary\n\nDo the thing.\n\nEstimate: S — likely one run\n",
 		}},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 	cfg.model = "opus" // the flag the S cell must beat
 	cfg.modelBySize = "S=sonnet,L=opus"
 	cfg.sizeModel = map[string]string{"S": "sonnet", "L": "opus"}
@@ -2473,11 +2509,12 @@ func TestDrainModelBySizeFromTheEstimateLine(t *testing.T) {
 // Two labels of one family are a mistake, not a choice: the run warns and falls
 // through to the flag rather than picking one.
 func TestDrainFallsThroughOnDuplicateModelLabels(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true, Labels: []string{"model:opus", "model:sonnet"}}},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 	cfg.model = "haiku" // the flag the duplicate labels fall through to
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -2502,14 +2539,15 @@ func TestDrainFallsThroughOnDuplicateModelLabels(t *testing.T) {
 // (#364): the implement run dispatches on the parent's model and its record
 // names the source epic.
 func TestDrainInheritsModelFromEpic(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		Issues: map[string]*fakeIssue{
 			"1": {Open: true, Parent: 2},
 			"2": {Open: true, SubIssues: 2, Labels: []string{"model:sonnet"}},
 		},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 	cfg.model = "opus" // the flag the epic's label must beat
 	records := t.TempDir()
 	cfg.rec = newRecorder(records)
@@ -2552,14 +2590,15 @@ func TestDrainInheritsModelFromEpic(t *testing.T) {
 // The child's own model:default is its deliberate escape from the epic: it
 // stops resolution at inherit rather than taking the epic's model.
 func TestDrainChildModelDefaultBeatsEpic(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		Issues: map[string]*fakeIssue{
 			"1": {Open: true, Parent: 2, Labels: []string{"model:default"}},
 			"2": {Open: true, SubIssues: 2, Labels: []string{"model:sonnet"}},
 		},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 	cfg.model = "opus"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -2580,14 +2619,15 @@ func TestDrainChildModelDefaultBeatsEpic(t *testing.T) {
 // The two families resolve independently: a child with effort:high under a
 // parent with model:sonnet gets both.
 func TestDrainEpicAndChildLabelsResolveIndependently(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		Issues: map[string]*fakeIssue{
 			"1": {Open: true, Parent: 2, Labels: []string{"effort:high"}},
 			"2": {Open: true, SubIssues: 2, Labels: []string{"model:sonnet"}},
 		},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -2613,8 +2653,8 @@ func TestDrainEpicAndChildLabelsResolveIndependently(t *testing.T) {
 // labels` alone: the child's own labels still resolve and the shift keeps
 // working, an epic's labels just do not reach it.
 func TestDrainSurvivesGhWithoutParentField(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		NoParentField: true,
 		Issues: map[string]*fakeIssue{
@@ -2622,6 +2662,7 @@ func TestDrainSurvivesGhWithoutParentField(t *testing.T) {
 			"2": {Open: true, SubIssues: 2, Labels: []string{"model:sonnet"}},
 		},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 	cfg.model = "haiku" // the flag the child falls through to
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -2642,14 +2683,15 @@ func TestDrainSurvivesGhWithoutParentField(t *testing.T) {
 // A parent read that fails outright warns and the child's unset families fall
 // through to the flags rather than the shift ending.
 func TestDrainParentLabelReadFailureFallsThrough(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		Issues: map[string]*fakeIssue{
 			// #99 is named as the parent but does not exist, so its view fails.
 			"1": {Open: true, Parent: 99},
 		},
 	})
+	getArgs := watchClaudeArgs(t, &cfg)
 	cfg.model = "haiku"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -2674,6 +2716,7 @@ func TestDrainParentLabelReadFailureFallsThrough(t *testing.T) {
 // has not moved — and treats it the same as a Go error, so the issue parks
 // rather than looping until someone notices.
 func TestDrainParksWhenCIRemediationChangesNothing(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -2737,6 +2780,7 @@ func TestDrainParksWhenCIRemediationChangesNothing(t *testing.T) {
 // Half a suite is not a diagnosis: a job still running can only add to the list
 // of failures, so a rollup with anything pending in it waits.
 func TestDrainWaitsOutChecksStillRunning(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -2770,6 +2814,7 @@ func TestDrainWaitsOutChecksStillRunning(t *testing.T) {
 // has to dispatch one remediation run — one, not one per poll — and the PR goes
 // on to merge once that run has pushed.
 func TestDrainRemediatesARequestedChange(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "fixreview", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -2811,6 +2856,7 @@ func TestDrainRemediatesARequestedChange(t *testing.T) {
 // carry the comment grant, pinned to the PR it was sent to (issue #385). The
 // review run must keep its own pinned read alongside it.
 func TestEveryRemediationRunMayCommentOnItsOwnPR(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, mode string
 		pr         fakePR
@@ -2834,13 +2880,13 @@ func TestEveryRemediationRunMayCommentOnItsOwnPR(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			captureLog(t)
-			getArgs := watchClaudeArgs(t)
 			pr := c.pr
 			cfg, _ := drainConfig(t, c.mode, &ghState{
 				Issues: map[string]*fakeIssue{"1": {Open: true}},
 				PRs:    map[string]*fakePR{"issue-1": &pr},
 				Labels: []string{needsHumanLabel},
 			})
+			getArgs := watchClaudeArgs(t, &cfg)
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if err := drain(ctx, cfg); err != nil {
@@ -2879,6 +2925,7 @@ func TestEveryRemediationRunMayCommentOnItsOwnPR(t *testing.T) {
 // error: the budget is spent and, with none left, the issue parks for a
 // human instead of consuming a run per poll.
 func TestDrainParksWhenReviewRemediationChangesNothing(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -2932,6 +2979,7 @@ func TestDrainParksWhenReviewRemediationChangesNothing(t *testing.T) {
 // comments that have already been addressed, so the poll only says what is
 // holding the PR up.
 func TestDrainWaitsOutAnAnsweredReview(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -2963,6 +3011,7 @@ func TestDrainWaitsOutAnAnsweredReview(t *testing.T) {
 // A parked issue must not come back round: the label is what takes it out of
 // the queue, and the loop has to terminate rather than retry it forever.
 func TestDrainStopsSelectingAParkedIssue(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -2982,6 +3031,7 @@ func TestDrainStopsSelectingAParkedIssue(t *testing.T) {
 // rather than blamed for it. Issue 1 merges first, so this also pins the other
 // half: what got done before the fatal error is still accounted for.
 func TestDrainStillStopsOnAFatalError(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "authfail", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}, "2": {Open: true}},
@@ -3009,6 +3059,7 @@ func TestDrainStillStopsOnAFatalError(t *testing.T) {
 // earlier pass — the accumulator survives into finish, which every exit runs
 // through, errors included.
 func TestDrainNamesAnEpicItClosedEvenWhenItEndsOnAFatalError(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "authfail", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -3035,6 +3086,7 @@ func TestDrainNamesAnEpicItClosedEvenWhenItEndsOnAFatalError(t *testing.T) {
 // itself and says so on its way out, sourced from the listing the loop already
 // made rather than an extra `gh` call.
 func TestDrainNamesAnEpicThatFinishesMidShift(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -3065,6 +3117,7 @@ func TestDrainNamesAnEpicThatFinishesMidShift(t *testing.T) {
 // from — the same rule a held-back blocker follows — so a finished one there
 // is never this shift's business to report.
 func TestDrainDoesNotNameAFinishedEpicOutsideLabelScope(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -3089,6 +3142,7 @@ func TestDrainDoesNotNameAFinishedEpicOutsideLabelScope(t *testing.T) {
 }
 
 func TestDrainHonoursOnceAfterAPark(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}, "2": {Open: true}},
@@ -3109,6 +3163,7 @@ func TestDrainHonoursOnceAfterAPark(t *testing.T) {
 // — once, not once per issue, so the line is a startup notice rather than noise
 // down the length of a long shift.
 func TestDrainWorksNeitherProposalsNorContainers(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -3152,6 +3207,7 @@ func TestDrainWorksNeitherProposalsNorContainers(t *testing.T) {
 // the children (containerInfo carries no child numbers, and fetching them
 // would cost an extra call this drain does not make), and is then closed.
 func TestDrainClosesAFinishedContainer(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -3185,6 +3241,7 @@ func TestDrainClosesAFinishedContainer(t *testing.T) {
 // A shift that finds the marker already on the thread — a prior shift commented
 // and then failed to close — must not comment a second time, only close.
 func TestDrainDoesNotCommentTwiceOnAFinishedContainer(t *testing.T) {
+	t.Parallel()
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
 			"113": {
@@ -3216,6 +3273,7 @@ func TestDrainDoesNotCommentTwiceOnAFinishedContainer(t *testing.T) {
 // the prose around it — which the wording of finishedContainerComment is free
 // to do later — never causes a second comment.
 func TestDrainRecognisesTheMarkerAfterTheProseIsReworded(t *testing.T) {
+	t.Parallel()
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
 			"113": {
@@ -3244,6 +3302,7 @@ func TestDrainRecognisesTheMarkerAfterTheProseIsReworded(t *testing.T) {
 // The close does not happen either: the comment is the record of why, and a
 // close with no explanation is the thing this avoids.
 func TestDrainWarnsWhenItCannotCommentOnAFinishedContainer(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -3272,6 +3331,7 @@ func TestDrainWarnsWhenItCannotCommentOnAFinishedContainer(t *testing.T) {
 // retries the close alone — the comment saying why is already on the thread,
 // so it is not posted a second time.
 func TestDrainRetriesAFailedContainerCloseNextShift(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -3312,6 +3372,7 @@ func TestDrainRetriesAFailedContainerCloseNextShift(t *testing.T) {
 // shift-local memo is what stops that stale row closing it, notifying or
 // summarising it a second time.
 func TestCloseFinishedContainersIgnoresAStaleListing(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -3348,6 +3409,7 @@ func TestCloseFinishedContainersIgnoresAStaleListing(t *testing.T) {
 // A container with exactly one child is grammar, not an edge case: the log
 // line and the comment body must both say "1 sub-issue", not "1 sub-issues".
 func TestDrainNamesASingleSubIssueCorrectly(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -3372,6 +3434,7 @@ func TestDrainNamesASingleSubIssueCorrectly(t *testing.T) {
 // be a call spent for nothing. A shift-local memo, mirroring the loop's own
 // skip map, is what keeps it to one read and one comment for the whole shift.
 func TestDrainReadsAFinishedContainerOnceInAShift(t *testing.T) {
+	t.Parallel()
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
 			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6},
@@ -3387,7 +3450,7 @@ func TestDrainReadsAFinishedContainerOnceInAShift(t *testing.T) {
 		},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("drain: %v", err)
@@ -3412,6 +3475,7 @@ func TestDrainReadsAFinishedContainerOnceInAShift(t *testing.T) {
 // commented and not closed, and the exit summary names it as the operator's to
 // close.
 func TestDrainLeavesAHeldFinishedContainerAlone(t *testing.T) {
+	t.Parallel()
 	for _, label := range []string{needsHumanLabel, proposedLabel} {
 		t.Run(label, func(t *testing.T) {
 			buf := captureLog(t)
@@ -3455,6 +3519,7 @@ func planFooterLine(doc string) string {
 // issue's own body carries the same footer, which is what a later close on
 // the same document finds (see the "already filed" case below).
 func TestDrainFilesARetireIssueWhenAContainerCloses(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -3463,7 +3528,7 @@ func TestDrainFilesARetireIssueWhenAContainerCloses(t *testing.T) {
 		Labels: []string{proposedLabel},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("drain: %v", err)
@@ -3501,6 +3566,7 @@ func TestDrainFilesARetireIssueWhenAContainerCloses(t *testing.T) {
 // retireOrphanedDoc is supposed to find. Filing a second one would leave two
 // competing "retire this" issues for a human to sort out.
 func TestDrainFilesNoSecondRetireIssueForTheSameDocument(t *testing.T) {
+	t.Parallel()
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
 			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/plans/foo.md")},
@@ -3531,6 +3597,7 @@ func TestDrainFilesNoSecondRetireIssueForTheSameDocument(t *testing.T) {
 // search seeing the first container's create in time (its index lags a write
 // by seconds to a minute, per docs/plans/plan-conventions.md).
 func TestDrainFilesOnlyOneRetireIssueForTwoContainersClosingTogether(t *testing.T) {
+	t.Parallel()
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
 			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/plans/foo.md")},
@@ -3565,13 +3632,14 @@ func TestDrainFilesOnlyOneRetireIssueForTwoContainersClosingTogether(t *testing.
 // filedThisCall, retireOrphanedDoc must not touch the network at all for it,
 // which is true regardless of what any search would or wouldn't find.
 func TestRetireOrphanedDocSkipsADocumentAlreadyRetiredThisCall(t *testing.T) {
+	t.Parallel()
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
 			"200": {Open: true, Body: planFooterLine("docs/plans/foo.md")},
 		},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 
 	filedThisCall := map[string]bool{"docs/plans/foo.md": true}
 	_, ok, err := retireOrphanedDoc(context.Background(), cfg,
@@ -3595,6 +3663,7 @@ func TestRetireOrphanedDocSkipsADocumentAlreadyRetiredThisCall(t *testing.T) {
 // issue, just unfinished work the plan proposed — means the document is not
 // orphaned yet, so nothing is filed.
 func TestDrainFilesNoRetireIssueWhileAnotherOpenIssueNamesTheDoc(t *testing.T) {
+	t.Parallel()
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
 			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/plans/foo.md")},
@@ -3624,6 +3693,7 @@ func TestDrainFilesNoRetireIssueWhileAnotherOpenIssueNamesTheDoc(t *testing.T) {
 // most likely — is invisible to the derivation: nothing names a document, so
 // nothing can say one is done.
 func TestDrainFilesNoRetireIssueWithoutAPlanFooter(t *testing.T) {
+	t.Parallel()
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
 			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6},
@@ -3646,6 +3716,7 @@ func TestDrainFilesNoRetireIssueWithoutAPlanFooter(t *testing.T) {
 // Scope is the queue's scope: a finished container outside -label is neither
 // commented nor closed — it was never this shift's business.
 func TestDrainDoesNotCloseAFinishedContainerOutsideLabelScope(t *testing.T) {
+	t.Parallel()
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
 			"1": {Open: true, SubIssues: 2, SubIssuesCompleted: 2},
@@ -3672,6 +3743,7 @@ func TestDrainDoesNotCloseAFinishedContainerOutsideLabelScope(t *testing.T) {
 // blockedBy share one budget: a gh old enough to reject one is assumed too
 // old for both, so the drop and the warning happen once, not once per field.
 func TestOldGhListsWithoutTheSubIssueRollup(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		OldGh: true,
@@ -3685,7 +3757,7 @@ func TestOldGhListsWithoutTheSubIssueRollup(t *testing.T) {
 		},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
-	t.Setenv(fakeGhLogEnv, calls)
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 
 	// Twice, because both the fallback and the warning have to be paid for once
 	// a shift rather than once per issue — and the drain lists once per issue.
@@ -3729,6 +3801,7 @@ func TestOldGhListsWithoutTheSubIssueRollup(t *testing.T) {
 // it instead, names the blocker once per pass, and never touches the
 // held-back issue itself — no comment, no label, no PR.
 func TestDrainSkipsAHeldBackIssueAndWorksTheNextOne(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -3776,6 +3849,7 @@ func TestDrainSkipsAHeldBackIssueAndWorksTheNextOne(t *testing.T) {
 // running it again this pass cannot reveal anything the same listing did not
 // already know, so it stays out of ready either way.
 func TestOpenIssuesKeepsAHeldBackIssueOutUnderStrictOrder(t *testing.T) {
+	t.Parallel()
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
 			"1": {Open: true, Labels: []string{awaitingAnswerLabel}},
@@ -3806,6 +3880,7 @@ func TestOpenIssuesKeepsAHeldBackIssueOutUnderStrictOrder(t *testing.T) {
 // --- the pieces, on their own ---
 
 func TestSelectableIssuesDropsParkedOnes(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`[{"number":4,"labels":[{"name":"bug"}]},
 		{"number":5,"labels":[{"name":"Needs-Human"}]},
 		{"number":6,"labels":[]},
@@ -3832,6 +3907,7 @@ func TestSelectableIssuesDropsParkedOnes(t *testing.T) {
 // The two queues are separate: a flagged issue is not ready, but it is not
 // parked either, so it has to come back as something the drain can revisit.
 func TestSelectableIssuesSeparatesBlockedOnes(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`[{"number":9,"labels":[{"name":"Awaiting-Answer"}]},
 		{"number":4,"labels":[{"name":"awaiting-answer"}]},
 		{"number":6,"labels":[]},
@@ -3857,6 +3933,7 @@ func TestSelectableIssuesSeparatesBlockedOnes(t *testing.T) {
 // The curation gate: an issue a machine proposed is nobody's to work until a
 // human takes the label off, so it is in neither queue a drain reads.
 func TestSelectableIssuesDropsProposals(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`[{"number":4,"labels":[{"name":"Proposed"}]},
 		{"number":5,"labels":[{"name":"bug"}]},
 		{"number":6,"labels":[{"name":"proposed"},{"name":"awaiting-answer"}]},
@@ -3888,6 +3965,7 @@ func TestSelectableIssuesDropsProposals(t *testing.T) {
 // what makes it one is its shape rather than anything written on it — which is
 // what also protects a parent somebody made by hand.
 func TestSelectableIssuesDropsContainers(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`[{"number":4,"subIssuesSummary":{"total":3,"completed":1}},
 		{"number":5,"labels":[{"name":"bug"}],"subIssuesSummary":{"total":1}},
 		{"number":6,"labels":[{"name":"needs-human"}],"subIssuesSummary":{"total":2}},
@@ -3928,6 +4006,7 @@ func TestSelectableIssuesDropsContainers(t *testing.T) {
 // one still in progress. One predicate, finished(), is the only place that
 // decides it.
 func TestContainerInfoFinished(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		c    containerInfo
@@ -3959,6 +4038,7 @@ func heldBackEqual(a, b []heldBackInfo) bool {
 // A ready issue with an open blockedBy dependency is put down for this pass
 // rather than worked — the whole point of #179.
 func TestSelectableIssuesHoldsBackAnOpenBlocker(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`[
 		{"number":4,"labels":[],"blockedBy":{"nodes":[{"number":100,"state":"OPEN"},{"number":101,"state":"CLOSED"}]}},
 		{"number":5,"labels":[]}]`)
@@ -3980,6 +4060,7 @@ func TestSelectableIssuesHoldsBackAnOpenBlocker(t *testing.T) {
 // Nothing durable marks a held-back issue: the very next listing that finds
 // the blocker closed hands it straight back to ready.
 func TestSelectableIssuesUnblocksOnceTheBlockerCloses(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`[{"number":4,"blockedBy":{"nodes":[{"number":100,"state":"CLOSED"}]}}]`)
 
 	q, err := selectableIssues(raw)
@@ -3999,6 +4080,7 @@ func TestSelectableIssuesUnblocksOnceTheBlockerCloses(t *testing.T) {
 // its own account — wrong label, or none at all — still blocks while it is
 // open. The gate is whether the work landed, not whose business it was.
 func TestSelectableIssuesBlockerOutsideLabelScopeStillBlocks(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`[{"number":4,"blockedBy":{"nodes":[{"number":200,"state":"OPEN"}]}}]`)
 
 	q, err := selectableIssues(raw)
@@ -4018,6 +4100,7 @@ func TestSelectableIssuesBlockerOutsideLabelScopeStillBlocks(t *testing.T) {
 // whether the blocker's number showed up anywhere in this same listing —
 // numbers already in hand, no second request paid for the approximation.
 func TestSelectableIssuesFallsBackToTheListingWhenStateIsAbsent(t *testing.T) {
+	t.Parallel()
 	// 9 is present in the payload as its own open row, so the fallback reads
 	// it as open and 4 stays held back.
 	raw := []byte(`[{"number":4,"blockedBy":{"nodes":[{"number":9}]}},{"number":9,"labels":[]}]`)
@@ -4052,6 +4135,7 @@ func TestSelectableIssuesFallsBackToTheListingWhenStateIsAbsent(t *testing.T) {
 // are held back, both are named, and neither loops or hangs the rest of the
 // queue.
 func TestSelectableIssuesResolvesADependencyCycle(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`[
 		{"number":4,"blockedBy":{"nodes":[{"number":5,"state":"OPEN"}]}},
 		{"number":5,"blockedBy":{"nodes":[{"number":4,"state":"OPEN"}]}},
@@ -4077,6 +4161,7 @@ func TestSelectableIssuesResolvesADependencyCycle(t *testing.T) {
 // that issue's thread for a reply whether or not some unrelated dependency has
 // merged, and demoting it to held-back would silently stop that poll.
 func TestSelectableIssuesLabelsAndContainersOutrankAnOpenBlocker(t *testing.T) {
+	t.Parallel()
 	blocker := `"blockedBy":{"nodes":[{"number":100,"state":"OPEN"}]}`
 	raw := []byte(`[
 		{"number":4,"labels":[{"name":"needs-human"}],` + blocker + `},
@@ -4117,9 +4202,10 @@ func TestSelectableIssuesLabelsAndContainersOutrankAnOpenBlocker(t *testing.T) {
 // comment on issueState), so resumeHint prints it whenever it is set, with
 // no park category to check.
 func TestResumeHintLeadsWithTheRemediationSessionWhenOneIsRecorded(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	st := &issueState{session: "sess-implement", remediationSession: "sess-remediate"}
-	resumeHint(config{}, 7, st)
+	resumeHint(config{ui: testUI(t)}, 7, st)
 
 	out := buf.String()
 	remediate := strings.Index(out, "reopens the remediation run that gave up")
@@ -4143,9 +4229,10 @@ func TestResumeHintLeadsWithTheRemediationSessionWhenOneIsRecorded(t *testing.T)
 // falls back to the implement session alone rather than printing an empty
 // resume command.
 func TestResumeHintOmitsAnUnsetRemediationSession(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	st := &issueState{session: "sess-implement"}
-	resumeHint(config{}, 7, st)
+	resumeHint(config{ui: testUI(t)}, 7, st)
 
 	out := buf.String()
 	if strings.Contains(out, "gave up") {
@@ -4162,6 +4249,7 @@ func TestResumeHintOmitsAnUnsetRemediationSession(t *testing.T) {
 // by an earlier, different-kind success never gets shown as "the run that
 // gave up" for an unrelated later failure (issue #388).
 func TestRunRemediationTracksOnlyASessionThatGaveUp(t *testing.T) {
+	t.Parallel()
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		PRs: map[string]*fakePR{"issue-1": {Number: 9, State: "OPEN", Head: "abc123"}},
 	})
@@ -4192,12 +4280,14 @@ func TestRunRemediationTracksOnlyASessionThatGaveUp(t *testing.T) {
 }
 
 func TestSelectableIssuesRejectsJunk(t *testing.T) {
+	t.Parallel()
 	if _, err := selectableIssues([]byte("not json")); err == nil {
 		t.Fatal("a payload that is not an issue list must be an error, not an empty queue")
 	}
 }
 
 func TestParkedErrorsSurviveWrapping(t *testing.T) {
+	t.Parallel()
 	err := fmt.Errorf("issue #3: %w", park(parkPRClosed, "PR #%d was closed", 12))
 	reason, parked := parkReason(err)
 	if !parked {
@@ -4235,6 +4325,7 @@ func TestParkedErrorsSurviveWrapping(t *testing.T) {
 }
 
 func TestDrainSummaryReportsEveryOutcome(t *testing.T) {
+	t.Parallel()
 	got := strings.Join(drainSummary([]issueResult{
 		{issue: 1, parked: true, reason: "no PR and no questions"},
 		{issue: 2},
@@ -4259,6 +4350,7 @@ func TestDrainSummaryReportsEveryOutcome(t *testing.T) {
 // Most drains have nothing waiting, and a bucket that reads "0 issues awaiting
 // an answer" on every ordinary run is noise in the one line anybody reads.
 func TestDrainSummaryOmitsAnEmptyWaitingBucket(t *testing.T) {
+	t.Parallel()
 	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil, nil, nil, time.Minute), "\n")
 	if want := "summary: 1 issue merged, 0 issues parked, 1m of wall clock"; !strings.Contains(got, want) {
 		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
@@ -4271,6 +4363,7 @@ func TestDrainSummaryOmitsAnEmptyWaitingBucket(t *testing.T) {
 // A drain that never reached an issue has nothing to summarize, and "0 issues
 // merged" on every empty backlog is noise.
 func TestDrainSummaryIsSilentWithoutResults(t *testing.T) {
+	t.Parallel()
 	if got := drainSummary(nil, nil, nil, nil, time.Minute); got != nil {
 		t.Errorf("summary = %v, want nothing", got)
 	}
@@ -4278,6 +4371,7 @@ func TestDrainSummaryIsSilentWithoutResults(t *testing.T) {
 
 // What a drained backlog cost, in total and issue by issue.
 func TestDrainSummaryPricesTheDrainAndEachIssue(t *testing.T) {
+	t.Parallel()
 	got := strings.Join(drainSummary([]issueResult{
 		{issue: 1, parked: true, reason: "no PR and no questions", cost: 2.5},
 		{issue: 2, cost: 4},
@@ -4301,6 +4395,7 @@ func TestDrainSummaryPricesTheDrainAndEachIssue(t *testing.T) {
 // whole of it — and the caps that read the same number would look broken
 // rather than conservative.
 func TestDrainSummarySaysWhenTheTotalUndercounts(t *testing.T) {
+	t.Parallel()
 	got := strings.Join(drainSummary([]issueResult{
 		{issue: 1, cost: 4, approximated: 2},
 	}, nil, nil, nil, time.Minute), "\n")
@@ -4313,6 +4408,7 @@ func TestDrainSummarySaysWhenTheTotalUndercounts(t *testing.T) {
 // A drain that only waited on a PR an earlier process opened spent nothing,
 // and "$0.00" reads as a free backlog rather than as an absent number.
 func TestDrainSummaryOmitsDollarsItNeverSpent(t *testing.T) {
+	t.Parallel()
 	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil, nil, nil, time.Minute), "\n")
 	if strings.Contains(got, "$") {
 		t.Errorf("an uncosted drain should print no dollars at all\ngot:\n%s", got)
@@ -4323,6 +4419,7 @@ func TestDrainSummaryOmitsDollarsItNeverSpent(t *testing.T) {
 // accumulator the drain carries across passes — a container closed mid-shift
 // is gone from the next listing and can only be named from there.
 func TestDrainSummaryNamesAContainerItClosed(t *testing.T) {
+	t.Parallel()
 	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil,
 		[]containerInfo{{number: 113, total: 6, completed: 6}}, nil, time.Minute), "\n")
 	if want := "epic    #113: all 6 sub-issues closed — closed it"; !strings.Contains(got, want) {
@@ -4334,6 +4431,7 @@ func TestDrainSummaryNamesAContainerItClosed(t *testing.T) {
 // needs-human or proposed — polako closes the rest on sight — so it keeps the
 // older "yours to close" mood.
 func TestDrainSummaryNamesAHeldFinishedContainer(t *testing.T) {
+	t.Parallel()
 	got := strings.Join(drainSummary([]issueResult{{issue: 2}},
 		[]containerInfo{{number: 113, total: 6, completed: 6, held: true}}, nil, nil, time.Minute), "\n")
 	if want := "epic    #113: all 6 sub-issues closed — close it when the design is satisfied"; !strings.Contains(got, want) {
@@ -4345,6 +4443,7 @@ func TestDrainSummaryNamesAHeldFinishedContainer(t *testing.T) {
 // accumulator and the stale last listing — it must be named once, from the
 // accumulator.
 func TestDrainSummaryNamesAJustClosedContainerOnce(t *testing.T) {
+	t.Parallel()
 	c := containerInfo{number: 113, total: 6, completed: 6}
 	got := strings.Join(drainSummary([]issueResult{{issue: 2}},
 		[]containerInfo{c}, []containerInfo{c}, nil, time.Minute), "\n")
@@ -4359,6 +4458,7 @@ func TestDrainSummaryNamesAJustClosedContainerOnce(t *testing.T) {
 // Most drains touch no epic at all, and a container list with nothing
 // finished in it should read exactly like no container list.
 func TestDrainSummaryOmitsContainersThatAreNotFinished(t *testing.T) {
+	t.Parallel()
 	got := strings.Join(drainSummary([]issueResult{{issue: 2}},
 		[]containerInfo{{number: 113, total: 6, completed: 3}}, nil, nil, time.Minute), "\n")
 	if strings.Contains(got, "epic") {
@@ -4369,6 +4469,7 @@ func TestDrainSummaryOmitsContainersThatAreNotFinished(t *testing.T) {
 // A container with exactly one sub-issue is still a container — SubIssues.Total
 // > 0 is the whole of the rule — so the singular has to read right too.
 func TestDrainSummaryNamesAFinishedContainerOfOne(t *testing.T) {
+	t.Parallel()
 	got := strings.Join(drainSummary([]issueResult{{issue: 2}}, nil,
 		[]containerInfo{{number: 113, total: 1, completed: 1}}, nil, time.Minute), "\n")
 	if want := "epic    #113: all 1 sub-issue closed — closed it"; !strings.Contains(got, want) {
@@ -4380,6 +4481,7 @@ func TestDrainSummaryNamesAFinishedContainerOfOne(t *testing.T) {
 // container it closed — still has the one thing worth saying, without the
 // "0 issues merged, 0 issues parked" header that would frame it as a no-op.
 func TestDrainSummaryReportsAClosedContainerEvenWithNoIssueResults(t *testing.T) {
+	t.Parallel()
 	got := strings.Join(drainSummary(nil, nil,
 		[]containerInfo{{number: 113, total: 6, completed: 6}}, nil, time.Minute), "\n")
 	if want := "epic    #113: all 6 sub-issues closed — closed it"; !strings.Contains(got, want) {
@@ -4394,6 +4496,7 @@ func TestDrainSummaryReportsAClosedContainerEvenWithNoIssueResults(t *testing.T)
 // the lot, and the issue is parked with the arithmetic in the reason rather
 // than resumed into another bill.
 func TestDrainParksAnIssueOverItsCostCap(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "costlycrash", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -4436,6 +4539,7 @@ func TestDrainParksAnIssueOverItsCostCap(t *testing.T) {
 // budget watchdog kills it, and the kill is a park rather than the crash it
 // looks like — a resume would spend the same allowance reaching the same kill.
 func TestDrainParksAnIssueOverItsTimeCap(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "hang", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -4466,6 +4570,7 @@ func TestDrainParksAnIssueOverItsTimeCap(t *testing.T) {
 // asked to stop spending, not to hand issues back. Everything is on GitHub, so
 // raising it and starting again carries on from here.
 func TestDrainStopsCleanlyOnTheSessionBudget(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
@@ -4501,6 +4606,7 @@ func TestDrainStopsCleanlyOnTheSessionBudget(t *testing.T) {
 // gate waits it out and carries on once the pool drops, the fence matching the
 // wall a mid-run refusal hits. Nothing is parked or closed while it waits.
 func TestDrainWaitsOutTheWeekUsageGateThenCarriesOn(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -4509,7 +4615,7 @@ func TestDrainWaitsOutTheWeekUsageGateThenCarriesOn(t *testing.T) {
 		// back under the ceiling, as if the block had reset during the wait.
 		PRs: map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
 	})
-	t.Setenv(fakeUsageEnv, "over-then-under")
+	setFakeEnv(&cfg, fakeUsageEnv, "over-then-under")
 	cfg.maxWeekUsage = 50
 
 	if err := drain(context.Background(), cfg); err != nil {
@@ -4541,12 +4647,13 @@ func TestDrainWaitsOutTheWeekUsageGateThenCarriesOn(t *testing.T) {
 
 // -max-session-usage is the sibling pool, gated and waited out the same way.
 func TestDrainWaitsOutTheSessionUsageGate(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 		PRs:    map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
 	})
-	t.Setenv(fakeUsageEnv, "over-then-under")
+	setFakeEnv(&cfg, fakeUsageEnv, "over-then-under")
 	cfg.maxSessionUsage = 40
 
 	if err := drain(context.Background(), cfg); err != nil {
@@ -4577,6 +4684,7 @@ func TestDrainWaitsOutTheSessionUsageGate(t *testing.T) {
 // TestDrainWaitsOutASessionLimitThenShips): a real sleep would drag the suite
 // into wall time.
 func TestUsageGateWait(t *testing.T) {
+	t.Parallel()
 	const poll = 5 * time.Minute
 
 	future := time.Now().Add(2 * time.Hour)
@@ -4611,15 +4719,16 @@ func TestUsageGateWait(t *testing.T) {
 // nothing — not a stop, not a probe call, not a log line — even against a
 // fake CLI that would happily answer /usage if asked.
 func TestDrainUsageGateOffChangesNothing(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
-	getArgs := watchClaudeArgs(t)
 	// Restart safety: a PR already on the branch means no claude run at all,
 	// so this is a clean merge with nothing about the run itself in play.
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 		PRs:    map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
 	})
-	t.Setenv(fakeUsageEnv, "sub")
+	setFakeEnv(&cfg, fakeUsageEnv, "sub")
+	getArgs := watchClaudeArgs(t, &cfg)
 
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("drain: %v", err)
@@ -4642,6 +4751,7 @@ func TestDrainUsageGateOffChangesNothing(t *testing.T) {
 // a shift: the gate abstains, logs one line per attempt rather than a retry
 // storm, and the issue is worked as if neither flag were set.
 func TestDrainUsageGateAbstainsWhenTheProbeCannotAnswer(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -4668,12 +4778,13 @@ func TestDrainUsageGateAbstainsWhenTheProbeCannotAnswer(t *testing.T) {
 // and again as it reached a terminal state — land on the same terminal record
 // the park reason and the PR enrichment already do.
 func TestDrainRecordsUsageSamplesOnTheTerminalRecord(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 	})
-	t.Setenv(fakeUsageEnv, "sub") // week (all models): 52% used, both samples
-	cfg.maxWeekUsage = 99         // high enough that the gate never trips
+	setFakeEnv(&cfg, fakeUsageEnv, "sub") // week (all models): 52% used, both samples
+	cfg.maxWeekUsage = 99                 // high enough that the gate never trips
 	records := t.TempDir()
 	cfg.rec = newRecorder(records)
 
@@ -4695,6 +4806,7 @@ func TestDrainRecordsUsageSamplesOnTheTerminalRecord(t *testing.T) {
 // shrugged that off and tried again; the lookups that decide what to work next
 // did not, and one of them failing ended the whole backlog.
 func TestDrainSurvivesAFlakyGh(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
@@ -4733,6 +4845,7 @@ func TestDrainSurvivesAFlakyGh(t *testing.T) {
 // is meant to be fatal: every issue behind this one would hit the same wall, so
 // parking them one at a time would only bury the cause.
 func TestDrainStopsWhenGhKeepsFailing(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues:    map[string]*fakeIssue{"1": {Open: true}},
@@ -4757,6 +4870,7 @@ func TestDrainStopsWhenGhKeepsFailing(t *testing.T) {
 // invocation, and the resume is read out of the same log — no state the fakes
 // would have to keep just to be asked about.
 func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
+	t.Parallel()
 	// Every resume the ceiling allows costs a fake claude process and the gh
 	// calls around it, so the shipped 20 spends over a minute under -race and
 	// ran the bound below out on CI. Three proves the same thing: it is past

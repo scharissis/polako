@@ -10,6 +10,7 @@ import (
 )
 
 func TestLabelExists(t *testing.T) {
+	t.Parallel()
 	cfg, _ := drainConfig(t, "stream", &ghState{Labels: []string{"needs-human", "model:opus"}})
 
 	ok, err := labelExists(context.Background(), cfg, "needs-human")
@@ -22,6 +23,7 @@ func TestLabelExists(t *testing.T) {
 }
 
 func TestLabelExistsMissingIsFalseNotError(t *testing.T) {
+	t.Parallel()
 	cfg, _ := drainConfig(t, "stream", &ghState{})
 
 	ok, err := labelExists(context.Background(), cfg, "does-not-exist")
@@ -37,6 +39,7 @@ func TestLabelExistsMissingIsFalseNotError(t *testing.T) {
 // round-trips through the fake's own PathUnescape the same way a real
 // repository's REST endpoint would see it.
 func TestLabelExistsEscapesTheName(t *testing.T) {
+	t.Parallel()
 	cfg, _ := drainConfig(t, "stream", &ghState{Labels: []string{"model:opus"}})
 
 	ok, err := labelExists(context.Background(), cfg, "model:opus")
@@ -52,6 +55,7 @@ func TestLabelExistsEscapesTheName(t *testing.T) {
 // never be reported as "missing": that would let a caller create a label
 // gh already has under a different name it just couldn't answer for.
 func TestLabelExistsNonNotFoundFailureIsAnError(t *testing.T) {
+	t.Parallel()
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Labels:    []string{"needs-human"},
 		FailReads: map[string]int{"api label": ghReads},

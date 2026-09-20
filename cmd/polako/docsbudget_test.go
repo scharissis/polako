@@ -47,6 +47,7 @@ var docsDebt = map[string]int{
 }
 
 func TestDocsStayWithinLineBudget(t *testing.T) {
+	t.Parallel()
 	files := map[string]int{"README.md": countRepoFileLines(t, "README.md")}
 
 	dir := filepath.Join(repoRoot(), "docs")

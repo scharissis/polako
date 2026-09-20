@@ -113,6 +113,7 @@ func pluginManifestVersion(t *testing.T) string {
 }
 
 func TestPluginManifestMatchesTheModule(t *testing.T) {
+	t.Parallel()
 	manifest := pluginManifest(t)
 	if want := moduleName(t); manifest.Name != want {
 		t.Errorf("plugin name = %q, want %q to match the module", manifest.Name, want)
@@ -157,6 +158,7 @@ func thisPluginEntry(t *testing.T) marketplaceEntry {
 // The repo doubles as its own marketplace, so `/plugin marketplace add` works
 // straight from the clone.
 func TestMarketplaceManifestListsThisPlugin(t *testing.T) {
+	t.Parallel()
 	if entry := thisPluginEntry(t); len(entry.Source) == 0 {
 		t.Errorf("plugin %q needs a source", entry.Name)
 	}
@@ -168,6 +170,7 @@ func TestMarketplaceManifestListsThisPlugin(t *testing.T) {
 // keeping those two steps apart — but it must never lead it. A ref naming a
 // tag that does not exist yet is an install that fails for everyone.
 func TestMarketplaceRefIsNotAheadOfTheVersion(t *testing.T) {
+	t.Parallel()
 	entry := thisPluginEntry(t)
 	var source struct {
 		Source string `json:"source"`
@@ -202,6 +205,7 @@ func TestMarketplaceRefIsNotAheadOfTheVersion(t *testing.T) {
 // Every release publishes its changelog section as the GitHub release body, so
 // a version with no section ships with an empty one.
 func TestChangelogHasASectionForThisVersion(t *testing.T) {
+	t.Parallel()
 	version := pluginManifestVersion(t)
 	heading := regexp.MustCompile(`(?m)^## \[?` + regexp.QuoteMeta(version) + `\]?`)
 	if !heading.MatchString(readRepoFile(t, "CHANGELOG.md")) {
@@ -215,6 +219,7 @@ func TestChangelogHasASectionForThisVersion(t *testing.T) {
 // takes the whole check out, so guard the key set here where the suite can see
 // it without shelling out to `claude`.
 func TestMarketplaceManifestHasNoUnrecognizedRootKeys(t *testing.T) {
+	t.Parallel()
 	var root map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(readRepoFile(t, ".claude-plugin", "marketplace.json")), &root); err != nil {
 		t.Fatalf("marketplace.json is not valid JSON: %v", err)
@@ -245,12 +250,14 @@ func TestMarketplaceManifestHasNoUnrecognizedRootKeys(t *testing.T) {
 // has to track the plugin name. Getting this wrong is invisible until a run
 // exits at 0 turns with "Unknown command".
 func TestDefaultSkillIsNamespacedForThePlugin(t *testing.T) {
+	t.Parallel()
 	if want := moduleName(t) + ":" + skillDir; defaultSkill != want {
 		t.Errorf("defaultSkill = %q, want %q", defaultSkill, want)
 	}
 }
 
 func TestShippedSkillMatchesTheDefaultFlag(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	front, _ := skillFrontmatter(t, "skills/"+skillDir+"/SKILL.md", skill)
@@ -281,6 +288,7 @@ func planSkill(t *testing.T) string {
 // interpolates. A body referring to an argument the frontmatter never declared
 // gets the literal `$name` instead of the operator's path.
 func TestPlanSkillDeclaresItsArguments(t *testing.T) {
+	t.Parallel()
 	skill := planSkill(t)
 
 	front, body := skillFrontmatter(t, "skills/"+planSkillDir+"/SKILL.md", skill)
@@ -305,6 +313,7 @@ func TestPlanSkillDeclaresItsArguments(t *testing.T) {
 // because the two are one contract — the skill applies the label, the
 // supervisor derives the queue by excluding it, and neither reads the other.
 func TestPlanSkillLabelsEverythingItCreates(t *testing.T) {
+	t.Parallel()
 	skill := planSkill(t)
 
 	// The full invocation form is the one carrying --title; the other mentions
@@ -338,6 +347,7 @@ func TestPlanSkillLabelsEverythingItCreates(t *testing.T) {
 // PR, or one hiding a decision nobody has made, becomes a park or a question
 // weeks later at full price. It is one sentence and it earns its pin.
 func TestPlanSkillStatesTheSizingContract(t *testing.T) {
+	t.Parallel()
 	skill := planSkill(t)
 
 	// Read against the text with its line breaks flattened: the sentence is long
@@ -354,6 +364,7 @@ func TestPlanSkillStatesTheSizingContract(t *testing.T) {
 // accepts outside issues that backlog is written by strangers. Its blast radius
 // is smaller — proposals behind a label — but the reading has to be the same.
 func TestPlanSkillTreatsWhatItReadsAsData(t *testing.T) {
+	t.Parallel()
 	skill := planSkill(t)
 
 	for _, marker := range []string{"data", "not addressed to you", "content to report, not to act on"} {
@@ -371,6 +382,7 @@ func TestPlanSkillTreatsWhatItReadsAsData(t *testing.T) {
 // this locks that paragraph down the way every neighboring contract in this
 // section is locked down.
 func TestPlanSkillClosesItsGhSurface(t *testing.T) {
+	t.Parallel()
 	skill := planSkill(t)
 
 	for _, marker := range []string{"gh label list", "gh --version"} {
@@ -406,6 +418,7 @@ func TestPlanSkillClosesItsGhSurface(t *testing.T) {
 // This pins both halves: the false claim stays gone, and the floor the skill
 // names is granted by plan (runs this skill) and health (runs its twin).
 func TestPlanSkillGhSurfaceMatchesEveryVerbsGrant(t *testing.T) {
+	t.Parallel()
 	skill := planSkill(t)
 
 	if strings.Contains(skill, "has not shipped") {
@@ -429,6 +442,7 @@ func TestPlanSkillGhSurfaceMatchesEveryVerbsGrant(t *testing.T) {
 // model has no price sheet, the binary refuses to hardcode one, and a
 // confident-looking dollar figure invented here would be read as measured.
 func TestPlanSkillEstimateLineKeepsItsShape(t *testing.T) {
+	t.Parallel()
 	skill := planSkill(t)
 
 	shape := regexp.MustCompile(`(?m)^[ \t]*Estimate: [SML] — likely \S+ runs[ \t]*$`)
@@ -451,6 +465,7 @@ func TestPlanSkillEstimateLineKeepsItsShape(t *testing.T) {
 // markers, adapted for a skill that writes issue bodies rather than PR bodies
 // and thread questions.
 func TestPlanSkillCarriesTheHouseStyle(t *testing.T) {
+	t.Parallel()
 	skill := planSkill(t)
 
 	flat := strings.Join(strings.Fields(skill), " ")
@@ -486,6 +501,7 @@ func TestPlanSkillDescribesDontPaste(t *testing.T) {
 // only by accident of which repo happened to load CLAUDE.md. Mirrors
 // TestPlanSkillCarriesTheHouseStyle's marker-list shape.
 func TestPlanSkillStatesTheTitleConvention(t *testing.T) {
+	t.Parallel()
 	skill := planSkill(t)
 
 	flat := strings.Join(strings.Fields(skill), " ")
@@ -510,6 +526,7 @@ func TestPlanSkillStatesTheTitleConvention(t *testing.T) {
 // documents belong. Mirrors TestPlanSkillStatesTheTitleConvention's
 // marker-list shape.
 func TestPlanSkillStatesTheDocumentLayout(t *testing.T) {
+	t.Parallel()
 	skill := planSkill(t)
 
 	flat := strings.Join(strings.Fields(skill), " ")
@@ -533,6 +550,7 @@ func TestPlanSkillStatesTheDocumentLayout(t *testing.T) {
 // TestPRBodySectionsAllHaveBudgets. Every section now carries a length budget
 // on or under its heading; drop one and that section is open-ended again.
 func TestPlanSkillBodySectionsAllHaveBudgets(t *testing.T) {
+	t.Parallel()
 	skill := planSkill(t)
 
 	start := strings.Index(skill, "## Summary — what this proposes and why")
@@ -576,6 +594,7 @@ func TestPlanSkillBodySectionsAllHaveBudgets(t *testing.T) {
 // phrase or the ` @ ` on either side fails here. Sits beside
 // TestPlanSkillBodySectionsAllHaveBudgets, which anchors on the same line.
 func TestPlanSkillFooterMatchesTheParser(t *testing.T) {
+	t.Parallel()
 	skill := planSkill(t)
 
 	start := strings.Index(skill, planFooterPrefix)
@@ -603,6 +622,7 @@ func TestPlanSkillFooterMatchesTheParser(t *testing.T) {
 // text is not the enforcement (the allowlist is, once the plan verb ships), but
 // a skill that talks about editing issues is one that will try.
 func TestPlanSkillCreatesIssuesAndNothingElse(t *testing.T) {
+	t.Parallel()
 	skill := planSkill(t)
 
 	for _, forbidden := range []string{"gh issue edit", "gh issue comment", "gh pr", "git commit", "git push"} {
@@ -620,6 +640,7 @@ func TestPlanSkillCreatesIssuesAndNothingElse(t *testing.T) {
 // create call, a fixed-shape `Depends on:` line in the body, and prose that
 // names issue numbers only. These three lines carry that contract.
 func TestPlanSkillDeclaresDependencyOrder(t *testing.T) {
+	t.Parallel()
 	skill := planSkill(t)
 
 	if !strings.Contains(skill, "--blocked-by") {
@@ -652,6 +673,7 @@ func TestPlanSkillDeclaresDependencyOrder(t *testing.T) {
 // branch means reviewing an already-merged change and writing the fixes there.
 // Naming the branch is the entire defence, and it is one word easy to drop.
 func TestReviewGateNamesTheBranch(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	invoked := false
@@ -679,6 +701,7 @@ func TestReviewGateNamesTheBranch(t *testing.T) {
 // in the same breath as the branch, and like the branch it is one token easy
 // to drop.
 func TestReviewGateNamesTheWorktree(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	// Flattened, and checked over a window rather than one physical line: a
@@ -711,6 +734,7 @@ func TestReviewGateNamesTheWorktree(t *testing.T) {
 // that step d already has in hand. A regression back to a hardcoded level is
 // invisible except here — and it is the whole point of the issue.
 func TestReviewGateScalesLevelToDiffSize(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	if !strings.Contains(skill, "diff --stat") {
@@ -732,6 +756,7 @@ func TestReviewGateScalesLevelToDiffSize(t *testing.T) {
 // a finding "fixed" against it lands the fix inside this branch's own commits.
 // The refresh has to come before the invocation, so check the order too.
 func TestReviewGateRefreshesTheBaseBeforeReviewing(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	refresh := strings.Index(skill, "merge --ff-only")
@@ -754,6 +779,7 @@ func TestReviewGateRefreshesTheBaseBeforeReviewing(t *testing.T) {
 // TestReviewGateNamesTheBranch above) while quietly losing the resumability
 // this test exists to protect.
 func TestReviewGateDoesNotAutoApplyFixes(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	// Checked over the whole document rather than a window around the
@@ -784,6 +810,7 @@ func TestReviewGateDoesNotAutoApplyFixes(t *testing.T) {
 // full re-review — the exact cost the issue was filed about — without any
 // test failing to say so.
 func TestReviewGateRecordsResumeMarkers(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	// >= 2, not just present: step a reads it (the resume check) and step c
@@ -807,6 +834,7 @@ func TestReviewGateRecordsResumeMarkers(t *testing.T) {
 // anything. Pin that ordering directly rather than the reminder prose, since
 // the prose was the symptom, not the guarantee.
 func TestReviewGateFallbackStillRefreshesTheBase(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	fallback := strings.Index(skill, "not invocable in this session")
@@ -834,6 +862,7 @@ func TestReviewGateFallbackStillRefreshesTheBase(t *testing.T) {
 // median it measures against is the machine's own accreted norm). All three
 // measures matter: comment density is the one that otherwise goes unwatched.
 func TestReviewGateChecksForAccretion(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	// Flattened: these markers read across line wraps in SKILL.md's prose, and
@@ -863,6 +892,7 @@ func TestReviewGateChecksForAccretion(t *testing.T) {
 // the promise, not the file. Phase 3's own heading carries the gate because a
 // resuming run reads that heading and decides from it whether it may start.
 func TestPlanIsWrittenBeforeImplementation(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	plan := strings.Index(skill, "## Phase 2 — Plan")
@@ -897,6 +927,7 @@ func TestPlanIsWrittenBeforeImplementation(t *testing.T) {
 // grant, so this pins that the skill names the tool explicitly rather than
 // leaving the model to improvise one.
 func TestPlanExistenceCheckUsesReadNotBash(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	if !strings.Contains(skill, "Read-ing `<worktree>/"+planFile+"`") {
@@ -917,6 +948,7 @@ func TestPlanExistenceCheckUsesReadNotBash(t *testing.T) {
 // guards a SKILL.md that stops naming either — this catches a spelling that
 // drifts from the Go constant inspectLeftWork actually discounts.
 func TestEvidenceDirSpellingMatchesTheSkill(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	if !strings.Contains(skill, "polako-evidence") {
@@ -937,6 +969,7 @@ func TestEvidenceDirSpellingMatchesTheSkill(t *testing.T) {
 // names it. Before this, a diff dumped to an improvised name in the worktree
 // root made tidy refuse every such worktree after its merge.
 func TestSkillSendsScratchFilesToTheScratchDir(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 	flat := strings.Join(strings.Fields(skill), " ")
 
@@ -970,6 +1003,7 @@ func TestSkillSendsScratchFilesToTheScratchDir(t *testing.T) {
 // pusher, the URL-building command, and the scratch dir it reads shots
 // from — are pinned together in the section that documents them.
 func TestEvidenceRefSectionIsPinned(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	start := strings.Index(skill, "## Evidence ref")
@@ -1002,6 +1036,7 @@ func TestEvidenceRefSectionIsPinned(t *testing.T) {
 // `no-evidence` value means nothing if the argument it rides on was never
 // declared, or the body never reads it.
 func TestSkillDeclaresTheEvidenceArgument(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	front, body := skillFrontmatter(t, "skills/"+skillDir+"/SKILL.md", skill)
@@ -1026,6 +1061,7 @@ func TestSkillDeclaresTheEvidenceArgument(t *testing.T) {
 // anything anywhere" or lets a run pad the section past what a reviewer
 // reads in a minute.
 func TestEvidenceSectionCapsShotsAndNarrowsTheUploadBan(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	start := strings.Index(skill, "## Evidence — add only when")
@@ -1056,6 +1092,7 @@ func TestEvidenceSectionCapsShotsAndNarrowsTheUploadBan(t *testing.T) {
 // nothing look identical from outside. No guard can tell them apart, which
 // leaves the skill knowing what kind of process it is as the only defence.
 func TestSkillSaysTheRunGetsOneTurn(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	if !strings.Contains(skill, "one turn") {
@@ -1091,6 +1128,7 @@ func TestSkillSaysTheRunGetsOneTurn(t *testing.T) {
 // grant — and stops before Phase 1 creates a worktree or branch for an issue
 // an open blocker should have held back.
 func TestPhase0ReadsBlockedBy(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	if !strings.Contains(skill, "gh issue view $issue --json number,title,state,body,comments,blockedBy") {
@@ -1103,6 +1141,7 @@ func TestPhase0ReadsBlockedBy(t *testing.T) {
 // late to matter: a worktree or branch already exists for an issue an open
 // blocker should have held back, and now there is something to clean up.
 func TestPhase0ChecksBlockedByBeforeAnythingIsCreated(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	blockerCheck := strings.Index(skill, "Check `blockedBy` before Phase 1 creates anything")
@@ -1133,6 +1172,7 @@ func TestPhase0ChecksBlockedByBeforeAnythingIsCreated(t *testing.T) {
 // to answer it — so the run hangs with its question still unposted, which is
 // the failure this whole label exists to prevent.
 func TestLabelCommandsInTheSkillMatchTheGrantedPrefixes(t *testing.T) {
+	t.Parallel()
 	const issue = 42
 	skill := strings.ReplaceAll(readRepoFile(t, "skills", skillDir, "SKILL.md"), "$issue", strconv.Itoa(issue))
 
@@ -1173,6 +1213,7 @@ func TestLabelCommandsInTheSkillMatchTheGrantedPrefixes(t *testing.T) {
 // there to answer, and the run hangs rather than closing or falling back to
 // a park.
 func TestCloseCommandInTheSkillMatchesTheGrantedPrefix(t *testing.T) {
+	t.Parallel()
 	const issue = 42
 	skill := strings.ReplaceAll(readRepoFile(t, "skills", skillDir, "SKILL.md"), "$issue", strconv.Itoa(issue))
 
@@ -1198,6 +1239,7 @@ func TestCloseCommandInTheSkillMatchesTheGrantedPrefix(t *testing.T) {
 // every PR the other half goes looking for is simply absent — which reads as
 // "the run produced nothing" and parks a perfectly good issue.
 func TestSkillBranchNameMatchesTheBranchPrefixDefault(t *testing.T) {
+	t.Parallel()
 	prefix := stringFlagDefault(t, "branch-prefix")
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 	if want := prefix + "$issue"; !strings.Contains(skill, want) {
@@ -1213,6 +1255,7 @@ func TestSkillBranchNameMatchesTheBranchPrefixDefault(t *testing.T) {
 // which is issue #311. --plugin-dir is what lets the run invoke the main
 // checkout's script against its own worktree.
 func TestSkillRunsTheEvalCasesOnASkillChange(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 	for _, marker := range []string{"evals/run.sh", "--plugin-dir <worktree>"} {
 		if !strings.Contains(skill, marker) {
@@ -1227,6 +1270,7 @@ func TestSkillRunsTheEvalCasesOnASkillChange(t *testing.T) {
 // and a closed issue is how the next drain sees the work as done. Left off, the
 // issue stays open and the backlog never drains past it.
 func TestPRBodyKeepsItsSectionsAndClosingLine(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	for _, heading := range []string{"## Summary", "## Evidence", "## Design decisions", "## Scope", "## Verification"} {
@@ -1259,6 +1303,7 @@ func TestPRBodyKeepsItsSectionsAndClosingLine(t *testing.T) {
 // the next edit drifts the tone back toward the memo voice with nothing to
 // catch it.
 func TestSkillCarriesTheHouseStyle(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	flat := strings.Join(strings.Fields(skill), " ")
@@ -1299,6 +1344,7 @@ func TestSkillDescribesDontPaste(t *testing.T) {
 // carries a length budget on or under its heading; drop one and that section
 // is open-ended again.
 func TestPRBodySectionsAllHaveBudgets(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	start := strings.Index(skill, "## Summary — what changed and why")
@@ -1338,6 +1384,7 @@ func TestPRBodySectionsAllHaveBudgets(t *testing.T) {
 // know, and what each answer would change — capped at one screen. This pins
 // that shape in the "Asking a question" section.
 func TestQuestionPathHasAShape(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	ask := strings.Index(skill, "## Asking a question")
@@ -1364,6 +1411,7 @@ func TestQuestionPathHasAShape(t *testing.T) {
 // it just quietly never runs, and the merge that should have cut a release
 // does nothing at all.
 func TestReleaseWorkflowsStayCoupled(t *testing.T) {
+	t.Parallel()
 	couplings := map[string][]string{
 		// The path filter is how a version bump — and nothing else — starts a
 		// release; workflow_dispatch is the documented recovery re-run.
@@ -1394,6 +1442,7 @@ func TestReleaseWorkflowsStayCoupled(t *testing.T) {
 // an exact reference with nothing to bump it goes stale in silence, so this
 // checks both, since either alone is worse than the pair.
 func TestWorkflowActionsArePinnedToSHAs(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(repoRoot(), ".github", "workflows")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -1435,6 +1484,7 @@ func TestWorkflowActionsArePinnedToSHAs(t *testing.T) {
 // undocumented. The README is the landing page and deliberately carries no
 // flag tables, so it is not what this reads.
 func TestDocsDocumentEveryFlag(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(repoRoot(), "docs")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -1462,6 +1512,7 @@ func TestDocsDocumentEveryFlag(t *testing.T) {
 // the non-test Go — fixtures and golden records in _test.go files quote real
 // ids on purpose and are out of scope.
 func TestNoVersionedModelIDsInSource(t *testing.T) {
+	t.Parallel()
 	sources, err := filepath.Glob(filepath.Join(repoRoot(), "cmd", "polako", "*.go"))
 	if err != nil {
 		t.Fatalf("listing sources: %v", err)
@@ -1499,6 +1550,7 @@ func TestNoVersionedModelIDsInSource(t *testing.T) {
 // would hand out the gate with it — the failure docs/security.md warns about,
 // arriving through a file nobody thinks of as code.
 func TestIssueTemplatesApplyNoOrchestrationLabel(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(repoRoot(), ".github", "ISSUE_TEMPLATE")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -1565,6 +1617,7 @@ const releaseGrace = 24 * time.Hour
 // user — and a release already in flight (plugin.json bumped, tag not yet
 // pushed) is taken as the acknowledgement it is.
 func TestShippingFixesDoNotSitUnreleased(t *testing.T) {
+	t.Parallel()
 	root := repoRoot()
 	// Real git against the actual checkout breaks none of the hermetic rules
 	// (no network, no gh, no real claude): the facts are all local, and no fake
@@ -1705,6 +1758,7 @@ func releaseCheckShouldSkip(event string) bool {
 
 // Hermetic: no network, no gh, no real claude — just the event switch itself.
 func TestReleaseCheckShouldSkip(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		event string
 		skip  bool

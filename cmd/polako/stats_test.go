@@ -76,7 +76,6 @@ func stats(t *testing.T, args ...string) string {
 // errOut (the -html confirmation under -json) as well as stdout.
 func statsOutErr(t *testing.T, args ...string) (string, string) {
 	t.Helper()
-	clearEnvDefaults(t)
 	var out, errOut bytes.Buffer
 	if err := runStats(args, &out, &errOut, fixtureNow, report{}); err != nil {
 		t.Fatalf("stats %v: %v", args, err)
@@ -84,25 +83,9 @@ func statsOutErr(t *testing.T, args ...string) (string, string) {
 	return out.String(), errOut.String()
 }
 
-// clearEnvDefaults keeps a test hermetic against the shell it runs in. Flags
-// take their defaults from POLAKO_* now, so a maintainer who set one in
-// their profile would otherwise be running a different suite from CI.
-func clearEnvDefaults(t *testing.T) {
-	t.Helper()
-	for _, kv := range os.Environ() {
-		name, _, _ := strings.Cut(kv, "=")
-		if !strings.HasPrefix(name, envPrefix) {
-			continue
-		}
-		t.Setenv(name, "") // registers the restore this test needs
-		os.Unsetenv(name)  // then actually takes it out of the environment
-	}
-}
-
 // One variable points both halves at the same directory: the drain writes
 // there, and stats reads there, without either being told twice.
 func TestStatsReadsTheMetricsDirectoryFromTheEnvironment(t *testing.T) {
-	clearEnvDefaults(t)
 	t.Setenv("POLAKO_METRICS", fixtureDir(t))
 
 	var buf bytes.Buffer
@@ -125,6 +108,7 @@ func TestStatsReadsTheMetricsDirectoryFromTheEnvironment(t *testing.T) {
 // The whole report, pinned. Every number here was worked out by hand from the
 // fixture above: if a change moves one, the change has to be able to say why.
 func TestStatsReport(t *testing.T) {
+	t.Parallel()
 	dir := fixtureDir(t)
 	want := fmt.Sprintf(`run data from %s
   read    2 files, 11 records (1 unreadable line skipped)
@@ -165,6 +149,7 @@ human latency
 // merge and the record of it, and rerun later. The newest line is the one that
 // happened — here, merged, not the needs_human that preceded it.
 func TestStatsDedupesIssueRecordsLatestWins(t *testing.T) {
+	t.Parallel()
 	out := stats(t, "-metrics", fixtureDir(t), "-by", byIssue)
 	line := issueLine(t, out, "scharissis/polako#12")
 	if !strings.Contains(line, "merged") {
@@ -194,6 +179,7 @@ func issueLine(t *testing.T, out, prefix string) string {
 // stretch of work. Both count — dropping the crash would price the crashy
 // configurations at nothing.
 func TestStatsCountsBothHalvesOfAResumedSession(t *testing.T) {
+	t.Parallel()
 	out := stats(t, "-metrics", fixtureDir(t), "-by", byIssue)
 	line := issueLine(t, out, "scharissis/polako#13")
 	if !strings.Contains(line, "  2  ") {
@@ -216,6 +202,7 @@ func TestStatsCountsBothHalvesOfAResumedSession(t *testing.T) {
 // the session (settled on issue #78), so the two costs add. A per-session
 // maximum — the alternative the old caveat hedged against — would report $3.00.
 func TestStatsSumsBothPricedHalvesOfAResumedSession(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	const both = `{"v":1,"kind":"run","ts":"2026-08-22T09:00:00Z","ended":"2026-08-22T09:30:00Z","repo":"scharissis/paired","issue":21,"reason":"implement","session":"s21","resumed_from":"","status":"ok","subtype":"success","outcome":"nothing","turns":62,"wall_ms":1800000,"cost_usd":2.00,"usage_source":"result","tokens":{"in":100,"out":54077,"cache_read":6194619,"cache_write":1000},"model":"claude-opus-5"}
 {"v":1,"kind":"run","ts":"2026-08-22T09:31:00Z","ended":"2026-08-22T10:00:00Z","repo":"scharissis/paired","issue":21,"pr":9,"reason":"unfinished","attempt":1,"session":"s21","resumed_from":"s21","status":"ok","subtype":"success","outcome":"opened_pr","turns":31,"wall_ms":1740000,"cost_usd":3.00,"usage_source":"result","tokens":{"in":100,"out":15651,"cache_read":4947563,"cache_write":1000},"model":"claude-opus-5"}
@@ -235,6 +222,7 @@ func TestStatsSumsBothPricedHalvesOfAResumedSession(t *testing.T) {
 // deliberately — a park that named its reason, one that could not, and two
 // written before the field existed at all.
 func TestStatsBreaksParksDownByReason(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	const parks = `{"v":1,"kind":"issue","ts":"2026-08-22T09:00:00Z","repo":"scharissis/parked","issue":1,"outcome":"needs_human","park_reason":"budget"}
 {"v":1,"kind":"issue","ts":"2026-08-22T09:01:00Z","repo":"scharissis/parked","issue":2,"outcome":"needs_human","park_reason":"budget"}
@@ -265,12 +253,14 @@ func TestStatsBreaksParksDownByReason(t *testing.T) {
 // A window with nothing parked in it gets no line, rather than a row of zeroes
 // for every reason nothing happened for.
 func TestStatsOmitsParkReasonsWhenNothingParked(t *testing.T) {
+	t.Parallel()
 	if out := stats(t, "-metrics", drainFixtureDir(t)); strings.Contains(out, "park reasons") {
 		t.Errorf("no issue was parked, so there is nothing to break down:\n%s", out)
 	}
 }
 
 func TestStatsFiltersByRepo(t *testing.T) {
+	t.Parallel()
 	out := stats(t, "-metrics", fixtureDir(t), "-repo", "scharissis/other")
 	if strings.Contains(out, "polako#") || strings.Contains(out, "$8.10") {
 		t.Errorf("-repo let another repository's records through:\n%s", out)
@@ -287,6 +277,7 @@ func TestStatsFiltersByRepo(t *testing.T) {
 }
 
 func TestStatsFiltersBySince(t *testing.T) {
+	t.Parallel()
 	dir := fixtureDir(t)
 	// fixtureNow is 2026-08-25T09:00Z, so 30h reaches back to the 24th only.
 	out := stats(t, "-metrics", dir, "-since", "30h")
@@ -321,6 +312,7 @@ func sameBody(a, b string) bool {
 }
 
 func TestStatsByIssue(t *testing.T) {
+	t.Parallel()
 	out := stats(t, "-metrics", fixtureDir(t), "-by", byIssue)
 	want := `by issue
   issue                 outcome      runs  questions   cost  tokens  wall
@@ -337,6 +329,7 @@ func TestStatsByIssue(t *testing.T) {
 
 // The point of the whole exercise: price one configuration against another.
 func TestStatsByModelAndTag(t *testing.T) {
+	t.Parallel()
 	dir := fixtureDir(t)
 	wantModel := `by model
   model            issues  merged  runs   cost  $/merged  tokens
@@ -370,6 +363,7 @@ func TestStatsByModelAndTag(t *testing.T) {
 // The ledger every other section is a rollup of, and the only place a run's
 // session id is ever shown. Pinned whole: the columns are the interface.
 func TestStatsRunLog(t *testing.T) {
+	t.Parallel()
 	out := stats(t, "-metrics", fixtureDir(t), "-runs")
 	want := `run log
   started               issue                 reason     status    outcome           session  attempt   cost  tokens  wall
@@ -400,6 +394,7 @@ func TestStatsRunLog(t *testing.T) {
 // filtered slice — asserted rather than assumed, since a table that quietly
 // ignored -repo would be a report about the wrong project.
 func TestStatsRunLogHonoursTheFilters(t *testing.T) {
+	t.Parallel()
 	dir := fixtureDir(t)
 
 	one := stats(t, "-metrics", dir, "-runs", "-repo", "scharissis/other")
@@ -458,6 +453,7 @@ func drainFixtureDir(t *testing.T) string {
 }
 
 func TestStatsByShift(t *testing.T) {
+	t.Parallel()
 	out := stats(t, "-metrics", drainFixtureDir(t), "-by", byShift)
 	want := `by shift
   shift     issues  merged  runs   cost  $/merged  tokens
@@ -474,6 +470,7 @@ func TestStatsByShift(t *testing.T) {
 // Records written before the field existed are not a parse failure and not a
 // gap: they are one more drain nobody can name.
 func TestStatsGroupsRecordsWithNoShiftIDUnderNone(t *testing.T) {
+	t.Parallel()
 	out := stats(t, "-metrics", fixtureDir(t), "-by", byShift)
 	if !hasLine(out, "(none) 5 3 7") {
 		t.Errorf("a file written before drain ids existed should still group, whole:\n%s", out)
@@ -489,6 +486,7 @@ func TestStatsGroupsRecordsWithNoShiftIDUnderNone(t *testing.T) {
 // both drains here recorded issue #1 ending, and the older one's report must
 // show what that drain concluded rather than what the next one did.
 func TestStatsFiltersToOneShiftBeforeDedupingIssues(t *testing.T) {
+	t.Parallel()
 	dir := drainFixtureDir(t)
 
 	older := stats(t, "-metrics", dir, "-shift", "aaaa1111")
@@ -511,6 +509,7 @@ func TestStatsFiltersToOneShiftBeforeDedupingIssues(t *testing.T) {
 // "last" is the flag's whole point on a drain that is still running: the id is
 // in a startup line scrolled off the screen an hour ago.
 func TestStatsShiftLastPicksTheNewestShiftInScope(t *testing.T) {
+	t.Parallel()
 	dir := drainFixtureDir(t)
 
 	// The report names the id it resolved to, not the word that was typed —
@@ -532,6 +531,7 @@ func TestStatsShiftLastPicksTheNewestShiftInScope(t *testing.T) {
 // construction never the one a window clips — so it takes a named drain whose
 // records sit outside it.
 func TestStatsShiftAndSinceBothApply(t *testing.T) {
+	t.Parallel()
 	// 72h back from fixtureNow starts on the 22nd; every aaaa1111 record is
 	// from the 20th.
 	out := stats(t, "-metrics", drainFixtureDir(t), "-shift", "aaaa1111", "-since", "72h")
@@ -546,6 +546,7 @@ func TestStatsShiftAndSinceBothApply(t *testing.T) {
 // An id nobody wrote is not an error — it is a report with nothing in it, and
 // the line has to say which drain came up empty.
 func TestStatsOnAShiftWithNoRecords(t *testing.T) {
+	t.Parallel()
 	out := stats(t, "-metrics", drainFixtureDir(t), "-shift", "deadbeef")
 	if !strings.Contains(out, "from shift deadbeef") {
 		t.Errorf("want the empty report to name the drain asked for:\n%s", out)
@@ -555,6 +556,7 @@ func TestStatsOnAShiftWithNoRecords(t *testing.T) {
 // Batches are normally one tag each, so an issue worked under two of them is
 // counted under both — and said so, rather than quietly inflating a column.
 func TestStatsNotesIssuesSpanningGroups(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	body := `{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T09:10:00Z","repo":"r/r","issue":1,"reason":"implement","status":"ok","outcome":"nothing","cost_usd":1,"tag":"before"}
 {"v":1,"kind":"run","ts":"2026-08-20T10:00:00Z","ended":"2026-08-20T10:10:00Z","repo":"r/r","issue":1,"reason":"implement","status":"ok","outcome":"opened_pr","pr":2,"cost_usd":2,"tag":"after"}
@@ -578,6 +580,7 @@ func TestStatsNotesIssuesSpanningGroups(t *testing.T) {
 // grows by adding, so the reader skips it: not counted as a run, not counted
 // as an unreadable line, and the rest of the file still reports.
 func TestStatsSkipsAPlanRecordCleanly(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	body := `{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T09:10:00Z","repo":"r/r","issue":1,"reason":"implement","status":"ok","outcome":"opened_pr","pr":2,"cost_usd":1.5,"turns":9}
 {"v":1,"kind":"issue","ts":"2026-08-20T11:00:00Z","repo":"r/r","issue":1,"pr":2,"outcome":"merged"}
@@ -599,6 +602,7 @@ func TestStatsSkipsAPlanRecordCleanly(t *testing.T) {
 }
 
 func TestStatsOnAnEmptyDirectory(t *testing.T) {
+	t.Parallel()
 	out := stats(t, "-metrics", filepath.Join(t.TempDir(), "never-drained"))
 	if !strings.Contains(out, "no run data in") {
 		t.Errorf("want a plain answer, got:\n%s", out)
@@ -608,6 +612,7 @@ func TestStatsOnAnEmptyDirectory(t *testing.T) {
 // A run record on its own is a complete report: an issue in flight has no
 // terminal record yet, and every rate has to cope with that.
 func TestStatsWithNoTerminalIssueYet(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	body := `{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T09:10:00Z","repo":"r/r","issue":1,"reason":"implement","status":"ok","outcome":"opened_pr","pr":2,"cost_usd":1.5,"turns":9}
 `
@@ -628,6 +633,7 @@ func TestStatsWithNoTerminalIssueYet(t *testing.T) {
 }
 
 func TestStatsRejectsBadInput(t *testing.T) {
+	t.Parallel()
 	cases := map[string][]string{
 		"an unknown -by":     {"-by", "sideways"},
 		"a stray argument":   {"stats-again"},
@@ -640,7 +646,6 @@ func TestStatsRejectsBadInput(t *testing.T) {
 	}
 	for name, args := range cases {
 		t.Run(name, func(t *testing.T) {
-			clearEnvDefaults(t)
 			var buf bytes.Buffer
 			if err := runStats(args, &buf, io.Discard, fixtureNow, report{}); err == nil {
 				t.Errorf("runStats(%v) succeeded, want an error explaining what to do", args)
@@ -651,7 +656,7 @@ func TestStatsRejectsBadInput(t *testing.T) {
 
 // -h is how a person finds the flags; it is not a failure.
 func TestStatsHelpIsNotAnError(t *testing.T) {
-	clearEnvDefaults(t)
+	t.Parallel()
 	var buf bytes.Buffer
 	if err := runStats([]string{"-h"}, &buf, io.Discard, fixtureNow, report{}); err != nil {
 		t.Fatalf("stats -h: %v", err)
@@ -666,6 +671,7 @@ func TestStatsHelpIsNotAnError(t *testing.T) {
 // --- the derivations, unit by unit ---
 
 func TestAnswerSpansPairEachRoundWithItsReply(t *testing.T) {
+	t.Parallel()
 	// The middle run does both: it folds in one reply and asks again.
 	is := &issueStats{runs: []runRecord{
 		{TS: "2026-08-20T09:00:00Z", Ended: "2026-08-20T09:30:00Z", Reason: reasonImplement, Outcome: outcomeQuestions},
@@ -687,6 +693,7 @@ func TestAnswerSpansPairEachRoundWithItsReply(t *testing.T) {
 // Records are ordered by timestamp, never by attempt: attempt restarts at zero
 // every time the supervisor does, so a chronology built on it is fiction.
 func TestStatsOrdersRunsByTimestampNotAttempt(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	// Written out of order, with attempt counters that disagree with the clock.
 	body := `{"v":1,"kind":"run","ts":"2026-08-20T13:00:00Z","ended":"2026-08-20T13:30:00Z","repo":"r/r","issue":1,"reason":"answers","attempt":0,"status":"ok","outcome":"opened_pr","pr":2,"cost_usd":1}
@@ -710,6 +717,7 @@ func TestStatsOrdersRunsByTimestampNotAttempt(t *testing.T) {
 }
 
 func TestMergeSpanIgnoresAnAbandonedPR(t *testing.T) {
+	t.Parallel()
 	merged := issueRecord{TS: "2026-08-20T15:00:00Z", PR: 34, Outcome: issueMerged}
 	is := &issueStats{
 		terminal: &merged,
@@ -730,6 +738,7 @@ func TestMergeSpanIgnoresAnAbandonedPR(t *testing.T) {
 }
 
 func TestLoadRecordsSkipsWhatItCannotUse(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	body := "not json at all\n" +
 		`{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","repo":"r/r","issue":1,"cost_usd":1}` + "\n" +
@@ -754,6 +763,7 @@ func TestLoadRecordsSkipsWhatItCannotUse(t *testing.T) {
 }
 
 func TestCountReadsAtAGlance(t *testing.T) {
+	t.Parallel()
 	cases := map[int64]string{
 		0: "0", 999: "999", 1000: "1k", 8123400: "8.1M", 1_500_000_000: "1.5G", 53000: "53k",
 	}
@@ -765,6 +775,7 @@ func TestCountReadsAtAGlance(t *testing.T) {
 }
 
 func TestDurDropsTheNoiseUnits(t *testing.T) {
+	t.Parallel()
 	cases := map[time.Duration]string{
 		30 * time.Second:                            "30s",
 		90 * time.Second:                            "1m30s",
@@ -781,6 +792,7 @@ func TestDurDropsTheNoiseUnits(t *testing.T) {
 }
 
 func TestMedianAndMean(t *testing.T) {
+	t.Parallel()
 	if got := median([]float64{3.60, 0.10, 3.00, 1.00}); got != 2.00 {
 		t.Errorf("median of an even set = %v, want the midpoint 2", got)
 	}
@@ -798,6 +810,7 @@ func TestMedianAndMean(t *testing.T) {
 // The drain writes; stats reads. Neither reaches for the other's job, which is
 // what keeps run data telemetry rather than state.
 func TestStatsNeverWrites(t *testing.T) {
+	t.Parallel()
 	dir := fixtureDir(t)
 	before, err := os.ReadDir(dir)
 	if err != nil {
@@ -816,6 +829,7 @@ func TestStatsNeverWrites(t *testing.T) {
 // One issue worked under three tags is one issue spanning groups, not two —
 // the surplus memberships add up faster than the issues do.
 func TestStatsCountsSpanningIssuesNotSurplusMemberships(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	var body strings.Builder
 	for i, tag := range []string{"a", "b", "c"} {
@@ -834,6 +848,7 @@ func TestStatsCountsSpanningIssuesNotSurplusMemberships(t *testing.T) {
 // produced it. Averaging that issue in at $0 is how a filter turns expensive
 // work into a cheap-looking batch.
 func TestStatsDoesNotPriceIssuesWithNoRunsInScope(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	body := `{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T18:00:00Z","repo":"r/r","issue":1,"reason":"implement","status":"ok","outcome":"opened_pr","pr":2,"cost_usd":9.99,"turns":50}
 {"v":1,"kind":"issue","ts":"2026-08-25T08:00:00Z","repo":"r/r","issue":1,"pr":2,"outcome":"merged"}
@@ -876,6 +891,7 @@ func TestStatsDoesNotPriceIssuesWithNoRunsInScope(t *testing.T) {
 // written 0600 — so someone else's file is normally unreadable. Reporting
 // nothing at all in that case would make the shared setup useless.
 func TestStatsReportsAroundAnUnreadableFile(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("unix permission bits are not how Windows decides this")
 	}
@@ -902,6 +918,7 @@ func TestStatsReportsAroundAnUnreadableFile(t *testing.T) {
 // Naming the record file rather than its directory finds nothing, and "no run
 // data" would send someone hunting for records in the path they just named.
 func TestStatsRejectsAFileAsTheMetricsDirectory(t *testing.T) {
+	t.Parallel()
 	dir := fixtureDir(t)
 	var buf bytes.Buffer
 	err := runStats([]string{"-metrics", filepath.Join(dir, "scharissis--other.jsonl")}, &buf, io.Discard, fixtureNow, report{})
@@ -932,6 +949,7 @@ func enrichedDir(t *testing.T) string {
 }
 
 func TestStatsReportsWhatTheMergedWorkChanged(t *testing.T) {
+	t.Parallel()
 	out := stats(t, "-metrics", enrichedDir(t))
 	if !hasLine(out, "change per issue +306 -29 across 5 files, 1 review (medians over 2 issues with PR data)") {
 		t.Errorf("no change line built from the enrichment:\n%s", out)
@@ -946,6 +964,7 @@ func TestStatsReportsWhatTheMergedWorkChanged(t *testing.T) {
 // Every record written before the enrichment existed still reads, and reports
 // exactly what it did before: the line simply does not appear.
 func TestStatsOmitsTheChangeLineWithoutEnrichment(t *testing.T) {
+	t.Parallel()
 	out := stats(t, "-metrics", fixtureDir(t))
 	if strings.Contains(out, "change per issue") {
 		t.Errorf("unenriched records produced a change line:\n%s", out)
@@ -953,6 +972,7 @@ func TestStatsOmitsTheChangeLineWithoutEnrichment(t *testing.T) {
 }
 
 func TestMergeSpanPrefersGitHubsTimestamps(t *testing.T) {
+	t.Parallel()
 	merged := issueRecord{TS: "2026-08-20T15:00:00Z", PR: 34, Outcome: issueMerged,
 		PROpened: "2026-08-20T09:00:00Z", PRMerged: "2026-08-20T14:00:00Z"}
 	is := &issueStats{terminal: &merged, runs: []runRecord{

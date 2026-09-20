@@ -30,6 +30,8 @@ func planTestConfig(t *testing.T, st *ghState) (cfg config, statePath, checkout 
 	_, checkout = upstream(t)
 	cfg = config{
 		dir:            checkout,
+		env:            slices.Clone(drainCfg.env), // the fake gh and claude handshake, for the child
+		ui:             testUI(t),
 		ghBin:          drainCfg.ghBin,
 		claudeBin:      drainCfg.claudeBin,
 		ghRetryWait:    time.Millisecond,
@@ -56,6 +58,7 @@ func writeVision(t *testing.T, checkout, rel string) {
 // The bare invocation's verb table has to list plan now that it exists — the
 // usage never advertises a verb that errors, and never omits one that works.
 func TestVerbUsageListsPlan(t *testing.T) {
+	t.Parallel()
 	var b strings.Builder
 	verbUsage(&b)
 	if !strings.Contains(b.String(), "\n  plan ") {
@@ -66,6 +69,7 @@ func TestVerbUsageListsPlan(t *testing.T) {
 // Exactly one of -vision / -brief, and never a does-the-file-exist heuristic on
 // -vision: a typo'd path has to fail loudly rather than become "no document".
 func TestPlanConfigRequiresExactlyOneSource(t *testing.T) {
+	t.Parallel()
 	sane := intakeOptions{maxIssues: 10}
 	if _, err := planConfig(&planOptions{intakeOptions: sane}); err == nil {
 		t.Error("planConfig accepted neither -vision nor -brief")
@@ -88,6 +92,7 @@ func TestPlanConfigRequiresExactlyOneSource(t *testing.T) {
 // The milestone title: -milestone verbatim, "" for "off", else derived from the
 // document name or the brief's opening words.
 func TestPlanMilestoneTitle(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		opt  planOptions
 		want string
@@ -117,6 +122,7 @@ func TestPlanMilestoneTitle(t *testing.T) {
 // The capability probe reads `gh issue create --help`: a gh that lists
 // `--parent` files hierarchically, one that does not works flat.
 func TestPlanPreflightProbesParentSupport(t *testing.T) {
+	t.Parallel()
 	newGh := func(st *ghState) (config, *planOptions, string) {
 		cfg, _, checkout := planTestConfig(t, st)
 		writeVision(t, checkout, "VISION.md")
@@ -143,6 +149,7 @@ func TestPlanPreflightProbesParentSupport(t *testing.T) {
 
 // A missing document is a loud, advice-carrying failure, not a silent fallback.
 func TestPlanPreflightFailsWithAdvice(t *testing.T) {
+	t.Parallel()
 	cfg, _, _ := planTestConfig(t, &ghState{})
 	_, _, err := planPreflight(context.Background(), &cfg,
 		&planOptions{
@@ -162,6 +169,7 @@ func TestPlanPreflightFailsWithAdvice(t *testing.T) {
 // ensureMilestone is find-or-create and nothing more: a title that already
 // exists is left untouched, an absent one is POSTed.
 func TestEnsureMilestoneIsIdempotent(t *testing.T) {
+	t.Parallel()
 	cfg, statePath, _ := planTestConfig(t, &ghState{Milestones: []string{"Roadmap Q3"}})
 	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
 
@@ -188,6 +196,7 @@ func TestEnsureMilestoneIsIdempotent(t *testing.T) {
 // otherwise refuse, and the batch milestone the run attaches issues to.
 // `-milestone off` skips only the milestone.
 func TestPlanPreflightDeclaresTheGateForARealRun(t *testing.T) {
+	t.Parallel()
 	cfg, statePath, checkout := planTestConfig(t, &ghState{})
 	writeVision(t, checkout, "VISION.md")
 
@@ -225,6 +234,7 @@ func TestPlanPreflightDeclaresTheGateForARealRun(t *testing.T) {
 // -dry-run's promise: it prints the invocation a run would make and does none
 // of it — no label, no milestone, no change to the repository at all.
 func TestPlanDryRunWritesNothingAndPrintsTheInvocation(t *testing.T) {
+	t.Parallel()
 	cfg, statePath, checkout := planTestConfig(t, &ghState{})
 	writeVision(t, checkout, "docs/VISION.md")
 	before, err := os.ReadFile(statePath)
@@ -317,7 +327,7 @@ func planRunConfig(t *testing.T, st *ghState, claudeMode string) (config, string
 	t.Helper()
 	cfg, statePath, checkout := planTestConfig(t, st)
 	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
-	t.Setenv(fakeClaudeEnv, claudeMode)
+	setFakeEnv(&cfg, fakeClaudeEnv, claudeMode)
 	writeVision(t, checkout, "VISION.md")
 	return cfg, statePath
 }
@@ -326,6 +336,7 @@ func planRunConfig(t *testing.T, st *ghState, claudeMode string) (config, string
 // proposedLabel — a missing one added, any other stripped — attaches the batch
 // milestone to the ones without it, and leaves another account's issue alone.
 func TestPlanNormaliseForcesExactlyProposed(t *testing.T) {
+	t.Parallel()
 	cfg, statePath, _ := planTestConfig(t, &ghState{
 		Labels:     []string{proposedLabel, "enhancement"},
 		Milestones: []string{"Batch 1"},
@@ -371,6 +382,7 @@ func TestPlanNormaliseForcesExactlyProposed(t *testing.T) {
 // stripped: the `> maxBefore` guard holds because GitHub issue numbers only
 // ever climb.
 func TestPlanNormaliseLeavesPreRunIssuesBelowTheHighWaterMark(t *testing.T) {
+	t.Parallel()
 	cfg, statePath, _ := planTestConfig(t, &ghState{
 		Labels: []string{proposedLabel, "enhancement"},
 		Issues: map[string]*fakeIssue{
@@ -402,6 +414,7 @@ func TestPlanNormaliseLeavesPreRunIssuesBelowTheHighWaterMark(t *testing.T) {
 // nonzero exit — never swallowed, because an unlabelled proposal a drain would
 // pick up is the worst thing a plan run can leave behind.
 func TestPlanNormaliseReportsLabelFailuresLoudly(t *testing.T) {
+	t.Parallel()
 	// The repository never declared proposedLabel, so `gh issue edit --add-label`
 	// fails exactly as GitHub's would.
 	cfg, _, _ := planTestConfig(t, &ghState{
@@ -428,6 +441,7 @@ func TestPlanNormaliseReportsLabelFailuresLoudly(t *testing.T) {
 // edits (adds plus strips), and created issues that turned out to be
 // containers.
 func TestPlanNormaliseCountsTheEnforcementAndTheEpics(t *testing.T) {
+	t.Parallel()
 	cfg, _, _ := planTestConfig(t, &ghState{
 		Labels:     []string{proposedLabel, "enhancement"},
 		Milestones: []string{"Batch 1"},
@@ -457,6 +471,7 @@ func TestPlanNormaliseCountsTheEnforcementAndTheEpics(t *testing.T) {
 // one field. The pass retries without it and still normalises — epics_created
 // then reads 0, the same degradation the drain's container skip takes.
 func TestPlanNormaliseFallsBackForAnOldGh(t *testing.T) {
+	t.Parallel()
 	cfg, _, _ := planTestConfig(t, &ghState{
 		OldGh:  true,
 		Labels: []string{proposedLabel},
@@ -480,8 +495,9 @@ func TestPlanNormaliseFallsBackForAnOldGh(t *testing.T) {
 // normalises what it filed. The fake skill creates three proposals, only one
 // of them labelled.
 func TestPlanRunSpawnsTheSkillAndNormalisesWhatItCreated(t *testing.T) {
+	t.Parallel()
 	var term, buf bytes.Buffer
-	wireSinks(t, &ui{terminal: &term, file: &buf})
+	captureUI(t, &ui{terminal: &term, file: &buf})
 	cfg, statePath := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plan")
 
 	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10}, vision: "VISION.md"}
@@ -532,6 +548,7 @@ func TestPlanRunSpawnsTheSkillAndNormalisesWhatItCreated(t *testing.T) {
 // kind:"plan" record whatever its status, and — because it proposed
 // something — one `proposed` notification naming what awaits curation.
 func TestPlanRunRecordsAndNotifies(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, _ := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plan")
 	records := t.TempDir()
@@ -584,6 +601,7 @@ func TestPlanRunRecordsAndNotifies(t *testing.T) {
 // A plan run that proposed nothing fires no notification — nobody is waiting
 // on a backlog that does not exist — but still writes its record.
 func TestPlanRunWithNoProposalsRecordsButDoesNotNotify(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cfg, _ := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "planempty")
 	records := t.TempDir()
@@ -613,6 +631,7 @@ func TestPlanRunWithNoProposalsRecordsButDoesNotNotify(t *testing.T) {
 // rather than raising it, and the label pass still normalises everything that
 // was filed. Nothing is closed.
 func TestPlanRunCapsIssueCreationAndStillNormalises(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	cfg, statePath := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plancap")
 
@@ -653,6 +672,7 @@ func TestPlanRunCapsIssueCreationAndStillNormalises(t *testing.T) {
 // the interrupt from the context itself. The label pass still runs, on its own
 // detached deadline.
 func TestPlanRunInterruptReportsAsCancelled(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	// "plancap" pauses between its create iterations, so the context kill —
 	// not the process's own exit — is what ends the run.
@@ -684,6 +704,7 @@ func TestPlanRunInterruptReportsAsCancelled(t *testing.T) {
 // create`, in whatever shell dressing, but never the `--help` capability probe
 // and never a lookalike subcommand.
 func TestIsIssueCreate(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, cmd string
 		want      bool
@@ -713,6 +734,7 @@ func TestIsIssueCreate(t *testing.T) {
 
 // The -skill default resolves to the skill this repo actually ships.
 func TestPlanSkillDefaultMatchesTheShippedSkill(t *testing.T) {
+	t.Parallel()
 	if defaultPlanSkill != "polako:"+planSkillDir {
 		t.Fatalf("defaultPlanSkill = %q, want polako:%s", defaultPlanSkill, planSkillDir)
 	}
@@ -756,6 +778,7 @@ func writePricingFixture(t *testing.T, bodies map[string]string) string {
 }
 
 func TestPlanPricingLineFromHistory(t *testing.T) {
+	t.Parallel()
 	dir := writePricingFixture(t, map[string]string{
 		"scharissis--polako.jsonl": pricingFixture,
 		"scharissis--other.jsonl":  pricingOtherRepo,
@@ -768,12 +791,14 @@ func TestPlanPricingLineFromHistory(t *testing.T) {
 }
 
 func TestPlanPricingLineWithNoHistory(t *testing.T) {
+	t.Parallel()
 	if got := proposalPricingLine(t.TempDir(), "scharissis/polako", 5, 0, fixtureNow); got != noPricingHistory {
 		t.Errorf("empty directory: got %q, want the no-history line", got)
 	}
 }
 
 func TestPlanPricingLineWithMetricsOff(t *testing.T) {
+	t.Parallel()
 	// -metrics off resolves to an empty dir string: no file is opened to find
 	// out there is nothing to read.
 	if got := proposalPricingLine("", "scharissis/polako", 5, 0, fixtureNow); got != noPricingHistory {
@@ -782,6 +807,7 @@ func TestPlanPricingLineWithMetricsOff(t *testing.T) {
 }
 
 func TestPlanPricingLineTreatsUnpricedCrashesAsNoHistory(t *testing.T) {
+	t.Parallel()
 	// The only merged issue's runs all died before reporting a cost: a real
 	// record, a useless estimate. Priced at nothing ⇒ no history to price
 	// against, said as such rather than "≈ $0".
@@ -796,6 +822,7 @@ func TestPlanPricingLineTreatsUnpricedCrashesAsNoHistory(t *testing.T) {
 }
 
 func TestPlanPricingLineSkipsUnpricedIssuesInAMixedHistory(t *testing.T) {
+	t.Parallel()
 	// One real merged issue ($6.00, 60m) and one merged issue whose only run
 	// crashed at $0 after 5m. The $0 issue must not be averaged in — the
 	// estimate is $6.00/60m, not the $3.00/32m a per-issue skip would avoid but
@@ -815,6 +842,7 @@ func TestPlanPricingLineSkipsUnpricedIssuesInAMixedHistory(t *testing.T) {
 }
 
 func TestPlanPricingLineOnlyPrintsForABatch(t *testing.T) {
+	t.Parallel()
 	// Zero proposals never reaches proposalPricingLine in planRun, but the median
 	// half of the sentence should still read sanely if it ever did.
 	dir := writePricingFixture(t, map[string]string{"scharissis--polako.jsonl": pricingFixture})
@@ -826,6 +854,7 @@ func TestPlanPricingLineOnlyPrintsForABatch(t *testing.T) {
 }
 
 func TestPlanPricingLineSaysWhyItsCountIsShortOfTheSummary(t *testing.T) {
+	t.Parallel()
 	// An epic is a container, never worked, so the caller prices created minus
 	// epics — and the line names the gap, or "filed 7" above "all 6" reads as
 	// a miscount.
@@ -844,6 +873,7 @@ func TestPlanPricingLineSaysWhyItsCountIsShortOfTheSummary(t *testing.T) {
 }
 
 func TestMedianDurRoundsToTheMinuteOnceItIsWorthOne(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		in   time.Duration
 		want string
@@ -860,6 +890,7 @@ func TestMedianDurRoundsToTheMinuteOnceItIsWorthOne(t *testing.T) {
 }
 
 func TestLabelPassSummaryVariants(t *testing.T) {
+	t.Parallel()
 	seven := []int{405, 404, 403, 402, 401, 400, 399}
 	for _, c := range []struct {
 		name string
@@ -896,6 +927,7 @@ func TestLabelPassSummaryVariants(t *testing.T) {
 }
 
 func TestIssueRanges(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		in   []int
 		want string
@@ -914,6 +946,7 @@ func TestIssueRanges(t *testing.T) {
 }
 
 func TestCurationLine(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name, repo, milestone, want string
 	}{
@@ -933,6 +966,7 @@ func TestCurationLine(t *testing.T) {
 }
 
 func TestApproxUSDAndDur(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		f    float64
 		want string

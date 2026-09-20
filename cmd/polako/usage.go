@@ -10,7 +10,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -74,9 +73,9 @@ func probeUsage(ctx context.Context, cfg config) (usageSnapshot, bool) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	out, err := capture(ctx, cfg.dir, cfg.claudeBin, "-p", "/usage", "--output-format", "json")
+	out, err := capture(ctx, cfg.dir, cfg.env, cfg.claudeBin, "-p", "/usage", "--output-format", "json")
 	if err != nil {
-		log.Printf("usage probe: %v", err)
+		cfg.logf("usage probe: %v", err)
 		return usageSnapshot{}, false
 	}
 	// streamEvent's fields line up with a plain (non-streaming) `--output-format
@@ -85,11 +84,11 @@ func probeUsage(ctx context.Context, cfg config) (usageSnapshot, bool) {
 	// redeclaring the same two fields under a new name.
 	var res streamEvent
 	if err := json.Unmarshal(out, &res); err != nil {
-		log.Printf("usage probe: parsing the CLI's response: %v", err)
+		cfg.logf("usage probe: parsing the CLI's response: %v", err)
 		return usageSnapshot{}, false
 	}
 	if res.IsError || strings.TrimSpace(res.Result) == "" {
-		log.Printf("usage probe: the CLI reported no usage")
+		cfg.logf("usage probe: the CLI reported no usage")
 		return usageSnapshot{}, false
 	}
 	// The plugin this run's own share should be read off is whichever plugin
@@ -110,7 +109,7 @@ func probeUsage(ctx context.Context, cfg config) (usageSnapshot, bool) {
 	}
 	snap, ok := parseUsage(res.Result, time.Now(), plugin)
 	if !ok {
-		log.Printf("usage probe: could not read a plan out of the CLI's /usage output")
+		cfg.logf("usage probe: could not read a plan out of the CLI's /usage output")
 	}
 	return snap, ok
 }

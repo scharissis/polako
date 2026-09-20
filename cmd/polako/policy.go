@@ -120,31 +120,31 @@ var modelLabelValue = regexp.MustCompile(`^[A-Za-z0-9._\[\]-]+$`)
 // leaves that pair unset — picking one of two would be guessing which the
 // maintainer meant. "Falls through" then means the epic's own label if the
 // issue has a parent that carries one, and the -model/-effort flags otherwise.
-func labelPolicy(labels []ghLabel) labelChoice {
+func labelPolicy(u *ui, labels []ghLabel) labelChoice {
 	var lc labelChoice
 
 	switch model := labelValues(labels, "model:"); {
 	case len(model) == 0:
 	case len(model) > 1:
-		narrate(sevWarning, "issue carries %d model: labels (%s) — model falls through",
+		u.narrate(sevWarning, "issue carries %d model: labels (%s) — model falls through",
 			len(model), strings.Join(model, ", "))
 	case strings.EqualFold(model[0], "default"):
 		lc.modelSet = true // set, but empty: the account default
 	case modelLabelValue.MatchString(model[0]):
 		lc.model, lc.modelSet = model[0], true
 	default:
-		narrate(sevWarning, "model:%s is not a valid model name — model falls through", model[0])
+		u.narrate(sevWarning, "model:%s is not a valid model name — model falls through", model[0])
 	}
 
 	switch effort := labelValues(labels, "effort:"); {
 	case len(effort) == 0:
 	case len(effort) > 1:
-		narrate(sevWarning, "issue carries %d effort: labels (%s) — effort falls through",
+		u.narrate(sevWarning, "issue carries %d effort: labels (%s) — effort falls through",
 			len(effort), strings.Join(effort, ", "))
 	case slices.Contains(effortLevels, effort[0]):
 		lc.effort, lc.effortSet = effort[0], true
 	default:
-		narrate(sevWarning, "effort:%s is not a claude effort level — effort falls through", effort[0])
+		u.narrate(sevWarning, "effort:%s is not a claude effort level — effort falls through", effort[0])
 	}
 
 	return lc

@@ -3,6 +3,7 @@ package main
 import "testing"
 
 func TestParsePlanFooter(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		body string

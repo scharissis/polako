@@ -6,6 +6,7 @@ import "testing"
 // effort per the operator's cells: -remediation-* for a remediation run,
 // -model/-effort otherwise, inherit when the relevant cell is empty.
 func TestRunPolicyChoose(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name                string
 		policy              runPolicy
@@ -71,6 +72,7 @@ func TestRunPolicyChoose(t *testing.T) {
 // sizeFromBody reads the one anchored Estimate: line and nothing else: S/M/L
 // on a line of its own, and no match for anything that is not exactly that.
 func TestSizeFromBody(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, body, want string
 	}{
@@ -98,6 +100,7 @@ func TestSizeFromBody(t *testing.T) {
 // -effort-by-size is one rung below an effort: label and above -effort, and
 // only on an implementation-class run.
 func TestRunPolicyEffortBySize(t *testing.T) {
+	t.Parallel()
 	cells := map[string]string{"S": "medium", "L": "max"}
 
 	// The S body hits the S cell; the record's effort_source says so.
@@ -142,6 +145,7 @@ func TestRunPolicyEffortBySize(t *testing.T) {
 // -model-by-size mirrors -effort-by-size (#395): one rung below a model:
 // label and above -model, and only on an implementation-class run.
 func TestRunPolicyModelBySize(t *testing.T) {
+	t.Parallel()
 	cells := map[string]string{"S": "sonnet", "L": "opus"}
 
 	// The S body hits the S cell; the record's model_source says so.
@@ -197,6 +201,7 @@ func TestRunPolicyModelBySize(t *testing.T) {
 // resume, unfinished and answers are implementation class: a resumed
 // implement run must not suddenly get the remediation cell.
 func TestRunPolicyResumesAreImplementationClass(t *testing.T) {
+	t.Parallel()
 	p := runPolicy{model: "opus", remediationModel: "sonnet"}
 	for _, reason := range []string{reasonResume, reasonUnfinished, reasonAnswers} {
 		if got := p.choose(reason); got.model != "opus" || got.modelSource != sourceFlag {
@@ -218,6 +223,7 @@ func labelsFrom(names ...string) []ghLabel {
 // effort checked against the closed set, a typo or a duplicate warned and
 // dropped, model:default set-but-empty.
 func TestLabelPolicy(t *testing.T) {
+	t.Parallel()
 	captureLog(t)
 	cases := []struct {
 		name                string
@@ -245,7 +251,7 @@ func TestLabelPolicy(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := labelPolicy(labelsFrom(tc.labels...))
+			got := labelPolicy(testUI(t), labelsFrom(tc.labels...))
 			if got.model != tc.model || got.modelSet != tc.modelSet ||
 				got.effort != tc.effort || got.effortSet != tc.effortSet {
 				t.Errorf("labelPolicy(%v) = %+v, want model=%q(%v) effort=%q(%v)",
@@ -259,6 +265,7 @@ func TestLabelPolicy(t *testing.T) {
 // -remediation-* cell alike. model:default stops resolution at inherit rather
 // than falling through to -model.
 func TestRunPolicyLabelBeatsFlagAndRemediation(t *testing.T) {
+	t.Parallel()
 	p := runPolicy{
 		model: "opus", effort: "high",
 		remediationModel: "sonnet", remediationEffort: "medium",
@@ -282,6 +289,7 @@ func TestRunPolicyLabelBeatsFlagAndRemediation(t *testing.T) {
 // labels, marking it epic-sourced; a family the issue set itself — model:default
 // included — is its escape from the epic and stays put.
 func TestLabelChoiceInheritFrom(t *testing.T) {
+	t.Parallel()
 	epic := labelChoice{model: "sonnet", modelSet: true, effort: "high", effortSet: true}
 
 	got := labelChoice{}.inheritFrom(epic)
@@ -315,6 +323,7 @@ func TestLabelChoiceInheritFrom(t *testing.T) {
 // complete is the one-read short-circuit: true only when the issue settled both
 // families itself.
 func TestLabelChoiceComplete(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		lc   labelChoice
 		want bool
@@ -333,6 +342,7 @@ func TestLabelChoiceComplete(t *testing.T) {
 // A family filled from the epic is named source epic; one the issue carries
 // itself stays source label, and the two resolve independently.
 func TestRunPolicyEpicSource(t *testing.T) {
+	t.Parallel()
 	p := runPolicy{
 		model: "opus", effort: "high",
 		labels: labelChoice{
@@ -350,6 +360,7 @@ func TestRunPolicyEpicSource(t *testing.T) {
 }
 
 func TestRunChoiceApply(t *testing.T) {
+	t.Parallel()
 	cfg := config{model: "opus", effort: "high", skill: "x"}
 	got := runChoice{model: "sonnet", effort: "medium"}.apply(cfg)
 	if got.model != "sonnet" || got.effort != "medium" {
@@ -367,6 +378,7 @@ func TestRunChoiceApply(t *testing.T) {
 // carry, and a stats reader keys on them. size now backs both -effort-by-size
 // (#366) and -model-by-size (#395).
 func TestSourceConstantsAreStable(t *testing.T) {
+	t.Parallel()
 	for got, want := range map[string]string{
 		sourceInherit: "inherit", sourceFlag: "flag", sourceRemediation: "remediation",
 		sourceLabel: "label", sourceEpic: "epic", sourceSize: "size",
@@ -378,6 +390,7 @@ func TestSourceConstantsAreStable(t *testing.T) {
 }
 
 func TestRunChoiceDispatchLine(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		choice runChoice

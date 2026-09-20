@@ -2,9 +2,15 @@ package main
 
 // The work verb narrates to two sinks: the terminal, for an operator glancing
 // over, and a per-shift log file that keeps everything. Which lines matter is
-// decided at the call site — the default logger carries milestones, `detail`
-// carries texture — and how each sink renders a line (timestamps, filtering)
-// is decided here, so a call site never has to know how it will be shown.
+// decided at the call site — narrate/logf carry milestones, detailf carries
+// texture — and how each sink renders a line (timestamps, filtering) is
+// decided here, so a call site never has to know how it will be shown.
+//
+// A call site reaches its ui through config: cfg.narrate, cfg.logf,
+// cfg.detailf, cfg.fatal forward to config.ui, or to the package-level sinks
+// when that is unset. Threading it rather than keeping a global is what lets
+// the test suite run in parallel — each test asserts on its own ui's buffer
+// with no shared logger to redirect out from under a neighbour.
 //
 // The shift log is write-only, like the run-data records: nothing in this
 // binary ever reads it back, deleting it mid-drain changes no behaviour, and
@@ -15,7 +21,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,39 +68,21 @@ type ui struct {
 	lastTerm atomic.Int64 // UnixNano, 0 until the first terminal write
 }
 
-// sinks is the process's one ui. Package-level for the same reason the stdlib
-// logger is: narration comes from everywhere, and threading a handle through
-// every signature would dwarf the feature. stampFull is stampKind's zero
-// value, so it needs no explicit field here.
+// sinks is the process's one real ui: stderr, and a shift log once preflight
+// opens it. Everything that narrates reaches it through config.ui, which
+// points here in production and at a test's own capturing ui under the
+// suite — the seam that lets parallel tests each assert on their own
+// narration without a global to fight over. config.narrate and friends fall
+// back here when config.ui is unset, so a config assembled outside parseFlags
+// still narrates somewhere real. stampFull is stampKind's zero value, so it
+// needs no explicit field here.
 var sinks = &ui{terminal: os.Stderr}
-
-// detail is the second narration channel: lines worth keeping but not worth an
-// operator's glance. They always reach the shift log and, unless -verbose says
-// otherwise, nothing else.
-var detail = log.New(detailWriter{u: sinks}, "", 0)
-
-// milestoneWriter is what the default logger writes to on the work path.
-type milestoneWriter struct{ u *ui }
-
-func (w milestoneWriter) Write(p []byte) (int, error) {
-	w.u.emit(p, true, sevProgress)
-	return len(p), nil
-}
-
-// detailWriter is what the detail logger writes to.
-type detailWriter struct{ u *ui }
-
-func (w detailWriter) Write(p []byte) (int, error) {
-	w.u.emit(p, false, sevProgress)
-	return len(p), nil
-}
 
 // severity is what a call site declares about a milestone line, so render
 // can choose its colour without re-deriving meaning from the wording the way
-// the rule table it replaces did. sevProgress, the zero value, is what an
-// unmigrated log.Printf gets implicitly — the stdlib log package has no way
-// to carry anything richer per call — and it renders exactly as an
-// unclassified line always has: plain. sevSection is not one of the
+// the rule table it replaces did. sevProgress, the zero value, is what a
+// plain progress line (logf) gets — it renders exactly as an unclassified
+// line always has: plain. sevSection is not one of the
 // semantic severities a caller "feels" (success/warning/error/settings); it
 // marks the shift's own two structural headings, which need a colour but no
 // sentiment: the issue's acceptance criteria pin the other five colours to
@@ -114,43 +101,48 @@ const (
 	sevSection
 )
 
-// activeUI is the *ui the narration loggers currently point at: the real
-// sinks in production, a test's own ui while wireSinks is in effect. It is
-// the same resolution narrate does to pick its target — the heartbeat uses
-// it to read lastTerm off whichever ui its own narrate calls will write to.
-func activeUI() *ui {
-	if mw, ok := log.Writer().(milestoneWriter); ok {
-		return mw.u
-	}
-	return sinks
-}
-
-// narrate emits one milestone line at the severity its caller declares. It
-// resolves its target the same way the default logger's Write does — through
-// whatever log.SetOutput currently points at — so a test that redirects the
-// default logger redirects severity-aware narration too, with no separate
-// wiring to keep in sync.
-func narrate(sev severity, format string, args ...any) {
-	mw, ok := log.Writer().(milestoneWriter)
-	if !ok {
-		// The default logger points somewhere that isn't a *ui — a test
-		// redirected it directly (log.SetOutput(io.Discard), a strings.Builder)
-		// expecting plain log.Printf semantics. Matching that, rather than
-		// falling back to the real sinks, is what keeps the promise above.
-		log.Printf(format, args...)
-		return
-	}
+// narrate emits one milestone line at the severity its caller declares.
+// logf is the plain-progress shorthand, detailf the second channel — lines
+// kept in the shift log but off the terminal unless -verbose. config's thin
+// wrappers forward straight to these.
+func (u *ui) narrate(sev severity, format string, args ...any) {
 	s := fmt.Sprintf(format, args...)
 	if len(s) == 0 || s[len(s)-1] != '\n' {
 		s += "\n"
 	}
-	mw.u.emit([]byte(s), true, sev)
+	u.emit([]byte(s), true, sev)
 }
 
-// fatal narrates at error severity, then ends the process the same way
-// log.Fatalf always did.
-func fatal(format string, args ...any) {
-	narrate(sevError, format, args...)
+func (u *ui) logf(format string, args ...any) { u.narrate(sevProgress, format, args...) }
+
+// sink resolves the ui this config narrates into: its own, or the process
+// sinks when it has none (a config built outside parseFlags, mostly a test
+// that does not care about narration).
+func (c config) sink() *ui {
+	if c.ui != nil {
+		return c.ui
+	}
+	return sinks
+}
+
+func (c config) narrate(sev severity, format string, args ...any) {
+	c.sink().narrate(sev, format, args...)
+}
+func (c config) logf(format string, args ...any)    { c.sink().logf(format, args...) }
+func (c config) detailf(format string, args ...any) { c.sink().detailf(format, args...) }
+func (c config) fatal(format string, args ...any)   { c.sink().fatal(format, args...) }
+
+func (u *ui) detailf(format string, args ...any) {
+	s := fmt.Sprintf(format, args...)
+	if len(s) == 0 || s[len(s)-1] != '\n' {
+		s += "\n"
+	}
+	u.emit([]byte(s), false, sevProgress)
+}
+
+// fatal narrates at error severity, then exits 1.
+func (u *ui) fatal(format string, args ...any) {
+	u.narrate(sevError, format, args...)
 	os.Exit(1)
 }
 
@@ -343,9 +335,10 @@ func (r report) cell(s string) string {
 // lineWriter carries a child process's stderr into the narration stream one
 // line at a time, so it lands in the shift log stamped and prefixed instead of
 // tearing raw and unattributed across whatever else is printing. Written from
-// os/exec's copier goroutine alone; the detail logger and the sinks do their
-// own locking downstream.
+// os/exec's copier goroutine alone; emit and the sinks do their own locking
+// downstream. u is the ui to narrate into — the dispatch's config.ui.
 type lineWriter struct {
+	u      *ui
 	prefix string
 	buf    []byte
 }
@@ -387,7 +380,7 @@ func (w *lineWriter) emit(line []byte) {
 	if len(bytes.TrimSpace(line)) == 0 {
 		return
 	}
-	detail.Printf("%s %s", w.prefix, line)
+	w.u.detailf("%s %s", w.prefix, line)
 }
 
 // resolveLogDir resolves the -log flag: a directory, or "off". The default

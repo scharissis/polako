@@ -135,7 +135,7 @@ func statusLabelNote(ctx context.Context, cfg config) {
 	if err != nil {
 		return
 	}
-	_ = refuseOrNote(labelGate(cfg.label, exists), true)
+	_ = refuseOrNote(cfg, labelGate(cfg.label, exists), true)
 }
 
 // statusConfig builds the config the shared GitHub readers take, and settles

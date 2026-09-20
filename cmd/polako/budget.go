@@ -9,7 +9,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 )
@@ -118,7 +117,7 @@ func usageGateReason(ctx context.Context, cfg config) (time.Duration, string, bo
 	}
 	snap, ok := probeUsage(ctx, cfg)
 	if !ok {
-		log.Print("usage gate: could not read the plan's usage this pass " +
+		cfg.logf("usage gate: could not read the plan's usage this pass " +
 			"(an older claude with no /usage, or an unparseable reply) — " +
 			"proceeding as if -max-session-usage and -max-week-usage were unset until the next check")
 		return 0, "", false

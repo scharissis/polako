@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os/exec"
 	"slices"
 	"strings"
@@ -279,7 +278,7 @@ func execClaude(ctx context.Context, cfg config, prompt, resumeID, invokes strin
 	// is the operator's own doing, not a cause to explain.
 	if err != nil && ctx.Err() == nil && !cfg.verbose {
 		if t := strings.TrimSpace(rep.stderrTail); t != "" {
-			log.Printf("last stderr: %s", clip(t, 300))
+			cfg.logf("last stderr: %s", clip(t, 300))
 		}
 	}
 	return rep, err
@@ -389,16 +388,18 @@ type claudeProc struct {
 // runReport: its sessionID is what a retry resumes.
 func startClaude(ctx context.Context, cfg config, prompt, resumeID string) (*claudeProc, error) {
 	args := buildArgs(cfg, prompt, resumeID)
-	detail.Printf("running: %s %s", cfg.claudeBin, strings.Join(args, " "))
+	sink := cfg.sink()
+	sink.detailf("running: %s %s", cfg.claudeBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.claudeBin, args...)
 	cmd.Dir = cfg.dir
+	cmd.Env = childEnv(cfg.env) // nil in production, so os/exec passes the parent env through
 	// The child's stderr goes into the narration stream line by line, so it
 	// lands in the shift log stamped and attributed rather than raw across the
 	// terminal. The tail is remembered besides, for the diagnoses stdout
 	// cannot carry: a CLI that refuses the registration flags prints a usage
 	// error and emits no events at all, and a crashed run's last words are
 	// often the only cause on record.
-	stderrLines := &lineWriter{prefix: "[claude stderr]"}
+	stderrLines := &lineWriter{u: sink, prefix: "[claude stderr]"}
 	errTail := &tailWriter{}
 	cmd.Stderr = io.MultiWriter(stderrLines, errTail)
 	// A writer that is not an *os.File makes os/exec hand the child a pipe
@@ -440,6 +441,7 @@ type watchdogs struct {
 // armWatchdogs starts the stall, budget and heartbeat watchdogs for cmd and
 // returns the handle the scan loop feeds and the teardown reads.
 func armWatchdogs(cfg config, cmd *exec.Cmd, invokeStart time.Time, limit time.Duration) *watchdogs {
+	sink := cfg.sink()
 	w := &watchdogs{
 		watchDone: make(chan struct{}),
 		hbDone:    make(chan struct{}),
@@ -460,7 +462,7 @@ func armWatchdogs(cfg config, cmd *exec.Cmd, invokeStart time.Time, limit time.D
 				case <-t.C:
 					idle := time.Since(time.Unix(0, w.lastEvent.Load()))
 					if idle > cfg.stall {
-						narrate(sevWarning, "no activity for %s — killing the run to resume it",
+						sink.narrate(sevWarning, "no activity for %s — killing the run to resume it",
 							idle.Round(time.Millisecond))
 						w.stalled.Store(true)
 						_ = cmd.Process.Kill()
@@ -478,7 +480,7 @@ func armWatchdogs(cfg config, cmd *exec.Cmd, invokeStart time.Time, limit time.D
 	// there is nothing to sample.
 	if limit > 0 {
 		w.budget = time.AfterFunc(limit, func() {
-			log.Printf("this run has used the %s of -max-issue-time the issue had left — killing it",
+			sink.logf("this run has used the %s of -max-issue-time the issue had left — killing it",
 				dur(limit))
 			w.overspent.Store(true)
 			_ = cmd.Process.Kill()
@@ -522,17 +524,17 @@ func armWatchdogs(cfg config, cmd *exec.Cmd, invokeStart time.Time, limit time.D
 						return
 					default:
 					}
-					// max(lastTerm, invokeStart): sinks outlives one
+					// max(lastTerm, invokeStart): the ui outlives one
 					// invocation, so a previous issue's last line must not
 					// read as this run's silence.
 					since := invokeStart
-					if lt := time.Unix(0, activeUI().lastTerm.Load()); lt.After(since) {
+					if lt := time.Unix(0, sink.lastTerm.Load()); lt.After(since) {
 						since = lt
 					}
 					if time.Since(since) < cfg.heartbeat {
 						continue
 					}
-					narrate(sevProgress, "[claude] %s", heartbeatLine(
+					sink.narrate(sevProgress, "[claude] %s", heartbeatLine(
 						time.Since(invokeStart), int(w.hbTools.Load()), stage(w.hbPhase.Load())))
 				}
 			}
@@ -572,7 +574,8 @@ func scanEvents(stdout io.Reader, cfg config, cmd *exec.Cmd, invokes string, w *
 	sc.Buffer(make([]byte, 64*1024), maxEventBytes)
 	// maxIssues is set by plan and health alone — the same tell the cap check
 	// below keys on — and is what picks the intake stage map over the drain's.
-	el := eventLog{stages: stageNarrator{intake: cfg.maxIssues > 0}}
+	sink := cfg.sink()
+	el := eventLog{u: sink, stages: stageNarrator{intake: cfg.maxIssues > 0}}
 	for sc.Scan() {
 		w.lastEvent.Store(time.Now().UnixNano())
 		ev, ok := parseEvent(sc.Bytes())
@@ -602,7 +605,7 @@ func scanEvents(stdout io.Reader, cfg config, cmd *exec.Cmd, invokes string, w *
 				missing += " (it does list " + strings.Join(near, ", ") + ")"
 			}
 			rep.skillMissing = true
-			log.Printf("%s — stopping the run", missing)
+			sink.logf("%s — stopping the run", missing)
 			_ = cmd.Process.Kill()
 		}
 		// The issue cap, plan's and health's alike. Killed here, in the reader,
@@ -611,7 +614,7 @@ func scanEvents(stdout io.Reader, cfg config, cmd *exec.Cmd, invokes string, w *
 		// the label pass (runPlan, runHealth) would keep. Normalised, not stranded.
 		if cfg.maxIssues > 0 && rep.issueCreates >= cfg.maxIssues && !rep.capped {
 			rep.capped = true
-			narrate(sevWarning, "the run has filed %s, the whole of -max-issues — killing it; "+
+			sink.narrate(sevWarning, "the run has filed %s, the whole of -max-issues — killing it; "+
 				"the label pass still normalises what it created", plural(cfg.maxIssues, "issue"))
 			_ = cmd.Process.Kill()
 		}
@@ -633,7 +636,7 @@ func claudeVerdict(rep *runReport, cfg config, prompt, missing string, limit tim
 	// each is reported as itself below, not as a finish.
 	if rep.hasResult {
 		sev, line := finishLine(rep)
-		narrate(sev, "%s", line)
+		cfg.narrate(sev, "%s", line)
 	}
 	if rep.skillMissing {
 		return fmt.Errorf("%w: %s", errNoWork, missing)

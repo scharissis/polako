@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"slices"
 	"strconv"
@@ -56,14 +55,14 @@ func labelGate(label string, exists bool) error {
 // nothing and writes nothing. queueGate and versionSkewGate both go through
 // this so a real refusal and its dry-run preview can never drift into saying
 // it two different ways.
-func refuseOrNote(err error, dryRun bool) error {
+func refuseOrNote(cfg config, err error, dryRun bool) error {
 	if err == nil {
 		return nil
 	}
 	if !dryRun {
 		return err
 	}
-	log.Printf("note: a real run would refuse to start here — %v", err)
+	cfg.logf("note: a real run would refuse to start here — %v", err)
 	return nil
 }
 
@@ -102,9 +101,9 @@ func effortFlagGate(ctx context.Context, cfg config) error {
 	if len(setFlags) > 1 {
 		drop = "drop them"
 	}
-	out, err := capture(ctx, cfg.dir, cfg.claudeBin, "--help")
+	out, err := capture(ctx, cfg.dir, cfg.env, cfg.claudeBin, "--help")
 	if err != nil {
-		log.Printf("could not check whether claude takes --effort (%v) — running anyway; "+
+		cfg.logf("could not check whether claude takes --effort (%v) — running anyway; "+
 			"a run that then rejects %s needs a newer CLI", err, set)
 		return nil
 	}
@@ -129,10 +128,10 @@ func effortFlagGate(ctx context.Context, cfg config) error {
 // egress proxy keeps working), so an exported variable silently beats -model
 // and -effort both — worth a line before an operator wonders why their flag
 // did nothing.
-func warnClaudeModelEnv() {
+func warnClaudeModelEnv(cfg config) {
 	for _, name := range []string{"ANTHROPIC_MODEL", "CLAUDE_CODE_EFFORT_LEVEL"} {
 		if v := os.Getenv(name); v != "" {
-			log.Printf("%s=%s is exported — the CLI reads it, and it can override -model/-effort for every run", name, v)
+			cfg.logf("%s=%s is exported — the CLI reads it, and it can override -model/-effort for every run", name, v)
 		}
 	}
 }
@@ -141,7 +140,7 @@ func warnClaudeModelEnv() {
 // version it cannot read leaves the field empty rather than stopping a drain
 // over telemetry.
 func claudeVersion(ctx context.Context, cfg config) string {
-	out, err := capture(ctx, cfg.dir, cfg.claudeBin, "--version")
+	out, err := capture(ctx, cfg.dir, cfg.env, cfg.claudeBin, "--version")
 	if err != nil {
 		return ""
 	}
@@ -174,7 +173,7 @@ func pluginVersion(ctx context.Context, cfg config) (version, id, scope string) 
 // repo's own plugin (pluginName) rather than a value manufactured to look
 // like one.
 func installedPluginVersion(ctx context.Context, cfg config, plugin string) (version, id, scope string) {
-	out, err := capture(ctx, cfg.dir, cfg.claudeBin, "plugin", "list", "--json")
+	out, err := capture(ctx, cfg.dir, cfg.env, cfg.claudeBin, "plugin", "list", "--json")
 	if err != nil {
 		return "", "", ""
 	}
@@ -273,7 +272,7 @@ func warnOnVersionSkew(binary string, cfg config) {
 	if !ok {
 		return
 	}
-	log.Printf("version skew: this binary is %s but the installed %s plugin is %s — "+
+	cfg.logf("version skew: this binary is %s but the installed %s plugin is %s — "+
 		"they are meant to ship together, and the supervisor finds a PR by the "+
 		"branch name the skill chooses. To fix, %s", self, pluginName, plugin, skewRemedy())
 }

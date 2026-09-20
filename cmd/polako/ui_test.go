@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,11 +17,18 @@ import (
 // logger's Ldate|Ltime flags used to produce.
 var stamped = regexp.MustCompile(`^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} `)
 
+// emitM and emitD drive one milestone / one detail record straight into a
+// ui's emit, the way narrate and detailf do once the formatting is done —
+// the presentation tests below assert on what emit renders.
+func emitM(u *ui, p []byte) { u.emit(p, true, sevProgress) }
+func emitD(u *ui, p []byte) { u.emit(p, false, sevProgress) }
+
 func TestMilestonesReachTerminalAndShiftLog(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
 	u := &ui{terminal: &term, file: &file}
 
-	milestoneWriter{u: u}.Write([]byte("PR #61 merged — cleaning up and advancing\n"))
+	emitM(u, []byte("PR #61 merged — cleaning up and advancing\n"))
 
 	for name, buf := range map[string]*bytes.Buffer{"terminal": &term, "shift log": &file} {
 		if !strings.Contains(buf.String(), "PR #61 merged") {
@@ -35,10 +41,11 @@ func TestMilestonesReachTerminalAndShiftLog(t *testing.T) {
 }
 
 func TestDetailReachesTheShiftLogAlone(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
 	u := &ui{terminal: &term, file: &file}
 
-	detailWriter{u: u}.Write([]byte("[claude] → Bash: gh issue view 48\n"))
+	emitD(u, []byte("[claude] → Bash: gh issue view 48\n"))
 
 	if term.Len() != 0 {
 		t.Errorf("detail reached the terminal: %q", term.String())
@@ -57,12 +64,13 @@ func (f *failWriter) Write(p []byte) (int, error) {
 }
 
 func TestShiftLogFailureWarnsOnceAndNeverStopsNarration(t *testing.T) {
+	t.Parallel()
 	var term bytes.Buffer
 	fw := &failWriter{}
 	u := &ui{terminal: &term, file: fw}
 
-	milestoneWriter{u: u}.Write([]byte("=== issue #1 ===\n"))
-	milestoneWriter{u: u}.Write([]byte("=== issue #2 ===\n"))
+	emitM(u, []byte("=== issue #1 ===\n"))
+	emitM(u, []byte("=== issue #2 ===\n"))
 
 	if got := strings.Count(term.String(), "shift log not written"); got != 1 {
 		t.Errorf("warned %d times, want exactly once: %q", got, term.String())
@@ -79,6 +87,7 @@ func TestShiftLogFailureWarnsOnceAndNeverStopsNarration(t *testing.T) {
 }
 
 func TestOpenShiftLogNamesAndProtectsTheFile(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "logs")
 	var term bytes.Buffer
 	u := &ui{terminal: &term}
@@ -99,7 +108,7 @@ func TestOpenShiftLogNamesAndProtectsTheFile(t *testing.T) {
 		t.Errorf("path = %q, want %q", path, want)
 	}
 
-	milestoneWriter{u: u}.Write([]byte("backlog cleared\n"))
+	emitM(u, []byte("backlog cleared\n"))
 	got, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("reading the shift log back: %v", err)
@@ -122,27 +131,14 @@ func TestOpenShiftLogNamesAndProtectsTheFile(t *testing.T) {
 	}
 }
 
-// wireSinks points both narration loggers at one test ui for the duration of
-// a test, so terminal-versus-log presentation can be asserted rather than the
-// union captureLog collapses them into.
-func wireSinks(t *testing.T, u *ui) {
-	t.Helper()
-	log.SetOutput(milestoneWriter{u: u})
-	detail.SetOutput(detailWriter{u: u})
-	t.Cleanup(func() {
-		log.SetOutput(os.Stderr)
-		detail.SetOutput(detailWriter{u: sinks})
-	})
-}
-
 // replayStream feeds a stream-json transcript through the two consumers
-// dispatchClaude wires up — the event renderer and the report — and then
-// emits the run's one finish milestone from the report the way dispatchClaude
-// does once the scan loop ends. It is the closest a unit test gets to a real
+// dispatchClaude wires up — the event renderer and the report — narrating
+// into u the way a real dispatch narrates into cfg.ui, and then emits the
+// run's one finish milestone. It is the closest a unit test gets to a real
 // dispatch.
-func replayStream(t *testing.T, lines ...string) *runReport {
+func replayStream(t *testing.T, u *ui, lines ...string) *runReport {
 	t.Helper()
-	var el eventLog
+	el := eventLog{u: u}
 	rep := &runReport{turns: -1}
 	for _, l := range lines {
 		ev, ok := parseEvent([]byte(l))
@@ -154,7 +150,7 @@ func replayStream(t *testing.T, lines ...string) *runReport {
 	}
 	if rep.hasResult {
 		sev, line := finishLine(rep)
-		narrate(sev, "%s", line)
+		u.narrate(sev, "%s", line)
 	}
 	return rep
 }
@@ -162,10 +158,11 @@ func replayStream(t *testing.T, lines ...string) *runReport {
 // The terminal's audience is an operator glancing over: a healthy run is a
 // pair of lines, and the conversation between them belongs to the shift log.
 func TestQuietTerminalShowsARunAsMilestones(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
-	wireSinks(t, &ui{terminal: &term, file: &file})
+	u := &ui{terminal: &term, file: &file}
 
-	replayStream(t,
+	replayStream(t, u,
 		`{"type":"system","subtype":"init","model":"claude-opus-5","session_id":"sess-1"}`,
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"Gathering context on issue #48."}]}}`,
 		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"gh issue view 48"}}]}}`,
@@ -192,14 +189,15 @@ func TestQuietTerminalShowsARunAsMilestones(t *testing.T) {
 // An error's result text is the whole diagnosis for a run the CLI answered
 // itself, so unlike a healthy run's it stays on the terminal.
 func TestQuietTerminalStillShowsAnErrorsResultText(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
-	wireSinks(t, &ui{terminal: &term, file: &file})
+	u := &ui{terminal: &term, file: &file}
 
 	ev, ok := parseEvent([]byte(`{"type":"result","subtype":"success","is_error":true,"result":"Unknown skill: polako:implement-issue"}`))
 	if !ok {
 		t.Fatal("a result event should parse")
 	}
-	(&eventLog{}).event(ev)
+	(&eventLog{u: u}).event(ev)
 
 	if !strings.Contains(term.String(), "Unknown skill") {
 		t.Errorf("an error's result text is the diagnosis and belongs on the terminal\ngot:\n%s", term.String())
@@ -212,10 +210,11 @@ func TestQuietTerminalStillShowsAnErrorsResultText(t *testing.T) {
 // returning and belong in the shift log, or a healthy run reads as a crash
 // loop that cost several times what it did (issue #224).
 func TestBackgroundTaskWakeupsDoNotRepeatTheMilestones(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
-	wireSinks(t, &ui{terminal: &term, file: &file})
+	u := &ui{terminal: &term, file: &file}
 
-	replayStream(t,
+	replayStream(t, u,
 		`{"type":"system","subtype":"init","model":"claude-opus-5","session_id":"sess-1"}`,
 		`{"type":"result","subtype":"success","num_turns":16,"duration_ms":61000,"total_cost_usd":12.00,"result":"a"}`,
 		`{"type":"system","subtype":"init","model":"claude-opus-5","session_id":"sess-1"}`,
@@ -245,10 +244,11 @@ func TestBackgroundTaskWakeupsDoNotRepeatTheMilestones(t *testing.T) {
 // finish, and a run that ends in error must say so however healthy it looked
 // on the way.
 func TestFinishLineReflectsTheFinalState(t *testing.T) {
+	t.Parallel()
 	t.Run("a later ok finish is not buried by an earlier error", func(t *testing.T) {
 		var term, file bytes.Buffer
-		wireSinks(t, &ui{terminal: &term, file: &file})
-		replayStream(t,
+		u := &ui{terminal: &term, file: &file}
+		replayStream(t, u,
 			`{"type":"system","subtype":"init","model":"claude-opus-5"}`,
 			`{"type":"result","subtype":"error_max_turns","num_turns":9,"is_error":true}`,
 			`{"type":"result","subtype":"success","num_turns":40,"duration_ms":600000,"total_cost_usd":5.00}`,
@@ -264,8 +264,8 @@ func TestFinishLineReflectsTheFinalState(t *testing.T) {
 	})
 	t.Run("a run that ends in error says so", func(t *testing.T) {
 		var term, file bytes.Buffer
-		wireSinks(t, &ui{terminal: &term, file: &file})
-		replayStream(t,
+		u := &ui{terminal: &term, file: &file}
+		replayStream(t, u,
 			`{"type":"system","subtype":"init","model":"claude-opus-5"}`,
 			`{"type":"result","subtype":"success","num_turns":10}`,
 			`{"type":"result","subtype":"error_max_turns","num_turns":9,"is_error":true}`,
@@ -277,10 +277,11 @@ func TestFinishLineReflectsTheFinalState(t *testing.T) {
 }
 
 func TestVerboseMirrorsDetailToTheTerminal(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
 	u := &ui{terminal: &term, file: &file, verbose: true}
 
-	detailWriter{u: u}.Write([]byte("[claude] → Bash: gh issue view 48\n"))
+	emitD(u, []byte("[claude] → Bash: gh issue view 48\n"))
 
 	if !strings.Contains(term.String(), "→ Bash") {
 		t.Errorf("-verbose should mirror detail to the terminal\ngot:\n%s", term.String())
@@ -295,10 +296,11 @@ func TestVerboseMirrorsDetailToTheTerminal(t *testing.T) {
 var ttyStamped = regexp.MustCompile(`^\x1b\[2m\d{2}:\d{2}:\d{2} \x1b\[0m`)
 
 func TestVerboseTTYStampsDetailTimeOnlyAndDim(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
 	u := &ui{terminal: &term, stamp: stampTTYDim, style: styler{on: true}, file: &file, verbose: true}
 
-	detailWriter{u: u}.Write([]byte("[claude] → Bash: gh issue view 48\n"))
+	emitD(u, []byte("[claude] → Bash: gh issue view 48\n"))
 
 	if !ttyStamped.MatchString(term.String()) {
 		t.Errorf("terminal detail line should carry a dim time-only stamp, got: %q", term.String())
@@ -309,10 +311,11 @@ func TestVerboseTTYStampsDetailTimeOnlyAndDim(t *testing.T) {
 }
 
 func TestTTYStampIsTimeOnlyAndDim(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
 	u := &ui{terminal: &term, stamp: stampTTYDim, style: styler{on: true}, file: &file}
 
-	milestoneWriter{u: u}.Write([]byte("PR #61 merged — cleaning up and advancing\n"))
+	emitM(u, []byte("PR #61 merged — cleaning up and advancing\n"))
 
 	if !ttyStamped.MatchString(term.String()) {
 		t.Errorf("terminal line should carry a dim time-only stamp, got: %q", term.String())
@@ -326,10 +329,11 @@ func TestTTYStampIsTimeOnlyAndDim(t *testing.T) {
 // all three land here, at the styler being off. The stamp must stay
 // time-only rather than either reverting to the full layout or disappearing.
 func TestTTYStampUnstyledWithoutColour(t *testing.T) {
+	t.Parallel()
 	var term bytes.Buffer
 	u := &ui{terminal: &term, stamp: stampTTYDim, file: &bytes.Buffer{}}
 
-	milestoneWriter{u: u}.Write([]byte("PR #61 merged\n"))
+	emitM(u, []byte("PR #61 merged\n"))
 
 	got := term.String()
 	if strings.Contains(got, "\x1b[") {
@@ -344,10 +348,11 @@ func TestTTYStampUnstyledWithoutColour(t *testing.T) {
 }
 
 func TestPipedStampStaysFullLayout(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
 	u := &ui{terminal: &term, file: &file} // stampFull, the zero value
 
-	milestoneWriter{u: u}.Write([]byte("PR #61 merged\n"))
+	emitM(u, []byte("PR #61 merged\n"))
 
 	if !stamped.MatchString(term.String()) {
 		t.Errorf("a non-tty terminal should keep the full stampLayout, got: %q", term.String())
@@ -358,10 +363,11 @@ func TestPipedStampStaysFullLayout(t *testing.T) {
 }
 
 func TestStampOffOmitsTheTerminalStampEntirely(t *testing.T) {
+	t.Parallel()
 	var term bytes.Buffer
 	u := &ui{terminal: &term, stamp: stampOff}
 
-	milestoneWriter{u: u}.Write([]byte("ignoring 6 proposed issue(s) awaiting curation\n"))
+	emitM(u, []byte("ignoring 6 proposed issue(s) awaiting curation\n"))
 
 	if strings.HasPrefix(term.String(), "\x1b") || regexp.MustCompile(`^\d`).MatchString(term.String()) {
 		t.Errorf("stampOff should carry no stamp at all (status/stats piped output never had one), got: %q", term.String())
@@ -369,11 +375,12 @@ func TestStampOffOmitsTheTerminalStampEntirely(t *testing.T) {
 }
 
 func TestShiftLogFailureWarningStampsTTYTimeOnlyAndDim(t *testing.T) {
+	t.Parallel()
 	var term bytes.Buffer
 	fw := &failWriter{}
 	u := &ui{terminal: &term, stamp: stampTTYDim, style: styler{on: true}, file: fw}
 
-	milestoneWriter{u: u}.Write([]byte("=== issue #1 ===\n"))
+	emitM(u, []byte("=== issue #1 ===\n"))
 
 	if !strings.Contains(term.String(), "shift log not written") {
 		t.Errorf("the warning should still fire on a TTY, got: %q", term.String())
@@ -389,10 +396,11 @@ func TestShiftLogFailureWarningStampsTTYTimeOnlyAndDim(t *testing.T) {
 // whole attributed lines, blank ones dropped, the unterminated remainder
 // flushed when the run ends.
 func TestLineWriterSplitsPrefixesAndFlushes(t *testing.T) {
+	t.Parallel()
 	var term, file bytes.Buffer
-	wireSinks(t, &ui{terminal: &term, file: &file})
+	u := &ui{terminal: &term, file: &file}
 
-	w := &lineWriter{prefix: "[claude stderr]"}
+	w := &lineWriter{u: u, prefix: "[claude stderr]"}
 	w.Write([]byte("first li"))
 	w.Write([]byte("ne\n\nsecond line\ntrail"))
 	w.Write([]byte("ing"))
@@ -443,6 +451,7 @@ func TestStyleForGatesColour(t *testing.T) {
 // the severity declared alongside it, and unrelated wording sharing a
 // severity gets the same colour — proving render never looks at the text.
 func TestRenderStylesBySeverityNotWording(t *testing.T) {
+	t.Parallel()
 	s := styler{on: true}
 	cases := []struct {
 		sev  severity
@@ -485,6 +494,7 @@ func TestNewReportGoesThroughStyleFor(t *testing.T) {
 }
 
 func TestReportRendersPlainAtTheZeroValue(t *testing.T) {
+	t.Parallel()
 	var rpt report
 	for _, s := range []string{"by issue", "not read", "failing (build)", "1 issue — parked"} {
 		if got := rpt.bold(s); got != s {
@@ -500,6 +510,7 @@ func TestReportRendersPlainAtTheZeroValue(t *testing.T) {
 }
 
 func TestReportBoldAndDimWrapWholeStrings(t *testing.T) {
+	t.Parallel()
 	rpt := report{style: styler{on: true}}
 	if got, want := rpt.bold("by issue"), "\x1b[1mby issue\x1b[0m"; got != want {
 		t.Errorf("bold = %q, want %q", got, want)
@@ -510,6 +521,7 @@ func TestReportBoldAndDimWrapWholeStrings(t *testing.T) {
 }
 
 func TestReportCellHighlightsAttentionMarkersOnly(t *testing.T) {
+	t.Parallel()
 	rpt := report{style: styler{on: true}}
 	for in, want := range map[string]string{
 		"failing (build, lint)":         "\x1b[33mfailing (build, lint)\x1b[0m",
@@ -526,6 +538,7 @@ func TestReportCellHighlightsAttentionMarkersOnly(t *testing.T) {
 }
 
 func TestResolveLogDirHonoursOff(t *testing.T) {
+	t.Parallel()
 	if got := resolveLogDir("off"); got != "" {
 		t.Errorf(`resolveLogDir("off") = %q, want ""`, got)
 	}

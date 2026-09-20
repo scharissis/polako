@@ -20,7 +20,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -160,7 +159,7 @@ func reclaim(ctx context.Context, cfg config, apply bool, watched int) ([]tidyRe
 	// nil: this sweep isn't about any one about-to-run issue, so there is
 	// nothing to remember a fetch auth failure against.
 	if err := syncDefaultBranch(ctx, cfg, nil); err != nil {
-		narrate(sevWarning, "sweeping against the default branch as it is: %v", err)
+		cfg.narrate(sevWarning, "sweeping against the default branch as it is: %v", err)
 	}
 
 	if apply {
@@ -354,7 +353,7 @@ func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply
 func tidySweep(ctx context.Context, cfg config, watched int) {
 	results, err := reclaim(ctx, cfg, true, watched)
 	if err != nil {
-		narrate(sevWarning, "could not sweep finished worktrees (%v) — nothing was reclaimed; "+
+		cfg.narrate(sevWarning, "could not sweep finished worktrees (%v) — nothing was reclaimed; "+
 			"run `polako tidy` by hand to clear them", err)
 		return
 	}
@@ -371,7 +370,7 @@ func tidySweep(ctx context.Context, cfg config, watched int) {
 			// Nothing is wrong: the operator clears the label when they are
 			// ready, and that is their cue, not something for the drain to
 			// raise an alarm about.
-			detail.Printf("left %s%d alone: %s", cfg.branchPrefix, r.issue, r.reason)
+			cfg.detailf("left %s%d alone: %s", cfg.branchPrefix, r.issue, r.reason)
 		case r.issue == watched:
 			// The issue whose merge just advanced the drain, and its worktree
 			// could not be reclaimed — almost always uncommitted work the merge
@@ -395,7 +394,7 @@ func tidySweep(ctx context.Context, cfg config, watched int) {
 				lead = fmt.Sprintf("%s%d %s but its worktree could not be reclaimed",
 					cfg.branchPrefix, r.issue, r.why)
 			}
-			narrate(sevWarning, "%s: %s — %s", lead, r.reason, fix)
+			cfg.narrate(sevWarning, "%s: %s — %s", lead, r.reason, fix)
 		case r.reason == "still open":
 			// The overwhelmingly common verdict — an issue in the queue, in
 			// flight or parked — and it means nothing is wrong. Saying it every
@@ -404,13 +403,13 @@ func tidySweep(ctx context.Context, cfg config, watched int) {
 		default:
 			// A branch that looked finished but failed a safety check: worth a
 			// line in the shift log, though it is nobody's to act on mid-drain.
-			detail.Printf("left %s%d alone: %s", cfg.branchPrefix, r.issue, r.reason)
+			cfg.detailf("left %s%d alone: %s", cfg.branchPrefix, r.issue, r.reason)
 		}
 	}
 	if len(reclaimed) > 0 {
 		// The branch is always deleted, the worktree only when one was there —
 		// so this counts issues, and names them by branch.
-		log.Printf("reclaimed %s: %s", plural(len(reclaimed), "finished issue"), strings.Join(reclaimed, ", "))
+		cfg.logf("reclaimed %s: %s", plural(len(reclaimed), "finished issue"), strings.Join(reclaimed, ", "))
 	}
 }
 

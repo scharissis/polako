@@ -13,7 +13,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -167,11 +166,11 @@ func intakePreflight(ctx context.Context, cfg *config, opt *intakeOptions, verb 
 	// from its own `gh issue create` error (see planPrompt).
 	hierarchical = ghCreatesSubIssues(ctx, *cfg)
 
-	warnClaudeModelEnv()
+	warnClaudeModelEnv(*cfg)
 	// Wrapped like the drain's identical gate (main.go): a real run refuses, a
 	// dry run only notes what a real run would refuse and goes on to print the
 	// invocation — "a -dry-run may still look, since it runs nothing".
-	if err := refuseOrNote(effortFlagGate(ctx, *cfg), opt.dryRun); err != nil {
+	if err := refuseOrNote(*cfg, effortFlagGate(ctx, *cfg), opt.dryRun); err != nil {
 		return false, err
 	}
 
@@ -218,7 +217,7 @@ func intakeRun(ctx context.Context, cfg config, opt intakeOptions, spec intakeRu
 			cfg.repo, err)
 	}
 
-	log.Printf("running %s %s — capped at %s", cfg.skill, spec.announceTarget, plural(opt.maxIssues, "issue"))
+	cfg.logf("running %s %s — capped at %s", cfg.skill, spec.announceTarget, plural(opt.maxIssues, "issue"))
 	started := time.Now()
 	rep, runErr := execClaude(ctx, cfg, spec.prompt, "", cfg.skill, 0)
 	// Timed here, before the label pass, so the record's wall time is the run's
@@ -236,10 +235,10 @@ func intakeRun(ctx context.Context, cfg config, opt intakeOptions, spec intakeRu
 	passCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 	defer cancel()
 	if ctx.Err() != nil {
-		narrate(sevWarning, "the run was interrupted — still normalising anything it created before exiting")
+		cfg.narrate(sevWarning, "the run was interrupted — still normalising anything it created before exiting")
 	}
 	pass := normaliseProposals(passCtx, cfg, before, spec.milestone, spec.verb)
-	pass.report(spec.verb, opt.maxCost, rep)
+	pass.report(cfg, spec.verb, opt.maxCost, rep)
 
 	// The pricing line: what the operator's own history says this batch will
 	// cost to implement. After the label pass, because it prices the proposals
@@ -248,11 +247,11 @@ func intakeRun(ctx context.Context, cfg config, opt intakeOptions, spec intakeRu
 	// when there are proposals, because a batch of nothing has nothing to
 	// price and nothing to curate.
 	if workable := pass.created - pass.epics; workable > 0 {
-		narrate(sevProgress, "%s: %s", spec.verb,
+		cfg.narrate(sevProgress, "%s: %s", spec.verb,
 			proposalPricingLine(cfg.rec.metricsDir(), cfg.repo, workable, pass.epics, time.Now()))
 	}
 	if pass.created > 0 {
-		narrate(sevProgress, "%s: %s", spec.verb, curationLine(cfg.repo, spec.milestone))
+		cfg.narrate(sevProgress, "%s: %s", spec.verb, curationLine(cfg.repo, spec.milestone))
 	}
 
 	// The two traces the run leaves, both after the label pass so they carry

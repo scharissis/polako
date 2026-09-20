@@ -12,6 +12,7 @@ import (
 )
 
 func TestVerbUsageListsUpdate(t *testing.T) {
+	t.Parallel()
 	var b strings.Builder
 	verbUsage(&b)
 	if !strings.Contains(b.String(), "\n  update ") {
@@ -22,7 +23,8 @@ func TestVerbUsageListsUpdate(t *testing.T) {
 // The same flags-only contract every other verb's entry point holds to; see
 // TestRunStatusRejectsAnArgument in main_test.go for the sibling this mirrors.
 func TestRunUpdateRejectsAnArgument(t *testing.T) {
-	err := runUpdate(context.Background(), []string{"12"}, &strings.Builder{})
+	t.Parallel()
+	err := runUpdate(context.Background(), config{}, []string{"12"}, &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "update takes flags only") {
 		t.Errorf("err = %v, want a complaint about the argument", err)
 	}
@@ -31,6 +33,7 @@ func TestRunUpdateRejectsAnArgument(t *testing.T) {
 // --- publishedVersion / parseMarketplaceVersion ---
 
 func TestParseMarketplaceVersion(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		raw     string
@@ -89,8 +92,8 @@ func updateGhCfg(t *testing.T, st *ghState) config {
 	if err := writeGhState(path, st); err != nil {
 		t.Fatalf("writing fake gh state: %v", err)
 	}
-	t.Setenv(fakeGhEnv, path)
 	return config{
+		env:         fakeEnv(fakeGhEnv, path),
 		dir:         t.TempDir(),
 		ghBin:       fakeCLI(t),
 		ghRetryWait: time.Millisecond,
@@ -98,6 +101,7 @@ func updateGhCfg(t *testing.T, st *ghState) config {
 }
 
 func TestPublishedVersionReadsTheMarketplaceFile(t *testing.T) {
+	t.Parallel()
 	cfg := updateGhCfg(t, &ghState{PublishedRef: "polako--v0.24.0"})
 	got, err := publishedVersion(context.Background(), cfg)
 	if err != nil {
@@ -109,6 +113,7 @@ func TestPublishedVersionReadsTheMarketplaceFile(t *testing.T) {
 }
 
 func TestPublishedVersionIsARealErrorOnFailure(t *testing.T) {
+	t.Parallel()
 	// Empty PublishedRef is the fake's "could not read this" fixture — unlike
 	// probeUsage, update's own explicit command must not swallow this.
 	cfg := updateGhCfg(t, &ghState{})
@@ -118,6 +123,7 @@ func TestPublishedVersionIsARealErrorOnFailure(t *testing.T) {
 }
 
 func TestPublishedVersionQuietSilentOnFailure(t *testing.T) {
+	t.Parallel()
 	cfg := updateGhCfg(t, &ghState{})
 	if _, ok := publishedVersionQuiet(context.Background(), cfg); ok {
 		t.Error("publishedVersionQuiet should stay silent, not error, on a failed read")
@@ -125,6 +131,7 @@ func TestPublishedVersionQuietSilentOnFailure(t *testing.T) {
 }
 
 func TestPublishedVersionQuietReadsTheMarketplaceFile(t *testing.T) {
+	t.Parallel()
 	cfg := updateGhCfg(t, &ghState{PublishedRef: "polako--v0.24.0"})
 	got, ok := publishedVersionQuiet(context.Background(), cfg)
 	if !ok || got != "0.24.0" {
@@ -135,6 +142,7 @@ func TestPublishedVersionQuietReadsTheMarketplaceFile(t *testing.T) {
 // --- the passive notice (docs/plans/update.md ticket 2) ---
 
 func TestUpdateAvailableLine(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name                string
 		binary, plugin, pub string
@@ -175,6 +183,7 @@ func TestUpdateAvailableLine(t *testing.T) {
 }
 
 func TestUpdateAvailableLineNamesPluginNotInstalled(t *testing.T) {
+	t.Parallel()
 	got := updateAvailableLine("0.23.0", "", "0.24.0")
 	if !strings.Contains(got, "plugin not installed") {
 		t.Errorf("line = %q, want it to say the plugin is not installed", got)
@@ -182,6 +191,7 @@ func TestUpdateAvailableLineNamesPluginNotInstalled(t *testing.T) {
 }
 
 func TestReadPublishedVersionSilentWhenSkillNamesAnotherPlugin(t *testing.T) {
+	t.Parallel()
 	cfg := updateGhCfg(t, &ghState{PublishedRef: "polako--v0.24.0"})
 	cfg.skill = "my-fork:implement-issue"
 	if _, ok := readPublishedVersion(context.Background(), cfg); ok {
@@ -190,6 +200,7 @@ func TestReadPublishedVersionSilentWhenSkillNamesAnotherPlugin(t *testing.T) {
 }
 
 func TestReadPublishedVersionSilentOnAFailedRead(t *testing.T) {
+	t.Parallel()
 	cfg := updateGhCfg(t, &ghState{})
 	cfg.skill = defaultSkill
 	if _, ok := readPublishedVersion(context.Background(), cfg); ok {
@@ -198,6 +209,7 @@ func TestReadPublishedVersionSilentOnAFailedRead(t *testing.T) {
 }
 
 func TestReadPublishedVersionReadsTheSameFilePublishedVersionDoes(t *testing.T) {
+	t.Parallel()
 	cfg := updateGhCfg(t, &ghState{PublishedRef: "polako--v0.24.0"})
 	cfg.skill = defaultSkill
 	got, ok := readPublishedVersion(context.Background(), cfg)
@@ -207,6 +219,7 @@ func TestReadPublishedVersionReadsTheSameFilePublishedVersionDoes(t *testing.T) 
 }
 
 func TestUpdateNoticeLineEndToEnd(t *testing.T) {
+	t.Parallel()
 	cfg := updateGhCfg(t, &ghState{PublishedRef: "polako--v0.24.0"})
 	cfg.skill = defaultSkill
 	cfg.pluginVersion = "0.23.0"
@@ -218,6 +231,7 @@ func TestUpdateNoticeLineEndToEnd(t *testing.T) {
 }
 
 func TestUpdateNoticeLineSilentWhenCurrent(t *testing.T) {
+	t.Parallel()
 	cfg := updateGhCfg(t, &ghState{PublishedRef: "polako--v0.23.0"})
 	cfg.skill = defaultSkill
 	cfg.pluginVersion = "0.23.0"
@@ -230,6 +244,7 @@ func TestUpdateNoticeLineSilentWhenCurrent(t *testing.T) {
 // --- the plugin half ---
 
 func TestResolvePluginPlanFrom(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name          string
 		list          string
@@ -284,6 +299,7 @@ func TestResolvePluginPlanFrom(t *testing.T) {
 }
 
 func TestPluginSummary(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		plan       pluginPlan
@@ -348,6 +364,7 @@ func TestPluginSummary(t *testing.T) {
 // review of this branch (PLAN.md) caught, since every other test here
 // hand-builds binaryPlan.current without the prefix.
 func TestNormalizeBuildVersion(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		tier buildTier
@@ -370,8 +387,9 @@ func TestNormalizeBuildVersion(t *testing.T) {
 }
 
 func TestBinarySummary(t *testing.T) {
+	t.Parallel()
 	cfg := config{dir: t.TempDir(), goBin: fakeCLI(t)}
-	t.Setenv(fakeGoEnv, "1")
+	setFakeEnv(&cfg, fakeGoEnv, "1")
 
 	for _, tc := range []struct {
 		name       string
@@ -427,10 +445,11 @@ func TestBinarySummary(t *testing.T) {
 }
 
 func TestGoInstallDirPrefersGOBINOverGOPATH(t *testing.T) {
+	t.Parallel()
 	cfg := config{dir: t.TempDir(), goBin: fakeCLI(t)}
-	t.Setenv(fakeGoEnv, "1")
-	t.Setenv(fakeGoGOBINEnv, "/gobin")
-	t.Setenv(fakeGoGOPATHEnv, "/gopath")
+	setFakeEnv(&cfg, fakeGoEnv, "1")
+	setFakeEnv(&cfg, fakeGoGOBINEnv, "/gobin")
+	setFakeEnv(&cfg, fakeGoGOPATHEnv, "/gopath")
 
 	got, err := goInstallDir(context.Background(), cfg)
 	if err != nil {
@@ -442,9 +461,10 @@ func TestGoInstallDirPrefersGOBINOverGOPATH(t *testing.T) {
 }
 
 func TestGoInstallDirFallsBackToGOPATHBin(t *testing.T) {
+	t.Parallel()
 	cfg := config{dir: t.TempDir(), goBin: fakeCLI(t)}
-	t.Setenv(fakeGoEnv, "1")
-	t.Setenv(fakeGoGOPATHEnv, "/gopath")
+	setFakeEnv(&cfg, fakeGoEnv, "1")
+	setFakeEnv(&cfg, fakeGoGOPATHEnv, "/gopath")
 
 	got, err := goInstallDir(context.Background(), cfg)
 	if err != nil {
@@ -456,6 +476,7 @@ func TestGoInstallDirFallsBackToGOPATHBin(t *testing.T) {
 }
 
 func TestGoInstallWarningSilentWhenRunningFromTheInstallDir(t *testing.T) {
+	t.Parallel()
 	// resolveBinaryPlan hands goInstallWarning an already-EvalSymlinks'd exe
 	// (t.TempDir() itself can be a symlink, e.g. macOS's /var -> /private/var),
 	// so the fixture resolves it too rather than assuming it's already clean.
@@ -464,8 +485,8 @@ func TestGoInstallWarningSilentWhenRunningFromTheInstallDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config{dir: t.TempDir(), goBin: fakeCLI(t)}
-	t.Setenv(fakeGoEnv, "1")
-	t.Setenv(fakeGoGOBINEnv, dir)
+	setFakeEnv(&cfg, fakeGoEnv, "1")
+	setFakeEnv(&cfg, fakeGoGOBINEnv, dir)
 
 	exe := filepath.Join(dir, exeBaseName())
 	if got := goInstallWarning(context.Background(), cfg, exe); got != "" {
@@ -474,14 +495,15 @@ func TestGoInstallWarningSilentWhenRunningFromTheInstallDir(t *testing.T) {
 }
 
 func TestGoInstallWarningNamesBothDirsWhenTheyDiffer(t *testing.T) {
+	t.Parallel()
 	running, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	installDir := t.TempDir()
 	cfg := config{dir: t.TempDir(), goBin: fakeCLI(t)}
-	t.Setenv(fakeGoEnv, "1")
-	t.Setenv(fakeGoGOBINEnv, installDir)
+	setFakeEnv(&cfg, fakeGoEnv, "1")
+	setFakeEnv(&cfg, fakeGoGOBINEnv, installDir)
 
 	exe := filepath.Join(running, exeBaseName())
 	got := goInstallWarning(context.Background(), cfg, exe)
@@ -491,9 +513,10 @@ func TestGoInstallWarningNamesBothDirsWhenTheyDiffer(t *testing.T) {
 }
 
 func TestGoInstallWarningSilentWithNoExe(t *testing.T) {
+	t.Parallel()
 	cfg := config{dir: t.TempDir(), goBin: fakeCLI(t)}
-	t.Setenv(fakeGoEnv, "1")
-	t.Setenv(fakeGoGOBINEnv, t.TempDir())
+	setFakeEnv(&cfg, fakeGoEnv, "1")
+	setFakeEnv(&cfg, fakeGoGOBINEnv, t.TempDir())
 
 	if got := goInstallWarning(context.Background(), cfg, ""); got != "" {
 		t.Errorf("goInstallWarning = %q, want silence with no known exe path", got)
@@ -519,11 +542,11 @@ func stampedGhCfg(t *testing.T, release *fakeRelease) config {
 	if err := writeGhState(path, &ghState{Repo: "example/repo", Release: release}); err != nil {
 		t.Fatalf("writing fake gh state: %v", err)
 	}
-	t.Setenv(fakeGhEnv, path)
-	return config{dir: t.TempDir(), ghBin: fakeCLI(t)}
+	return config{dir: t.TempDir(), env: fakeEnv(fakeGhEnv, path), ghBin: fakeCLI(t)}
 }
 
 func TestChecksumFor(t *testing.T) {
+	t.Parallel()
 	raw := []byte("aaaa11  polako_v0.24.0_linux_amd64\nbbbb22 *polako_v0.24.0_darwin_arm64\n")
 	if got, err := checksumFor(raw, "polako_v0.24.0_linux_amd64"); err != nil || got != "aaaa11" {
 		t.Errorf("checksumFor(linux) = %q, %v, want aaaa11, nil", got, err)
@@ -538,6 +561,7 @@ func TestChecksumFor(t *testing.T) {
 }
 
 func TestApplyStampedBinaryReplacesTheRunningBinary(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	exe := filepath.Join(dir, exeBaseName())
 	if err := os.WriteFile(exe, []byte("old binary"), 0o755); err != nil {
@@ -571,6 +595,7 @@ func TestApplyStampedBinaryReplacesTheRunningBinary(t *testing.T) {
 }
 
 func TestApplyStampedBinaryRefusesOnChecksumMismatch(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	exe := filepath.Join(dir, exeBaseName())
 	original := []byte("old binary")
@@ -594,6 +619,7 @@ func TestApplyStampedBinaryRefusesOnChecksumMismatch(t *testing.T) {
 }
 
 func TestApplyStampedBinaryRefusesWithNoChecksumsFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	exe := filepath.Join(dir, exeBaseName())
 	original := []byte("old binary")
@@ -617,6 +643,7 @@ func TestApplyStampedBinaryRefusesWithNoChecksumsFile(t *testing.T) {
 }
 
 func TestApplyStampedBinaryRefusesWithNoExePath(t *testing.T) {
+	t.Parallel()
 	cfg := stampedGhCfg(t, &fakeRelease{})
 	err := applyStampedBinary(context.Background(), cfg, "0.24.0", "")
 	if err == nil || !strings.Contains(err.Error(), releaseAssetName("0.24.0")) {
@@ -625,6 +652,7 @@ func TestApplyStampedBinaryRefusesWithNoExePath(t *testing.T) {
 }
 
 func TestSwapBinaryReplacesTheRunningBinary(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	exe := filepath.Join(dir, exeBaseName())
 	if err := os.WriteFile(exe, []byte("old"), 0o755); err != nil {
@@ -658,6 +686,7 @@ func TestSwapBinaryReplacesTheRunningBinary(t *testing.T) {
 }
 
 func TestSwapBinaryRestoresTheOriginalIfTheSecondRenameFails(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "windows" {
 		t.Skip("only Windows renames the running binary aside before the swap")
 	}
@@ -688,6 +717,7 @@ func TestSwapBinaryRestoresTheOriginalIfTheSecondRenameFails(t *testing.T) {
 }
 
 func TestRemoveStaleOldBinary(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "windows" {
 		t.Skip("the .old dance only exists on Windows")
 	}
@@ -704,6 +734,7 @@ func TestRemoveStaleOldBinary(t *testing.T) {
 }
 
 func TestRemoveStaleOldBinaryNoOpWithNothingThere(t *testing.T) {
+	t.Parallel()
 	// Best-effort: no .old file, and no exe path known at all, are both the
 	// common case, not an error — nothing here should panic either way.
 	removeStaleOldBinary(filepath.Join(t.TempDir(), "polako.exe"))
@@ -712,11 +743,23 @@ func TestRemoveStaleOldBinaryNoOpWithNothingThere(t *testing.T) {
 
 // --- applyUpdate orchestration ---
 
+// applyUpdateCfg is the config every applyUpdate test runs under: fake claude
+// and go binaries, their handshake on config.env, and the test's own ui.
+func applyUpdateCfg(t *testing.T) config {
+	t.Helper()
+	return config{
+		dir:       t.TempDir(),
+		ui:        testUI(t),
+		claudeBin: fakeCLI(t),
+		goBin:     fakeCLI(t),
+		env:       fakeEnv(fakeClaudeEnv, "stream", fakeGoEnv, "1"),
+	}
+}
+
 func TestApplyUpdateChecksWithoutWriting(t *testing.T) {
-	cfg := config{dir: t.TempDir(), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeGoEnv, "1")
-	argsOf := watchClaudeArgs(t)
+	t.Parallel()
+	cfg := applyUpdateCfg(t)
+	argsOf := watchClaudeArgs(t, &cfg)
 	buf := captureLog(t)
 
 	plugin := pluginPlan{state: pluginFound, version: "0.23.0", id: "polako@scharissis", scope: "user", marketplace: "scharissis"}
@@ -738,10 +781,9 @@ func TestApplyUpdateChecksWithoutWriting(t *testing.T) {
 }
 
 func TestApplyUpdateRunsBothHalvesWhenBehind(t *testing.T) {
-	cfg := config{dir: t.TempDir(), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeGoEnv, "1")
-	argsOf := watchClaudeArgs(t)
+	t.Parallel()
+	cfg := applyUpdateCfg(t)
+	argsOf := watchClaudeArgs(t, &cfg)
 
 	plugin := pluginPlan{state: pluginFound, version: "0.23.0", id: "polako@scharissis", scope: "user", marketplace: "scharissis"}
 	binary := binaryPlan{tier: tierModule, current: "0.23.0"}
@@ -774,6 +816,7 @@ func TestApplyUpdateRunsBothHalvesWhenBehind(t *testing.T) {
 }
 
 func TestApplyUpdateRunsStampedBinaryWhenBehind(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	exe := filepath.Join(dir, exeBaseName())
 	if err := os.WriteFile(exe, []byte("old binary"), 0o755); err != nil {
@@ -797,6 +840,7 @@ func TestApplyUpdateRunsStampedBinaryWhenBehind(t *testing.T) {
 }
 
 func TestApplyUpdateRemovesAStaleOldBinaryOnARealRun(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "windows" {
 		t.Skip("the .old dance only exists on Windows")
 	}
@@ -809,9 +853,7 @@ func TestApplyUpdateRemovesAStaleOldBinaryOnARealRun(t *testing.T) {
 	if err := os.WriteFile(exe, []byte("current"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := config{dir: t.TempDir(), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeGoEnv, "1")
+	cfg := applyUpdateCfg(t)
 
 	plugin := pluginPlan{state: pluginFound, version: "0.24.0"}
 	binary := binaryPlan{tier: tierStamped, current: "0.24.0", exe: exe} // already current — nothing else to run
@@ -828,6 +870,7 @@ func TestApplyUpdateRemovesAStaleOldBinaryOnARealRun(t *testing.T) {
 // A ".old" beside a go-installed or VCS-tier binary was never swapBinary's
 // own — only tierStamped ever calls it — so it's not this verb's to delete.
 func TestApplyUpdateLeavesAnOldFileAloneForANonStampedTier(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "windows" {
 		t.Skip("the .old dance only exists on Windows")
 	}
@@ -840,9 +883,7 @@ func TestApplyUpdateLeavesAnOldFileAloneForANonStampedTier(t *testing.T) {
 	if err := os.WriteFile(exe, []byte("current"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := config{dir: t.TempDir(), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeGoEnv, "1")
+	cfg := applyUpdateCfg(t)
 
 	plugin := pluginPlan{state: pluginFound, version: "0.24.0"}
 	binary := binaryPlan{tier: tierModule, current: "0.24.0", exe: exe}
@@ -857,6 +898,7 @@ func TestApplyUpdateLeavesAnOldFileAloneForANonStampedTier(t *testing.T) {
 }
 
 func TestApplyUpdateLeavesAStaleOldBinaryUnderCheck(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "windows" {
 		t.Skip("the .old dance only exists on Windows")
 	}
@@ -869,9 +911,7 @@ func TestApplyUpdateLeavesAStaleOldBinaryUnderCheck(t *testing.T) {
 	if err := os.WriteFile(exe, []byte("current"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := config{dir: t.TempDir(), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeGoEnv, "1")
+	cfg := applyUpdateCfg(t)
 
 	plugin := pluginPlan{state: pluginFound, version: "0.24.0"}
 	binary := binaryPlan{tier: tierStamped, current: "0.24.0", exe: exe}
@@ -894,29 +934,31 @@ func TestApplyUpdateLeavesAStaleOldBinaryUnderCheck(t *testing.T) {
 // build), so what it reports depends on the environment the suite runs in,
 // not on anything this test controls — the module-tier branch itself is
 // covered above, directly, by TestApplyUpdateRunsBothHalvesWhenBehind.
-func runUpdateCfg(t *testing.T, published, installedPluginVersion string) (args []string, argsOf func() []string) {
+func runUpdateCfg(t *testing.T, published, installedPluginVersion string) (seed config, args []string, argsOf func() []string) {
 	t.Helper()
 	bin := fakeCLI(t)
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakePluginEnv, installedPluginVersion)
-	t.Setenv(fakeGoEnv, "1")
-	argsOf = watchClaudeArgs(t)
 
 	ghPath := filepath.Join(t.TempDir(), "gh-state.json")
 	if err := writeGhState(ghPath, &ghState{Repo: "example/repo", PublishedRef: "polako--v" + published}); err != nil {
 		t.Fatalf("writing fake gh state: %v", err)
 	}
-	t.Setenv(fakeGhEnv, ghPath)
+	seed = config{
+		ui: testUI(t),
+		env: fakeEnv(fakeClaudeEnv, "stream", fakePluginEnv, installedPluginVersion,
+			fakeGoEnv, "1", fakeGhEnv, ghPath),
+	}
+	argsOf = watchClaudeArgs(t, &seed)
 
-	return []string{"-claude", bin, "-gh", bin}, argsOf
+	return seed, []string{"-claude", bin, "-gh", bin}, argsOf
 }
 
 func TestRunUpdateEndToEndRunsThePlanWhenBehind(t *testing.T) {
-	args, argsOf := runUpdateCfg(t, "0.24.0", "0.23.0")
+	t.Parallel()
+	seed, args, argsOf := runUpdateCfg(t, "0.24.0", "0.23.0")
 	buf := captureLog(t)
 
 	var out strings.Builder
-	if err := runUpdate(context.Background(), args, &out); err != nil {
+	if err := runUpdate(context.Background(), seed, args, &out); err != nil {
 		t.Fatalf("runUpdate: %v", err)
 	}
 	if !strings.Contains(out.String(), "plugin: 0.23.0 -> 0.24.0") {
@@ -940,11 +982,12 @@ func TestRunUpdateEndToEndRunsThePlanWhenBehind(t *testing.T) {
 }
 
 func TestRunUpdateEndToEndCheckRunsNothing(t *testing.T) {
-	args, argsOf := runUpdateCfg(t, "0.24.0", "0.23.0")
+	t.Parallel()
+	seed, args, argsOf := runUpdateCfg(t, "0.24.0", "0.23.0")
 	args = append(args, "-check")
 	buf := captureLog(t)
 
-	if err := runUpdate(context.Background(), args, &strings.Builder{}); err != nil {
+	if err := runUpdate(context.Background(), seed, args, &strings.Builder{}); err != nil {
 		t.Fatalf("runUpdate: %v", err)
 	}
 	if !strings.Contains(buf.String(), "-check") {
@@ -958,10 +1001,11 @@ func TestRunUpdateEndToEndCheckRunsNothing(t *testing.T) {
 }
 
 func TestRunUpdateEndToEndBothCurrentRunsNothing(t *testing.T) {
-	args, argsOf := runUpdateCfg(t, "0.23.0", "0.23.0")
+	t.Parallel()
+	seed, args, argsOf := runUpdateCfg(t, "0.23.0", "0.23.0")
 
 	var out strings.Builder
-	if err := runUpdate(context.Background(), args, &out); err != nil {
+	if err := runUpdate(context.Background(), seed, args, &out); err != nil {
 		t.Fatalf("runUpdate: %v", err)
 	}
 	if !strings.Contains(out.String(), "plugin: 0.23.0, already current") {
@@ -975,10 +1019,9 @@ func TestRunUpdateEndToEndBothCurrentRunsNothing(t *testing.T) {
 }
 
 func TestApplyUpdateRunsNothingWhenAlreadyCurrent(t *testing.T) {
-	cfg := config{dir: t.TempDir(), claudeBin: fakeCLI(t), goBin: fakeCLI(t)}
-	t.Setenv(fakeClaudeEnv, "stream")
-	t.Setenv(fakeGoEnv, "1")
-	argsOf := watchClaudeArgs(t)
+	t.Parallel()
+	cfg := applyUpdateCfg(t)
+	argsOf := watchClaudeArgs(t, &cfg)
 
 	plugin := pluginPlan{state: pluginFound, version: "0.24.0", id: "polako@scharissis", scope: "user", marketplace: "scharissis"}
 	binary := binaryPlan{tier: tierModule, current: "0.24.0"}

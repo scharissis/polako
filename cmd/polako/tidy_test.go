@@ -15,9 +15,20 @@ import (
 	"time"
 )
 
-// tidyGh points the fake gh at a pretend repository, the same way
-// statusConfigFor does for status's own tests.
-func tidyGh(t *testing.T, st *ghState) {
+// The same flags-only contract every other verb's entry point holds to; see
+// TestRunStatusRejectsAnArgument in main_test.go for the sibling this mirrors.
+func TestRunTidyRejectsAnArgument(t *testing.T) {
+	t.Parallel()
+	err := runTidy(context.Background(), []string{"12"}, &strings.Builder{}, report{})
+	if err == nil || !strings.Contains(err.Error(), "tidy takes flags only") {
+		t.Errorf("err = %v, want a complaint about the argument", err)
+	}
+}
+
+// tidyCfg writes st to a fake gh state file and returns a config wired to it,
+// the handshake carried on config.env so the test needs no t.Setenv (which
+// would bar it from t.Parallel()). dir is -dir.
+func tidyCfg(t *testing.T, st *ghState, dir string) config {
 	t.Helper()
 	if st.Repo == "" {
 		st.Repo = "example/repo"
@@ -26,22 +37,10 @@ func tidyGh(t *testing.T, st *ghState) {
 	if err := writeGhState(path, st); err != nil {
 		t.Fatalf("writing fake gh state: %v", err)
 	}
-	t.Setenv(fakeGhEnv, path)
-}
-
-// The same flags-only contract every other verb's entry point holds to; see
-// TestRunStatusRejectsAnArgument in main_test.go for the sibling this mirrors.
-func TestRunTidyRejectsAnArgument(t *testing.T) {
-	err := runTidy(context.Background(), []string{"12"}, &strings.Builder{}, report{})
-	if err == nil || !strings.Contains(err.Error(), "tidy takes flags only") {
-		t.Errorf("err = %v, want a complaint about the argument", err)
-	}
-}
-
-func tidyCfg(t *testing.T, dir string) config {
-	t.Helper()
 	return config{
 		dir:          dir,
+		env:          fakeEnv(fakeGhEnv, path),
+		ui:           testUI(t),
 		ghBin:        fakeCLI(t),
 		repo:         "example/repo",
 		ghRepo:       "example/repo",
@@ -79,13 +78,13 @@ func mergeIssueBranch(t *testing.T, checkout, branch, file string) {
 // The point of the whole issue: an issue that is closed, merged into the
 // default branch and whose worktree is clean is reclaimed in full.
 func TestReclaimRemovesAMergedAndCleanIssue(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	mergeIssueBranch(t, checkout, "issue-1", "feature-1")
 	wt := filepath.Join(t.TempDir(), "issue-1-worktree")
 	gitAt(t, checkout, "worktree", "add", wt, "issue-1")
 
-	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: false}}})
-	cfg := tidyCfg(t, checkout)
+	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: false}}}, checkout)
 
 	results, err := reclaim(context.Background(), cfg, true, 0)
 	if err != nil {
@@ -110,14 +109,13 @@ func TestReclaimRemovesAMergedAndCleanIssue(t *testing.T) {
 // stop it, or a tidy-up takes the backlog down. It judges against the mirror as
 // it stands instead.
 func TestReclaimSurvivesAnUnreachableOrigin(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	_, checkout := upstream(t)
 	mergeIssueBranch(t, checkout, "issue-1", "feature-1")
 	unreachableOrigin(t, checkout)
 
-	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: false}}})
-
-	results, err := reclaim(context.Background(), tidyCfg(t, checkout), true, 0)
+	results, err := reclaim(context.Background(), tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: false}}}, checkout), true, 0)
 	if err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
@@ -135,6 +133,7 @@ func TestReclaimSurvivesAnUnreachableOrigin(t *testing.T) {
 // `.worktrees/issue-N` layout the skill creates today are reclaimed
 // identically, in the same sweep.
 func TestReclaimWorksAtOldAndNewWorktreeLocations(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	mergeIssueBranch(t, checkout, "issue-2", "feature-2")
 	mergeIssueBranch(t, checkout, "issue-3", "feature-3")
@@ -144,8 +143,7 @@ func TestReclaimWorksAtOldAndNewWorktreeLocations(t *testing.T) {
 	newStyle := filepath.Join(checkout, ".worktrees", "issue-3")
 	gitAt(t, checkout, "worktree", "add", newStyle, "issue-3")
 
-	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"2": {Open: false}, "3": {Open: false}}})
-	cfg := tidyCfg(t, checkout)
+	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"2": {Open: false}, "3": {Open: false}}}, checkout)
 
 	results, err := reclaim(context.Background(), cfg, true, 0)
 	if err != nil {
@@ -167,6 +165,7 @@ func TestReclaimWorksAtOldAndNewWorktreeLocations(t *testing.T) {
 // A plain `git worktree remove` would refuse the untracked file; the sweep
 // forces past it, exactly the way the merge-moment cleanup it replaced did.
 func TestReclaimRemovesAWorktreeHoldingOnlyThePlan(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	mergeIssueBranch(t, checkout, "issue-9", "feature-9")
 	wt := filepath.Join(t.TempDir(), "issue-9-worktree")
@@ -175,8 +174,7 @@ func TestReclaimRemovesAWorktreeHoldingOnlyThePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"9": {Open: false}}})
-	cfg := tidyCfg(t, checkout)
+	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"9": {Open: false}}}, checkout)
 
 	results, err := reclaim(context.Background(), cfg, true, 0)
 	if err != nil {
@@ -194,6 +192,7 @@ func TestReclaimRemovesAWorktreeHoldingOnlyThePlan(t *testing.T) {
 // issue #400: shots a dead run left in the evidence scratch dir are not left
 // work either, the same way a lone PLAN.md isn't.
 func TestReclaimRemovesAWorktreeHoldingOnlyThePlanAndEvidence(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	mergeIssueBranch(t, checkout, "issue-9", "feature-9")
 	wt := filepath.Join(t.TempDir(), "issue-9-worktree")
@@ -208,8 +207,7 @@ func TestReclaimRemovesAWorktreeHoldingOnlyThePlanAndEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"9": {Open: false}}})
-	cfg := tidyCfg(t, checkout)
+	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"9": {Open: false}}}, checkout)
 
 	results, err := reclaim(context.Background(), cfg, true, 0)
 	if err != nil {
@@ -229,6 +227,7 @@ func TestReclaimRemovesAWorktreeHoldingOnlyThePlanAndEvidence(t *testing.T) {
 // worktree root still is — the root stays strict on purpose, since no pattern
 // tells an improvised scratch name from a file somebody meant to keep.
 func TestReclaimDiscountsTheScratchDirButNotARootLevelDump(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	mergeIssueBranch(t, checkout, "issue-9", "feature-9")
 	mergeIssueBranch(t, checkout, "issue-10", "feature-10")
@@ -246,8 +245,7 @@ func TestReclaimDiscountsTheScratchDirButNotARootLevelDump(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"9": {Open: false}, "10": {Open: false}}})
-	cfg := tidyCfg(t, checkout)
+	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"9": {Open: false}, "10": {Open: false}}}, checkout)
 
 	results, err := reclaim(context.Background(), cfg, true, 0)
 	if err != nil {
@@ -266,11 +264,11 @@ func TestReclaimDiscountsTheScratchDirButNotARootLevelDump(t *testing.T) {
 
 // An open issue is left entirely alone, whatever its branch looks like.
 func TestReclaimSkipsAnOpenIssue(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	mergeIssueBranch(t, checkout, "issue-2", "feature-2")
 
-	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"2": {Open: true}}})
-	cfg := tidyCfg(t, checkout)
+	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"2": {Open: true}}}, checkout)
 
 	results, err := reclaim(context.Background(), cfg, true, 0)
 	if err != nil {
@@ -292,6 +290,7 @@ func TestReclaimSkipsAnOpenIssue(t *testing.T) {
 // named and left alone — removing it would be the one mistake nothing can
 // undo.
 func TestReclaimSkipsAClosedIssueWithADirtyWorktree(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	mergeIssueBranch(t, checkout, "issue-3", "feature-3")
 	wt := filepath.Join(t.TempDir(), "issue-3-worktree")
@@ -300,8 +299,7 @@ func TestReclaimSkipsAClosedIssueWithADirtyWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"3": {Open: false}}})
-	cfg := tidyCfg(t, checkout)
+	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"3": {Open: false}}}, checkout)
 
 	results, err := reclaim(context.Background(), cfg, true, 0)
 	if err != nil {
@@ -333,6 +331,7 @@ func TestReclaimSkipsAClosedIssueWithADirtyWorktree(t *testing.T) {
 // with the command to finish the job. This is the case the merge-moment
 // cleanup named by hand before the sweep replaced it.
 func TestReclaimLeavesAWorktreeItCannotReadAlone(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	mergeIssueBranch(t, checkout, "issue-1", "feature-1")
 	wt := filepath.Join(t.TempDir(), "issue-1-worktree")
@@ -344,8 +343,7 @@ func TestReclaimLeavesAWorktreeItCannotReadAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: false}}})
-	cfg := tidyCfg(t, checkout)
+	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: false}}}, checkout)
 
 	results, err := reclaim(context.Background(), cfg, true, 0)
 	if err != nil {
@@ -371,13 +369,13 @@ func TestReclaimLeavesAWorktreeItCannotReadAlone(t *testing.T) {
 // case, which is not literally an ancestor of anything either, and gets the
 // same honest refusal rather than a guess.
 func TestReclaimSkipsABranchNotMergedIntoTheDefaultBranch(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	gitAt(t, checkout, "checkout", "-b", "issue-4")
 	commit(t, checkout, "feature-4")
 	gitAt(t, checkout, "checkout", "main")
 
-	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"4": {Open: false}}})
-	cfg := tidyCfg(t, checkout)
+	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"4": {Open: false}}}, checkout)
 
 	results, err := reclaim(context.Background(), cfg, true, 0)
 	if err != nil {
@@ -400,6 +398,7 @@ func TestReclaimSkipsABranchNotMergedIntoTheDefaultBranch(t *testing.T) {
 // when GitHub says the PR merged. Someone who finishes a parked issue by hand
 // still gets to clear the label at their desk.
 func TestReclaimLeavesAHeldIssueAlone(t *testing.T) {
+	t.Parallel()
 	for _, label := range []string{needsHumanLabel, proposedLabel} {
 		t.Run(label, func(t *testing.T) {
 			_, checkout := upstream(t)
@@ -407,11 +406,10 @@ func TestReclaimLeavesAHeldIssueAlone(t *testing.T) {
 			wt := filepath.Join(t.TempDir(), "issue-1-worktree")
 			gitAt(t, checkout, "worktree", "add", wt, "issue-1")
 
-			tidyGh(t, &ghState{
+			cfg := tidyCfg(t, &ghState{
 				Issues: map[string]*fakeIssue{"1": {Open: true, Labels: []string{label}}},
 				PRs:    map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
-			})
-			cfg := tidyCfg(t, checkout)
+			}, checkout)
 
 			results, err := reclaim(context.Background(), cfg, true, 0)
 			if err != nil {
@@ -440,17 +438,17 @@ func TestReclaimLeavesAHeldIssueAlone(t *testing.T) {
 // "PR merged but the worktree could not be reclaimed" alarm reserved for
 // uncommitted work the merge did not take.
 func TestTidySweepIsQuietAboutAHeldWatchedIssue(t *testing.T) {
+	t.Parallel()
 	buf := captureLog(t)
 	_, checkout := upstream(t)
 	mergeIssueBranch(t, checkout, "issue-1", "feature-1")
 	wt := filepath.Join(t.TempDir(), "issue-1-worktree")
 	gitAt(t, checkout, "worktree", "add", wt, "issue-1")
 
-	tidyGh(t, &ghState{
+	cfg := tidyCfg(t, &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true, Labels: []string{needsHumanLabel}}},
 		PRs:    map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
-	})
-	cfg := tidyCfg(t, checkout)
+	}, checkout)
 
 	tidySweep(context.Background(), cfg, 1)
 
@@ -467,6 +465,7 @@ func TestTidySweepIsQuietAboutAHeldWatchedIssue(t *testing.T) {
 // evidence is GitHub's own merge event, not the branch shape, and it applies
 // only because the local tip still equals what was pushed to origin.
 func TestReclaimReclaimsAWitnessedSquashMerge(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	// issue-7 diverges and is never merged back: 1 commit ahead of main, the
 	// shape a squash merge leaves.
@@ -477,11 +476,10 @@ func TestReclaimReclaimsAWitnessedSquashMerge(t *testing.T) {
 	wt := filepath.Join(t.TempDir(), "issue-7-worktree")
 	gitAt(t, checkout, "worktree", "add", wt, "issue-7")
 
-	tidyGh(t, &ghState{
+	cfg := tidyCfg(t, &ghState{
 		Issues: map[string]*fakeIssue{"7": {Open: false}},
 		PRs:    map[string]*fakePR{"issue-7": {Number: 9, State: "MERGED"}},
-	})
-	cfg := tidyCfg(t, checkout)
+	}, checkout)
 
 	// Not witnessed: the conservative refusal still stands.
 	unwatched, err := reclaim(context.Background(), cfg, false, 0)
@@ -514,6 +512,7 @@ func TestReclaimReclaimsAWitnessedSquashMerge(t *testing.T) {
 // origin's before it force-deletes; when it does not, the branch takes the
 // ordinary conservative path and is left alone rather than -D'd.
 func TestReclaimDoesNotForceDeleteAWitnessedBranchWithUnpushedWork(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	gitAt(t, checkout, "checkout", "-b", "issue-7")
 	commit(t, checkout, "feature-7")
@@ -522,11 +521,10 @@ func TestReclaimDoesNotForceDeleteAWitnessedBranchWithUnpushedWork(t *testing.T)
 	commit(t, checkout, "local-only-follow-up")
 	gitAt(t, checkout, "checkout", "main")
 
-	tidyGh(t, &ghState{
+	cfg := tidyCfg(t, &ghState{
 		Issues: map[string]*fakeIssue{"7": {Open: false}},
 		PRs:    map[string]*fakePR{"issue-7": {Number: 9, State: "MERGED"}},
-	})
-	cfg := tidyCfg(t, checkout)
+	}, checkout)
 
 	results, err := reclaim(context.Background(), cfg, true, 7)
 	if err != nil {
@@ -545,11 +543,11 @@ func TestReclaimDoesNotForceDeleteAWitnessedBranchWithUnpushedWork(t *testing.T)
 // the common case for a run that finished cleanly and whose worktree a
 // drain already cleaned up on merge.
 func TestReclaimDeletesABranchWithNoWorktree(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	mergeIssueBranch(t, checkout, "issue-5", "feature-5")
 
-	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"5": {Open: false}}})
-	cfg := tidyCfg(t, checkout)
+	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"5": {Open: false}}}, checkout)
 
 	results, err := reclaim(context.Background(), cfg, true, 0)
 	if err != nil {
@@ -571,6 +569,7 @@ func TestReclaimDeletesABranchWithNoWorktree(t *testing.T) {
 // stale admin entry — git calls it prunable. tidy clears it with no
 // `worktree remove` call, since there is nothing left to remove.
 func TestReclaimClearsAPrunableWorktreeEntry(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	mergeIssueBranch(t, checkout, "issue-6", "feature-6")
 	wt := filepath.Join(t.TempDir(), "issue-6-worktree")
@@ -582,8 +581,7 @@ func TestReclaimClearsAPrunableWorktreeEntry(t *testing.T) {
 		t.Fatal("removing the directory by hand did not leave a prunable admin entry — fixture is wrong")
 	}
 
-	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"6": {Open: false}}})
-	cfg := tidyCfg(t, checkout)
+	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"6": {Open: false}}}, checkout)
 
 	results, err := reclaim(context.Background(), cfg, true, 0)
 	if err != nil {
@@ -609,13 +607,13 @@ func TestReclaimClearsAPrunableWorktreeEntry(t *testing.T) {
 // rule that keeps a Claude Code worktree safe. It is never a candidate, and
 // reclaim must not so much as look at it.
 func TestReclaimIgnoresADetachedWorktree(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	sha := gitAt(t, checkout, "rev-parse", "HEAD")
 	wt := filepath.Join(t.TempDir(), "detached-worktree")
 	gitAt(t, checkout, "worktree", "add", "--detach", wt, sha)
 
-	tidyGh(t, &ghState{})
-	cfg := tidyCfg(t, checkout)
+	cfg := tidyCfg(t, &ghState{}, checkout)
 
 	results, err := reclaim(context.Background(), cfg, true, 0)
 	if err != nil {
@@ -637,13 +635,13 @@ func TestReclaimIgnoresADetachedWorktree(t *testing.T) {
 // instead of at the main checkout must be refused, not have the ground
 // removed out from under the rest of the sweep.
 func TestReclaimRefusesToRemoveTheWorktreeItIsRunningFrom(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	mergeIssueBranch(t, checkout, "issue-8", "feature-8")
 	wt := filepath.Join(t.TempDir(), "issue-8-worktree")
 	gitAt(t, checkout, "worktree", "add", wt, "issue-8")
 
-	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"8": {Open: false}}})
-	cfg := tidyCfg(t, wt) // -dir points at the linked worktree itself
+	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"8": {Open: false}}}, wt) // -dir points at the linked worktree itself
 
 	results, err := reclaim(context.Background(), cfg, true, 0)
 	if err != nil {
@@ -668,13 +666,13 @@ func TestReclaimRefusesToRemoveTheWorktreeItIsRunningFrom(t *testing.T) {
 // touches disk, whether or not everything about the issue says it safely
 // could.
 func TestReclaimDryRunWritesNothingToDisk(t *testing.T) {
+	t.Parallel()
 	_, checkout := upstream(t)
 	mergeIssueBranch(t, checkout, "issue-7", "feature-7")
 	wt := filepath.Join(t.TempDir(), "issue-7-worktree")
 	gitAt(t, checkout, "worktree", "add", wt, "issue-7")
 
-	tidyGh(t, &ghState{Issues: map[string]*fakeIssue{"7": {Open: false}}})
-	cfg := tidyCfg(t, checkout)
+	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"7": {Open: false}}}, checkout)
 
 	for i := 0; i < 2; i++ {
 		results, err := reclaim(context.Background(), cfg, false, 0)
@@ -697,6 +695,7 @@ func TestReclaimDryRunWritesNothingToDisk(t *testing.T) {
 // A repository with no issue-N branch at all is the simplest possible
 // report: one line, not an empty pair of tables.
 func TestRenderTidyNothingToReclaim(t *testing.T) {
+	t.Parallel()
 	var out strings.Builder
 	renderTidy(&out, report{}, config{repo: "example/repo", branchPrefix: "issue-"}, true, nil)
 	want := "example/repo — nothing to reclaim: no issue-N branch found\n"
@@ -709,6 +708,7 @@ func TestRenderTidyNothingToReclaim(t *testing.T) {
 // was skipped, with the reason — in one report, and the dry-run heading says
 // out loud that nothing has actually happened yet.
 func TestRenderTidyReportsBothHalves(t *testing.T) {
+	t.Parallel()
 	results := []tidyResult{
 		{issue: 1, branch: "issue-1", reclaimed: true, why: "closed", worktreePath: "/tmp/issue-1"},
 		{issue: 5, branch: "issue-5", reclaimed: true, why: "merged (PR #9)"},
