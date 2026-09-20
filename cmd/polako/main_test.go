@@ -98,6 +98,7 @@ func TestMain(m *testing.M) {
 		recordFakeArgs()
 		os.Exit(fakeClaude(mode))
 	}
+	clearEnvDefaults()
 	code := m.Run()
 	if fakeCLIDir != "" {
 		os.RemoveAll(fakeCLIDir)
@@ -109,6 +110,22 @@ func TestMain(m *testing.M) {
 		os.RemoveAll(fakeSSHDenyDir)
 	}
 	os.Exit(code)
+}
+
+// clearEnvDefaults keeps the suite hermetic against the shell it runs in.
+// Flags take their defaults from POLAKO_*, so a maintainer who set one in
+// their profile would otherwise be running a different suite from CI. Once,
+// for the whole process, rather than per test through t.Setenv: that panics
+// in a test that has called t.Parallel(), and nearly all of them have. A test
+// that wants one set still uses t.Setenv, stays serial, and restores it to
+// unset. Called after TestMain's fake-CLI checks — a child picks its role off
+// POLAKO_FAKE_*, which carry the same prefix.
+func clearEnvDefaults() {
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, envPrefix) {
+			os.Unsetenv(name)
+		}
+	}
 }
 
 var (

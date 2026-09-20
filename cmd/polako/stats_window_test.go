@@ -420,7 +420,6 @@ func TestPlanCostNoProbeCallWithoutSamples(t *testing.T) {
 // a POLAKO_WINDOW default sitting in the environment, not be silently
 // overridden by it once resolveWindowBounds runs.
 func TestExplicitSinceBeatsAWindowEnvDefault(t *testing.T) {
-	clearEnvDefaults(t)
 	t.Setenv(envVarName("window"), "week")
 	var out bytes.Buffer
 	if err := runStats([]string{"-since", "1h", "-metrics", fixtureDir(t)}, &out, io.Discard, fixtureNow, report{}); err != nil {
@@ -436,7 +435,6 @@ func TestExplicitSinceBeatsAWindowEnvDefault(t *testing.T) {
 
 // The mirror image: an explicit -window must beat a POLAKO_SINCE default.
 func TestExplicitWindowBeatsASinceEnvDefault(t *testing.T) {
-	clearEnvDefaults(t)
 	t.Setenv(envVarName("since"), "1h")
 	var out bytes.Buffer
 	if err := runStats([]string{"-window", "today", "-metrics", fixtureDir(t)}, &out, io.Discard, fixtureNow, report{}); err != nil {

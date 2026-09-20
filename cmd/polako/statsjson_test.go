@@ -17,6 +17,7 @@ import (
 // record above it — if a change moves one, the change has to be able to say
 // why, the same discipline TestStatsReport holds the text report to.
 func TestStatsJSONGoldenDocument(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	body := `{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T09:10:00Z","repo":"r/r","issue":1,"reason":"implement","status":"ok","outcome":"opened_pr","pr":2,"cost_usd":1.5,"turns":9}
 `
@@ -291,6 +292,7 @@ func TestStatsJSONReviewsMedianSurvivesAGenuineZero(t *testing.T) {
 // stdout, where it would break "-json is the whole of stdout" and could not
 // be told apart from part of the document by a naive line-splitter.
 func TestStatsJSONHTMLConfirmationGoesToStderr(t *testing.T) {
+	t.Parallel()
 	dir := fixtureDir(t)
 	path := filepath.Join(t.TempDir(), "report.html")
 	out, errOut := statsOutErr(t, "-metrics", dir, "-json", "-html", path)

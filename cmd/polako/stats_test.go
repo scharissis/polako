@@ -76,7 +76,6 @@ func stats(t *testing.T, args ...string) string {
 // errOut (the -html confirmation under -json) as well as stdout.
 func statsOutErr(t *testing.T, args ...string) (string, string) {
 	t.Helper()
-	clearEnvDefaults(t)
 	var out, errOut bytes.Buffer
 	if err := runStats(args, &out, &errOut, fixtureNow, report{}); err != nil {
 		t.Fatalf("stats %v: %v", args, err)
@@ -84,25 +83,9 @@ func statsOutErr(t *testing.T, args ...string) (string, string) {
 	return out.String(), errOut.String()
 }
 
-// clearEnvDefaults keeps a test hermetic against the shell it runs in. Flags
-// take their defaults from POLAKO_* now, so a maintainer who set one in
-// their profile would otherwise be running a different suite from CI.
-func clearEnvDefaults(t *testing.T) {
-	t.Helper()
-	for _, kv := range os.Environ() {
-		name, _, _ := strings.Cut(kv, "=")
-		if !strings.HasPrefix(name, envPrefix) {
-			continue
-		}
-		t.Setenv(name, "") // registers the restore this test needs
-		os.Unsetenv(name)  // then actually takes it out of the environment
-	}
-}
-
 // One variable points both halves at the same directory: the drain writes
 // there, and stats reads there, without either being told twice.
 func TestStatsReadsTheMetricsDirectoryFromTheEnvironment(t *testing.T) {
-	clearEnvDefaults(t)
 	t.Setenv("POLAKO_METRICS", fixtureDir(t))
 
 	var buf bytes.Buffer
@@ -294,6 +277,7 @@ func TestStatsFiltersByRepo(t *testing.T) {
 }
 
 func TestStatsFiltersBySince(t *testing.T) {
+	t.Parallel()
 	dir := fixtureDir(t)
 	// fixtureNow is 2026-08-25T09:00Z, so 30h reaches back to the 24th only.
 	out := stats(t, "-metrics", dir, "-since", "30h")
@@ -649,6 +633,7 @@ func TestStatsWithNoTerminalIssueYet(t *testing.T) {
 }
 
 func TestStatsRejectsBadInput(t *testing.T) {
+	t.Parallel()
 	cases := map[string][]string{
 		"an unknown -by":     {"-by", "sideways"},
 		"a stray argument":   {"stats-again"},
@@ -661,7 +646,6 @@ func TestStatsRejectsBadInput(t *testing.T) {
 	}
 	for name, args := range cases {
 		t.Run(name, func(t *testing.T) {
-			clearEnvDefaults(t)
 			var buf bytes.Buffer
 			if err := runStats(args, &buf, io.Discard, fixtureNow, report{}); err == nil {
 				t.Errorf("runStats(%v) succeeded, want an error explaining what to do", args)
@@ -672,7 +656,7 @@ func TestStatsRejectsBadInput(t *testing.T) {
 
 // -h is how a person finds the flags; it is not a failure.
 func TestStatsHelpIsNotAnError(t *testing.T) {
-	clearEnvDefaults(t)
+	t.Parallel()
 	var buf bytes.Buffer
 	if err := runStats([]string{"-h"}, &buf, io.Discard, fixtureNow, report{}); err != nil {
 		t.Fatalf("stats -h: %v", err)

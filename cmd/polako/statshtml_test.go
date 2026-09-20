@@ -188,6 +188,7 @@ func TestStatsHTMLOnAnEmptyWindowOverFullFiles(t *testing.T) {
 // Errors say what to do about it: this one runs unattended often enough that
 // its output is the only diagnostic.
 func TestStatsHTMLSaysWhatToDoAboutABadPath(t *testing.T) {
+	t.Parallel()
 	dir := fixtureDir(t)
 	cases := map[string]string{
 		"a directory":      t.TempDir(),
@@ -195,7 +196,6 @@ func TestStatsHTMLSaysWhatToDoAboutABadPath(t *testing.T) {
 	}
 	for name, path := range cases {
 		t.Run(name, func(t *testing.T) {
-			clearEnvDefaults(t)
 			var buf strings.Builder
 			err := runStats([]string{"-metrics", dir, "-html", path}, &buf, io.Discard, fixtureNow, report{})
 			if err == nil {
