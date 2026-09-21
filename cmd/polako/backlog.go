@@ -463,10 +463,11 @@ type issueComment struct {
 	// quiet. No wait decides on it: comment ids only ever increase, and a
 	// baseline made of them needs no clock and survives an edit.
 	CreatedAt string `json:"created_at"`
-	// Body is read by nobody but commentFinishedContainers, checking a
-	// thread for the epic-finished marker before posting a second one. Every
-	// other reader of this type only ever needed metadata — the text itself
-	// is data, not something the rest of the drain acts on.
+	// Body is read by commentFinishedContainers, checking a thread for the
+	// epic-finished marker before posting a second one, and by unpark.go's
+	// readParkListItem, checking it for polako's own park comment and
+	// parsing the `Refused:` footer back out of it. The drain loop itself
+	// reads neither — every field it decides on is metadata.
 	Body string `json:"body"`
 }
 
