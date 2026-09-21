@@ -1942,6 +1942,11 @@ func TestBudgetParkFoldsAFailedPushIntoTheReason(t *testing.T) {
 	if !strings.Contains(reason, "tried to push branch issue-1 to origin") || !strings.Contains(reason, "the push failed") {
 		t.Errorf("park reason = %q, want it to say the push failed", reason)
 	}
+	// Not just that it failed — what to do about it, the same as this
+	// file's other park reasons (fetchAuthParkReason).
+	if !strings.Contains(reason, "push it by hand (`git push origin issue-1`), then remove needs-human") {
+		t.Errorf("park reason = %q, want it to tell the human how to recover", reason)
+	}
 	// Still says what is there, push failure or not — the person picking
 	// this up needs both facts.
 	if !strings.Contains(reason, "branch issue-1 has 1 commit, not pushed to origin") {

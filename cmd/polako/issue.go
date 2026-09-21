@@ -803,7 +803,8 @@ func (r *issueLoop) budgetPark(cause string) error {
 	if left.commits > 0 && !left.pushed {
 		if _, err := git(r.ctx, r.cfg, "push", "origin", left.branch); err != nil {
 			reason += fmt.Sprintf("; tried to push branch %s to origin so the work "+
-				"is not only on this machine, but the push failed", left.branch)
+				"is not only on this machine, but the push failed — push it by hand "+
+				"(`git push origin %s`), then remove needs-human", left.branch, left.branch)
 		} else {
 			left.pushed = true
 		}
