@@ -45,8 +45,8 @@ func labelGate(label string, exists bool) error {
 		return nil
 	}
 	return fmt.Errorf("this repository has no %q label — -label only scopes the queue to issues that carry it, "+
-		"and one the repository doesn't have scopes it to nothing. Create it (`gh label create %s`) "+
-		"or point -label at a label that exists", label, label)
+		"and one the repository doesn't have scopes it to nothing. Create it (`gh label create %s`, or "+
+		"`polako setup -apply -label %s`) or point -label at a label that exists", label, label, label)
 }
 
 // refuseOrNote is the dry-run carve-out every preflight gate shares: nil

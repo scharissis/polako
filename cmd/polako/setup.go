@@ -2,10 +2,11 @@ package main
 
 // `polako setup` is a read-only readiness report: what a repository has for
 // polako and what it is missing, one row per check, ending with the
-// `polako work` line to run once it looks ready. Nothing here is written —
-// `-apply` (docs/plans/setup.md, ticket 3) is a later ticket, and `in` is
-// already threaded through the entry point so that ticket's stdin prompt
-// costs no signature change.
+// `polako work` line to run once it looks ready. `-apply` (docs/plans/setup.md,
+// ticket 3) is the one thing that writes: it creates the labels the report
+// found missing, asking `[Y/n]` per step on a terminal (or `-yes`, for a
+// script). Nothing else here is written — no issue, no repo file, no PR; see
+// ticket 4 for those.
 //
 // Every check degrades rather than fails the whole report: a tool missing
 // from PATH, a gh too old for a field, a repository this gh cannot reach —
@@ -25,15 +26,20 @@ import (
 )
 
 type setupOptions struct {
-	dir   string
-	repo  string
-	label string
+	dir          string
+	repo         string
+	label        string
+	apply        bool
+	yes          bool
+	policyLabels bool
 }
 
 // runSetup is the `setup` subcommand: parse its own flags, read what the
-// checks below can tell, print the report. in is unused today — see the
-// package comment.
-func runSetup(ctx context.Context, args []string, in io.Reader, out io.Writer, rpt report) error {
+// checks below can tell, print the report, then — with -apply — write what
+// it found missing. isTTY is whether in is a terminal: main passes
+// isTerminal(os.Stdin); tests pass it directly, since a strings.Reader is
+// never one.
+func runSetup(ctx context.Context, args []string, in io.Reader, isTTY bool, out io.Writer, rpt report) error {
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	fs.SetOutput(out)
 	var opt setupOptions
@@ -42,11 +48,17 @@ func runSetup(ctx context.Context, args []string, in io.Reader, out io.Writer, r
 		"repository to check readiness for (owner/name), instead of whichever -dir is a checkout of")
 	fs.StringVar(&opt.label, "label", "",
 		"gate label `polako work -label` would use — checked as one more row, and named in the suggested command")
+	fs.BoolVar(&opt.apply, "apply", false,
+		"create the labels the report found missing, asking [Y/n] first — needs a terminal, or -yes")
+	fs.BoolVar(&opt.yes, "yes", false,
+		"with -apply, take the default answer for every step without asking — required when stdin isn't a terminal")
+	fs.BoolVar(&opt.policyLabels, "policy-labels", false,
+		"with -apply, also offer the model:/effort: policy labels (tier aliases only) — see docs/behaviour.md")
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako setup [flags]\n\n"+
 			"Prints a read-only readiness report: what this repository has for polako\n"+
 			"and what it's missing, ending with the `polako work` line to run once it's\n"+
-			"ready. Reads only — nothing here is written.\n\n"+envUsage+"\nFlags:\n")
+			"ready. -apply is the one thing that writes — see docs/setup.md.\n\n"+envUsage+"\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	if err := applyEnvDefaults(fs); err != nil {
@@ -61,13 +73,27 @@ func runSetup(ctx context.Context, args []string, in io.Reader, out io.Writer, r
 	if rest := fs.Args(); len(rest) > 0 {
 		return fmt.Errorf("unexpected argument %q — setup takes flags only", rest[0])
 	}
+	// Unattended means no prompts: -apply reads stdin, and a read that would
+	// block forever with nobody there to answer it is exactly the failure
+	// mode -yes exists to rule out. Checked before any gh call, the same as
+	// every other flag-shape refusal here — errFlagsReported for the same
+	// exit code, even though what follows is prose rather than usage.
+	if setupApplyNeedsYes(opt.apply, opt.yes, isTTY) {
+		fmt.Fprintln(out, "-apply is reading stdin that is not a terminal — pass -yes to take the "+
+			"defaults for every step without asking, or run this where stdin is a terminal")
+		return errFlagsReported
+	}
 
 	cfg, err := setupConfig(opt)
 	if err != nil {
 		return err
 	}
-	cfg, rows := readSetup(ctx, cfg)
+	cfg, rows := readSetup(ctx, cfg, opt.policyLabels)
 	renderSetup(out, rpt, cfg, rows)
+	if opt.apply {
+		defs := setupLabelDefs(cfg, opt.policyLabels)
+		rows = applySetup(ctx, in, out, cfg, rows, defs, opt.yes)
+	}
 	if setupFailed(rows) {
 		return errSetupNotReady
 	}
@@ -78,6 +104,14 @@ func runSetup(ctx context.Context, args []string, in io.Reader, out io.Writer, r
 // dispatchVerb's runReport exits nonzero. The report itself already said
 // which row and what to do about it, so nothing more needs saying here.
 var errSetupNotReady = errors.New("one or more required checks failed — see the rows above")
+
+// setupApplyNeedsYes reports whether -apply would have to read a stdin
+// nobody is there to answer: not -yes, and not a terminal either. Pulled out
+// of runSetup so it can be tested as a pure function, without the flag-shape
+// check needing an actual gh or claude on PATH to prove it lets a run past.
+func setupApplyNeedsYes(apply, yes, isTTY bool) bool {
+	return apply && !yes && !isTTY
+}
 
 // setupConfig resolves -dir and, when named, validates -repo's shape. Unlike
 // tidyConfig and statusConfig it makes no gh call and requires no binary on
@@ -141,7 +175,7 @@ func setupFailed(rows []setupRow) bool {
 // own copy stops at whatever setupConfig resolved, and renderSetup's header
 // needs the name this function discovered, not that earlier, possibly-empty
 // one.
-func readSetup(ctx context.Context, cfg config) (config, []setupRow) {
+func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []setupRow) {
 	claudeOK := onPath(cfg.claudeBin)
 	ghOK := onPath(cfg.ghBin)
 	gitOK := onPath("git")
@@ -169,6 +203,7 @@ func readSetup(ctx context.Context, cfg config) (config, []setupRow) {
 		} else {
 			reposOK = true
 			cfg.repo, cfg.ghRepo = result.view.NameWithOwner, result.view.NameWithOwner
+			cfg.visibility = result.view.Visibility
 			rows = append(rows, setupRepoOKRow(result.view, cfg.label), setupIssuesEnabledRow(result))
 		}
 	}
@@ -176,7 +211,7 @@ func readSetup(ctx context.Context, cfg config) (config, []setupRow) {
 	rows = append(rows, setupOriginHeadRow(ctx, cfg, gitOK))
 	rows = append(rows, setupPluginRow(ctx, cfg, claudeOK))
 	rows = append(rows, setupSubIssueRow(ctx, cfg, reposOK))
-	rows = append(rows, setupLabelRows(ctx, cfg, reposOK)...)
+	rows = append(rows, setupLabelRows(ctx, cfg, reposOK, policyLabels)...)
 	return cfg, rows
 }
 
@@ -320,36 +355,9 @@ func setupSubIssueRow(ctx context.Context, cfg config, reposOK bool) setupRow {
 		detail: "this gh can't file a child issue with `--parent` — epics work flat instead"}
 }
 
-// setupLabelRows checks every label in labelTable, plus -label's own when it
-// names one the table does not already cover — the queue gate the operator
-// is about to point `polako work` at.
-func setupLabelRows(ctx context.Context, cfg config, reposOK bool) []setupRow {
-	check := func(l labelDef) setupRow {
-		if !reposOK {
-			return setupRow{name: l.name, status: setupUnknown, required: l.required,
-				detail: "the repository could not be read"}
-		}
-		exists, err := labelExists(ctx, cfg, l.name)
-		switch {
-		case err != nil:
-			return setupRow{name: l.name, status: setupUnknown, required: l.required, detail: err.Error()}
-		case exists:
-			return setupRow{name: l.name, status: setupOK, required: l.required}
-		default:
-			return setupRow{name: l.name, status: setupMissing, required: l.required,
-				detail: fmt.Sprintf("gh label create %s --color %s --description %q", l.name, l.color, l.description)}
-		}
-	}
-	rows := make([]setupRow, 0, len(labelTable)+1)
-	for _, l := range labelTable {
-		rows = append(rows, check(l))
-	}
-	if cfg.label != "" && !slices.ContainsFunc(labelTable, func(l labelDef) bool { return l.name == cfg.label }) {
-		rows = append(rows, check(labelDef{name: cfg.label, color: "ededed",
-			description: "gate label for `polako work -label`", required: true}))
-	}
-	return rows
-}
+// setupLabelDefs, policyLabelDefs, checkLabelDef, setupLabelRows and -apply's
+// own write pass live in setup_apply.go — split out to keep this file closer
+// to the repo's own median length.
 
 // --- rendering ---
 

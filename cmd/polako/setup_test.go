@@ -9,8 +9,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -64,7 +66,7 @@ func TestVerbUsageListsSetup(t *testing.T) {
 // TestRunTidyRejectsAnArgument.
 func TestRunSetupRejectsAnArgument(t *testing.T) {
 	t.Parallel()
-	err := runSetup(context.Background(), []string{"12"}, strings.NewReader(""), &strings.Builder{}, report{})
+	err := runSetup(context.Background(), []string{"12"}, strings.NewReader(""), false, &strings.Builder{}, report{})
 	if err == nil || !strings.Contains(err.Error(), "setup takes flags only") {
 		t.Errorf("err = %v, want a complaint about the argument", err)
 	}
@@ -117,7 +119,7 @@ func TestReadSetupNamesMissingLabelsAndFails(t *testing.T) {
 	_, checkout := upstream(t)
 	cfg := setupCfg(t, &ghState{}, checkout)
 
-	_, rows := readSetup(context.Background(), cfg)
+	_, rows := readSetup(context.Background(), cfg, false)
 
 	for _, name := range []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel} {
 		r := findSetupRow(t, rows, name)
@@ -136,7 +138,7 @@ func TestReadSetupWithAllLabelsSucceeds(t *testing.T) {
 	_, checkout := upstream(t)
 	cfg := setupCfg(t, &ghState{Labels: []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel}}, checkout)
 
-	_, rows := readSetup(context.Background(), cfg)
+	_, rows := readSetup(context.Background(), cfg, false)
 
 	for _, name := range []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel} {
 		r := findSetupRow(t, rows, name)
@@ -161,7 +163,7 @@ func TestReadSetupResolvesTheRepoName(t *testing.T) {
 		t.Fatalf("test setup: cfg.repo = %q, want empty before readSetup resolves it", cfg.repo)
 	}
 
-	resolved, _ := readSetup(context.Background(), cfg)
+	resolved, _ := readSetup(context.Background(), cfg, false)
 
 	if resolved.repo != "example/widgets" {
 		t.Errorf("resolved.repo = %q, want %q", resolved.repo, "example/widgets")
@@ -180,7 +182,7 @@ func TestReadSetupIssuesDisabledFailsTheReport(t *testing.T) {
 		IssuesEnabled: &disabled,
 	}, checkout)
 
-	_, rows := readSetup(context.Background(), cfg)
+	_, rows := readSetup(context.Background(), cfg, false)
 
 	r := findSetupRow(t, rows, "issues enabled")
 	if r.status != setupMissing || !r.required {
@@ -202,7 +204,7 @@ func TestReadSetupIssuesEnabledIsUnknownOnAnOldGh(t *testing.T) {
 		NoIssuesEnabledField: true,
 	}, checkout)
 
-	_, rows := readSetup(context.Background(), cfg)
+	_, rows := readSetup(context.Background(), cfg, false)
 
 	if r := findSetupRow(t, rows, "issues enabled"); r.status != setupUnknown {
 		t.Errorf("issues enabled row = %+v, want %q on a gh that doesn't report it", r, setupUnknown)
@@ -224,7 +226,7 @@ func TestReadSetupChecksTheGateLabelToo(t *testing.T) {
 	cfg := setupCfg(t, &ghState{Labels: []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel}}, checkout)
 	cfg.label = "ready"
 
-	_, rows := readSetup(context.Background(), cfg)
+	_, rows := readSetup(context.Background(), cfg, false)
 
 	r := findSetupRow(t, rows, "ready")
 	if r.status != setupMissing || !r.required {
@@ -243,7 +245,7 @@ func TestReadSetupPluginRowIsUnknownRatherThanFailingWithNoFixture(t *testing.T)
 	_, checkout := upstream(t)
 	cfg := setupCfg(t, &ghState{Labels: []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel}}, checkout)
 
-	_, rows := readSetup(context.Background(), cfg)
+	_, rows := readSetup(context.Background(), cfg, false)
 
 	r := findSetupRow(t, rows, "plugin")
 	if r.status != setupUnknown {
@@ -265,7 +267,7 @@ func TestReadSetupMakesReadsOnly(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "gh.log")
 	setFakeEnv(&cfg, fakeGhLogEnv, logPath)
 
-	readSetup(context.Background(), cfg)
+	readSetup(context.Background(), cfg, false)
 
 	b, err := os.ReadFile(logPath)
 	if err != nil {
@@ -278,6 +280,203 @@ func TestReadSetupMakesReadsOnly(t *testing.T) {
 		fields := strings.Fields(line)
 		if len(fields) >= 2 && fields[1] == "create" && !strings.Contains(line, "--help") {
 			t.Errorf("setup made a write call: %q", line)
+		}
+	}
+}
+
+// -policy-labels adds the tier-alias set to the table — the report itself,
+// not only -apply's own offer — so an operator can preview it before writing
+// anything.
+func TestPolicyLabelDefsAreTierAliasesOnly(t *testing.T) {
+	t.Parallel()
+	defs := policyLabelDefs()
+	var names []string
+	for _, d := range defs {
+		names = append(names, d.name)
+	}
+	for _, want := range []string{"model:opus", "model:sonnet", "model:haiku", "model:default",
+		"effort:low", "effort:medium", "effort:high", "effort:xhigh", "effort:max"} {
+		if !slices.Contains(names, want) {
+			t.Errorf("policyLabelDefs() = %v, missing %q", names, want)
+		}
+	}
+	for _, unwanted := range []string{"model:best", "model:claude-opus-5"} {
+		if slices.Contains(names, unwanted) {
+			t.Errorf("policyLabelDefs() = %v, must not offer %q — tier aliases only", names, unwanted)
+		}
+	}
+}
+
+// readSetup shows the policy labels in the report too, not only when -apply
+// is given — an operator previewing what -policy-labels would offer.
+func TestReadSetupIncludesPolicyLabelRowsWhenRequested(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	cfg := setupCfg(t, &ghState{}, checkout)
+
+	_, rows := readSetup(context.Background(), cfg, true)
+
+	if r := findSetupRow(t, rows, "model:opus"); r.status != setupMissing || r.required {
+		t.Errorf("model:opus row = %+v, want missing and not required", r)
+	}
+
+	_, plain := readSetup(context.Background(), cfg, false)
+	for _, r := range plain {
+		if r.name == "model:opus" {
+			t.Error("readSetup(..., false) must not add policy label rows")
+		}
+	}
+}
+
+// The point of ticket 3: -apply -yes creates exactly the missing required
+// labels, and running it again creates nothing more.
+func TestApplySetupCreatesMissingRequiredLabelsIdempotently(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	cfg := setupCfg(t, &ghState{}, checkout)
+
+	cfg, rows := readSetup(context.Background(), cfg, false)
+	defs := setupLabelDefs(cfg, false)
+	var out strings.Builder
+	rows = applySetup(context.Background(), strings.NewReader(""), &out, cfg, rows, defs, true)
+
+	for _, name := range []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel} {
+		r := findSetupRow(t, rows, name)
+		if r.status != setupOK {
+			t.Errorf("row %q = %+v, want ok after -apply -yes", name, r)
+		}
+	}
+	if setupFailed(rows) {
+		t.Errorf("setupFailed(rows) = true after -apply -yes created every required label: %+v", rows)
+	}
+
+	// A second pass finds nothing left to create.
+	_, rows2 := readSetup(context.Background(), cfg, false)
+	var out2 strings.Builder
+	rows2 = applySetup(context.Background(), strings.NewReader(""), &out2, cfg, rows2, defs, true)
+	if out2.String() != "" {
+		t.Errorf("second -apply -yes run wrote %q, want nothing left to create", out2.String())
+	}
+}
+
+// Declining a step leaves that label missing — applySetup must not create it,
+// and the row it hands back still says so.
+func TestApplySetupAnsweringNoLeavesTheLabelMissing(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	cfg := setupCfg(t, &ghState{}, checkout)
+
+	cfg, rows := readSetup(context.Background(), cfg, false)
+	defs := setupLabelDefs(cfg, false)
+	var out strings.Builder
+	// One "n" per required label in the table, isTTY-style answers, not -yes.
+	in := strings.NewReader("n\nn\nn\n")
+	rows = applySetup(context.Background(), in, &out, cfg, rows, defs, false)
+
+	for _, name := range []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel} {
+		r := findSetupRow(t, rows, name)
+		if r.status != setupMissing {
+			t.Errorf("row %q = %+v, want still missing after declining", name, r)
+		}
+	}
+	if !setupFailed(rows) {
+		t.Error("setupFailed(rows) = false, want true — every required label was declined")
+	}
+
+	_, rows2 := readSetup(context.Background(), cfg, false)
+	for _, name := range []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel} {
+		if r := findSetupRow(t, rows2, name); r.status != setupMissing {
+			t.Errorf("second read: row %q = %+v, want still missing — nothing should have been created", name, r)
+		}
+	}
+}
+
+// A public repository with no -label given gets asked to name one, "ready"
+// suggested — and -yes takes that suggestion without asking.
+func TestApplySetupPromptsForGateLabelOnPublicRepoWithNoLabel(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	cfg := setupCfg(t, &ghState{Visibility: "PUBLIC",
+		Labels: []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel}}, checkout)
+
+	cfg, rows := readSetup(context.Background(), cfg, false)
+	if cfg.visibility != "PUBLIC" {
+		t.Fatalf("test setup: cfg.visibility = %q, want PUBLIC", cfg.visibility)
+	}
+	defs := setupLabelDefs(cfg, false)
+	var out strings.Builder
+	rows = applySetup(context.Background(), strings.NewReader(""), &out, cfg, rows, defs, true)
+
+	r := findSetupRow(t, rows, "ready")
+	if r.status != setupOK {
+		t.Errorf("row %q = %+v, want ok — -yes should have taken the suggested name and created it", "ready", r)
+	}
+
+	exists, err := labelExists(context.Background(), cfg, "ready")
+	if err != nil || !exists {
+		t.Errorf("labelExists(ready) = %v, %v, want true, nil", exists, err)
+	}
+}
+
+// A create the repository refuses (no write access) says so in plain words,
+// never the raw gh stderr — which would otherwise be an HTTP 403 body an
+// operator has to decode.
+func TestApplySetupRefusedCreateNamesWriteAccessNotRawStderr(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	cfg := setupCfg(t, &ghState{DenyLabelCreate: true}, checkout)
+
+	cfg, rows := readSetup(context.Background(), cfg, false)
+	defs := setupLabelDefs(cfg, false)
+	var out strings.Builder
+	rows = applySetup(context.Background(), strings.NewReader(""), &out, cfg, rows, defs, true)
+
+	if !strings.Contains(out.String(), "needs write access to "+cfg.repo) {
+		t.Errorf("output = %q, want it to name %q needing write access", out.String(), cfg.repo)
+	}
+	if strings.Contains(out.String(), "HTTP 403") {
+		t.Errorf("output = %q, leaked raw gh stderr", out.String())
+	}
+	for _, name := range []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel} {
+		if r := findSetupRow(t, rows, name); r.status != setupMissing {
+			t.Errorf("row %q = %+v, want still missing — the create was refused", name, r)
+		}
+	}
+}
+
+// -apply with stdin that is not a terminal and no -yes refuses before making
+// any call, naming -yes, exit code 2 (errFlagsReported) — never a blocking
+// read.
+func TestRunSetupApplyNeedsYesWithoutATerminal(t *testing.T) {
+	t.Parallel()
+	var out strings.Builder
+	err := runSetup(context.Background(), []string{"-apply"}, strings.NewReader(""), false, &out, report{})
+	if !errors.Is(err, errFlagsReported) {
+		t.Errorf("err = %v, want errFlagsReported", err)
+	}
+	if !strings.Contains(out.String(), "-yes") {
+		t.Errorf("output = %q, want it to name -yes", out.String())
+	}
+}
+
+// The same refusal must not fire on a terminal, or once -yes is given, or
+// without -apply at all — only the combination of a write that would ask and
+// no way to ask it blocks.
+func TestSetupApplyNeedsYes(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		apply, yes, isTTY bool
+		want              bool
+	}{
+		{apply: true, yes: false, isTTY: false, want: true},
+		{apply: true, yes: true, isTTY: false, want: false},
+		{apply: true, yes: false, isTTY: true, want: false},
+		{apply: true, yes: true, isTTY: true, want: false},
+		{apply: false, yes: false, isTTY: false, want: false},
+	}
+	for _, c := range cases {
+		if got := setupApplyNeedsYes(c.apply, c.yes, c.isTTY); got != c.want {
+			t.Errorf("setupApplyNeedsYes(%v, %v, %v) = %v, want %v", c.apply, c.yes, c.isTTY, got, c.want)
 		}
 	}
 }

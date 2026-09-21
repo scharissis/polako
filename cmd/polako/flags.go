@@ -57,6 +57,13 @@ type config struct {
 	skill        string
 	branchPrefix string
 	label        string
+	// visibility is the repository's visibility as `gh repo view` last
+	// reported it — set only by setup's own read (readSetup), for
+	// applySetup's public-repo-no--label prompt. Every other verb reads
+	// visibility off its own local repoView instead; this field exists so
+	// that one read does not have to be threaded back out of readSetup by
+	// hand.
+	visibility string
 	// ignoreSkew is consent to what versionSkewGate otherwise refuses:
 	// starting a drain whose installed skill is an older release than this
 	// binary, which is the #239 shape — a shift on a skill missing recent
@@ -487,8 +494,10 @@ const envUsage = "Any flag below can take its default from the environment:\n" +
 // mirrored onto `tidy`: a forgotten export would turn every future dry-run
 // preview into a live worktree-and-branch deletion run, which is exactly the
 // case -dry-run defaulting on is meant to prevent for the reason -apply
-// exists at all.
-var envExempt = map[string]bool{"version": true, "dry-run": true, "apply": true}
+// exists at all. POLAKO_YES mirrors the same risk onto `setup -apply`: it is
+// the flag that turns "ask before every write" into "write without asking",
+// and a forgotten export would make every future setup run silent.
+var envExempt = map[string]bool{"version": true, "dry-run": true, "apply": true, "yes": true}
 
 // applyEnvDefaults lets an operator set a per-machine default for any flag, so
 // a preference they always want lives in a shell profile instead of being
