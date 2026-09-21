@@ -99,6 +99,13 @@ func dryRun(ctx context.Context, cfg config, out io.Writer) error {
 	policy.labels, policy.size = issuePickupPolicy(ctx, cfg, issue)
 	runCfg = policy.choose(reasonImplement).apply(runCfg)
 	cfg.logf("issue #%d would be worked next; the invocation follows on stdout", issue)
+	if runCfg.remote {
+		// Under -remote the prompt travels on stdin (see remoteStdin), not
+		// argv — the printed invocation alone would no longer show it, so
+		// say it here instead of leaving a dry run silent about the one
+		// thing it exists to reveal.
+		cfg.logf("-remote is on, so the prompt travels on stdin, not argv: %s", prompt)
+	}
 	_, err = fmt.Fprintln(out, commandLine(cfg.claudeBin, buildArgs(runCfg, prompt, "")))
 	return err
 }

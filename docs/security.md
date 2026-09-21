@@ -118,6 +118,7 @@ Two things, one of them only on request:
 | --- | --- | --- |
 | [`-post-summary`](run-data.md#putting-it-on-the-pr--post-summary) | One line of run numbers, as a comment on your own merged PR — readable by exactly the people who can already see that PR. | Off. |
 | Evidence images | A PNG the skill captured as real output, pushed to the `polako-evidence` orphan branch on your own origin and embedded in the PR body by commit sha — readable by anyone who can already read that repo. | On, for a run whose diff touches browser-rendered files in a repo with a script to serve them. [`-visual-evidence`](reference.md) on `polako work`, default on, is the off switch — it appends `no-evidence`, the skill's own second argument, to the invocation. |
+| [`-remote`](reference.md#watching-a-shift-from-anywhere--remote) | Each run's session, registered with Remote Control through the operator's own claude.ai account — watchable and typeable from claude.ai/code or the app, the same visibility an interactive `claude --remote-control` session has. | On. `-remote=false` keeps runs to this machine. |
 
 `plan` and `health` don't change this — neither has a `-post-summary` of its
 own, and neither posts anything anywhere.
@@ -131,23 +132,23 @@ read back by nothing, turned off with `-log off`; `-notify` runs a command
 of yours on your own machine; the skill half, being a prompt, collects
 nothing at all.
 
-### `-remote`, and why it isn't in that table
+### `-remote`
 
-[`-remote`](reference.md#watching-a-shift-from-anywhere--remote) is on by
-default and used to be the second outward path — session *text*, not
-numbers. It isn't, today: no `claude` CLI registers headless runs with
-Remote Control — the current one takes `--remote-control` under `-p` and
-never starts the bridge. polako stops passing the flag at all, so with
-`-remote` on or off, no session content goes anywhere.
-
-Worth stating rather than dropping quietly, because the reverse matters. If
-a future CLI registers headless runs and polako passes the flag again, this
-table gains a row: a registered session is readable through the claude.ai
-account the CLI already authenticates as — the same account running the
-model and holding the transcript — reaching you and nobody else, the same
-visibility an interactive `claude --remote-control` session has.
-`-remote=false` would again be the way to decline it. Until then there's
-nothing to decline.
+The destination isn't new either: Remote Control is Claude Code's own
+feature, and a registered session reaches nobody an interactive `claude
+--remote-control` session wouldn't already reach — the operator's own
+claude.ai account, already running the model and already holding the
+transcript. What's new on [issue
+#471](https://github.com/scharissis/polako/issues/471) is the channel a
+headless run reaches it through: a `remote_control` control request written
+to the child's stdin over the stream-json protocol, probed by hand and
+confirmed by no doc or published SDK type. polako never waits on the reply —
+a success logs the session URL, an error logs the CLI's own reason, and no
+reply by the end of the run logs one line saying so — so a CLI that never
+answers, or answers with a shape this run doesn't recognise, cannot hang,
+fail or re-dispatch anything; the stall watchdog stays the only kill for a
+silent CLI. `-remote=false` is the way to decline it, unchanged since before
+this issue: no stdin, no `-n`, the same argv `work` always sent.
 
 ### The evidence ref
 
@@ -170,4 +171,5 @@ release is ahead of the binary or the installed plugin, nothing otherwise.
 All three send nothing about your run, your repository or your account: the
 request carries only the path to a file anyone can already fetch from a
 browser. Not a second destination under the table above, but named here for
-the same reason `-remote` is.
+the same reason every row in it is: worth stating rather than dropping
+quietly.

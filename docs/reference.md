@@ -39,7 +39,7 @@ These are `polako work`'s own; the other six verbs take smaller sets —
 | `-strict-order` | `false` | Work issues in strict ascending order: wait in place on an issue awaiting an answer instead of moving past it. |
 | `-dry-run` | `false` | Resolve the next issue, print the `claude` invocation it would get, and exit. Runs nothing and writes nothing — see [Looking before you leap](#looking-before-you-leap--dry-run). |
 | `-notify` | *(none)* | Command to run whenever polako needs a human, with context in `POLAKO_NOTIFY_*` — see [Being told when it needs you](#being-told-when-it-needs-you--notify). |
-| `-remote` | `true` | Ask for each run to be watchable from claude.ai/code or the app. **Inert today** — no `claude` CLI registers headless runs, so nothing is sent. See [Watching a shift from anywhere](#watching-a-shift-from-anywhere--remote). |
+| `-remote` | `true` | Register each run with Remote Control, watchable and typeable from claude.ai/code or the app. See [Watching a shift from anywhere](#watching-a-shift-from-anywhere--remote). |
 | `-visual-evidence` | `true` | Let the skill publish before/after screenshots to the `polako-evidence` ref. `false` appends `no-evidence` to the skill invocation instead. See [Security](security.md#the-evidence-ref). |
 | `-run-tag` | *(none)* | Freeform label recorded with every run, so one batch can be compared against another. |
 | `-metrics` | `~/.polako/metrics` | Directory for run-data records, or `off` to write nothing. |
@@ -57,11 +57,12 @@ leap of faith. `-dry-run` takes it out:
 $ polako work -dir ../my-project -dry-run
 example/my-project — running /polako:implement-issue per issue, polling every 5m0s
   dry-run  resolving the next issue only — no claude run, no GitHub write, no run data
-  remote   on, but no claude CLI registers headless runs with Remote Control yet — runs stay on this machine and unwatched, and nothing is sent anywhere (-remote=false silences this line; a later polako lights the flag up once a CLI supports it)
+  remote   on — each run registers with Remote Control under the operator's own claude.ai account, watchable and typeable from claude.ai/code or the app (-remote=false keeps runs to this machine)
 ready: #12, #14, #19
 waiting on an answer: #9
 issue #12 would be worked next; the invocation follows on stdout
-claude -p '/polako:implement-issue 12' --permission-mode acceptEdits --allowedTools '…' --output-format stream-json --verbose
+-remote is on, so the prompt travels on stdin, not argv: /polako:implement-issue 12
+claude -p --input-format stream-json --permission-mode acceptEdits -n 'polako example/my-project#12' --allowedTools '…' --output-format stream-json --verbose
 ```
 
 It resolves the next issue exactly as a real shift would — same queue,
@@ -135,15 +136,14 @@ muted.
 ### Watching a shift from anywhere: `-remote`
 
 A shift's runs are unattended and invisible — output exists only in the
-terminal that started it. `-remote` asks for runs to show up in your session
-list on [claude.ai/code](https://claude.ai/code) and the mobile app instead.
-**It does nothing today**, though: no `claude` CLI registers headless runs
-with Remote Control, so polako never passes the flag — same invocation
-either way, nothing leaves this machine. Startup says so once, and
-`-remote=false` silences that line and changes nothing else. The flag stays
-as interface ([issue #52](https://github.com/scharissis/polako/issues/52),
-see [security.md](security.md) for the trade); until a CLI supports it, [the
-shift log](#the-shift-log--log) reads a run you weren't watching.
+terminal that started it. `-remote` registers each one with Remote Control,
+watchable and typeable from claude.ai/code and the mobile app — the
+operator's own claude.ai account. It's a stream-json request over stdin,
+probed by hand, confirmed by no doc ([issue #52](https://github.com/scharissis/polako/issues/52)
+settled the argument, [issue #471](https://github.com/scharissis/polako/issues/471) found it;
+see [security.md](security.md) for the trade). polako never waits on the
+reply — a success or an error each log once, neither logs "stayed
+unwatched" — `-remote=false` keeps runs to this machine.
 
 ### The shift log: `-log`
 

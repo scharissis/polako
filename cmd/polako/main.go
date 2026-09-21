@@ -447,14 +447,11 @@ func preflightPairs(cfg config) [][2]string {
 	}
 	if cfg.remote {
 		// Said every time, unprompted, like the recorder's line and for the same
-		// reason — except that what it has to say is now the opposite. An
-		// on-by-default flag that quietly does nothing is worse than one that
-		// quietly does something, because the operator goes looking for sessions
-		// that will never appear.
+		// reason: this is the one thing a shift does that makes its sessions
+		// visible somewhere other than this terminal, and it is on by default.
 		pairs = append(pairs, [2]string{"remote",
-			"on, but no claude CLI registers headless runs with Remote Control yet — runs stay on this machine " +
-				"and unwatched, and nothing is sent anywhere (-remote=false silences this line; a later polako " +
-				"lights the flag up once a CLI supports it)"})
+			"on — each run registers with Remote Control under the operator's own claude.ai account, " +
+				"watchable and typeable from claude.ai/code or the app (-remote=false keeps runs to this machine)"})
 	}
 	if cfg.rec.enabled() {
 		// Say where the data goes, every time, unprompted: it is the whole of

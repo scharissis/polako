@@ -46,20 +46,25 @@ in the PR body rather than doing it quietly.
   it never leaves the machine, no exception — and a read from it anywhere in
   the binary is the same design error as a read from the records.
 - **What leaves the machine is named here.** `-post-summary`
-  above is the one thing that actually does. `-remote` was meant to be the
-  second but isn't one today: no `claude`
-  CLI registers headless runs with Remote Control — the current one takes
-  `--remote-control` under `-p`, runs a normal session, and never starts the
-  bridge, with no in-band signal to detect the ignore (issue #82). So nothing
-  passes the flag, and with `-remote` on or off no session text goes anywhere.
-  The flag stays as interface: issue #52 settled the argument for re-arming
-  it — destination is the operator's own claude.ai account (already running
-  the model, already holding the transcript), channel is Claude Code's own —
-  and `-remote=false` must keep restoring today's behaviour byte for byte.
-  Re-arming against a CLI that does register brings that argument back into
-  force, not a new one; it must still degrade to an unwatched run rather than
-  hang, prompt or fail one, and nothing durable may remember whether it
-  worked. A third is staged the same way: the `polako-evidence` orphan
+  is one. `-remote` is the second, re-armed on issue #471 against #52's own
+  argument: destination is the operator's own claude.ai account (already
+  running the model, already holding the transcript), channel is Claude
+  Code's own. The documented `--remote-control` flag never worked under
+  `-p` (issue #82 — Claude Code accepted it, ran a normal session, and
+  never started the bridge, with no in-band signal to detect the ignore),
+  but the stream-json protocol's `remote_control` control request does,
+  probed by hand and confirmed by no doc or published SDK type. On,
+  buildArgs/startClaude move the prompt off argv onto a fixed stdin buffer
+  carrying that request and the prompt as a user message, and add `-n` so
+  the session list is legible; `-remote=false` restores today's argv byte
+  for byte — no stdin, no exception. polako never waits on the reply and
+  nothing durable remembers whether it worked: a success or an error each
+  log once, a silent CLI logs "stayed unwatched", and no reply shape, order
+  or absence can hang, fail or re-dispatch a run — the stall watchdog stays
+  the only kill for one. Registration carries no confirmation step even on
+  an account that has never used Remote Control before; polako's own
+  shift-start line is the operator's only notice of it. A third is staged
+  the same way: the `polako-evidence` orphan
   branch on origin. `skills/implement-issue/SKILL.md`'s publish recipe
   writes through it, chosen per run by the skill's own `evidence` argument
   (`no-evidence` turns it off). Issue #402 shipped the channel and the

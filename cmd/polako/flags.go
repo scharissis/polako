@@ -169,16 +169,24 @@ type config struct {
 	// that started it. remote asks for those runs to be watchable from
 	// claude.ai/code or the mobile app instead.
 	//
-	// Asks, and today gets nothing — which is why no invocation carries
-	// `--remote-control` any more. Claude Code accepts the flag under -p, emits
-	// a normal init event, runs to completion and never starts the remote
-	// bridge; print mode is the whole differentiator, and the init event carries
-	// no field to detect the ignore from (issue #82). Sending a flag that does
-	// nothing only kept the promise alive, so the flag is not sent and startup
-	// says so. What remains is interface: the flag is still accepted and still
-	// documented, so the day a CLI registers headless runs there is one place to
-	// light it up again and the argument for it is already on issue #52.
+	// Re-armed on issue #471: the documented `--remote-control` flag never did
+	// anything under -p (issue #82 — Claude Code accepted it, emitted a normal
+	// init event, and never started the bridge), but the stream-json control
+	// channel has a `remote_control` request that works headless, probed by
+	// hand and undocumented. On, buildArgs and startClaude move the prompt
+	// from argv to a stdin control_request plus a user message (see
+	// remoteStdin) and add -n so the session list is legible; off keeps
+	// today's argv byte for byte, no stdin at all. polako never waits on the
+	// reply — a success logs the session URL once, an error logs the CLI's own
+	// reason once, and no reply by the end of the run logs "stayed unwatched"
+	// — so no reply shape, order or absence can hang, fail or re-dispatch a
+	// run; the stall watchdog stays the only kill for a silent CLI.
 	remote bool
+	// remoteName is what one invocation is called in the operator's Remote
+	// Control session list, set per run by issueRun and runRemediation —
+	// polako <repo>#<issue> — the way addTools is: it names an issue, and the
+	// recorder's own config must not change with every issue number.
+	remoteName string
 	// visualEvidence is the skill's own `evidence` argument, minted per run:
 	// true (the default) sends nothing extra, so the prompt stays
 	// byte-identical to before this flag existed; false appends `no-evidence`,
@@ -368,7 +376,7 @@ func parseFlags() config {
 	flag.StringVar(&cfg.notifyCmd, "notify", "",
 		"command to run when polako needs a human, with context in "+notifyPrefix+"* (see docs/reference.md)")
 	flag.BoolVar(&cfg.remote, "remote", true,
-		"ask for each run to be watchable from claude.ai/code or the phone (no CLI registers headless runs yet)")
+		"register each run with Remote Control, watchable and typeable from claude.ai/code or the phone")
 	flag.BoolVar(&cfg.visualEvidence, "visual-evidence", true,
 		"let the skill publish before/after screenshots to the polako-evidence ref (false appends no-evidence to the skill invocation)")
 	flag.StringVar(&cfg.tag, "run-tag", "", "label recorded with every run, for comparing one batch against another")

@@ -281,6 +281,7 @@ func runRemediation(ctx context.Context, cfg config, issue, prNumber int, reason
 	choice runChoice, prompt, extraTools, beforeHead string, st *issueState, tally *issueTally) error {
 	runCfg := choice.apply(cfg)
 	runCfg.addTools = resolveTools(cfg.addTools, resolveTools(extraTools, prCommentTools(prNumber)))
+	runCfg.remoteName = remoteSessionName(cfg, issue)
 	if line := choice.dispatchLine(issue); line != "" {
 		cfg.logf("%s", line)
 	}
