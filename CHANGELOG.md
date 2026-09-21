@@ -13,6 +13,19 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.30.0]
+
+### What's Changed
+* docs: plan for a status report that kept up by @scharissis in https://github.com/scharissis/polako/pull/505
+* refactor: one shutdown-context helper for dispatchVerb's cases by @scharissis in https://github.com/scharissis/polako/pull/517 (closes #477)
+* feat: a permission park names its -add-tools entries on the thread by @scharissis in https://github.com/scharissis/polako/pull/518 (closes #432)
+* feat: the exit summary ends with the -add-tools line to paste by @scharissis in https://github.com/scharissis/polako/pull/519 (closes #433)
+* feat: polako unpark, the attended morning-after step for parks by @scharissis in https://github.com/scharissis/polako/pull/520 (closes #434)
+* feat: status names the grant each parked issue is waiting on by @scharissis in https://github.com/scharissis/polako/pull/521 (closes #435)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.29.0...v0.30.0
+
 ## [0.29.0]
 
 ### What's Changed
