@@ -62,6 +62,26 @@ func TestSetupTemplatesRowFlagsAManagedLabel(t *testing.T) {
 	}
 }
 
+// A review finding: the label-line scan must not depend on quoting — an
+// unquoted flow item, a bare scalar, and a single-quoted dash item are all
+// valid YAML spellings of the same leak.
+func TestSetupTemplatesRowFlagsEveryYAMLQuotingForm(t *testing.T) {
+	t.Parallel()
+	cases := []string{
+		"name: Bug\nlabels: [proposed]\nbody: []\n",
+		"name: Bug\nlabels: proposed\nbody: []\n",
+		"name: Bug\nlabels:\n  - 'proposed'\nbody: []\n",
+	}
+	for _, content := range cases {
+		dir := t.TempDir()
+		writeIssueTemplate(t, dir, "bug.yml", content)
+		row := setupTemplatesRow(config{dir: dir})
+		if row.status != setupMissing || !row.required {
+			t.Errorf("content %q: row = %+v, want a required missing row", content, row)
+		}
+	}
+}
+
 func TestSetupTemplatesRowFlagsAPolicyPrefix(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

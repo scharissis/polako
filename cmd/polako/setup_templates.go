@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -35,17 +36,54 @@ func templateLabelLines(form string) []string {
 	return out
 }
 
-// leakedTemplateLabel reports the first entry in lines that names a member of
-// forbidden (quoted or dash-list) or carries a model:/effort: prefix — the
-// former lets an outsider queue work on a gated repo, the latter raises what
-// an unattended run costs. "" means the template is clean.
-func leakedTemplateLabel(lines []string, forbidden []string) string {
+// templateLabelTokens turns the labels: block templateLabelLines found into
+// individual label names, stripping YAML's quoting — double, single, or
+// none — whether written as a flow list (`[a, "b"]`), a bare scalar
+// (`labels: a`), or a block list (`labels:` then `- a` / `- "b"` below it).
+// A raw substring scan over the line text can't tell `proposed` (a leak) from
+// `not-proposed` or `risk-model:high` (not); token boundaries can.
+func templateLabelTokens(lines []string) []string {
+	var tokens []string
 	for _, line := range lines {
-		for _, label := range forbidden {
-			if strings.Contains(line, `"`+label+`"`) || strings.Contains(line, "- "+label) {
-				return label
+		if rest, ok := strings.CutPrefix(line, "labels:"); ok {
+			rest = strings.TrimSuffix(strings.TrimSpace(rest), "]")
+			rest = strings.TrimPrefix(rest, "[")
+			for _, part := range strings.Split(rest, ",") {
+				if part = unquoteYAMLScalar(part); part != "" {
+					tokens = append(tokens, part)
+				}
 			}
+			continue
 		}
+		item := strings.TrimPrefix(strings.TrimSpace(line), "- ")
+		if part := unquoteYAMLScalar(item); part != "" {
+			tokens = append(tokens, part)
+		}
+	}
+	return tokens
+}
+
+// unquoteYAMLScalar trims whitespace and, if present, one layer of matching
+// double or single quotes.
+func unquoteYAMLScalar(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 && ((s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'')) {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
+// leakedTemplateLabel reports the first label token that names a member of
+// forbidden, or carries a model:/effort: prefix — the former lets an
+// outsider queue work on a gated repo, the latter raises what an unattended
+// run costs. "" means the template is clean.
+func leakedTemplateLabel(lines []string, forbidden []string) string {
+	for _, token := range templateLabelTokens(lines) {
+		if slices.Contains(forbidden, token) {
+			return token
+		}
+	}
+	for _, line := range lines {
 		for _, prefix := range []string{"model:", "effort:"} {
 			if strings.Contains(line, prefix) {
 				return prefix + "…"
