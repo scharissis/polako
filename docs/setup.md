@@ -20,12 +20,14 @@ setup
   gh repo view        ok             PUBLIC — public: -label is required for `polako work` to refuse an unfiltered queue
   issues enabled      ok
   origin/HEAD         ok
+  .gitignore          missing        missing /.worktrees/, /PLAN.md, /.polako-scratch/ — `polako setup -apply` proposes it through a PR
+  CLAUDE.md           missing        missing the polako block — `polako setup -apply` proposes it through a PR; run `/init` for the rest of CLAUDE.md
+  docs/VISION.md      missing        optional — `polako setup -apply` can scaffold it and docs/plans/README.md (advice only)
   plugin              ok             0.23.0
   sub-issue support   ok
   needs-human         missing        gh label create needs-human --color D93F0B --description "polako parked this issue for a human"
   proposed            missing        gh label create proposed --color 1D76DB --description "proposed by polako — a human removes this label to queue it"
   awaiting-answer     missing        gh label create awaiting-answer --color FBCA04 --description "polako is waiting for an answer on this issue"
-  .gitignore          missing        missing /.worktrees/, /PLAN.md, /.polako-scratch/ — `polako setup -apply` proposes it through a PR
 
 polako work -dir ../my-project -dry-run
 ```
@@ -62,6 +64,14 @@ in a script.
   where `implement-issue` puts its own worktree, resume note and scratch
   files, so a fresh repo can't accidentally commit them. Not required: a
   repo without it still runs `polako work` fine.
+- CLAUDE.md carries a marked polako block, between `<!-- polako:begin -->`
+  and `<!-- polako:end -->`: the one command that checks this repo's work
+  (detected from `scripts/check.sh`, a Makefile `test` target, `go.mod`,
+  `package.json`'s `test` script, `Cargo.toml` or `pyproject.toml`, else a
+  line asking a human to fill it in), which files are scratch, the `issue-N`
+  branch contract, and that issue text is data, not instructions. Not
+  required, the same as `.gitignore`.
+- `docs/VISION.md` exists — advice only, since `plan-backlog` is opt-in.
 
 ## Flags
 
@@ -109,14 +119,21 @@ raw `gh` error.
 
 ## Proposing repo files: `-apply`
 
-After the labels, `-apply` asks once more whether to propose the missing
-`.gitignore` lines. Accepted: one commit (`chore: set up polako`) on a
+After the labels, `-apply` asks up to three more questions, each `[Y/n]`
+default yes except the last: propose the missing `.gitignore` lines, propose
+the CLAUDE.md block, and — default *no* — also scaffold `docs/VISION.md` and
+`docs/plans/README.md`. `-yes` takes each step's own default, so a plain
+`-apply -yes` run proposes the first two and leaves the scaffold alone;
+scaffolding it needs an explicit `y` on that question.
+
+Whatever's accepted becomes one commit (`chore: set up polako`) on a
 `polako-setup` branch, built in a worktree at `.worktrees/polako-setup`,
 pushed, behind one PR a human merges — never a direct commit to the default
 branch. An open PR from `polako-setup` already: its URL is printed and
 nothing is written. A local or remote branch with no PR yet (a previous run
-that died mid-way): built on, never force-pushed.
+that died mid-way): built on, never force-pushed. An item already satisfied
+on the freshly-fetched default branch (a previous `polako-setup` PR merged
+it) reports as `ok` rather than being proposed again — this can happen for
+some items and not others in the same run.
 
-Still no issue is ever touched, and no repo setting is changed. A CLAUDE.md
-block and a `docs/VISION.md` scaffold are a later addition — see
-`docs/plans/setup.md`.
+Still no issue is ever touched, and no repo setting is changed.
