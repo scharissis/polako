@@ -6,23 +6,40 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func TestSetupVisionRow(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	if r := setupVisionRow(config{dir: dir}); r.status != setupMissing || r.required {
-		t.Errorf("row with no docs/VISION.md = %+v, want missing and not required", r)
+	if r := setupVisionRow(config{dir: dir}); r.status != setupMissing || r.required ||
+		!strings.Contains(r.detail, visionMdPath) || !strings.Contains(r.detail, plansReadmePath) {
+		t.Errorf("row with neither page = %+v, want missing, not required, naming both", r)
 	}
+
+	// A repo with its own docs/VISION.md but no docs/plans/README.md still
+	// has something scaffoldNeedsWrite (and writeScaffold) would add — the
+	// row has to say so, not read ok off docs/VISION.md alone.
 	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
 		t.Fatalf("mkdir docs: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "docs", "VISION.md"), []byte("# Vision\n"), 0o644); err != nil {
 		t.Fatalf("writing docs/VISION.md: %v", err)
 	}
+	if r := setupVisionRow(config{dir: dir}); r.status != setupMissing ||
+		strings.Contains(r.detail, visionMdPath) || !strings.Contains(r.detail, plansReadmePath) {
+		t.Errorf("row with only docs/VISION.md present = %+v, want missing naming only %s", r, plansReadmePath)
+	}
+
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "plans"), 0o755); err != nil {
+		t.Fatalf("mkdir docs/plans: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "plans", "README.md"), []byte("# Plans\n"), 0o644); err != nil {
+		t.Fatalf("writing docs/plans/README.md: %v", err)
+	}
 	if r := setupVisionRow(config{dir: dir}); r.status != setupOK {
-		t.Errorf("row with docs/VISION.md present = %+v, want ok", r)
+		t.Errorf("row with both pages present = %+v, want ok", r)
 	}
 }
 

@@ -22,7 +22,7 @@ setup
   origin/HEAD         ok
   .gitignore          missing        missing /.worktrees/, /PLAN.md, /.polako-scratch/ — `polako setup -apply` proposes it through a PR
   CLAUDE.md           missing        the polako block is missing or out of date — `polako setup -apply` proposes it through a PR; run `/init` for the rest of CLAUDE.md
-  docs/VISION.md      missing        optional — `polako setup -apply` can scaffold it and docs/plans/README.md (advice only)
+  docs/VISION.md      missing        missing docs/VISION.md, docs/plans/README.md — optional — `polako setup -apply` can scaffold them (advice only)
   plugin              ok             0.23.0
   sub-issue support   ok
   needs-human         missing        gh label create needs-human --color D93F0B --description "polako parked this issue for a human"

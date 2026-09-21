@@ -11,6 +11,7 @@ import (
 	_ "embed"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 //go:embed assets/vision.md
@@ -22,17 +23,27 @@ var plansReadmeTemplate string
 const (
 	visionMdPath     = "docs/VISION.md"
 	plansReadmePath  = "docs/plans/README.md"
-	visionAdviceOnly = "optional — `polako setup -apply` can scaffold it and docs/plans/README.md (advice only)"
+	visionAdviceOnly = "optional — `polako setup -apply` can scaffold them (advice only)"
 )
 
-// setupVisionRow is advisory only: docs/VISION.md not existing never fails
-// the report, and nothing here judges whether a repo without one is doing
-// anything wrong. plan-backlog is opt-in.
+// setupVisionRow is advisory only: the scaffold not existing never fails the
+// report, and nothing here judges whether a repo without one is doing
+// anything wrong. plan-backlog is opt-in. Driven by scaffoldNeedsWrite — the
+// same gate proposeSetupFiles checks — rather than stat'ing docs/VISION.md
+// alone, so a repo with its own VISION.md but no docs/plans/README.md still
+// gets offered the write writeScaffold would actually make.
 func setupVisionRow(cfg config) setupRow {
-	if fileExistsIn(cfg.dir, filepath.FromSlash(visionMdPath)) {
+	if !scaffoldNeedsWrite(cfg.dir) {
 		return setupRow{name: visionMdPath, status: setupOK}
 	}
-	return setupRow{name: visionMdPath, status: setupMissing, detail: visionAdviceOnly}
+	var missing []string
+	for _, rel := range []string{visionMdPath, plansReadmePath} {
+		if !fileExistsIn(cfg.dir, filepath.FromSlash(rel)) {
+			missing = append(missing, rel)
+		}
+	}
+	return setupRow{name: visionMdPath, status: setupMissing,
+		detail: "missing " + strings.Join(missing, ", ") + " — " + visionAdviceOnly}
 }
 
 // scaffoldNeedsWrite reports whether either scaffold page is missing from
