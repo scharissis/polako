@@ -2,11 +2,12 @@ package main
 
 // `polako setup` is a read-only readiness report: what a repository has for
 // polako and what it is missing, one row per check, ending with the
-// `polako work` line to run once it looks ready. `-apply` (docs/plans/setup.md,
-// ticket 3) is the one thing that writes: it creates the labels the report
-// found missing, asking `[Y/n]` per step on a terminal (or `-yes`, for a
-// script). Nothing else here is written — no issue, no repo file, no PR; see
-// ticket 4 for those.
+// `polako work` line to run once it looks ready. `-apply` is the one thing
+// that writes: it creates the labels the report found missing (ticket 3),
+// asking `[Y/n]` per step on a terminal (or `-yes`, for a script), and
+// proposes the repo files it found missing through one PR (ticket 4,
+// setup_files.go). Still no issue is ever touched, and no repo setting is
+// changed.
 //
 // Every check degrades rather than fails the whole report: a tool missing
 // from PATH, a gh too old for a field, a repository this gh cannot reach —
@@ -92,14 +93,19 @@ func runSetup(ctx context.Context, args []string, in io.Reader, isTTY bool, out 
 	cfg, rows, defs := readSetup(ctx, cfg, opt.policyLabels)
 	renderSetup(out, rpt, cfg, rows)
 	if opt.apply {
+		// One prompt for both write passes below — see setupPrompt's own
+		// doc comment for why a second Scanner over the same in would
+		// silently drop whatever the first had already read ahead.
+		prompt := newSetupPrompt(in, out, opt.yes)
 		var gateLabel string
-		rows, gateLabel = applySetup(ctx, in, out, cfg, rows, defs, opt.yes)
+		rows, gateLabel = applySetup(ctx, prompt, cfg, rows, defs)
 		if gateLabel != "" {
 			// The line renderSetup already printed named no -label: nothing
 			// had been chosen yet when it ran. Now something has.
 			cfg.label = gateLabel
 			fmt.Fprintf(out, "\n%s\n", suggestedWorkLine(cfg))
 		}
+		rows = applySetupFiles(ctx, prompt, cfg, rows)
 	}
 	if setupFailed(rows) {
 		return errSetupNotReady
@@ -219,6 +225,7 @@ func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []se
 	}
 
 	rows = append(rows, setupOriginHeadRow(ctx, cfg, gitOK))
+	rows = append(rows, setupGitignoreRow(cfg))
 	rows = append(rows, setupPluginRow(ctx, cfg, claudeOK))
 	rows = append(rows, setupSubIssueRow(ctx, cfg, reposOK))
 	defs := setupLabelDefs(cfg, policyLabels)

@@ -25,6 +25,7 @@ setup
   needs-human         missing        gh label create needs-human --color D93F0B --description "polako parked this issue for a human"
   proposed            missing        gh label create proposed --color 1D76DB --description "proposed by polako — a human removes this label to queue it"
   awaiting-answer     missing        gh label create awaiting-answer --color FBCA04 --description "polako is waiting for an answer on this issue"
+  .gitignore          missing        missing /.worktrees/, /PLAN.md, /.polako-scratch/ — `polako setup -apply` proposes it through a PR
 
 polako work -dir ../my-project -dry-run
 ```
@@ -57,6 +58,10 @@ in a script.
 - Every label polako manages — `needs-human`, `proposed`, `awaiting-answer` —
   plus `-label`'s own gate label when one is given and isn't already in that
   set. A missing one prints the exact `gh label create` command to fix it.
+- `.gitignore` covers `/.worktrees/`, `/PLAN.md` and `/.polako-scratch/` —
+  where `implement-issue` puts its own worktree, resume note and scratch
+  files, so a fresh repo can't accidentally commit them. Not required: a
+  repo without it still runs `polako work` fine.
 
 ## Flags
 
@@ -78,7 +83,8 @@ as `POLAKO_DRY_RUN` is for `tidy`.
 the read subcommands polako itself already re-derives state with, plus the
 one label lookup (`gh api repos/{owner}/{repo}/labels/<name>`) `polako
 work`'s own preflight uses to check its gate label. Nothing here opens an
-issue or touches anything but labels.
+issue or touches anything but labels and, with `-apply`, one branch and PR
+— see below.
 
 ## Creating what's missing: `-apply`
 
@@ -99,5 +105,18 @@ first — what to name the gate label, suggesting `ready` — since the report
 above never checked a label nobody named yet.
 
 A create that fails says it needs write access to the repository, never the
-raw `gh` error. The whole write surface is `gh label create`: no issue, no
-repo file, no PR — see `docs/plans/setup.md` for what those become later.
+raw `gh` error.
+
+## Proposing repo files: `-apply`
+
+After the labels, `-apply` asks once more whether to propose the missing
+`.gitignore` lines. Accepted: one commit (`chore: set up polako`) on a
+`polako-setup` branch, built in a worktree at `.worktrees/polako-setup`,
+pushed, behind one PR a human merges — never a direct commit to the default
+branch. An open PR from `polako-setup` already: its URL is printed and
+nothing is written. A local or remote branch with no PR yet (a previous run
+that died mid-way): built on, never force-pushed.
+
+Still no issue is ever touched, and no repo setting is changed. A CLAUDE.md
+block and a `docs/VISION.md` scaffold are a later addition — see
+`docs/plans/setup.md`.

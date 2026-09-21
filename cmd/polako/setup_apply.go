@@ -157,13 +157,18 @@ func (p *setupPrompt) name(question, suggestion string) string {
 }
 
 // applySetup is -apply's write pass: create every row readSetup found
-// missing, asking first unless yes says to skip asking. A public repository
-// with no -label named gets one more question before that loop — what to
-// call the gate label, defaulting to "ready" — since the report above never
-// checked a label nobody named yet; the answer is appended to both defs and
-// rows together, so the trailing len(defs) rows of rows keep lining up
-// positionally with defs one-for-one (matching by name instead could collide
-// with an unrelated row that happens to share the label's name).
+// missing, asking first unless prompt.yes says to skip asking. A public
+// repository with no -label named gets one more question before that loop —
+// what to call the gate label, defaulting to "ready" — since the report
+// above never checked a label nobody named yet; the answer is appended to
+// both defs and rows together, so the trailing len(defs) rows of rows keep
+// lining up positionally with defs one-for-one (matching by name instead
+// could collide with an unrelated row that happens to share the label's
+// name).
+//
+// prompt is built once by the caller (runSetup) and shared with
+// applySetupFiles — see setupPrompt's own doc comment for why two Scanners
+// over the same stdin would silently drop buffered input.
 //
 // Mutates and returns rows so the caller's setupFailed check reflects what
 // this pass actually created, without a second full read pass. gateLabel is
@@ -171,8 +176,7 @@ func (p *setupPrompt) name(question, suggestion string) string {
 // never ran — the caller's suggested `polako work` line was printed before
 // this ran and so cannot have named a label nobody had chosen yet; this is
 // how it finds out what to add.
-func applySetup(ctx context.Context, in io.Reader, out io.Writer, cfg config, rows []setupRow, defs []labelDef, yes bool) ([]setupRow, string) {
-	prompt := newSetupPrompt(in, out, yes)
+func applySetup(ctx context.Context, prompt *setupPrompt, cfg config, rows []setupRow, defs []labelDef) ([]setupRow, string) {
 	var gateLabel string
 	// queueGate rather than a hand-rolled visibility check, the same reason
 	// setup.go's setupRepoOKRow calls it instead of reimplementing it: this
@@ -202,18 +206,18 @@ func applySetup(ctx context.Context, in io.Reader, out io.Writer, cfg config, ro
 				// under a different required flag. Either way the label
 				// exists now, which is what this step wanted.
 				rows[ri] = setupRow{name: def.name, status: setupOK, required: def.required}
-				fmt.Fprintf(out, "  %q already exists\n", def.name)
+				fmt.Fprintf(prompt.out, "  %q already exists\n", def.name)
 				continue
 			}
 			// Named rather than relayed: the likeliest cause by far is a
 			// token without push access, and raw gh stderr for that is a
 			// wall of JSON an operator has to decode to reach the same
 			// conclusion.
-			fmt.Fprintf(out, "  could not create %q — needs write access to %s\n", def.name, cfg.repo)
+			fmt.Fprintf(prompt.out, "  could not create %q — needs write access to %s\n", def.name, cfg.repo)
 			continue
 		}
 		rows[ri] = setupRow{name: def.name, status: setupOK, required: def.required}
-		fmt.Fprintf(out, "  created %q\n", def.name)
+		fmt.Fprintf(prompt.out, "  created %q\n", def.name)
 	}
 	return rows, gateLabel
 }

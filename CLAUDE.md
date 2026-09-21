@@ -85,6 +85,20 @@ in the PR body rather than doing it quietly.
   binary, through `go install` or, for a release binary, a checksum-verified
   swap over a `gh release download`; nothing under `-dir`, nothing written
   to GitHub.
+- **`setup`'s write surface is labels, plus one PR from `polako-setup`.**
+  `-apply` creates the labels the report found missing (`gh label create`)
+  and, ticket 4 (docs/plans/setup.md, issue #416), proposes repo files
+  through one commit on a `polako-setup` branch, built in a worktree at
+  `.worktrees/polako-setup`, pushed, behind one PR a human merges — the
+  first commit the binary itself authors, and still never a direct commit
+  to the default branch, never a second PR: an already-open one is reported
+  and left alone, the same restart-safety rule the skill's own `issue-N`
+  branch holds to. The first file is `.gitignore`, covering `/.worktrees/`,
+  `/PLAN.md` and `/.polako-scratch/` — the skill's own scratch, so a fresh
+  repo can't accidentally commit it. A CLAUDE.md block and a
+  `docs/VISION.md` scaffold are a later ticket, not yet wired. No issue is
+  ever touched, no repo setting changed, and setup keeps no state of its
+  own — every run re-derives from GitHub and the tree.
 - **Restart safety.** If a PR already exists for an issue's branch, never
   re-run the skill for that issue — go straight to waiting on the PR.
 - **The `needs-human` label is orchestration state.** It's the only durable trace of a
