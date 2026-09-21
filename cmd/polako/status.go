@@ -754,24 +754,24 @@ func needsYouParts(snap statusSnapshot) []string {
 	// clause instead. snap.parks is nil (not just empty) when the read
 	// itself failed, and a nil map's lookups all miss the same way an empty
 	// one's would, so every parked issue falls back to the batched clause.
+	// One pass decides both lists, so the two clauses can never classify the
+	// same issue two different ways.
 	var undecided []int
+	var granted []string
 	for _, issue := range snap.queues.parked {
-		if it, ok := snap.parks[issue]; !ok || len(it.entries) == 0 {
+		it, ok := snap.parks[issue]
+		if !ok || len(it.entries) == 0 {
 			undecided = append(undecided, issue)
+			continue
 		}
+		granted = append(granted, fmt.Sprintf("grant %s or fix the skill, then polako unpark #%d",
+			strings.Join(it.entries, ", "), issue))
 	}
 	if len(undecided) > 0 {
 		parts = append(parts, fmt.Sprintf("decide what to do about %s (drop %s to requeue)",
 			issueRefs(undecided), needsHumanLabel))
 	}
-	for _, issue := range snap.queues.parked {
-		it, ok := snap.parks[issue]
-		if !ok || len(it.entries) == 0 {
-			continue
-		}
-		parts = append(parts, fmt.Sprintf("grant %s or fix the skill, then polako unpark #%d",
-			strings.Join(it.entries, ", "), issue))
-	}
+	parts = append(parts, granted...)
 	// Curation is a person's job by construction — nothing else takes the label
 	// off — so a backlog of proposals is one of the things only a person moves.
 	if len(snap.queues.proposed) > 0 {
