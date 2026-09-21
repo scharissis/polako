@@ -404,6 +404,127 @@ func toolResultRefusal(text string) bool {
 	return headMatchesAny(text, toolRefusalSignatures...)
 }
 
+// addToolsKind explains why addToolsEntry returned no entry; the zero value
+// means an entry was returned.
+type addToolsKind string
+
+const (
+	// addToolsNever is a refusal matching neverGrantTable — a command
+	// polako will not propose, whatever the refusal.
+	addToolsNever addToolsKind = "never"
+	// addToolsGranted is a refusal the given allowlist already covers.
+	addToolsGranted addToolsKind = "granted"
+	// addToolsAmbiguous is a Bash refusal with no CLI-named part and a `;`,
+	// `|` or `&` in the source: no single word can be pulled out of it
+	// safely, the same restraint splitCommand (notify.go) holds itself to.
+	addToolsAmbiguous addToolsKind = "ambiguous"
+	// addToolsUngrantable mirrors refusalUngrantable: a `$VAR` refusal no
+	// -add-tools entry ever fixes — the command has to be phrased
+	// differently.
+	addToolsUngrantable addToolsKind = "ungrantable"
+	// addToolsUnknown is a refusal whose tool_use never correlated, so
+	// r.command holds the CLI's own refusal text rather than the command it
+	// refused — nothing to derive a grant from.
+	addToolsUnknown addToolsKind = "unknown"
+)
+
+// neverGrantTable lists gh subcommands addToolsEntry will not propose,
+// whatever the refusal: each lets a run do something CLAUDE.md keeps to a
+// human — merge its own PR, relabel or close an issue beyond the one grant
+// its own dispatch is pinned to (issueLabelTools, issueCloseTool in
+// claude.go), or reach gh api/secret/repo/run rerun/label, none of which
+// defaultTools grants at all (flags.go). A suggestion here reads as
+// permission; the operator can still type the entry into -add-tools by
+// hand.
+var neverGrantTable = []string{
+	"gh pr merge",
+	"gh issue edit",
+	"gh issue close",
+	"gh api",
+	"gh secret",
+	"gh repo",
+	"gh run rerun",
+	"gh label",
+}
+
+// hasCommandPrefix reports whether source starts with prefix as whole
+// words, so "gh issue edit 431 ..." matches "gh issue edit" but "gh
+// issue-edit ..." does not.
+func hasCommandPrefix(source, prefix string) bool {
+	if !strings.HasPrefix(source, prefix) {
+		return false
+	}
+	rest := source[len(prefix):]
+	return rest == "" || rest[0] == ' '
+}
+
+// addToolsEntry turns one refusal into the -add-tools entry that would let
+// it through on a rerun, or explains in kind why there is none. allowlist
+// is the effective allowlist the run actually used (resolveTools(cfg.tools,
+// cfg.addTools)) — an entry it already covers is dropped as addToolsGranted
+// rather than suggested again.
+//
+// A Bash refusal uses the CLI's own named part when the refusal named one —
+// a compound-command approval lists the exact part, so that word is trusted
+// over the whole line — else the command's own first word. gh takes three
+// words instead of one: defaultTools grants gh per subcommand (flags.go's
+// comment on defaultTools explains why), so the entry has to match at that
+// grain. A source holding `;`, `|` or `&` is refused rather than guessed at
+// — splitCommand (notify.go) already declines to become a shell parser, and
+// this does the same on the CLI's own text. Any other tool's refusal names
+// the bare tool, unconditionally: a non-Bash refusal is the whole tool
+// asking, not a command inside it.
+func addToolsEntry(r refusal, allowlist string) (entry string, kind addToolsKind) {
+	if r.kind == refusalUngrantable {
+		return "", addToolsUngrantable
+	}
+	if r.tool == "" {
+		return "", addToolsUnknown
+	}
+	if r.tool == "Bash" {
+		source := r.part
+		if source == "" {
+			source = r.command
+		}
+		source = strings.TrimSpace(source)
+		if source == "" || strings.ContainsAny(source, ";|&") {
+			return "", addToolsAmbiguous
+		}
+		if hasNeverGrantPrefix(source) {
+			return "", addToolsNever
+		}
+		fields := strings.Fields(source)
+		n := 1
+		if fields[0] == "gh" {
+			n = min(3, len(fields))
+		}
+		entry = "Bash(" + strings.Join(fields[:n], " ") + ":*)"
+	} else {
+		entry = r.tool
+	}
+	if resolveTools(allowlist, entry) == allowlist {
+		return "", addToolsGranted
+	}
+	return entry, ""
+}
+
+// hasNeverGrantPrefix reports whether source is, or leads with, one of
+// neverGrantTable's entries.
+func hasNeverGrantPrefix(source string) bool {
+	return slices.ContainsFunc(neverGrantTable, func(p string) bool {
+		return hasCommandPrefix(source, p)
+	})
+}
+
+// addToolsEntryThreadSafe reports whether entry is safe to name on a public
+// issue thread: no absolute path, home shorthand, environment expansion or
+// escape. `Bash(/Users/x/bin/tool:*)` is the case this guards — the same
+// class of local detail the skill's "Describe, don't paste" rule already
+// keeps off threads.
+func addToolsEntryThreadSafe(entry string) bool {
+	return !strings.ContainsAny(entry, "/~$\\")
+}
+
 // toolResultContentText reads a tool_result content field. The CLI has only
 // ever been observed sending a plain string, but the underlying API also
 // allows an array of {type:"text",text:...} blocks (evals/lib/grade.py's
