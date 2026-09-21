@@ -197,6 +197,16 @@ func permissionAskMidRun(text string) bool {
 	return headMatchesAny(text, permissionAskSignatures...)
 }
 
+// sigMultipleOps and sigSimpleExpansion are named separately from
+// toolRefusalSignatures' third member (the plain "this command requires
+// approval" has no separate classification to share) because refusalKindOf
+// below has to test for them individually — naming them once keeps the two
+// switches from drifting apart on the exact wording.
+const (
+	sigMultipleOps     = "this bash command contains multiple operations"
+	sigSimpleExpansion = "contains simple_expansion"
+)
+
 // toolRefusalSignatures are the CLI's own wrapper text for a tool_result the
 // permission system refused outright — observed verbatim on issue #209
 // (session 902c1c34-d4db-40cc-b00c-aa8f82242472): a plain "This command
@@ -211,8 +221,8 @@ func permissionAskMidRun(text string) bool {
 // rather than treated as one phrasing among many.
 var toolRefusalSignatures = []string{
 	"this command requires approval",
-	"this bash command contains multiple operations",
-	"contains simple_expansion",
+	sigMultipleOps,
+	sigSimpleExpansion,
 }
 
 // refusalKind tells apart a refusal a wider allowlist can fix from one no
@@ -237,9 +247,9 @@ const (
 // already said this text is a refusal at all.
 func refusalKindOf(text string) refusalKind {
 	switch {
-	case headMatchesAny(text, "this bash command contains multiple operations"):
+	case headMatchesAny(text, sigMultipleOps):
 		return refusalPart
-	case headMatchesAny(text, "contains simple_expansion"):
+	case headMatchesAny(text, sigSimpleExpansion):
 		return refusalUngrantable
 	default:
 		return refusalPlain

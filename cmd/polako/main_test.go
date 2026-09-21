@@ -3568,6 +3568,27 @@ func TestObserveRefusalNamesANonBashTarget(t *testing.T) {
 	}
 }
 
+// When the CLI's "multiple operations" wording doesn't carry a parseable
+// part list, the fallback entry must still be kind refusalPart — the CLI's
+// own wording said this was a compound-command refusal, and losing the part
+// list is no reason to also misclassify it as a single-command one.
+func TestObserveRefusalKindSurvivesAnUnparseablePartList(t *testing.T) {
+	t.Parallel()
+	var rep runReport
+	ev, _ := parseEvent([]byte(toolUseID("toolu_1", "Bash", `{"command":"a; b"}`)))
+	rep.observe(ev)
+	ev, _ = parseEvent([]byte(toolResult("toolu_1",
+		"This Bash command contains multiple operations.", true)))
+	rep.observe(ev)
+	if len(rep.refusals) != 1 {
+		t.Fatalf("got %d refusals, want 1", len(rep.refusals))
+	}
+	if got := rep.refusals[0].kind; got != refusalPart {
+		t.Errorf("kind = %q, want %q — the CLI still called this a compound-command refusal",
+			got, refusalPart)
+	}
+}
+
 // A run stuck looping on the same wall must not grow runReport.refusals
 // without bound: an identical refusal, repeated, dedups to one entry, and
 // past refusalCap the oldest distinct refusal is evicted, never the newest.

@@ -392,9 +392,11 @@ func newRefusals(tool pendingTool, hadTool bool, text string) []refusal {
 		parts := refusalParts(text)
 		if len(parts) == 0 {
 			// The CLI said "multiple operations" but this build could not
-			// parse which parts — one plain entry rather than losing the
-			// refusal entirely.
-			return []refusal{{tool: toolName, command: command, kind: refusalPlain}}
+			// parse which parts — one entry rather than losing the refusal
+			// entirely, still kind refusalPart: the CLI's own wording said
+			// this was a compound-command refusal, and that classification
+			// doesn't change just because this build couldn't split it.
+			return []refusal{{tool: toolName, command: command, kind: kind}}
 		}
 		out := make([]refusal, len(parts))
 		for i, p := range parts {
