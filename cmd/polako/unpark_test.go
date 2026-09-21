@@ -171,6 +171,36 @@ func TestValidParkEntry(t *testing.T) {
 	}
 }
 
+// validParkEntryRe hand-encodes addToolsEntry's own word-count rule (gh
+// gets one to three words, everything else exactly one) with nothing
+// tying the two together the way a shared constant or wording test holds
+// parkFooterPrefix/planFooterPrefix to their own producer/parser pair. This
+// is that coupling, the cheap way: every entry addToolsEntry can actually
+// produce from a refusal has to pass validParkEntry, so the two drift
+// apart loudly (a test failure) rather than silently (real entries
+// rendering "(ignored)").
+func TestValidParkEntryAcceptsEveryShapeAddToolsEntryProduces(t *testing.T) {
+	t.Parallel()
+	refusals := []refusal{
+		{tool: "Bash", command: "echo hi", kind: refusalPlain},
+		{tool: "Bash", command: "gh issue view 1", kind: refusalPlain},
+		{tool: "Bash", command: "gh pr list", kind: refusalPlain},
+		{tool: "Bash", part: "curl example.com", kind: refusalPart},
+		{tool: "WebFetch", command: "https://example.com", kind: refusalPlain},
+		{tool: "Read", command: "/tmp/x", kind: refusalPlain},
+		{tool: "mcp__server__tool", command: "", kind: refusalPlain},
+	}
+	for _, r := range refusals {
+		entry, kind := addToolsEntry(r, "")
+		if kind != "" {
+			t.Fatalf("addToolsEntry(%+v) = kind %q, want a real entry — fix the fixture, not the assertion", r, kind)
+		}
+		if !validParkEntry(entry) {
+			t.Errorf("validParkEntry(%q) = false, but addToolsEntry(%+v) produced exactly this entry", entry, r)
+		}
+	}
+}
+
 // The end-to-end shape the issue's own acceptance criteria names: against a
 // fake repo with two parked issues, one with a footer, -apply -yes removes
 // both labels and prints one -add-tools value. Driven through
