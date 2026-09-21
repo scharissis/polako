@@ -1160,6 +1160,35 @@ func TestSkillSendsScratchFilesToTheScratchDir(t *testing.T) {
 	}
 }
 
+// Issue #494: the review agent's own finder and verifier subagents are one
+// level below the main run's own wait (#217, #372, #472) — backgrounded by
+// CLI default, they leave the review agent busy-polling (Bash: true,
+// ListAgents, sleep) and then asking each one to restate an answer it
+// already gave. #418 burned most of a 45-minute budget that way. Telling
+// /code-review to launch them in the foreground removes the wait entirely,
+// so it has to be in the same request as the worktree and scratch-dir
+// instructions.
+func TestReviewGateRunsItsSubagentsInTheForeground(t *testing.T) {
+	t.Parallel()
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+	flat := strings.Join(strings.Fields(skill), " ")
+
+	loc := regexp.MustCompile(`/code-review \S+ issue-\$issue`).FindStringIndex(flat)
+	if loc == nil {
+		t.Fatal("SKILL.md no longer invokes `/code-review <level> issue-$issue`")
+	}
+	window := flat[loc[0]:]
+	if len(window) > 900 {
+		window = window[:900]
+	}
+	if !strings.Contains(window, "run_in_background: false") {
+		t.Errorf("the review gate no longer tells /code-review to launch its finder and"+
+			" verifier subagents in the foreground (run_in_background: false) — without it"+
+			" they background by CLI default and the review agent busy-polls and asks each"+
+			" one to restate its answer, the waste issue #494 (and #418) found:\n\t%s", window)
+	}
+}
+
 // issue #402 (ticket 3 of docs/plans/visual-evidence.md): the publish
 // recipe is git plumbing a run executes unattended, so its sharpest edges —
 // the exact ref name, the flag that would silently clobber a concurrent
