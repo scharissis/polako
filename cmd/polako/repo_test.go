@@ -782,10 +782,11 @@ func TestSkillStopsWhenFetchFails(t *testing.T) {
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	phase1 := strings.Index(skill, "## Phase 1")
+	phase2 := strings.Index(skill, "## Phase 2")
 	phase2a := strings.Index(skill, "Bring the local default branch up to date")
-	if phase1 < 0 || phase2a < 0 {
-		t.Fatal("SKILL.md is missing Phase 1 or the step 2a base refresh — can't check the" +
-			" fetch-failure stop against either")
+	if phase1 < 0 || phase2 < 0 || phase2a < 0 {
+		t.Fatal("SKILL.md is missing Phase 1, Phase 2, or the step 2a base refresh — can't check" +
+			" the fetch-failure stop against any of them")
 	}
 	if n := strings.Count(skill, "fetch origin"); n < 2 {
 		t.Errorf("SKILL.md spells `fetch origin` only %d time(s) — Phase 1 and Phase 3 step 2a"+
@@ -793,7 +794,11 @@ func TestSkillStopsWhenFetchFails(t *testing.T) {
 	}
 
 	// Flattened: these markers read across line wraps in SKILL.md's prose.
-	phase1Section := strings.Join(strings.Fields(skill[phase1:phase2a]), " ")
+	// Bounded by the next heading, not by step 2a's own marker further down
+	// the file — that would fold in Phase 2 and Phase 3 steps 0-1 too, and
+	// pre-existing "stop" text from those would satisfy the check below even
+	// with Phase 1's own fetch-failure stop deleted.
+	phase1Section := strings.Join(strings.Fields(skill[phase1:phase2]), " ")
 	if !strings.Contains(phase1Section, "stop") {
 		t.Error("Phase 1 no longer stops the run when `git fetch origin` fails — without that," +
 			" a run with a dead remote branches and works from a base of unknown age")
@@ -808,6 +813,16 @@ func TestSkillStopsWhenFetchFails(t *testing.T) {
 		t.Error("Phase 3 step 2a no longer distinguishes a failed fetch (stop) from a refused" +
 			" `--ff-only` merge (skip and carry on) — collapsing them either stops on a harmless" +
 			" refusal or, worse, carries on past a dead remote")
+	} else {
+		// The distinction only holds if the refusal branch actually reads
+		// "skip", not just that the phrase "the merge refuses" appears
+		// somewhere after the fetch-failure stop.
+		refusalTail := afterA[refusalIdx:min(refusalIdx+200, len(afterA))]
+		if !strings.Contains(refusalTail, "skip") {
+			t.Error("Phase 3 step 2a says \"the merge refuses\" but doesn't skip the merge and" +
+				" carry on right after it — collapsing the refused-merge case into a stop" +
+				" would fail a review over a harmless non-fast-forward")
+		}
 	}
 }
 
