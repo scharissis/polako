@@ -409,6 +409,25 @@ func stillWaiting(states map[int]*issueState) []issueResult {
 	return out
 }
 
+// parkCommentPrefix opens every comment parkIssue posts — shared with
+// unpark.go, which reads it back to tell polako's own park comment apart
+// from the rest of the thread and to find where the reason clause ends.
+const parkCommentPrefix = "**polako parked this issue.** "
+
+// parkCommentBody is the comment parkIssue posts — pulled out so unpark_test.go
+// can build the exact same shape a real park would have left, rather than a
+// second, driftable copy of the template.
+func parkCommentBody(issue int, reason string, entries []string) string {
+	n := strconv.Itoa(issue)
+	body := fmt.Sprintf(parkCommentPrefix+"%s\n\n"+
+		"Nothing will run on it again until the `%s` label is removed — "+
+		"`gh issue edit %s --remove-label %s`.", reason, needsHumanLabel, n, needsHumanLabel)
+	if footer := parkFooter(entries); footer != "" {
+		body += "\n\n" + footer
+	}
+	return body
+}
+
 // parkIssue hands one issue back to a person: the label that takes it out of
 // the queue, and a comment saying what happened. Both are best-effort — a
 // GitHub call that fails must not end a drain that is otherwise healthy — but
@@ -440,12 +459,7 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string, entrie
 	// read it as a question of its own and sit waiting for a comment nobody
 	// owes it. Best-effort and silent: the issue is already parked either way.
 	_, _ = gh(ctx, cfg, "issue", "edit", n, "--remove-label", awaitingAnswerLabel)
-	body := fmt.Sprintf("**polako parked this issue.** %s\n\n"+
-		"Nothing will run on it again until the `%s` label is removed — "+
-		"`gh issue edit %s --remove-label %s`.", reason, needsHumanLabel, n, needsHumanLabel)
-	if footer := parkFooter(entries); footer != "" {
-		body += "\n\n" + footer
-	}
+	body := parkCommentBody(issue, reason, entries)
 	if _, cerr := gh(ctx, cfg, "issue", "comment", n, "--body", body); cerr != nil {
 		cfg.narrate(sevWarning, "could not comment on issue #%d (%v) — the reason is in this log and in the exit summary",
 			issue, cerr)
@@ -746,14 +760,10 @@ func drainSummary(results []issueResult, containers, closed []containerInfo, ret
 // parkGrantsBlock is the exit summary's paste-ready line for every permission
 // park this shift made: the union of every entry across every parked issue
 // (deduped, first-seen order), as both the -add-tools flag and the
-// POLAKO_ADD_TOOLS form, then the exact command to clear each issue it came
-// from. Nil when no parked result carried an entry — most drains, which
-// print nothing here, the same "empty bucket is noise" rule the rest of this
-// function follows.
-//
-// No `polako unpark` line: ticket 5 of docs/plans/permission-parks.md hasn't
-// landed, and this block only ever offers a command this build can actually
-// run.
+// POLAKO_ADD_TOOLS form, then `polako unpark` to clear whichever of them the
+// operator approves. Nil when no parked result carried an entry — most
+// drains, which print nothing here, the same "empty bucket is noise" rule
+// the rest of this function follows.
 func parkGrantsBlock(results []issueResult) []string {
 	seen := make(map[string]bool)
 	var union []string
@@ -769,16 +779,11 @@ func parkGrantsBlock(results []issueResult) []string {
 		return nil
 	}
 	value := strings.Join(union, ",")
-	lines := []string{
+	return []string{
 		fmt.Sprintf("  grants  -add-tools %q", value),
 		fmt.Sprintf("  grants  POLAKO_ADD_TOOLS=%s", value),
+		"  grants  polako unpark -apply",
 	}
-	for _, r := range results {
-		if r.parked && len(r.parkEntries) > 0 {
-			lines = append(lines, fmt.Sprintf("  grants  gh issue edit %d --remove-label %s", r.issue, needsHumanLabel))
-		}
-	}
-	return lines
 }
 
 // issueRefs renders a list of issue numbers the way the rest of the output

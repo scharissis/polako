@@ -453,15 +453,21 @@ type issueComment struct {
 		// Type is "Bot" for a GitHub App — Actions, Dependabot, a CI
 		// reporter — and "User" for everyone else.
 		Type string `json:"type"`
+		// Login is read only by `unpark`, to tell polako's own park comment
+		// apart from anything else written on the thread — the same reason
+		// this call goes through the REST API rather than `gh issue view
+		// --json comments`, whose author payload carries a login already.
+		Login string `json:"login"`
 	} `json:"user"`
 	// CreatedAt is read by `status` alone, to say how long a thread has been
 	// quiet. No wait decides on it: comment ids only ever increase, and a
 	// baseline made of them needs no clock and survives an edit.
 	CreatedAt string `json:"created_at"`
-	// Body is read by nobody but commentFinishedContainers, checking a
-	// thread for the epic-finished marker before posting a second one. Every
-	// other reader of this type only ever needed metadata — the text itself
-	// is data, not something the rest of the drain acts on.
+	// Body is read by commentFinishedContainers, checking a thread for the
+	// epic-finished marker before posting a second one, and by unpark.go's
+	// readParkListItem, checking it for polako's own park comment and
+	// parsing the `Refused:` footer back out of it. The drain loop itself
+	// reads neither — every field it decides on is metadata.
 	Body string `json:"body"`
 }
 
