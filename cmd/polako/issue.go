@@ -8,8 +8,9 @@ package main
 // Its loop has two arms. dispatchRun is the one taken while no PR exists yet:
 // it runs Claude and classifies what came back, through the per-attempt
 // helpers on runAttempt. superviseToClose is the other: a PR exists, so wait
-// it out to merged or parked. resumeLedger is the four interlocking retry
-// counters both the crash arm and the clean-exit arm read.
+// it out to merged or parked. resumeLedger is the interlocking retry
+// counters both the crash arm and the clean-exit arm read, plus the one
+// non-counter detail a worked-around refusal needs carried across a resume.
 
 import (
 	"cmp"
