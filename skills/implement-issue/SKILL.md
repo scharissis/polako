@@ -365,14 +365,16 @@ If PLAN.md doesn't exist in the worktree, or new answers have appeared:
        Launch: <exact command, from package.json scripts>
        Shots (at most 4):
        - <slug> — <path> — <routing file that defines it>
+       Before: pending
        After: pending
        Published: pending
 
    A `skip` decision needs only its first line and the reason — there's
    nothing to launch or shoot, so the rest of the block stays unwritten.
-   There's no `Before:` line: this run only ever shoots after, at the
-   final commit — a later ticket adds before shots and the resume rules
-   that come with them.
+   On a `capture` decision, `Before:` starts `pending`; Phase 3 step 0
+   turns it into `captured @ <base sha>` or `not captured — <why>` before
+   the first edit lands, since that's the only point in the run where a
+   before shot is free.
 3. If anything genuinely blocks implementation: record the questions in
    PLAN.md under "## Open questions", then ask them the way "Asking a
    question" above describes, and stop.
@@ -385,6 +387,44 @@ them, "Asking a question" above already covers it: leave the label alone,
 don't post again, and stop.
 
 ## Phase 3 — Implement (only when PLAN.md exists and isn't blocked)
+0. Before step 1's first edit, resolve `Before:` on any `## Visual
+   evidence` block whose `Decision:` reads `capture` — this is the one
+   point in the run where the worktree still equals base, so it's the
+   only chance a before shot costs nothing extra.
+   - `Before:` already `captured @ <sha>` with every listed shot's
+     `before-<slug>.png` still in `<worktree>/.polako-evidence/`, or
+     already `not captured — <reason>`: that decision is made, move on to
+     step 1.
+   - Otherwise, check the precondition: `git -C <worktree> status
+     --porcelain` shows nothing but `PLAN.md`, and `git -C <worktree>
+     rev-list --count` against the `origin/…` ref Phase 1 resolved
+     (`..HEAD`) is 0. Both hold only on this run's first pass through this
+     step. If either fails — a resumed run whose earlier turn already
+     edited the worktree before this ticket existed, or before reaching
+     this step — write `Before: not captured — edits already landed
+     before this run reached step 0` and move on to step 1. There's no
+     second checkout to recover it: doubling the install for a resumed
+     run's before shot is out of scope, the same call "Evidence ref"
+     above makes against a second worktree for anything but the publish
+     recipe's own private index.
+     With the precondition holding, shoot now: the same lifecycle step 3
+     below uses for the after shot (its a through e — start the server in
+     the background, poll its output for the URL, shoot each listed
+     route, retry once on a missing browser, stop the server regardless),
+     writing `<worktree>/.polako-evidence/before-<slug>.png` in place of
+     `after-`. The same look-before-publishing pass and the same caps
+     apply — drop an error overlay, a blank page, a login wall, anything
+     that looks like a credential; 1280x800, PNG, at most four, about
+     500 KB each, an oversized shot dropped rather than downscaled — and
+     the same ladder: no serving script, the server never prints a URL,
+     every route's shot fails, the browser install fails twice, or the
+     look step drops every survivor all end the same way, writing
+     `Before: not captured — <what was tried>`. Never a park, never a
+     question on the thread, either way.
+     With at least one surviving shot, write `Before: captured @ <the
+     HEAD this step ran at>` into PLAN.md. Leave the files on disk —
+     step 3 publishes them together with the after set; step 0 never
+     pushes anything itself.
 1. Implement the plan, committing in logical increments following the
    repo's commit conventions. Run the test suite, typecheck, and lint. All
    of it targets issue-$issue's worktree by path — `git -C <worktree> add
@@ -701,8 +741,19 @@ don't post again, and stop.
          fenced block of the real output (before/after when you can still
          reproduce both, after alone otherwise), a link to an image already
          committed on the branch, or an image pushed to the evidence ref
-         (see "Evidence ref" above) and embedded by its commit sha. Never
-         quote test or lint output here — that's what Verification is for.
+         (see "Evidence ref" above) and embedded by its commit sha. A route
+         with both a `before-<slug>.png` and an `after-<slug>.png` on the
+         evidence ref gets a two-column table instead of one image line:
+
+             `/settings` at 1280x800.
+
+             | Before | After |
+             | --- | --- |
+             | ![before /settings](…/before-settings.png?raw=true) | ![after /settings](…/after-settings.png?raw=true) |
+
+         A route with only an after shot — `Before:` reads `not captured`,
+         or the block predates this ticket — stays the single image line.
+         Never quote test or lint output here — that's what Verification is for.
          A mermaid diagram of a flow or state change is the one exception to
          "captured": it documents the actual structure rather than claiming
          to be a transcript, so author it, don't invent it. Beyond these
