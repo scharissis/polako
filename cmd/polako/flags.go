@@ -221,7 +221,7 @@ type config struct {
 	// opened (empty when -log is off or opening it failed). A park needs it
 	// to point an operator back at the one place the exact refused tool call
 	// survives — the reason posted to the issue thread cannot carry it, since
-	// the tool detail can hold a local absolute path (see permissionRefusedDetail).
+	// the tool detail can hold a local absolute path (see runReport.refusals).
 	logPath string
 
 	// Filled in by preflight, recorded with every run: which repository this

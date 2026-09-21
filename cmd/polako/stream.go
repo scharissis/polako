@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -158,22 +159,23 @@ type runReport struct {
 	// which is what let a park assert "no questions" over a run whose final
 	// message was verbatim one.
 	permissionRefused bool
-	// permissionRefusedDetail names what was refused, when the stream gives
-	// it: the tool_use correlated by id to the refused tool_result (preferred
-	// — it has the actual command, which a single-command refusal's own
-	// content text does not), or failing that the tool_result's own text
-	// (which does name the parts, for a refused compound Bash command). May
-	// hold a local absolute path (a worktree path in a Bash command), so — like
-	// leftWork.where() — it belongs in a park's aside, never its reason.
-	permissionRefusedDetail string
+	// refusals is every refusal the stream reported, in the CLI's own words —
+	// issue #430: #390 drew five and the old permissionRefusedDetail string
+	// kept only the first, and kept the whole compound command where the CLI
+	// had already named the one part it refused. Deduplicated and capped at
+	// refusalCap, so a run stuck looping on the same refusal cannot grow this
+	// without bound. May hold a local absolute path (a worktree path in a
+	// Bash command), so — like leftWork.where() — it belongs in a park's
+	// aside, never its reason.
+	refusals []refusal
 	// toolSucceededAfterRefusal reports whether a tool_result completed
-	// without error after permissionRefusedDetail's *last* refusal — issue
-	// #461's #402/#318 shape, where the run hit a refusal, found another way,
-	// and kept working. Reset to false every time a new refusal latches, so
-	// it only ever answers for the most recent one. refusalWorkedAround pairs
-	// it with permissionRefusedDetail != "" — the structural #209 signal
-	// alone — rather than permissionRefused, which a final message can also
-	// set on its own (the #138 shape, with nothing to work around).
+	// without error after refusals' *last* entry — issue #461's #402/#318
+	// shape, where the run hit a refusal, found another way, and kept
+	// working. Reset to false every time a new refusal latches, so it only
+	// ever answers for the most recent one. refusalWorkedAround pairs it with
+	// len(refusals) > 0 — the structural #209 signal alone — rather than
+	// permissionRefused, which a final message can also set on its own (the
+	// #138 shape, with nothing to work around).
 	toolSucceededAfterRefusal bool
 	// lastResultIsAsk is permissionRefusal(ev.Result) for the most recent
 	// result event only — assigned, not OR'd, unlike permissionRefused above.
@@ -218,7 +220,57 @@ type runReport struct {
 // tool_result refusal at all: a final-message ask has nothing to work
 // around).
 func (r runReport) refusalWorkedAround() bool {
-	return r.permissionRefusedDetail != "" && r.toolSucceededAfterRefusal && !r.lastResultIsAsk
+	return len(r.refusals) > 0 && r.toolSucceededAfterRefusal && !r.lastResultIsAsk
+}
+
+// lastRefusalDetail renders the most recent refusal the way a park still
+// wants to read it today — "<tool>: <command>" when the refusal was
+// correlated to a tool_use, or the tool_result's own text otherwise — same
+// as permissionRefusedDetail used to. Turning the fuller record below into an
+// -add-tools entry, and any change to what a park says, is ticket 2 and 3 of
+// docs/plans/permission-parks.md; until then every caller that used to read
+// permissionRefusedDetail reads this instead.
+func (r runReport) lastRefusalDetail() string {
+	if len(r.refusals) == 0 {
+		return ""
+	}
+	last := r.refusals[len(r.refusals)-1]
+	if last.tool == "" {
+		return last.command
+	}
+	return last.tool + ": " + last.command
+}
+
+// refusal is one CLI-reported refusal of a tool call, kept in the CLI's own
+// words: which tool it was (when correlated back to its tool_use), the
+// command that tool_use carried, the specific part the CLI named for a
+// compound-command refusal, and a kind telling a grantable refusal apart from
+// one no grant fixes. Comparable, so addRefusals can dedup with slices.Contains.
+type refusal struct {
+	tool    string
+	command string
+	part    string
+	kind    refusalKind
+}
+
+// refusalCap bounds runReport.refusals so a run stuck looping on the same
+// wall cannot grow it without bound — deduplication already stops an
+// identical refusal from counting twice, this stops distinct ones from
+// piling up past what a park could usefully show.
+const refusalCap = 20
+
+// addRefusals appends new refusal entries, skipping any already present and
+// stopping once refusalCap is reached.
+func (r *runReport) addRefusals(new []refusal) {
+	for _, nr := range new {
+		if len(r.refusals) >= refusalCap {
+			return
+		}
+		if slices.Contains(r.refusals, nr) {
+			continue
+		}
+		r.refusals = append(r.refusals, nr)
+	}
 }
 
 // status maps a run to exactly one value, most specific first: a run stopped
@@ -294,8 +346,8 @@ func (r *runReport) observeToolResults(ev streamEvent) {
 		}
 		if !c.IsError {
 			// A success anywhere before the first refusal is moot —
-			// refusalWorkedAround also requires permissionRefusedDetail set,
-			// so this only ever matters once a refusal has actually latched.
+			// refusalWorkedAround also requires refusals non-empty, so this
+			// only ever matters once a refusal has actually latched.
 			r.toolSucceededAfterRefusal = true
 			continue
 		}
@@ -303,17 +355,57 @@ func (r *runReport) observeToolResults(ev streamEvent) {
 			r.permissionRefused = true
 			// Scoped to *this* refusal's aftermath, not the whole run's.
 			r.toolSucceededAfterRefusal = false
-			// Last-wins, not first: refusalWorkedAround judges the *last*
-			// refusal's aftermath, so the detail named in a park has to be
-			// the same one, or a run with two distinct refusals could report
-			// the wrong (already-resolved) command to grant.
-			if hadTool {
-				r.permissionRefusedDetail = tool.name + toolDetail(tool.input)
-			} else {
-				r.permissionRefusedDetail = text
-			}
+			r.addRefusals(newRefusals(tool, hadTool, text))
 		}
 	}
+}
+
+// newRefusals turns one refused tool_result into the refusal entries it
+// names — more than one when the CLI's own text lists several parts of a
+// compound Bash command (one entry per part), exactly one otherwise. tool and
+// hadTool are the tool_use correlated by id, when the stream still had it
+// pending; text is the tool_result's own content, kept as command when
+// correlation failed — the same fallback permissionRefusedDetail used to
+// fall back to.
+func newRefusals(tool pendingTool, hadTool bool, text string) []refusal {
+	toolName, command := "", text
+	if hadTool {
+		toolName = tool.name
+		if c, ok := bashCommand(tool.input); ok {
+			command = c
+		}
+	}
+	switch kind := refusalKindOf(text); kind {
+	case refusalPart:
+		parts := refusalParts(text)
+		if len(parts) == 0 {
+			// The CLI said "multiple operations" but this build could not
+			// parse which parts — one plain entry rather than losing the
+			// refusal entirely.
+			return []refusal{{tool: toolName, command: command, kind: refusalPlain}}
+		}
+		out := make([]refusal, len(parts))
+		for i, p := range parts {
+			out[i] = refusal{tool: toolName, command: command, part: p, kind: refusalPart}
+		}
+		return out
+	default:
+		return []refusal{{tool: toolName, command: command, kind: kind}}
+	}
+}
+
+// bashCommand reads a Bash tool_use's own command field — the raw text, not
+// toolDetail's clipped display form, since a refusal entry's command is data
+// a later ticket derives an -add-tools entry from, not a log line. False for
+// any other tool, or a Bash input this build cannot parse.
+func bashCommand(input json.RawMessage) (string, bool) {
+	var in struct {
+		Command string `json:"command"`
+	}
+	if json.Unmarshal(input, &in) != nil || in.Command == "" {
+		return "", false
+	}
+	return in.Command, true
 }
 
 // observe folds one event into the report.

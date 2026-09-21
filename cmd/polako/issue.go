@@ -663,7 +663,7 @@ func (a *runAttempt) afterCleanExit() (*pullRequest, error) {
 		// clean-exit resume budget finding that out the slow way. #126's own
 		// shape (refused, then nothing more attempted) and #138's (the final
 		// message is itself the ask) both land here.
-		return nil, a.parkCleanExit(parkPermission, permissionParkReason, a.rep.permissionRefusedDetail, left)
+		return nil, a.parkCleanExit(parkPermission, permissionParkReason, a.rep.lastRefusalDetail(), left)
 	}
 	if workedAround {
 		// Remembered on the ledger, not just this attempt's own report: if the
@@ -671,7 +671,7 @@ func (a *runAttempt) afterCleanExit() (*pullRequest, error) {
 		// with or without a fresh refusal of its own — the eventual park has
 		// to keep blaming this refusal rather than reporting "produced
 		// nothing" or whatever bound actually stopped the resuming.
-		a.ledger.deferredPermissionDetail = a.rep.permissionRefusedDetail
+		a.ledger.deferredPermissionDetail = a.rep.lastRefusalDetail()
 	}
 
 	bound, boundWhy, resume := a.cleanExitDisposition(left)

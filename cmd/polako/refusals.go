@@ -202,13 +202,72 @@ func permissionAskMidRun(text string) bool {
 // (session 902c1c34-d4db-40cc-b00c-aa8f82242472): a plain "This command
 // requires approval" for a single command, and, for a compound Bash command,
 // "This Bash command contains multiple operations. The following parts
-// require approval: ..." naming the parts. Unlike permissionAskSignatures
-// this is CLI prose, not the model's, so — like authFailure and
-// limitRefusal — it is trusted rather than treated as one phrasing among
-// many.
+// require approval: ..." naming the parts. "Contains simple_expansion"
+// joined this list on issue #430 (#390's own session): a `$VAR` in the
+// command, refused for a reason no `-add-tools` entry fixes — the command has
+// to be phrased differently — but still a refusal, so it still latches
+// permissionRefused below. Unlike permissionAskSignatures this is CLI prose,
+// not the model's, so — like authFailure and limitRefusal — it is trusted
+// rather than treated as one phrasing among many.
 var toolRefusalSignatures = []string{
 	"this command requires approval",
 	"this bash command contains multiple operations",
+	"contains simple_expansion",
+}
+
+// refusalKind tells apart a refusal a wider allowlist can fix from one no
+// grant can — see refusalKindOf.
+type refusalKind string
+
+const (
+	// refusalPlain is a whole single command the CLI refused outright —
+	// "This command requires approval".
+	refusalPlain refusalKind = "plain"
+	// refusalPart is one named part of a compound Bash command the CLI
+	// refused — "The following part(s) require approval: …" — one refusal
+	// entry per part it named.
+	refusalPart refusalKind = "part"
+	// refusalUngrantable is "Contains simple_expansion": a $VAR in the
+	// command. No -add-tools entry fixes it.
+	refusalUngrantable refusalKind = "ungrantable"
+)
+
+// refusalKindOf classifies a refused tool_result's own text into which of
+// toolRefusalSignatures matched. Only called once toolResultRefusal has
+// already said this text is a refusal at all.
+func refusalKindOf(text string) refusalKind {
+	switch {
+	case headMatchesAny(text, "this bash command contains multiple operations"):
+		return refusalPart
+	case headMatchesAny(text, "contains simple_expansion"):
+		return refusalUngrantable
+	default:
+		return refusalPlain
+	}
+}
+
+// refusalPartsRe extracts the CLI's own comma-separated list of parts it
+// refused out of a compound Bash command's refusal text — "The following
+// part requires approval: X" or, naming more than one, "...parts require
+// approval: X, Y".
+var refusalPartsRe = regexp.MustCompile(`(?i)the following parts? requires? approval:\s*(.+)$`)
+
+// refusalParts splits the CLI's own part list — its own text, not a shell
+// parse; see splitCommand's (notify.go) own refusal to become one. Nil when
+// the refusal text does not name any parts.
+func refusalParts(text string) []string {
+	m := refusalPartsRe.FindStringSubmatch(strings.TrimSpace(text))
+	if m == nil {
+		return nil
+	}
+	fields := strings.Split(m[1], ", ")
+	parts := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if f = strings.TrimSpace(f); f != "" {
+			parts = append(parts, f)
+		}
+	}
+	return parts
 }
 
 // toolResultRefusal reports whether a tool_result's content is the CLI

@@ -3327,9 +3327,9 @@ func TestObserveLatchesOnARefusedToolResult(t *testing.T) {
 		t.Error("permissionRefused should latch from the refused tool_result " +
 			"and survive an ordinary final result — the overwrite this issue fixes")
 	}
-	if want := "Bash: gh issue close 126"; !strings.Contains(rep.permissionRefusedDetail, want) {
-		t.Errorf("permissionRefusedDetail = %q, want it to name the correlated command (contains %q)",
-			rep.permissionRefusedDetail, want)
+	if want := "Bash: gh issue close 126"; !strings.Contains(rep.lastRefusalDetail(), want) {
+		t.Errorf("lastRefusalDetail() = %q, want it to name the correlated command (contains %q)",
+			rep.lastRefusalDetail(), want)
 	}
 
 	// A tool_result that is not an error, or does not read as a refusal, must
@@ -3442,8 +3442,8 @@ func TestRefusalWorkedAround(t *testing.T) {
 		})
 	}
 
-	// Review finding on issue #461: permissionRefusedDetail used to latch on
-	// the *first* refusal, but refusalWorkedAround judges the *last* one's
+	// Review finding on issue #461: the refusal detail used to latch on the
+	// *first* refusal, but refusalWorkedAround judges the *last* one's
 	// aftermath — a run whose first refusal got worked around and whose
 	// second did not must still name the second (the actual blocker) in the
 	// park, not the resolved first one.
@@ -3457,11 +3457,119 @@ func TestRefusalWorkedAround(t *testing.T) {
 			toolResult("toolu_3", "This command requires approval", true),
 			result("Nothing left to do here."),
 		)
-		if want := "Bash: gh pr merge 1"; !strings.Contains(rep.permissionRefusedDetail, want) {
-			t.Errorf("permissionRefusedDetail = %q, want the last (unresolved) refusal %q",
-				rep.permissionRefusedDetail, want)
+		if want := "Bash: gh pr merge 1"; !strings.Contains(rep.lastRefusalDetail(), want) {
+			t.Errorf("lastRefusalDetail() = %q, want the last (unresolved) refusal %q",
+				rep.lastRefusalDetail(), want)
 		}
 	})
+}
+
+// Issue #430: #390's session drew five refusals and the old
+// permissionRefusedDetail kept only the first, as the whole compound
+// command even where the CLI had already named the one part it refused.
+// observe now keeps all five, classified by the CLI's own words — the table
+// in docs/plans/permission-parks.md, ticket 1, fed verbatim.
+func TestObserveKeepsEveryRefusalFromTheCLIsOwnWords(t *testing.T) {
+	t.Parallel()
+	pairs := []struct {
+		command string
+		refusal string
+	}{
+		{
+			`git fetch origin 2>&1; echo "exit:$?"`,
+			`This Bash command contains multiple operations. The following ` +
+				`part requires approval: echo "exit:$?"`,
+		},
+		{
+			`git … remote -v; ssh-add -l 2>&1; echo SSH_AUTH_SOCK=$SSH_AUTH_SOCK`,
+			"Contains simple_expansion",
+		},
+		{
+			`git … fetch origin 2>&1; echo RC=$?`,
+			"Contains simple_expansion",
+		},
+		{
+			`echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK"; ls -la …; ssh -T git@github.com 2>&1`,
+			"Contains simple_expansion",
+		},
+		{
+			"ssh -T git@github.com",
+			"This command requires approval",
+		},
+	}
+
+	var rep runReport
+	for i, p := range pairs {
+		id := fmt.Sprintf("toolu_%d", i+1)
+		ev, ok := parseEvent([]byte(toolUseID(id, "Bash", `{"command":`+jsonString(p.command)+`}`)))
+		if !ok {
+			t.Fatalf("could not build tool_use for pair %d", i)
+		}
+		rep.observe(ev)
+		ev, ok = parseEvent([]byte(toolResult(id, p.refusal, true)))
+		if !ok {
+			t.Fatalf("could not build tool_result for pair %d", i)
+		}
+		rep.observe(ev)
+	}
+
+	if len(rep.refusals) != 5 {
+		t.Fatalf("got %d refusals, want 5: %+v", len(rep.refusals), rep.refusals)
+	}
+
+	var parts, ungrantable, plain int
+	for _, r := range rep.refusals {
+		switch r.kind {
+		case refusalPart:
+			parts++
+			if r.part != `echo "exit:$?"` {
+				t.Errorf("part refusal = %+v, want part %q", r, `echo "exit:$?"`)
+			}
+		case refusalUngrantable:
+			ungrantable++
+		case refusalPlain:
+			plain++
+			if r.command != "ssh -T git@github.com" {
+				t.Errorf("plain refusal = %+v, want command %q", r, "ssh -T git@github.com")
+			}
+		default:
+			t.Errorf("unexpected kind %q on %+v", r.kind, r)
+		}
+	}
+	if parts != 1 || ungrantable != 3 || plain != 1 {
+		t.Errorf("got %d part, %d ungrantable, %d plain refusals, want 1, 3, 1", parts, ungrantable, plain)
+	}
+}
+
+// A run stuck looping on the same wall must not grow runReport.refusals
+// without bound: an identical refusal, repeated, dedups to one entry, and
+// distinct refusals stop being recorded once refusalCap is reached.
+func TestObserveRefusalsDedupsAndCaps(t *testing.T) {
+	t.Parallel()
+	var rep runReport
+	for i := 0; i < refusalCap+5; i++ {
+		id := fmt.Sprintf("toolu_%d", i)
+		ev, _ := parseEvent([]byte(toolUseID(id, "Bash", `{"command":"ssh -T git@github.com"}`)))
+		rep.observe(ev)
+		ev, _ = parseEvent([]byte(toolResult(id, "This command requires approval", true)))
+		rep.observe(ev)
+	}
+	if len(rep.refusals) != 1 {
+		t.Errorf("got %d refusals for an identical one repeated, want 1 (deduplicated)", len(rep.refusals))
+	}
+
+	rep = runReport{}
+	for i := 0; i < refusalCap+5; i++ {
+		id := fmt.Sprintf("toolu_%d", i)
+		input := `{"command":` + jsonString(fmt.Sprintf("tool%d --flag", i)) + `}`
+		ev, _ := parseEvent([]byte(toolUseID(id, "Bash", input)))
+		rep.observe(ev)
+		ev, _ = parseEvent([]byte(toolResult(id, "This command requires approval", true)))
+		rep.observe(ev)
+	}
+	if len(rep.refusals) != refusalCap {
+		t.Errorf("got %d refusals for %d distinct ones, want capped at %d", len(rep.refusals), refusalCap+5, refusalCap)
+	}
 }
 
 // Issue #182: on #169 the run asked for an ungranted tool in a turn partway
