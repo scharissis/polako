@@ -484,6 +484,7 @@ func TestPlanSkillCarriesTheHouseStyle(t *testing.T) {
 
 // issue #386: same gap, plan-backlog's copy. Mirrors TestSkillDescribesDontPaste.
 func TestPlanSkillDescribesDontPaste(t *testing.T) {
+	t.Parallel()
 	skill := planSkill(t)
 
 	flat := strings.Join(strings.Fields(skill), " ")
@@ -790,6 +791,7 @@ func TestReviewGateRefreshesTheBaseBeforeReviewing(t *testing.T) {
 // `--ff-only` merge is a different, survivable case (the checkout just isn't
 // fast-forwardable) and must stay that way.
 func TestSkillStopsWhenFetchFails(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	phase1 := strings.Index(skill, "## Phase 1")
@@ -1515,6 +1517,7 @@ func TestSkillCarriesTheHouseStyle(t *testing.T) {
 // leave out. Mirrors TestPlanSkillDescribesDontPaste and
 // TestHealthSkillDescribesDontPaste.
 func TestSkillDescribesDontPaste(t *testing.T) {
+	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 
 	flat := strings.Join(strings.Fields(skill), " ")
