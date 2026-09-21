@@ -29,6 +29,10 @@ type issueResult struct {
 	// with parked and awaiting — see issueState.closedNoChange.
 	closedNoChange bool
 	reason         string // why it parked; empty otherwise
+	// parkEntries are the thread-safe -add-tools entries a permission park's
+	// refusals derived (parkEntriesOf), nil for every other park kind — carried
+	// through so the exit summary can union them across every parked issue.
+	parkEntries []string
 	// What this shift's runs on the issue cost, and how many of them reported
 	// no cost at all. Both come off the tally the issue was carrying, so an
 	// issue this process only waited on contributes an honest zero.
@@ -297,7 +301,9 @@ func drain(ctx context.Context, cfg config) error {
 				issue, awaitingAnswerLabel)
 		case parked:
 			skip[issue] = true
-			results = append(results, spend(st, issueResult{issue: issue, parked: true, reason: reason}))
+			results = append(results, spend(st, issueResult{
+				issue: issue, parked: true, reason: reason, parkEntries: parkEntriesOf(err),
+			}))
 			delete(states, issue)
 			parkAndMoveOn(ctx, cfg, issue, st, reason, err)
 		case err != nil:
@@ -460,11 +466,12 @@ func parkAndMoveOn(ctx context.Context, cfg config, issue int, st *issueState, r
 	// A park is exactly when somebody wants to read what the run actually did,
 	// and the session is the whole transcript of it.
 	resumeHint(cfg, issue, st)
-	parkIssue(ctx, cfg, issue, reason, parkEntriesOf(err))
+	entries := parkEntriesOf(err)
+	parkIssue(ctx, cfg, issue, reason, entries)
 	// After the park, not before: by now the label and the comment saying why
 	// are on the issue, so somebody following the notification finds the whole
 	// story there.
-	notify(ctx, cfg, notification{event: notifyParked, issue: issue, reason: reason})
+	notify(ctx, cfg, notification{event: notifyParked, issue: issue, reason: reason, grants: entries})
 }
 
 // finishedContainerMarker tags the comment polako leaves on a container before
@@ -675,7 +682,17 @@ func drainSummary(results []issueResult, containers, closed []containerInfo, ret
 		case r.awaiting:
 			waiting = append(waiting, "#"+strconv.Itoa(r.issue)+price(r.cost))
 		case r.parked:
-			parked = append(parked, fmt.Sprintf("  parked  #%d%s — %s", r.issue, price(r.cost), r.reason))
+			// A permission park's reason paragraph already ran once — narrated
+			// when it happened, and posted to the issue thread — so this line
+			// shortens to naming the entries rather than repeating it; the
+			// grants block below carries the paste-ready form. Every other park
+			// keeps its full reason, the only place it appears.
+			if len(r.parkEntries) > 0 {
+				parked = append(parked, fmt.Sprintf("  parked  #%d%s — refused %s",
+					r.issue, price(r.cost), quotedEntries(r.parkEntries)))
+			} else {
+				parked = append(parked, fmt.Sprintf("  parked  #%d%s — %s", r.issue, price(r.cost), r.reason))
+			}
 		case r.closedNoChange:
 			closedNoChange = append(closedNoChange, "#"+strconv.Itoa(r.issue)+price(r.cost))
 		default:
@@ -722,7 +739,46 @@ func drainSummary(results []issueResult, containers, closed []containerInfo, ret
 			" — reply on the thread and the next shift picks them up")
 	}
 	lines = append(lines, parked...)
+	lines = append(lines, parkGrantsBlock(results)...)
 	return append(lines, epics...)
+}
+
+// parkGrantsBlock is the exit summary's paste-ready line for every permission
+// park this shift made: the union of every entry across every parked issue
+// (deduped, first-seen order), as both the -add-tools flag and the
+// POLAKO_ADD_TOOLS form, then the exact command to clear each issue it came
+// from. Nil when no parked result carried an entry — most drains, which
+// print nothing here, the same "empty bucket is noise" rule the rest of this
+// function follows.
+//
+// No `polako unpark` line: ticket 5 of docs/plans/permission-parks.md hasn't
+// landed, and this block only ever offers a command this build can actually
+// run.
+func parkGrantsBlock(results []issueResult) []string {
+	seen := make(map[string]bool)
+	var union []string
+	for _, r := range results {
+		for _, e := range r.parkEntries {
+			if !seen[e] {
+				seen[e] = true
+				union = append(union, e)
+			}
+		}
+	}
+	if len(union) == 0 {
+		return nil
+	}
+	value := strings.Join(union, ",")
+	lines := []string{
+		fmt.Sprintf("  grants  -add-tools %q", value),
+		fmt.Sprintf("  grants  POLAKO_ADD_TOOLS=%s", value),
+	}
+	for _, r := range results {
+		if r.parked && len(r.parkEntries) > 0 {
+			lines = append(lines, fmt.Sprintf("  grants  gh issue edit %d --remove-label %s", r.issue, needsHumanLabel))
+		}
+	}
+	return lines
 }
 
 // issueRefs renders a list of issue numbers the way the rest of the output

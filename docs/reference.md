@@ -112,6 +112,7 @@ The context arrives in the environment, so the command needs no arguments:
 | `POLAKO_NOTIFY_ISSUE` | The issue number, or empty when the whole shift rather than one issue needs you. |
 | `POLAKO_NOTIFY_REPO` | `owner/name`. |
 | `POLAKO_NOTIFY_REASON` | One line of English saying what happened and what to do about it. |
+| `POLAKO_NOTIFY_GRANTS` | Comma-separated `-add-tools` entries this park derived, empty otherwise — thread-safe entries only, the same set that issue's own thread footer and exit-summary line carry. |
 
 So a hook is usually a three-line script:
 

@@ -85,6 +85,11 @@ type notification struct {
 	// records keep that discipline and a hook that leaves the machine has more
 	// reason to, not less.
 	reason string
+	// grants are the thread-safe -add-tools entries a permission park derived,
+	// nil for every other notification — a notify command often posts
+	// somewhere, so it gets the same paste-ready value the exit summary and
+	// the issue thread's own footer already carry.
+	grants []string
 }
 
 // env is the context a hook is handed. Every variable is always set, empty
@@ -100,6 +105,7 @@ func (n notification) env(cfg config) []string {
 		notifyPrefix + "ISSUE=" + issue,
 		notifyPrefix + "REPO=" + cfg.repo,
 		notifyPrefix + "REASON=" + n.reason,
+		notifyPrefix + "GRANTS=" + strings.Join(n.grants, ","),
 	}
 }
 
