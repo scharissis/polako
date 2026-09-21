@@ -661,6 +661,23 @@ func fakeClaude(mode string) int {
 			`"num_turns":6,"total_cost_usd":0.1,` +
 			`"result":"git fetch origin keeps failing here — looks like the SSH agent isn't reachable from this session."}`)
 		return 0
+	case "toolrefusedrecoveredthenrefusedagain":
+		// Issue #432's own review: a worked-around refusal (run 1) defers to
+		// a resume, and that resume hits a *different* refusal it does not
+		// recover from — #126's shape, not #461's. The immediate park this
+		// triggers must still name run 1's deferred refusal alongside this
+		// one, not just its own.
+		if !slices.Contains(os.Args, "--resume") {
+			return fakeClaude("toolrefusedrecovered")
+		}
+		emit(`{"type":"system","subtype":"init","session_id":"sess-recovered","model":"claude-opus-5"}`)
+		emit(`{"type":"assistant","session_id":"sess-recovered","message":{"content":[` +
+			`{"type":"tool_use","id":"toolu_3","name":"Bash","input":{"command":"rm -rf /tmp/x"}}]}}`)
+		emit(`{"type":"user","session_id":"sess-recovered","message":{"content":[` +
+			`{"type":"tool_result","tool_use_id":"toolu_3","is_error":true,"content":"This command requires approval"}]}}`)
+		emit(`{"type":"result","subtype":"success","session_id":"sess-recovered","duration_ms":100,` +
+			`"num_turns":2,"total_cost_usd":0.1,"result":"Cleanup failed; stopping here."}`)
+		return 0
 	case "toolrefusedrecoveredthencrash":
 		// Issue #461: the deferred refusal from a worked-around clean exit
 		// has to survive the *resume* itself dying instead of ending cleanly
@@ -4035,6 +4052,15 @@ func TestPermissionParkAdviceNamesTheFixOrSaysWhyNot(t *testing.T) {
 			},
 			wantOK:    true,
 			wantParts: []string{"doesn't hand that grant out"},
+		},
+		{
+			name: "ungrantable and never together names both, with no entries to fall back on",
+			refusals: []refusal{
+				{tool: "Bash", command: "git fetch origin 2>&1; echo RC=$?", kind: refusalUngrantable},
+				{tool: "Bash", command: "gh pr merge 7", kind: refusalPlain},
+			},
+			wantOK:    true,
+			wantParts: []string{"$VAR", "doesn't hand out automatically"},
 		},
 		{
 			name: "a path-bearing entry is filtered out, leaving nothing derivable",

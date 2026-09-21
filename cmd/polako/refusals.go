@@ -165,14 +165,11 @@ func permissionParkEntries(refusals []refusal, allowlist string) (entries []stri
 	return entries, ungrantable, never
 }
 
-// permissionParkAdvice turns a refusal set into what a park's reason says
-// about fixing it — ticket 3 of docs/plans/permission-parks.md (#432): the
-// entries to rerun with when at least one can be derived, why none can be
-// when every refusal explains itself, or false when there is nothing
-// actionable to say (the caller falls back to permissionParkReason's fixed
-// pointer at the terminal in that case).
-func permissionParkAdvice(refusals []refusal, allowlist string) (advice string, ok bool) {
-	entries, ungrantable, never := permissionParkEntries(refusals, allowlist)
+// permissionParkAdviceFrom builds a park's advice clause from an
+// already-derived entries/ungrantable/never triple — permissionParkEntries'
+// own return — so a caller that also needs the entries themselves (for the
+// `Refused:` footer) classifies each refusal once, not once per use.
+func permissionParkAdviceFrom(entries []string, ungrantable, never bool) (advice string, ok bool) {
 	switch {
 	case len(entries) > 0:
 		quoted := make([]string, len(entries))
@@ -182,24 +179,47 @@ func permissionParkAdvice(refusals []refusal, allowlist string) (advice string, 
 		return fmt.Sprintf("the run was refused %s. Rerun with `-add-tools \"%s\"`, "+
 			"then remove needs-human — or fix the skill if it shouldn't reach for these.",
 			strings.Join(quoted, ", "), strings.Join(entries, ",")), true
-	case ungrantable && !never:
+	case ungrantable && never:
+		return "one command held a `$VAR`, which no `-add-tools` entry allows, and another " +
+			"is one polako doesn't hand out automatically — the skill has to change both.", true
+	case ungrantable:
 		return "a command held a `$VAR`, which no `-add-tools` entry allows — " +
 			"the skill has to phrase it differently.", true
-	case never && !ungrantable:
+	case never:
 		return "polako doesn't hand that grant out — fix the skill so it doesn't reach for it.", true
 	default:
 		return "", false
 	}
 }
 
+// permissionParkAdvice turns a refusal set into what a park's reason says
+// about fixing it — ticket 3 of docs/plans/permission-parks.md (#432): the
+// entries to rerun with when at least one can be derived, why none can be
+// when every refusal explains itself, or false when there is nothing
+// actionable to say (the caller falls back to permissionParkReason's fixed
+// pointer at the terminal in that case).
+func permissionParkAdvice(refusals []refusal, allowlist string) (advice string, ok bool) {
+	entries, ungrantable, never := permissionParkEntries(refusals, allowlist)
+	return permissionParkAdviceFrom(entries, ungrantable, never)
+}
+
 // permissionParkReasonFor is a permission park's reason, derived from what
 // actually refused it, falling back to permissionParkReason's fixed pointer
 // at the terminal when permissionParkAdvice has nothing to say.
 func permissionParkReasonFor(refusals []refusal, allowlist string) string {
-	if advice, ok := permissionParkAdvice(refusals, allowlist); ok {
-		return advice
+	reason, _ := permissionParkReasonAndEntries(refusals, allowlist)
+	return reason
+}
+
+// permissionParkReasonAndEntries is permissionParkReasonFor plus the same
+// thread-safe entries a caller needs for the `Refused:` footer, computed
+// once instead of twice.
+func permissionParkReasonAndEntries(refusals []refusal, allowlist string) (reason string, entries []string) {
+	entries, ungrantable, never := permissionParkEntries(refusals, allowlist)
+	if advice, ok := permissionParkAdviceFrom(entries, ungrantable, never); ok {
+		return advice, entries
 	}
-	return permissionParkReason
+	return permissionParkReason, entries
 }
 
 // permissionParkReasonWorkedAround is the eventual park's reason once a
@@ -211,13 +231,22 @@ func permissionParkReasonFor(refusals []refusal, allowlist string) string {
 // blocker (an unreachable SSH agent) was in the run's own last words
 // instead, which the aside carries alongside this (see runReport.lastResultText).
 func permissionParkReasonWorkedAround(refusals []refusal, allowlist string) string {
+	reason, _ := permissionParkReasonWorkedAroundAndEntries(refusals, allowlist)
+	return reason
+}
+
+// permissionParkReasonWorkedAroundAndEntries is
+// permissionParkReasonWorkedAround plus the same thread-safe entries a
+// caller needs for the `Refused:` footer, computed once instead of twice.
+func permissionParkReasonWorkedAroundAndEntries(refusals []refusal, allowlist string) (reason string, entries []string) {
+	entries, ungrantable, never := permissionParkEntries(refusals, allowlist)
 	lead := fmt.Sprintf("the run opened no PR, and was refused %s along the way — "+
 		"it kept going afterward, so a wider grant may not be the blocker",
 		plural(len(refusals), "call"))
-	if advice, ok := permissionParkAdvice(refusals, allowlist); ok {
-		return lead + ", but if it is: " + advice
+	if advice, ok := permissionParkAdviceFrom(entries, ungrantable, never); ok {
+		return lead + ", but if it is: " + advice, entries
 	}
-	return lead + "; " + permissionParkReason
+	return lead + "; " + permissionParkReason, entries
 }
 
 // permissionRefusal reports whether a clean run's final text is the run itself
@@ -485,11 +514,19 @@ func (r runReport) lastRefusalDetail() string {
 // #390 drew five refusals and only ever one reached the operator. "" when
 // there were none.
 func (r runReport) refusalDetails() string {
-	if len(r.refusals) == 0 {
+	return joinRefusalDetails(r.refusals)
+}
+
+// joinRefusalDetails is refusalDetails' rendering, shared with a permission
+// park that has to report refusals spanning more than one run — a worked-
+// around refusal deferred from an earlier resume (deferredRefusal.refusals),
+// combined with whatever this run added of its own.
+func joinRefusalDetails(refusals []refusal) string {
+	if len(refusals) == 0 {
 		return ""
 	}
-	parts := make([]string, len(r.refusals))
-	for i, ref := range r.refusals {
+	parts := make([]string, len(refusals))
+	for i, ref := range refusals {
 		parts[i] = refusalRender(ref)
 	}
 	return strings.Join(parts, "; ")
