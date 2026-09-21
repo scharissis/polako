@@ -479,8 +479,9 @@ run's diff touches browser-rendered files and a script serves them, it
 shoots up to four routes from the repo's own routing code, before the
 first edit and again at the end, and pushes the PNGs to one orphan branch
 on your origin, `polako-evidence`, embedded in the PR body as a
-before/after pair per route. Any failure along that chain drops back to no
-images and one `## Verification` line; it never parks the issue or asks a
+before/after pair per route — or the after shot alone if the before
+attempt came up empty. A route that gets no shot at all drops back to no
+image and one `## Verification` line; it never parks the issue or asks a
 question. `-visual-evidence=false` on `work` turns the whole thing off.
 
 ## Human touchpoints
