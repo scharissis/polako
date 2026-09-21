@@ -104,12 +104,9 @@ turn otherwise. An ask that was the final word parks immediately rather
 than retrying — resuming replays the same session against the same
 allowlist and hits the same wall, so only `-add-tools` or a skill fix gets
 past it. The reason now says what to grant, derived from the refusal
-itself:
-
-```
-  parked  #16 ($2.27) — the run was refused `Bash(echo:*)`. Rerun with
-  -add-tools "Bash(echo:*)", then remove needs-human, or fix the skill.
-```
+itself, narrated once and posted to the thread as e.g. "the run was refused
+`Bash(echo:*)`. Rerun with `-add-tools "Bash(echo:*)"`, then remove
+needs-human, or fix the skill."
 
 Nothing to grant says why instead — a `$VAR`, or a never-grant-table
 command — and nothing derivable falls back to the old terminal pointer. The
@@ -118,6 +115,20 @@ entries only. A worked-around refusal (kept going, ended calmly) gets a
 hedge instead — issue #390's own refusal was a red herring, the real
 blocker was in its last words — leading with "refused N calls along the
 way" rather than a confident fix.
+
+The exit summary's own `parked` line shortens to the entries, and — when any
+park this shift made derives one — ends with the union to paste, deduped,
+plus the command per issue:
+
+```
+  parked  #16 ($2.27) — refused `Bash(echo:*)`
+  grants  -add-tools "Bash(echo:*),Bash(curl:*)"
+  grants  POLAKO_ADD_TOOLS=Bash(echo:*),Bash(curl:*)
+  grants  gh issue edit 16 --remove-label needs-human
+  grants  gh issue edit 22 --remove-label needs-human
+```
+
+No entries, no block. `-notify` gets the same union in `POLAKO_NOTIFY_GRANTS`.
 
 When the ask was only an earlier turn, polako resumes first if there's work
 to resume into, telling it outright that its turn ends the process. If it

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -96,6 +97,26 @@ func TestNotifyHandsTheHookItsContext(t *testing.T) {
 	if !strings.Contains(got[1], notifyPrefix+"ISSUE= ") &&
 		!strings.HasSuffix(got[1], notifyPrefix+"ISSUE=") {
 		t.Errorf("drained notification = %s, want an empty %sISSUE", got[1], notifyPrefix)
+	}
+}
+
+// docs/plans/permission-parks.md ticket 4 (#433): a notify command often
+// posts what it is told somewhere, so a permission park's thread-safe
+// entries travel with it too — always set, empty when there are none, the
+// same rule every other notify variable follows.
+func TestNotifyEnvCarriesGrants(t *testing.T) {
+	t.Parallel()
+	cfg := config{repo: "owner/repo"}
+
+	env := notification{event: notifyParked, issue: 16, reason: "r",
+		grants: []string{"Bash(echo:*)", "Bash(curl:*)"}}.env(cfg)
+	if want := notifyPrefix + "GRANTS=Bash(echo:*),Bash(curl:*)"; !slices.Contains(env, want) {
+		t.Errorf("env is missing %q\ngot: %v", want, env)
+	}
+
+	env = notification{event: notifyParked, issue: 17, reason: "r"}.env(cfg)
+	if want := notifyPrefix + "GRANTS="; !slices.Contains(env, want) {
+		t.Errorf("a park with no entries should still set an empty %s\ngot: %v", notifyPrefix+"GRANTS", env)
 	}
 }
 
@@ -251,6 +272,30 @@ func TestNotifyFiresWhenAnIssueParksAndThenNothingIsLeftToWork(t *testing.T) {
 		if !strings.Contains(got[1], want) {
 			t.Errorf("second notification = %s, want it to name the stuck backlog: missing %q", got[1], want)
 		}
+	}
+}
+
+// docs/plans/permission-parks.md ticket 4 (#433), end to end: a permission
+// park's own -notify event carries the same thread-safe entries the exit
+// summary and the issue thread's footer do.
+func TestNotifyCarriesAPermissionParksEntries(t *testing.T) {
+	t.Parallel()
+	captureLog(t)
+	cfg, _ := drainConfig(t, "toolrefused", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	told := notifyLog(t, &cfg)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a permission refusal must not end the drain: %v", err)
+	}
+
+	got := told()
+	if len(got) == 0 {
+		t.Fatalf("notifications = %v, want at least the park", got)
+	}
+	if want := notifyPrefix + "GRANTS=Bash(curl:*)"; !strings.Contains(got[0], want) {
+		t.Errorf("the park notification is missing %q\ngot: %s", want, got[0])
 	}
 }
 

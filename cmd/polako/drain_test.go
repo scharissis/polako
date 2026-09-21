@@ -1564,6 +1564,41 @@ func TestDrainParksARefusedToolResultWithoutResuming(t *testing.T) {
 	}
 }
 
+// docs/plans/permission-parks.md ticket 4 (#433), end to end: a drain that
+// parks two issues on the same derivable entry ends with one grants block,
+// the union deduplicated, one gh line per issue.
+func TestDrainEndsWithAGrantsBlockAfterTwoPermissionParks(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "toolrefused", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}, "2": {Open: true}},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a permission refusal must not end the drain: %v", err)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"parked  #1 ($0.10) — refused `Bash(curl:*)`",
+		"parked  #2 ($0.10) — refused `Bash(curl:*)`",
+		`grants  -add-tools "Bash(curl:*)"`,
+		"grants  POLAKO_ADD_TOOLS=Bash(curl:*)",
+		"grants  gh issue edit 1 --remove-label needs-human",
+		"grants  gh issue edit 2 --remove-label needs-human",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary is missing %q\ngot:\n%s", want, out)
+		}
+	}
+	// The full "Rerun with -add-tools" paragraph already ran once per park,
+	// narrated above this block — it must not repeat inside it.
+	if n := strings.Count(out, "Rerun with"); n != 2 {
+		t.Errorf(`"Rerun with" appears %d times, want exactly 2 (once per park's own narration), `+
+			"not a third copy in the summary\ngot:\n%s", n, out)
+	}
+}
+
 // Issue #461: #402 and #318's actual shape — a refused tool_result the run
 // worked around, with successful tool calls and a calm final word after it.
 // Before this fix the refusal parked the issue on the spot, throwing away
@@ -5023,6 +5058,65 @@ func TestDrainSummaryReportsAClosedContainerEvenWithNoIssueResults(t *testing.T)
 	}
 	if strings.Contains(got, "merged") || strings.Contains(got, "parked") {
 		t.Errorf("no issue was touched, so the summary should not claim 0 of either\ngot:\n%s", got)
+	}
+}
+
+// docs/plans/permission-parks.md ticket 4 (#433): a permission park's own
+// paragraph already ran once, narrated when it happened and posted to the
+// thread — so the exit summary's per-issue line shortens to the entries
+// rather than repeating it.
+func TestDrainSummaryShortensAParkedLineWithEntries(t *testing.T) {
+	t.Parallel()
+	got := strings.Join(drainSummary([]issueResult{
+		{issue: 16, parked: true, reason: "the run was refused `Bash(echo:*)`. Rerun with " +
+			`-add-tools "Bash(echo:*)", then remove needs-human, or fix the skill.`,
+			parkEntries: []string{"Bash(echo:*)"}},
+	}, nil, nil, nil, time.Minute), "\n")
+	if want := "parked  #16 — refused `Bash(echo:*)`"; !strings.Contains(got, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
+	}
+	if strings.Contains(got, "Rerun with") {
+		t.Errorf("the full reason paragraph should not repeat in the summary\ngot:\n%s", got)
+	}
+}
+
+// A park with no entries — most parks, which are not permission refusals at
+// all — keeps today's full-reason line untouched.
+func TestDrainSummaryKeepsTheFullReasonWithNoEntries(t *testing.T) {
+	t.Parallel()
+	got := strings.Join(drainSummary([]issueResult{
+		{issue: 16, parked: true, reason: "no PR and no questions"},
+	}, nil, nil, nil, time.Minute), "\n")
+	if want := "parked  #16 — no PR and no questions"; !strings.Contains(got, want) {
+		t.Errorf("summary is missing %q\ngot:\n%s", want, got)
+	}
+	if strings.Contains(got, "grants") {
+		t.Errorf("no park carried entries, so there is nothing to paste\ngot:\n%s", got)
+	}
+}
+
+// docs/plans/permission-parks.md ticket 4 (#433): one paste-ready block, the
+// union of every park's entries with no duplicates, plus the command to
+// clear each issue that carried one.
+func TestDrainSummaryEndsWithAGrantsBlockUnioningEntries(t *testing.T) {
+	t.Parallel()
+	got := strings.Join(drainSummary([]issueResult{
+		{issue: 16, parked: true, reason: "r1", parkEntries: []string{"Bash(echo:*)", "Bash(curl:*)"}},
+		{issue: 3},
+		{issue: 22, parked: true, reason: "r2", parkEntries: []string{"Bash(curl:*)"}},
+	}, nil, nil, nil, time.Minute), "\n")
+
+	for _, want := range []string{
+		// "Bash(curl:*)" is deliberately named once per value line, not twice —
+		// #22's own entry folded into #16's rather than appended again.
+		`grants  -add-tools "Bash(echo:*),Bash(curl:*)"`,
+		"grants  POLAKO_ADD_TOOLS=Bash(echo:*),Bash(curl:*)",
+		"grants  gh issue edit 16 --remove-label needs-human",
+		"grants  gh issue edit 22 --remove-label needs-human",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary is missing %q\ngot:\n%s", want, got)
+		}
 	}
 }
 

@@ -60,9 +60,16 @@ const docsBudget = 500
 // (issue #390), had no existing paragraph on offer to cut instead — every
 // sentence in that section already earned its place across #126, #138,
 // #209 and #461.
+//
+// Both ceilings moved again in issue #433, ticket 4 of the same plan:
+// reference.md was at 510 with no slack for POLAKO_NOTIFY_GRANTS's own row;
+// behaviour.md was at 517 with no slack for the exit summary's new grants
+// block, and the paragraph just above it (ticket 3, #432) was trimmed as
+// far as it goes without losing the worked-around hedge those four issues
+// earned.
 var docsDebt = map[string]int{
-	"reference.md": 510,
-	"behaviour.md": 517,
+	"reference.md": 511,
+	"behaviour.md": 528,
 }
 
 func TestDocsStayWithinLineBudget(t *testing.T) {
