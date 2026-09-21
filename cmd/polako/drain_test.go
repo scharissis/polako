@@ -632,6 +632,33 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 		}
 		fmt.Fprintf(os.Stderr, "no PR #%s\n", at(2))
 		return "", false, 1
+
+	case "pr create":
+		// setup's own write, ticket 4 (docs/plans/setup.md): one PR from
+		// polako-setup. --head is the only flag every caller here needs
+		// keyed on; --base, --title and --body are accepted but not
+		// inspected, the same way real gh accepts them without echoing them
+		// back on `pr view`.
+		head := flagVal("--head")
+		if head == "" {
+			fmt.Fprintln(os.Stderr, "fake gh: pr create needs --head")
+			return "", false, 1
+		}
+		if pr, ok := st.PRs[head]; ok && pr.State == "OPEN" {
+			fmt.Fprintf(os.Stderr, "a pull request for branch %q already exists\n", head)
+			return "", false, 1
+		}
+		next := 1
+		for _, pr := range st.PRs {
+			if pr.Number >= next {
+				next = pr.Number + 1
+			}
+		}
+		if st.PRs == nil {
+			st.PRs = map[string]*fakePR{}
+		}
+		st.PRs[head] = &fakePR{Number: next, State: "OPEN", Mergeable: "MERGEABLE"}
+		return fmt.Sprintf("https://example.invalid/pr/%d\n", next), true, 0
 	}
 	fmt.Fprintf(os.Stderr, "fake gh: unhandled call %q\n", strings.Join(args, " "))
 	return "", false, 1
