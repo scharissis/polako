@@ -78,6 +78,15 @@ type resumeLedger struct {
 	// kinds are exclusive, and a second bool is one more thing every place
 	// that clears the first has to remember.
 	kind string
+	// deferredPermissionDetail carries a worked-around refusal's detail
+	// (issue #461) across the resume afterCleanExit let it try instead of
+	// parking straight away. A later run of this same issue may open a PR —
+	// then this is never read again — or end with no PR of its own, with or
+	// without a fresh refusal; either way the eventual park still blames the
+	// original refusal rather than reporting "produced nothing" or the bound
+	// that actually stopped the resuming. Empty means no such refusal is
+	// pending.
+	deferredPermissionDetail string
 }
 
 // clearRetries is what a fresh start does: a reply arrived, or a PR opened, so
@@ -613,27 +622,40 @@ func (a *runAttempt) giveUpAfterCrash() error {
 // nearly — exactly what resume exists for. The fourth asked the operator to
 // approve a tool this allowlist never granted and ended its turn unheard —
 // see rep.permissionRefused below, whose fix (-add-tools) is not something
-// resuming the same session can reach.
+// resuming the same session can reach — unless the run worked around it and
+// kept going (rep.refusalWorkedAround, issue #461), in which case it is worth
+// letting the resume machinery try to finish the job before assuming so.
 //
 // The first three (decided nothing, paused forever, ran out of road) are told
 // apart by that work on disk, not rep.progressed(): every clean exit
 // progressed — the run this was written for scored 59 turns and 58 tool
 // uses — so progress cannot separate them. Whether the branch has commits, or
 // the worktree is dirty, can. The fourth is told apart by the run's own final
-// words instead, classified by permissionRefusal, and checked first: no amount
-// of salvageable work changes what fixes it.
+// words instead, classified by permissionRefusal, and checked first — unless
+// worked around, no amount of salvageable work changes what fixes it.
 func (a *runAttempt) afterCleanExit() (*pullRequest, error) {
 	a.record(0, outcomeNothing)
 	// One probe, feeding both the decision and, if it turns out to be a park
 	// after all, the message.
 	left := inspectLeftWork(a.ctx, a.cfg, a.issue)
 
-	if a.rep.permissionRefused {
+	workedAround := a.rep.permissionRefused && a.rep.refusalWorkedAround()
+	if a.rep.permissionRefused && !workedAround {
 		// Resuming replays the identical session against the identical
 		// allowlist, so it hits the same wall again — only the operator can
 		// grant the tool, so park straight away rather than spending the
-		// clean-exit resume budget finding that out the slow way.
+		// clean-exit resume budget finding that out the slow way. #126's own
+		// shape (refused, then nothing more attempted) and #138's (the final
+		// message is itself the ask) both land here.
 		return nil, a.parkCleanExit(parkPermission, permissionParkReason, a.rep.permissionRefusedDetail, left)
+	}
+	if workedAround {
+		// Remembered on the ledger, not just this attempt's own report: if the
+		// resume below still ends with no PR — this run's or a later one's,
+		// with or without a fresh refusal of its own — the eventual park has
+		// to keep blaming this refusal rather than reporting "produced
+		// nothing" or whatever bound actually stopped the resuming.
+		a.ledger.deferredPermissionDetail = a.rep.permissionRefusedDetail
 	}
 
 	bound, boundWhy, resume := a.cleanExitDisposition(left)
@@ -642,8 +664,14 @@ func (a *runAttempt) afterCleanExit() (*pullRequest, error) {
 		// an API drop, a rate limit, a host that woke mid-run — and this is
 		// not: the process ended because the model ended its turn, and waiting
 		// changes nothing about what the next attempt finds.
-		a.cfg.logf("the run ended its turn without opening a PR but left work "+
-			"behind — resuming it to finish (%d/%d)", a.ledger.cleanResumes, cleanExitResumeCeiling)
+		if workedAround {
+			a.cfg.logf("the run was refused a tool mid-run but kept going and left work "+
+				"behind — resuming it to finish before treating the refusal as the blocker (%d/%d)",
+				a.ledger.cleanResumes, cleanExitResumeCeiling)
+		} else {
+			a.cfg.logf("the run ended its turn without opening a PR but left work "+
+				"behind — resuming it to finish (%d/%d)", a.ledger.cleanResumes, cleanExitResumeCeiling)
+		}
 		return nil, nil
 	}
 
@@ -675,10 +703,21 @@ func (a *runAttempt) afterCleanExit() (*pullRequest, error) {
 			category = parkPermission
 		}
 	}
+	refusedCmd := ""
+	if a.ledger.deferredPermissionDetail != "" {
+		// Unlike permissionAsked above, the category does not follow the
+		// bound here: this is a structural refusal (#209's own signal), not a
+		// weaker prose-based one, and the resume was already the concession —
+		// #461's whole point is that this park keeps blaming the refusal
+		// rather than the ceiling or budget that happened to be what actually
+		// stopped the resuming.
+		reason, category = permissionParkReason, parkPermission
+		refusedCmd = a.ledger.deferredPermissionDetail
+	}
 	if bound != "" {
 		reason += "; " + bound
 	}
-	return nil, a.parkCleanExit(category, reason, "", left)
+	return nil, a.parkCleanExit(category, reason, refusedCmd, left)
 }
 
 // cleanExitDisposition decides what to do with a clean exit that left work

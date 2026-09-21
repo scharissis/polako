@@ -568,6 +568,25 @@ func fakeClaude(mode string) int {
 		emit(`{"type":"result","subtype":"success","session_id":"sess-refused","duration_ms":100,` +
 			`"num_turns":2,"total_cost_usd":0.1,"result":"Issue #1 is resolved: nothing left to do."}`)
 		return 0
+	case "toolrefusedrecovered":
+		// Issue #461's #402/#318 shape: the same refused tool_result as
+		// "toolrefused", but this run kept going afterward — one more tool
+		// call, this one successful, then a calm final word that is not
+		// itself an ask. Identical on every dispatch, so a drain that resumes
+		// into this fake still has the same refusal to name once the shared
+		// clean-exit ceiling finally parks it.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-recovered","model":"claude-opus-5"}`)
+		emit(`{"type":"assistant","session_id":"sess-recovered","message":{"content":[` +
+			`{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"cd /w && gofmt -l ."}}]}}`)
+		emit(`{"type":"user","session_id":"sess-recovered","message":{"content":[` +
+			`{"type":"tool_result","tool_use_id":"toolu_1","is_error":true,"content":"This command requires approval"}]}}`)
+		emit(`{"type":"assistant","session_id":"sess-recovered","message":{"content":[` +
+			`{"type":"tool_use","id":"toolu_2","name":"Bash","input":{"command":"gofmt -l /w"}}]}}`)
+		emit(`{"type":"user","session_id":"sess-recovered","message":{"content":[` +
+			`{"type":"tool_result","tool_use_id":"toolu_2","is_error":false,"content":""}]}}`)
+		emit(`{"type":"result","subtype":"success","session_id":"sess-recovered","duration_ms":100,` +
+			`"num_turns":4,"total_cost_usd":0.1,"result":"Committed the fix; ending here."}`)
+		return 0
 	case "permissionmidrun":
 		// Issue #182 / #169: the ask lands in a turn partway through, and the
 		// run then ends on a sentence the head anchor cannot match. Same clean
