@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
 type setupOptions struct {
@@ -335,15 +336,34 @@ func setupOriginHeadRow(ctx context.Context, cfg config, gitOK bool) setupRow {
 	if !gitOK {
 		return setupRow{name: name, status: setupUnknown, detail: "git isn't on PATH"}
 	}
-	if _, err := git(ctx, cfg, "rev-parse", "--git-dir"); err != nil {
-		return setupRow{name: name, status: setupMissing, required: true,
-			detail: fmt.Sprintf("-dir %s is not a git checkout", cfg.dir)}
-	}
-	if _, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short"); err != nil {
+	if _, notCheckout, err := originDefaultBranch(ctx, cfg); err != nil {
+		if notCheckout {
+			return setupRow{name: name, status: setupMissing, required: true,
+				detail: fmt.Sprintf("-dir %s is not a git checkout", cfg.dir)}
+		}
 		return setupRow{name: name, status: setupMissing, required: true,
 			detail: "run `git remote set-head origin -a`"}
 	}
 	return setupRow{name: name, status: setupOK}
+}
+
+// originDefaultBranch resolves origin's default branch name — stripped of
+// its "origin/" prefix — via the same two git calls setupOriginHeadRow's own
+// doc comment already draws a distinction between: notCheckout true means
+// -dir isn't a git checkout at all, false with a non-nil err means it is,
+// but origin/HEAD isn't set (`git remote set-head origin -a` fixes it).
+// Shared with setupBranchProtectionRow (setup_advice.go), which needs the
+// branch name itself, so the two rows don't each spawn their own git
+// subprocess for the same question.
+func originDefaultBranch(ctx context.Context, cfg config) (branch string, notCheckout bool, err error) {
+	if _, err := git(ctx, cfg, "rev-parse", "--git-dir"); err != nil {
+		return "", true, err
+	}
+	out, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short")
+	if err != nil {
+		return "", false, err
+	}
+	return strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/"), false, nil
 }
 
 // setupPluginRow reuses pluginVersion and skewComparison — the same reads

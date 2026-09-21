@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // setupCIWorkflowRow is a plain tree read: any .yml/.yaml under
@@ -66,8 +65,9 @@ func readBranchProtection(ctx context.Context, cfg config, branch string) (branc
 	}
 }
 
-// setupBranchProtectionRow reads the default branch off the same local git
-// ref setupOriginHeadRow already resolves — no extra gh call just to name it.
+// setupBranchProtectionRow reads the default branch through
+// originDefaultBranch (setup.go), the same resolution setupOriginHeadRow
+// makes — no extra git subprocess just to name it.
 func setupBranchProtectionRow(ctx context.Context, cfg config, reposOK, gitOK bool) setupRow {
 	const name = "branch protection"
 	if !reposOK {
@@ -76,11 +76,13 @@ func setupBranchProtectionRow(ctx context.Context, cfg config, reposOK, gitOK bo
 	if !gitOK {
 		return setupRow{name: name, status: setupUnknown, detail: "git isn't on PATH"}
 	}
-	out, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short")
+	branch, notCheckout, err := originDefaultBranch(ctx, cfg)
 	if err != nil {
+		if notCheckout {
+			return setupRow{name: name, status: setupUnknown, detail: fmt.Sprintf("-dir %s is not a git checkout", cfg.dir)}
+		}
 		return setupRow{name: name, status: setupUnknown, detail: "origin/HEAD does not resolve"}
 	}
-	branch := strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/")
 	state, err := retryRead(ctx, cfg, "branch protection", func() (branchProtectionState, error) {
 		return readBranchProtection(ctx, cfg, branch)
 	})

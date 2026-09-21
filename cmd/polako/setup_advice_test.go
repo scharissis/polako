@@ -70,6 +70,19 @@ func TestSetupBranchProtectionRow(t *testing.T) {
 	}
 }
 
+// A review finding: on a -dir that isn't a git checkout at all, this row
+// must say so rather than the more general (and here misleading)
+// "origin/HEAD does not resolve" — the same distinction setupOriginHeadRow
+// already draws for the same underlying git failure.
+func TestSetupBranchProtectionRowNamesANonCheckout(t *testing.T) {
+	t.Parallel()
+	cfg := config{dir: t.TempDir()} // no .git here at all
+	row := setupBranchProtectionRow(context.Background(), cfg, true, true)
+	if row.status != setupUnknown || !strings.Contains(row.detail, "not a git checkout") {
+		t.Errorf("row = %+v, want it to name -dir as not a git checkout", row)
+	}
+}
+
 func TestSetupBranchProtectionRowUnknownWithoutRepoOrGit(t *testing.T) {
 	t.Parallel()
 	_, checkout := upstream(t)
