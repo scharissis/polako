@@ -10,6 +10,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -145,6 +146,7 @@ func resumePrompt(skill string, issue int, reason string) string {
 // changing with every issue number.
 func issueRun(cfg config, issue int) (config, string, string) {
 	cfg.addTools = resolveTools(cfg.addTools, issueLabelTools(issue)+","+issueCloseTool(issue))
+	cfg.remoteName = remoteSessionName(cfg, issue)
 	prompt := fmt.Sprintf("/%s %d", cfg.skill, issue)
 	if !cfg.visualEvidence {
 		prompt += " no-evidence"
@@ -211,13 +213,24 @@ func validateEffort(flagName, effort string) error {
 		flagName, effort, strings.Join(effortLevels, ", "))
 }
 
-// buildArgs assembles one headless claude invocation.
+// buildArgs assembles one headless claude invocation. Off, cfg.remote leaves
+// every one of these exactly as before: the prompt travels as -p's own
+// value, no stdin, no -n. On, the prompt instead travels over stdin — see
+// startClaude, which writes it there as a stream-json user message next to
+// the control_request that asks the CLI to register the session — so -p
+// takes no value and --input-format stream-json says why not; -n names the
+// session in the operator's Remote Control list, the same
+// polako-<repo>#<issue> scheme remoteRun used before issue #82 retired it.
 func buildArgs(cfg config, prompt, resumeID string) []string {
 	var args []string
 	if resumeID != "" {
 		args = append(args, "--resume", resumeID)
 	}
-	args = append(args, "-p", prompt, "--permission-mode", cfg.permissionMode)
+	if cfg.remote {
+		args = append(args, "-p", "--input-format", "stream-json", "--permission-mode", cfg.permissionMode)
+	} else {
+		args = append(args, "-p", prompt, "--permission-mode", cfg.permissionMode)
+	}
 	if cfg.model != "" {
 		args = append(args, "--model", cfg.model)
 	}
@@ -229,14 +242,57 @@ func buildArgs(cfg config, prompt, resumeID string) []string {
 	if cfg.effort != "" && resumeID == "" {
 		args = append(args, "--effort", cfg.effort)
 	}
-	// No --remote-control, whether -remote is on or off: today's CLI takes the
-	// flag under -p and ignores it (see config.remote), so passing it buys an
-	// argument pair and a false promise.
+	if cfg.remote && cfg.remoteName != "" {
+		args = append(args, "-n", cfg.remoteName)
+	}
 	return append(args,
 		"--allowedTools", resolveTools(cfg.tools, cfg.addTools),
 		"--output-format", "stream-json", // one JSON event per message, in real time
 		"--verbose", // required for stream-json in print mode
 	)
+}
+
+// remoteControlRequestID is fixed: exactly one control request is ever sent
+// per invocation, so nothing here needs to disambiguate several in flight.
+const remoteControlRequestID = "rc"
+
+// remoteUserMessage is stdin's second line under -remote: the prompt, carried
+// as a stream-json user message instead of argv. A named type rather than an
+// inline literal so json.Marshal has a shape to work from — content is
+// whatever issueRun or resumePrompt built, never issue text verbatim, but
+// marshalling it rather than string-building the line still means a stray
+// quote or newline in it can never break the JSON.
+type remoteUserMessage struct {
+	Type    string `json:"type"`
+	Message struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	} `json:"message"`
+}
+
+// remoteStdin builds the fixed stdin buffer a -remote invocation reads: one
+// control_request asking the CLI to register the session with Remote
+// Control, then the prompt as a user message, then EOF. A strings.Reader
+// rather than a pipe this process would have to remember to close on every
+// exit path — os/exec starts its own copying goroutine for a non-*os.File
+// Stdin and closes that pipe's write end once the reader hits EOF, which a
+// fixed buffer always does.
+func remoteStdin(prompt string) io.Reader {
+	const req = `{"type":"control_request","request_id":"` + remoteControlRequestID +
+		`","request":{"subtype":"remote_control","enabled":true}}`
+	var m remoteUserMessage
+	m.Type, m.Message.Role, m.Message.Content = "user", "user", prompt
+	msg, _ := json.Marshal(m) // a string field alone; this never errors
+	return strings.NewReader(req + "\n" + string(msg) + "\n")
+}
+
+// remoteSessionName is what one invocation is called in the operator's
+// Remote Control session list — polako <repo>#<issue>, so a shift working
+// several repositories overnight reads as distinct rows rather than one
+// indistinguishable "claude" per session. Revived from before issue #82
+// retired it: same name, new channel.
+func remoteSessionName(cfg config, issue int) string {
+	return fmt.Sprintf("polako %s#%d", cfg.repo, issue)
 }
 
 // maxEventBytes is the largest stream-json event the reader will accept.
@@ -397,6 +453,11 @@ func startClaude(ctx context.Context, cfg config, prompt, resumeID string) (*cla
 	cmd := exec.CommandContext(ctx, cfg.claudeBin, args...)
 	cmd.Dir = cfg.dir
 	cmd.Env = childEnv(cfg.env) // nil in production, so os/exec passes the parent env through
+	if cfg.remote {
+		// buildArgs left -p's value out for exactly this: the prompt travels
+		// here instead, as the stdin --input-format stream-json asks for.
+		cmd.Stdin = remoteStdin(prompt)
+	}
 	// The child's stderr goes into the narration stream line by line, so it
 	// lands in the shift log stamped and attributed rather than raw across the
 	// terminal. The tail is remembered besides, for the diagnoses stdout
@@ -641,6 +702,14 @@ func claudeVerdict(rep *runReport, cfg config, prompt, missing string, limit tim
 	if rep.hasResult {
 		sev, line := finishLine(rep)
 		cfg.narrate(sev, "%s", line)
+	}
+	// polako never waits on the control_response — no reply, in whichever
+	// direction, by the time the stream ends is not an error, only a run this
+	// invocation asked to be watchable that stayed unwatched. Said once here
+	// rather than left silent, since a success or an error reply already
+	// logged itself the moment it arrived (see eventLog.event).
+	if cfg.remote && !rep.remoteRegistered && rep.remoteError == "" {
+		cfg.narrate(sevWarning, "[claude] no Remote Control reply — this run stayed unwatched")
 	}
 	if rep.skillMissing {
 		return fmt.Errorf("%w: %s", errNoWork, missing)

@@ -50,6 +50,24 @@ type streamEvent struct {
 	Result        string                      `json:"result"` // the result event's final text
 	Usage         streamUsage                 `json:"usage"`
 	ModelUsage    map[string]streamModelUsage `json:"modelUsage"`
+	// Response carries a control_response event's own payload — the CLI's
+	// reply to the control_request a -remote invocation writes to stdin.
+	// Unconfirmed by any doc or the published Agent SDK types (issue #471
+	// probed it by hand); observe treats anything it cannot make sense of the
+	// same as no reply at all, rather than guessing at a shape.
+	Response *controlResponse `json:"response"`
+}
+
+// controlResponse is a control_response event's payload: a success carries a
+// session URL to watch the run from, an error carries the CLI's own reason
+// (an unsupported subtype, Remote Control disabled, and the like).
+type controlResponse struct {
+	Subtype   string `json:"subtype"`
+	RequestID string `json:"request_id"`
+	Error     string `json:"error"`
+	Response  struct {
+		SessionURL string `json:"session_url"`
+	} `json:"response"`
 }
 
 // streamUsage is the token block the CLI hangs off both assistant messages and
@@ -210,6 +228,14 @@ type runReport struct {
 	// run, often the only cause on record and worth a terminal line, since the
 	// full copy is off in the shift log.
 	stderrTail string
+	// remoteRegistered and remoteError are a -remote invocation's own
+	// control_response, if one ever arrived: success sets the first (and
+	// remoteURL alongside it), an error subtype sets the second to the CLI's
+	// own reason. Both stay unset for a run that got no reply either way —
+	// see claudeVerdict, which reports that case once at the end.
+	remoteRegistered bool
+	remoteURL        string
+	remoteError      string
 }
 
 // status maps a run to exactly one value, most specific first: a run stopped
@@ -391,6 +417,17 @@ func (r *runReport) observe(ev streamEvent) {
 				CostUSD: u.CostUSD,
 			}
 		}
+	case "control_response":
+		if ev.Response == nil {
+			return // not a shape this run recognises — same as no reply
+		}
+		switch ev.Response.Subtype {
+		case "success":
+			r.remoteRegistered = true
+			r.remoteURL = ev.Response.Response.SessionURL
+		case "error":
+			r.remoteError = ev.Response.Error
+		}
 	}
 }
 
@@ -498,6 +535,21 @@ func (el *eventLog) event(ev streamEvent) {
 			} else {
 				el.u.detailf("[claude] %s", clip(t, 160))
 			}
+		}
+	case "control_response":
+		// The reply to the control_request a -remote invocation's stdin
+		// carries, see remoteStdin. A milestone either way: a success
+		// says where to go watch the run, an error says why nowhere
+		// exists to go watch it. Logged once, here, the moment it
+		// arrives; claudeVerdict covers the case where neither ever does.
+		if ev.Response == nil {
+			return
+		}
+		switch ev.Response.Subtype {
+		case "success":
+			el.u.logf("[claude] registered with Remote Control: %s", ev.Response.Response.SessionURL)
+		case "error":
+			el.u.logf("[claude] Remote Control did not register: %s", ev.Response.Error)
 		}
 	}
 }
