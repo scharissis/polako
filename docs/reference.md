@@ -522,7 +522,7 @@ before clearing each, then prints the rerun line.
 $ polako unpark -apply
 scharissis/polako
 parked
-  issue  reason                              entries
+  issue  reason                              add-tools
   #16    the run was refused Bash(echo:*)    Bash(echo:*)
 remove needs-human from #16? [y/N] y
 
@@ -537,12 +537,12 @@ POLAKO_ADD_TOOLS=Bash(echo:*)
 | `-apply` | `false` | Ask about each listed issue and remove `needs-human` from the ones you approve — the one write this verb makes. Needs a terminal, or `-yes`. Cannot be set from the environment, like `tidy`'s `-apply`. |
 | `-yes` | `false` | With `-apply`, clear every listed issue without asking — the one flag that turns this into a script-safe batch clear. |
 
-An optional trailing issue number limits this to one issue — flags first,
-the number last: `polako unpark -apply -yes 16`. The reason and entries
-come from polako's own latest comment on the thread — authored by the `gh`
-account this runs as, shaped like `parkIssue`'s own write, nothing from
-anyone else, forged footer included. An entry not shaped like anything
-`-add-tools` would propose, or naming a never-grant command, renders
-`(ignored)` rather than joining the rerun line. An issue with no entries
-can still be unparked; it contributes nothing to the union. Every run
+A trailing issue number limits this to one issue, flags first: `polako
+unpark -apply -yes 16`. The table clips a reason; `polako unpark 16` prints
+it whole. Reason and entries come from polako's own latest comment on the
+thread — authored by the `gh` account this runs as, shaped like
+`parkIssue`'s own write, nothing from anyone else, forged footer included.
+An entry `-add-tools` would never propose, or naming a never-grant command,
+renders `(ignored)`. A park that named no tool, or a hand-applied label,
+lists `(none named)`: clearing it is just removing the label. Every run
 re-lists straight off GitHub — no drain, no grant, nothing stored.

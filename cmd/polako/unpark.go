@@ -84,7 +84,10 @@ func runUnpark(ctx context.Context, args []string, in io.Reader, isTTY bool, out
 	if err != nil {
 		return err
 	}
-	renderUnpark(out, rpt, cfg, items)
+	renderUnpark(out, rpt, cfg, items, only != 0)
+	if !opt.apply {
+		printUnparkNextStep(out, items, only != 0)
+	}
 	if opt.apply {
 		// -yes means "clear everything, don't ask" here — not setup's own
 		// "take each step's own default", since every question below shares
@@ -154,15 +157,20 @@ func unparkConfig(ctx context.Context, opt unparkOptions) (config, error) {
 // --- reading ---
 
 // parkListItem is one open needs-human issue, as unpark reports it: the
-// reason clipped to a line, its entries split into ones a rerun could
-// actually use and ones ignored because they don't match anything parkIssue
-// itself ever writes.
+// reason flattened to one line — the table clips it, the one-issue view
+// doesn't — its entries split into ones a rerun could actually use and ones
+// ignored because they don't match anything parkIssue itself ever writes.
 type parkListItem struct {
 	issue   int
 	reason  string
 	entries []string
 	ignored []string
 }
+
+// unparkReasonWidth is where the table clips a reason. The fallback permission
+// reason (permissionParkReason, refusals.go) runs to several times this, which
+// is why naming one issue prints it whole instead.
+const unparkReasonWidth = 100
 
 // readParkedIssues lists every open needs-human issue — the same queue.parked
 // the drain itself excludes, containers excluded structurally — and reads
@@ -251,7 +259,7 @@ func readParkListItem(ctx context.Context, cfg config, issue int, viewer string)
 		if c.User.Login != viewer || !strings.HasPrefix(c.Body, parkCommentPrefix) {
 			continue
 		}
-		item.reason = clip(parkCommentReason(c.Body), 100)
+		item.reason = strings.Join(strings.Fields(parkCommentReason(c.Body)), " ")
 		if entries, ok := parseParkFooter(c.Body); ok {
 			for _, e := range entries {
 				if validParkEntry(e) {
@@ -263,7 +271,7 @@ func readParkListItem(ctx context.Context, cfg config, issue int, viewer string)
 		}
 		return item
 	}
-	item.reason = "no park comment on the thread from this account"
+	item.reason = "labelled by hand, or by another account — no park comment of polako's own to read; see the thread"
 	return item
 }
 
@@ -352,7 +360,10 @@ func printUnparkRerunLine(w io.Writer, cfg config, union []string) {
 
 // --- rendering ---
 
-func renderUnpark(w io.Writer, rpt report, cfg config, items []parkListItem) {
+// renderUnpark prints the listing. single is an issue named on the command
+// line: that one prints as a block with its reason whole, since the table's
+// clipped line is the only place the reason otherwise shows.
+func renderUnpark(w io.Writer, rpt report, cfg config, items []parkListItem, single bool) {
 	header := cfg.repo
 	if header == "" {
 		header = cfg.dir
@@ -362,16 +373,40 @@ func renderUnpark(w io.Writer, rpt report, cfg config, items []parkListItem) {
 		fmt.Fprintf(w, "nothing parked — no open issue is labelled %s\n", needsHumanLabel)
 		return
 	}
+	if single {
+		it := items[0]
+		fmt.Fprintf(w, "\n%s\n", rpt.bold("#"+strconv.Itoa(it.issue)))
+		if cfg.repo != "" {
+			fmt.Fprintf(w, "  %s  https://github.com/%s/issues/%d\n", rpt.dim("thread   "), cfg.repo, it.issue)
+		}
+		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("reason   "), it.reason)
+		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("add-tools"), renderParkEntries(it))
+		return
+	}
 	rows := make([][]string, len(items))
 	for i, it := range items {
-		rows[i] = []string{"#" + strconv.Itoa(it.issue), it.reason, renderParkEntries(it)}
+		rows[i] = []string{"#" + strconv.Itoa(it.issue), clip(it.reason, unparkReasonWidth), renderParkEntries(it)}
 	}
-	printTable(w, rpt, "parked", []string{"issue", "reason", "entries"}, rows, 3)
+	printTable(w, rpt, "parked", []string{"issue", "reason", "add-tools"}, rows, 3)
+}
+
+// printUnparkNextStep closes a listing that changed nothing with what to run
+// next — without it, a bare `polako unpark` reads as the whole of the verb.
+func printUnparkNextStep(w io.Writer, items []parkListItem, single bool) {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	if single {
+		fmt.Fprintf(w, "fix what it names, then: polako unpark -apply %d\n", items[0].issue)
+		return
+	}
+	fmt.Fprintln(w, "polako unpark <issue> prints one reason in full; polako unpark -apply asks before clearing each")
 }
 
 func renderParkEntries(it parkListItem) string {
 	if len(it.entries) == 0 && len(it.ignored) == 0 {
-		return "(none)"
+		return "(none named)"
 	}
 	parts := append([]string{}, it.entries...)
 	for _, e := range it.ignored {

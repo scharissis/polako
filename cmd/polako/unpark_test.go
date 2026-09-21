@@ -261,3 +261,35 @@ func TestUnparkApplyYesRemovesBothLabelsAndPrintsOneAddToolsValue(t *testing.T) 
 		}
 	}
 }
+
+// The fallback permission reason (permissionParkReason) runs to several
+// times the table's width, and its useful half — what to do about it — sits
+// past the clip. Naming the issue is how an operator reads the rest, so that
+// view must not clip; the table still does, and both say what to run next.
+func TestUnparkNamingOneIssuePrintsItsReasonWhole(t *testing.T) {
+	t.Parallel()
+	items := []parkListItem{{issue: 390, reason: permissionParkReason}}
+	cfg := config{repo: "example/repo"}
+
+	var one strings.Builder
+	renderUnpark(&one, report{}, cfg, items, true)
+	printUnparkNextStep(&one, items, true)
+	if got := one.String(); !strings.Contains(got, permissionParkReason) {
+		t.Errorf("one-issue view clipped the reason:\n%s", got)
+	}
+	for _, want := range []string{"https://github.com/example/repo/issues/390", "polako unpark -apply 390"} {
+		if !strings.Contains(one.String(), want) {
+			t.Errorf("one-issue view is missing %q:\n%s", want, one.String())
+		}
+	}
+
+	var list strings.Builder
+	renderUnpark(&list, report{}, cfg, items, false)
+	printUnparkNextStep(&list, items, false)
+	if got := list.String(); strings.Contains(got, permissionParkReason) || !strings.Contains(got, "…") {
+		t.Errorf("the table should clip a reason this long:\n%s", got)
+	}
+	if !strings.Contains(list.String(), "polako unpark -apply") {
+		t.Errorf("the listing never says -apply is the next step:\n%s", list.String())
+	}
+}
