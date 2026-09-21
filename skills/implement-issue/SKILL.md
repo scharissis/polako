@@ -34,13 +34,29 @@ run spent an eighth of its tool calls on `sleep` and status polls (issue #217).
 Backgrounding the slow thing is fine; what is not is the turn ending while it
 is still outstanding.
 
-That polling is only for work you backgrounded yourself — a `run_in_background`
-job. Invoking a `Skill` is not that: it runs as a forked agent whose own
-activity keeps the run alive, and the harness holds the turn until it returns
-and hands you the result. Nothing to keep alive, nothing to check on, so
-`ListAgents` or a `Bash: true` heartbeat beside a `Skill` call that hasn't
-returned yet is pure waste. Issues #217 and #372 are both runs that hand-polled
-the review gate that way.
+That polling is only for work still running when you look — a
+`run_in_background` job you started, or a `Skill` call whose return didn't
+actually carry the result. Most `Skill` calls are the first case already
+solved: the call runs as a forked agent whose own activity keeps the run
+alive, and the harness holds the turn until it returns with the result in
+hand — nothing to keep alive, nothing to check on, so `ListAgents` or a
+`Bash: true` heartbeat beside a call that hasn't returned yet is pure waste.
+Issues #217 and #372 are both runs that hand-polled the review gate mid-call
+that way.
+
+But a return is not proof the work behind it is done. #472 is the opposite
+failure on the same gate: the review call returned at once, control handed
+back to this run, with the review itself still fanning out finder subagents
+in the background — what came back was a status ("I'll wait for their
+completion notifications"), not findings. Reading that return as the result is
+what lost the run: eight completion notifications later it ended its turn on
+an unfinished ninth, with the review's own verification pass still running per
+`ListAgents`, and nothing was ever written down. So a `Skill` call's return
+gets one look before it's trusted: the actual result in hand means done, move
+on. A status update naming subagents still working is backgrounded work by
+another name, whatever tool started it — switch to the polling rule above,
+slowly, the same as any other wait longer than a glance. Phase 3 step 2c says
+how the review gate specifically checkpoints what arrives while it waits.
 
 Stopping on purpose is a different thing from stopping to wait. An unanswered
 question ends the run deliberately, flagged with `awaiting-answer` for a human
@@ -466,7 +482,12 @@ don't post again, and stop.
 2. MANDATORY GATE — do not create a PR until this step has run. It writes one
    marker into PLAN.md's `## Review` section — "Reviewed through: <sha>",
    written by c each time c actually runs — that b reads to decide whether
-   the expensive part (the review sweep itself) needs repeating. Nothing
+   the expensive part (the review sweep itself) needs repeating. That marker
+   is the only thing b reads: c may checkpoint findings as they arrive before
+   it (see below), but those interim writes are a safety net against a death
+   mid-wait, not a second resume point — a run resuming with no "Reviewed
+   through" still re-invokes the review from scratch, the same as today,
+   replacing whatever partial `## Review` an earlier attempt left. Nothing
    else in this step is checkpointed: a (a fetch and an `--ff-only` merge),
    the retest/typecheck/lint/audit at the end of d, and the accretion check in
    e are all cheap and idempotent next to c, so they simply run every time the
@@ -499,7 +520,11 @@ don't post again, and stop.
       finished; d runs them again regardless, cheaply). No such section, or
       one whose sha is *not* an ancestor of current HEAD — nothing reviewed
       yet, or history moved in some way this shortcut can't account for —
-      runs c and d in full.
+      runs c and d in full. A section left mid-wait by a run that died while
+      backgrounded (c's placeholder heading, "Reviewed through: pending
+      (review in progress)") is this second case too: `pending` is not a sha,
+      `--is-ancestor` on it fails, and c is invoked again from scratch, wholly
+      replacing what the dead run checkpointed.
    c. Size the change first, then invoke the review at a level that matches
       it. `git -C <worktree> diff --stat` against the `origin/…` ref Phase 1
       resolved (`...HEAD`) — which a has just fast-forwarded the local default
@@ -546,31 +571,52 @@ don't post again, and stop.
       copy of every file your commits touched, the default-branch version
       rather than yours, so a finding lands against the wrong body and a fix
       written there lands outside the branch entirely (issue #219).
-      Invoking the review is one blocking call: control returns to this run
-      only when it has finished and its findings are in hand, with nothing for
-      this run to do until then. The finder subagents it fans out are the
-      review's own — this run neither starts nor awaits nor watches them, and
-      `ListAgents`, a `Bash: true` filler or a `Monitor` heartbeat beside the
-      call is pure waste, because a blocking call does not return sooner for
-      being polled. Issue #217 is a run that hand-polled it once a second;
-      issue #372 is a later one that polled every few seconds between `Monitor`
-      timers after #217's floor landed — the floor slowed the polling without
-      stopping it, because the poll had nothing to wait on. If `ListAgents`
-      shows finder subagents running, they are the review's: leave them, and
-      let the review call return.
-      Leaving `--fix` off is deliberate: applying fixes is
-      the slow part after the review itself returns, and a run
-      that dies during it is exactly what left issue #216's gate with
-      nothing to resume from. So write the `## Review` section in PLAN.md
-      immediately when this call returns and before fixing anything —
-      "Reviewed through: <the commit issue-$issue's HEAD resolves to right
-      now>" and every finding listed, each marked "pending". That is the
+      Invoking the review is one call, but its return is not automatically the
+      result — check what actually came back before acting on it. The finder
+      subagents it fans out are the review's own; this run neither starts nor
+      awaits nor watches them directly, and a `Bash: true` filler or a
+      `Monitor` heartbeat beside the call is always waste, whichever branch
+      below applies.
+      - If the return already carries the findings (the review ran to
+        completion within the call): proceed straight to the write-down
+        below. Issue #217 is a run that hand-polled this once a second before
+        the call returned; issue #372 polled every few seconds between
+        `Monitor` timers after #217's floor landed. Neither was waiting on
+        anything real — a completed return has nothing left to poll for, so
+        `ListAgents` beside it is pure waste, the same as before.
+      - If the return only reports background work still running (a status
+        like "I'll wait for their completion notifications", not findings):
+        that is backgrounded work by another name, and it gets the one-turn
+        section's own rule for it — poll slowly, a check every minute or two,
+        not seconds. As each finder's completion notification arrives during
+        that wait, checkpoint it into PLAN.md's `## Review` section right
+        away — "Reviewed through: pending (review in progress)" as a
+        placeholder heading, then that finder's findings each marked "pending,
+        unverified" — before going back to waiting. That is the fix for issue
+        #472: a run that ends mid-wait now leaves whatever landed on disk
+        instead of only in subagent transcripts nothing in polako reads. Keep
+        polling until `ListAgents` shows nothing review-related running —
+        finder subagents and the review's own verification pass both; #472's
+        incident died with the verification pass still going after every
+        finder had already reported, so the finders finishing is not itself
+        the signal to stop waiting.
+      Leaving `--fix` off is deliberate: applying fixes is the slow part after
+      the review itself is done, and a run that dies during it is exactly
+      what left issue #216's gate with nothing to resume from. So once the
+      findings are actually in hand — immediately on a completed return, or
+      once `ListAgents` shows nothing review-related left running on a
+      backgrounded one — write the `## Review` section in PLAN.md before
+      fixing anything: "Reviewed through: <the commit issue-$issue's HEAD
+      resolves to right now>" and every finding listed, each marked "pending"
+      (flipping any "pending, unverified" checkpoint from the wait above to
+      plain "pending" — d only ever acts on that spelling). That is the
       expensive part recorded; a death during d below now only costs the
       fixes still pending, not the review that found them. This replaces
-      PLAN.md's whole `## Review` section wholesale, including on the
-      "invoke c again" retry d sends here on an audit failure — never
-      append beside an older one, which would leave a stale sha or stale
-      finding statuses for a later run to misread as current.
+      PLAN.md's whole `## Review` section wholesale — the placeholder heading
+      and interim checkpoints above included, and the "invoke c again" retry d
+      sends here on an audit failure too — never append beside an older one,
+      which would leave a stale sha or stale finding statuses for a later run
+      to misread as current.
       If the code-review skill is not invocable in this session for a
       `medium` or `high` diff, say so explicitly and perform the same
       self-review pass the `cheap` path above uses instead (a has already run
