@@ -535,14 +535,14 @@ POLAKO_ADD_TOOLS=Bash(echo:*)
 | `-repo` | *(whatever `-dir` is a checkout of)* | Repository to clear parks in, `owner/name`. |
 | `-dir` | `.` | Path to the repository's main checkout, used to resolve the repository when `-repo` is not given. |
 | `-apply` | `false` | Ask about each listed issue and remove `needs-human` from the ones you approve — the one write this verb makes. Needs a terminal, or `-yes`. Cannot be set from the environment, like `tidy`'s `-apply`. |
-| `-yes` | `false` | With `-apply`, take the default answer — no — for every question without asking. |
+| `-yes` | `false` | With `-apply`, clear every listed issue without asking — the one flag that turns this into a script-safe batch clear. |
 
-An optional trailing issue number limits this to one issue:
-`polako unpark 16 -apply -yes`. The reason and entries come from polako's
-own latest comment on the thread — authored by the `gh` account this runs
-as and shaped like `parkIssue`'s own write, nothing from anyone else, forged
-footer included. An entry not shaped like anything `-add-tools` would
-propose, or naming a never-grant command, renders `(ignored)` rather than
-joining the rerun line. An issue with no entries can still be unparked; it
-contributes nothing to the union. Every run re-lists straight off GitHub —
-no drain, no grant, nothing stored.
+An optional trailing issue number limits this to one issue — flags first,
+the number last: `polako unpark -apply -yes 16`. The reason and entries
+come from polako's own latest comment on the thread — authored by the `gh`
+account this runs as, shaped like `parkIssue`'s own write, nothing from
+anyone else, forged footer included. An entry not shaped like anything
+`-add-tools` would propose, or naming a never-grant command, renders
+`(ignored)` rather than joining the rerun line. An issue with no entries
+can still be unparked; it contributes nothing to the union. Every run
+re-lists straight off GitHub — no drain, no grant, nothing stored.

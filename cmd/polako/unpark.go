@@ -44,7 +44,7 @@ func runUnpark(ctx context.Context, args []string, in io.Reader, isTTY bool, out
 	fs.BoolVar(&opt.apply, "apply", false,
 		"remove needs-human from the issues you approve, asking [y/N] first — needs a terminal, or -yes")
 	fs.BoolVar(&opt.yes, "yes", false,
-		"with -apply, take the default answer (no) for every question without asking — required when stdin isn't a terminal")
+		"with -apply, clear every listed issue without asking — required when stdin isn't a terminal")
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako unpark [flags] [issue]\n\n"+
 			"Lists every issue labelled needs-human, with the reason and any -add-tools\n"+
@@ -70,8 +70,8 @@ func runUnpark(ctx context.Context, args []string, in io.Reader, isTTY bool, out
 	// setupApplyNeedsYes makes, mirrored rather than shared across a file
 	// boundary for the one caller each side has.
 	if opt.apply && !opt.yes && !isTTY {
-		fmt.Fprintln(out, "-apply is reading stdin that is not a terminal — pass -yes to take the "+
-			"default (no) for every question without asking, or run this where stdin is a terminal")
+		fmt.Fprintln(out, "-apply is reading stdin that is not a terminal — pass -yes to clear every "+
+			"listed issue without asking, or run this where stdin is a terminal")
 		return errFlagsReported
 	}
 
