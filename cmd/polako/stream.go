@@ -202,6 +202,12 @@ type runReport struct {
 	// message, so this alone is not the whole test, but a final message that
 	// does read as an ask is disqualifying on its own.
 	lastResultIsAsk bool
+	// lastResultText is the most recent result event's own text, kept so a
+	// park that blames a worked-around refusal (issue #461, and the eventual
+	// wording ticket 3 of docs/plans/permission-parks.md gives it — #432)
+	// can still show the run's own last words: #390's carried the real tell
+	// (an unreachable SSH agent) that the generic permission wording hid.
+	lastResultText string
 	// pendingTools tracks each in-flight tool_use's id to enough of it to name
 	// later, so a refused tool_result — which the CLI reports as flat prose
 	// with no command of its own for a single-command refusal — can still be
@@ -368,6 +374,7 @@ func (r *runReport) observe(ev streamEvent) {
 		firstResult := !r.hasResult
 		r.hasResult = true
 		r.subtype, r.isError = ev.Subtype, ev.IsError
+		r.lastResultText = ev.Result
 		r.authFailed = ev.IsError && authFailure(ev.Result)
 		if ev.IsError && limitRefusal(ev.Result) {
 			r.limitMsg = ev.Result

@@ -596,14 +596,21 @@ func fakeClaude(mode string) int {
 		// (the CLI's own fact) followed by a clean exit whose final text is
 		// ordinary prose with no ask of its own, so the prose route
 		// (permissionRefusal) stays blind to it and only the structural
-		// signal catches it.
+		// signal catches it. Two refusals, issue #432 (ticket 3): one
+		// addToolsEntry can turn into a grantable entry, one path-bearing —
+		// addToolsEntryThreadSafe has to keep the second off the thread while
+		// the first still reaches it.
 		emit(`{"type":"system","subtype":"init","session_id":"sess-refused","model":"claude-opus-5"}`)
 		emit(`{"type":"assistant","session_id":"sess-refused","message":{"content":[` +
-			`{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"gh issue close 1 --comment \"...\""}}]}}`)
+			`{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"curl -s https://example.com/status"}}]}}`)
 		emit(`{"type":"user","session_id":"sess-refused","message":{"content":[` +
 			`{"type":"tool_result","tool_use_id":"toolu_1","is_error":true,"content":"This command requires approval"}]}}`)
+		emit(`{"type":"assistant","session_id":"sess-refused","message":{"content":[` +
+			`{"type":"tool_use","id":"toolu_2","name":"Bash","input":{"command":"/Users/x/bin/tool --flag"}}]}}`)
+		emit(`{"type":"user","session_id":"sess-refused","message":{"content":[` +
+			`{"type":"tool_result","tool_use_id":"toolu_2","is_error":true,"content":"This command requires approval"}]}}`)
 		emit(`{"type":"result","subtype":"success","session_id":"sess-refused","duration_ms":100,` +
-			`"num_turns":2,"total_cost_usd":0.1,"result":"Issue #1 is resolved: nothing left to do."}`)
+			`"num_turns":3,"total_cost_usd":0.1,"result":"Issue #1 is resolved: nothing left to do."}`)
 		return 0
 	case "toolrefusedrecovered":
 		// Issue #461's #402/#318 shape: the same refused tool_result as
@@ -623,6 +630,53 @@ func fakeClaude(mode string) int {
 			`{"type":"tool_result","tool_use_id":"toolu_2","is_error":false,"content":""}]}}`)
 		emit(`{"type":"result","subtype":"success","session_id":"sess-recovered","duration_ms":100,` +
 			`"num_turns":4,"total_cost_usd":0.1,"result":"Committed the fix; ending here."}`)
+		return 0
+	case "toolrefused390":
+		// Issue #390's actual shape, for ticket 3 (#432): two refusals — one
+		// addToolsEntry can turn into `Bash(ssh:*)`, one `Contains
+		// simple_expansion` (a `$VAR`, ungrantable) — a successful call
+		// after the last one, and a calm final word that is itself the real
+		// diagnosis (an unreachable SSH agent), not an ask. Granting the
+		// tool named in the first refusal would have fixed nothing; #390's
+		// own park still said "grant a tool" because only the first refusal
+		// was ever kept. Identical on every dispatch, so a drain that
+		// resumes into this fake still has the same two refusals and the
+		// same final words once the shared clean-exit ceiling finally parks
+		// it.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-390","model":"claude-opus-5"}`)
+		emit(`{"type":"assistant","session_id":"sess-390","message":{"content":[` +
+			`{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ssh -T git@github.com"}}]}}`)
+		emit(`{"type":"user","session_id":"sess-390","message":{"content":[` +
+			`{"type":"tool_result","tool_use_id":"toolu_1","is_error":true,"content":"This command requires approval"}]}}`)
+		emit(`{"type":"assistant","session_id":"sess-390","message":{"content":[` +
+			`{"type":"tool_use","id":"toolu_2","name":"Bash",` +
+			`"input":{"command":"git fetch origin 2>&1; echo RC=$?"}}]}}`)
+		emit(`{"type":"user","session_id":"sess-390","message":{"content":[` +
+			`{"type":"tool_result","tool_use_id":"toolu_2","is_error":true,"content":"Contains simple_expansion"}]}}`)
+		emit(`{"type":"assistant","session_id":"sess-390","message":{"content":[` +
+			`{"type":"tool_use","id":"toolu_3","name":"Bash","input":{"command":"git status"}}]}}`)
+		emit(`{"type":"user","session_id":"sess-390","message":{"content":[` +
+			`{"type":"tool_result","tool_use_id":"toolu_3","is_error":false,"content":""}]}}`)
+		emit(`{"type":"result","subtype":"success","session_id":"sess-390","duration_ms":100,` +
+			`"num_turns":6,"total_cost_usd":0.1,` +
+			`"result":"git fetch origin keeps failing here — looks like the SSH agent isn't reachable from this session."}`)
+		return 0
+	case "toolrefusedrecoveredthenrefusedagain":
+		// Issue #432's own review: a worked-around refusal (run 1) defers to
+		// a resume, and that resume hits a *different* refusal it does not
+		// recover from — #126's shape, not #461's. The immediate park this
+		// triggers must still name run 1's deferred refusal alongside this
+		// one, not just its own.
+		if !slices.Contains(os.Args, "--resume") {
+			return fakeClaude("toolrefusedrecovered")
+		}
+		emit(`{"type":"system","subtype":"init","session_id":"sess-recovered","model":"claude-opus-5"}`)
+		emit(`{"type":"assistant","session_id":"sess-recovered","message":{"content":[` +
+			`{"type":"tool_use","id":"toolu_3","name":"Bash","input":{"command":"rm -rf /tmp/x"}}]}}`)
+		emit(`{"type":"user","session_id":"sess-recovered","message":{"content":[` +
+			`{"type":"tool_result","tool_use_id":"toolu_3","is_error":true,"content":"This command requires approval"}]}}`)
+		emit(`{"type":"result","subtype":"success","session_id":"sess-recovered","duration_ms":100,` +
+			`"num_turns":2,"total_cost_usd":0.1,"result":"Cleanup failed; stopping here."}`)
 		return 0
 	case "toolrefusedrecoveredthencrash":
 		// Issue #461: the deferred refusal from a worked-around clean exit
@@ -3948,6 +4002,133 @@ func TestAddToolsEntryThreadSafe(t *testing.T) {
 		if got := addToolsEntryThreadSafe(tt.entry); got != tt.safe {
 			t.Errorf("addToolsEntryThreadSafe(%q) = %v, want %v", tt.entry, got, tt.safe)
 		}
+	}
+}
+
+// Ticket 3 of docs/plans/permission-parks.md (#432): permissionParkAdvice's
+// four cases, over addToolsEntry's own already-tested classifications.
+func TestPermissionParkAdviceNamesTheFixOrSaysWhyNot(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		refusals  []refusal
+		wantOK    bool
+		wantParts []string // substrings advice must contain when wantOK
+	}{
+		{
+			name:     "no refusals at all has nothing to say",
+			refusals: nil,
+			wantOK:   false,
+		},
+		{
+			name: "an entry names it and gives the rerun line",
+			refusals: []refusal{
+				{tool: "Bash", command: `echo "exit:$?"`, kind: refusalPlain},
+			},
+			wantOK:    true,
+			wantParts: []string{"`Bash(echo:*)`", `-add-tools "Bash(echo:*)"`, "remove needs-human"},
+		},
+		{
+			name: "several entries join into one rerun value",
+			refusals: []refusal{
+				{tool: "Bash", command: `echo "exit:$?"`, kind: refusalPlain},
+				{tool: "Bash", command: "ssh -T git@github.com", kind: refusalPlain},
+			},
+			wantOK:    true,
+			wantParts: []string{`-add-tools "Bash(echo:*),Bash(ssh:*)"`},
+		},
+		{
+			name: "only ungrantable says the $VAR wording",
+			refusals: []refusal{
+				{tool: "Bash", command: "git fetch origin 2>&1; echo RC=$?", kind: refusalUngrantable},
+			},
+			wantOK:    true,
+			wantParts: []string{"$VAR", "phrase it differently"},
+		},
+		{
+			name: "only never says polako doesn't hand it out",
+			refusals: []refusal{
+				{tool: "Bash", command: "gh pr merge 7", kind: refusalPlain},
+			},
+			wantOK:    true,
+			wantParts: []string{"doesn't hand that grant out"},
+		},
+		{
+			name: "ungrantable and never together names both, with no entries to fall back on",
+			refusals: []refusal{
+				{tool: "Bash", command: "git fetch origin 2>&1; echo RC=$?", kind: refusalUngrantable},
+				{tool: "Bash", command: "gh pr merge 7", kind: refusalPlain},
+			},
+			wantOK:    true,
+			wantParts: []string{"$VAR", "doesn't hand out automatically"},
+		},
+		{
+			name: "a path-bearing entry is filtered out, leaving nothing derivable",
+			refusals: []refusal{
+				{tool: "Bash", command: "/Users/x/bin/tool --flag", kind: refusalPlain},
+			},
+			wantOK: false,
+		},
+		{
+			name: "an uncorrelated refusal has nothing to derive from",
+			refusals: []refusal{
+				{command: "This command requires approval", kind: refusalPlain},
+			},
+			wantOK: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			advice, ok := permissionParkAdvice(tt.refusals, defaultTools)
+			if ok != tt.wantOK {
+				t.Fatalf("permissionParkAdvice() ok = %v, want %v (advice %q)", ok, tt.wantOK, advice)
+			}
+			for _, part := range tt.wantParts {
+				if !strings.Contains(advice, part) {
+					t.Errorf("advice %q missing %q", advice, part)
+				}
+			}
+		})
+	}
+}
+
+// permissionParkReasonFor falls back to the fixed pointer at the terminal
+// exactly when permissionParkAdvice has nothing to say, and otherwise uses
+// its advice verbatim.
+func TestPermissionParkReasonForFallsBackOnlyWhenAdviceHasNothing(t *testing.T) {
+	t.Parallel()
+	if got := permissionParkReasonFor(nil, defaultTools); got != permissionParkReason {
+		t.Errorf("permissionParkReasonFor(nil, ...) = %q, want the fixed fallback", got)
+	}
+	refusals := []refusal{{tool: "Bash", command: "ssh -T git@github.com", kind: refusalPlain}}
+	if got := permissionParkReasonFor(refusals, defaultTools); got == permissionParkReason {
+		t.Errorf("permissionParkReasonFor(%+v, ...) should not fall back — an entry was derivable", refusals)
+	}
+}
+
+// The worked-around wording always leads with the count and the hedge,
+// whatever advice has to add — issue #390 is the case where naming the
+// entry would have been actively misleading, not just insufficient.
+func TestPermissionParkReasonWorkedAroundLeadsWithTheCountAndHedge(t *testing.T) {
+	t.Parallel()
+	refusals := []refusal{
+		{tool: "Bash", command: "ssh -T git@github.com", kind: refusalPlain},
+		{tool: "Bash", command: "git fetch origin 2>&1; echo RC=$?", kind: refusalUngrantable},
+	}
+	got := permissionParkReasonWorkedAround(refusals, defaultTools)
+	for _, want := range []string{
+		"the run opened no PR, and was refused 2 calls along the way",
+		"a wider grant may not be the blocker",
+		"but if it is: the run was refused `Bash(ssh:*)`",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("permissionParkReasonWorkedAround(...) = %q, missing %q", got, want)
+		}
+	}
+	if got := permissionParkReasonWorkedAround(nil, defaultTools); !strings.Contains(got, "0 calls") ||
+		!strings.Contains(got, permissionParkReason) {
+		t.Errorf("permissionParkReasonWorkedAround(nil, ...) = %q, want the count and the fixed fallback", got)
 	}
 }
 

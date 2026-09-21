@@ -9,6 +9,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"slices"
 	"strconv"
@@ -119,15 +120,13 @@ func limitRefusal(result string) bool {
 	)
 }
 
-// permissionParkReason is the park message both permission paths share —
-// permissionRefused, where the result text itself was the ask and the issue
-// parks without a resume, and permissionAsked, where an earlier turn was and
-// the issue parks after any resume has run its course. Either way the lever is
-// the operator's, so this spells out where to find the specific tool (the
-// terminal, right after this park, and the shift log resumeHint names beside
-// it — never here, since the tool detail can carry a local absolute path) and
-// what to do with it once found, rather than only reporting that something
-// was refused.
+// permissionParkReason is the fallback park message for when nothing in a
+// run's refusals says anything actionable — no structural refusal recorded
+// at all (the #138 shape, where the ask was only the run's own final words)
+// or one whose tool_use never correlated to a command. permissionParkFor and
+// permissionParkReasonWorkedAround both fall back to this; see them for the
+// derived reason ticket 3 (#432) of docs/plans/permission-parks.md prefers
+// when a refusal actually says what to grant.
 const permissionParkReason = "the run stopped to ask for a permission this " +
 	"allowlist does not grant. To fix it: find the tool it reached for — " +
 	"named in the terminal right after this park, and saved in the shift " +
@@ -136,6 +135,119 @@ const permissionParkReason = "the run stopped to ask for a permission this " +
 	"`-add-tools \"Bash(<command>:*)\"`) and remove needs-human to retry, " +
 	"or, if the skill should not have reached for that tool at all, fix the " +
 	"skill instead"
+
+// permissionParkEntries derives the -add-tools entries a set of refusals
+// gives, deduplicated and filtered to addToolsEntryThreadSafe — the same
+// list both permissionParkAdvice's prose (posted to the issue thread) and
+// parkIssue's `Refused:` footer use, since nothing unsafe for one is safe
+// for the other. Also reports whether any refusal was ungrantable (a `$VAR`,
+// no grant fixes it) or matched the never-grant table, so a caller with no
+// entries can still say why.
+func permissionParkEntries(refusals []refusal, allowlist string) (entries []string, ungrantable, never bool) {
+	seen := make(map[string]bool, len(refusals))
+	for _, r := range refusals {
+		entry, kind := addToolsEntry(r, allowlist)
+		switch kind {
+		case "":
+			if !addToolsEntryThreadSafe(entry) {
+				continue // the same rule "Describe, don't paste" already holds for a path
+			}
+			if !seen[entry] {
+				seen[entry] = true
+				entries = append(entries, entry)
+			}
+		case addToolsUngrantable:
+			ungrantable = true
+		case addToolsNever:
+			never = true
+		}
+	}
+	return entries, ungrantable, never
+}
+
+// permissionParkAdviceFrom builds a park's advice clause from an
+// already-derived entries/ungrantable/never triple — permissionParkEntries'
+// own return — so a caller that also needs the entries themselves (for the
+// `Refused:` footer) classifies each refusal once, not once per use.
+func permissionParkAdviceFrom(entries []string, ungrantable, never bool) (advice string, ok bool) {
+	switch {
+	case len(entries) > 0:
+		quoted := make([]string, len(entries))
+		for i, e := range entries {
+			quoted[i] = "`" + e + "`"
+		}
+		return fmt.Sprintf("the run was refused %s. Rerun with `-add-tools \"%s\"`, "+
+			"then remove needs-human — or fix the skill if it shouldn't reach for these.",
+			strings.Join(quoted, ", "), strings.Join(entries, ",")), true
+	case ungrantable && never:
+		return "one command held a `$VAR`, which no `-add-tools` entry allows, and another " +
+			"is one polako doesn't hand out automatically — the skill has to change both.", true
+	case ungrantable:
+		return "a command held a `$VAR`, which no `-add-tools` entry allows — " +
+			"the skill has to phrase it differently.", true
+	case never:
+		return "polako doesn't hand that grant out — fix the skill so it doesn't reach for it.", true
+	default:
+		return "", false
+	}
+}
+
+// permissionParkAdvice turns a refusal set into what a park's reason says
+// about fixing it — ticket 3 of docs/plans/permission-parks.md (#432): the
+// entries to rerun with when at least one can be derived, why none can be
+// when every refusal explains itself, or false when there is nothing
+// actionable to say (the caller falls back to permissionParkReason's fixed
+// pointer at the terminal in that case).
+func permissionParkAdvice(refusals []refusal, allowlist string) (advice string, ok bool) {
+	entries, ungrantable, never := permissionParkEntries(refusals, allowlist)
+	return permissionParkAdviceFrom(entries, ungrantable, never)
+}
+
+// permissionParkReasonFor is a permission park's reason, derived from what
+// actually refused it, falling back to permissionParkReason's fixed pointer
+// at the terminal when permissionParkAdvice has nothing to say.
+func permissionParkReasonFor(refusals []refusal, allowlist string) string {
+	reason, _ := permissionParkReasonAndEntries(refusals, allowlist)
+	return reason
+}
+
+// permissionParkReasonAndEntries is permissionParkReasonFor plus the same
+// thread-safe entries a caller needs for the `Refused:` footer, computed
+// once instead of twice.
+func permissionParkReasonAndEntries(refusals []refusal, allowlist string) (reason string, entries []string) {
+	entries, ungrantable, never := permissionParkEntries(refusals, allowlist)
+	if advice, ok := permissionParkAdviceFrom(entries, ungrantable, never); ok {
+		return advice, entries
+	}
+	return permissionParkReason, entries
+}
+
+// permissionParkReasonWorkedAround is the eventual park's reason once a
+// worked-around refusal (issue #461) has spent the clean-exit resume budget
+// with still no PR. Unlike permissionParkReasonFor's confident "the run was
+// refused X — fix it", this hedges: the run kept going after its last
+// refusal, so the refusal may not be the actual blocker — #390's own case,
+// where granting the tool it named would have fixed nothing and the real
+// blocker (an unreachable SSH agent) was in the run's own last words
+// instead, which the aside carries alongside this (see runReport.lastResultText).
+func permissionParkReasonWorkedAround(refusals []refusal, allowlist string) string {
+	reason, _ := permissionParkReasonWorkedAroundAndEntries(refusals, allowlist)
+	return reason
+}
+
+// permissionParkReasonWorkedAroundAndEntries is
+// permissionParkReasonWorkedAround plus the same thread-safe entries a
+// caller needs for the `Refused:` footer, computed once instead of twice.
+func permissionParkReasonWorkedAroundAndEntries(refusals []refusal, allowlist string) (reason string, entries []string) {
+	entries, ungrantable, never := permissionParkEntries(refusals, allowlist)
+	lead := fmt.Sprintf("the run opened no PR, and was refused %s along the way — "+
+		"it kept going afterward, so a wider grant may not be the blocker",
+		plural(len(refusals), "call"))
+	if advice, ok := permissionParkAdviceFrom(entries, ungrantable, never); ok {
+		return lead + ", but if it is: " + advice, entries
+	}
+	return lead + "; " + permissionParkReason, entries
+}
 
 // permissionRefusal reports whether a clean run's final text is the run itself
 // asking the operator to approve a tool it was refused — the shape observed on
@@ -374,24 +486,50 @@ func (r runReport) refusalWorkedAround() bool {
 	return len(r.refusals) > 0 && r.toolSucceededAfterRefusal && !r.lastResultIsAsk
 }
 
-// lastRefusalDetail renders the most recent refusal the way a park still
-// wants to read it today — "<tool>: <command>" when the refusal was
-// correlated to a tool_use, or the tool_result's own text otherwise — the
-// same rendering permissionRefusedDetail used to produce, minus the 120-char
-// clip toolDetail applied for a log line (command is data here, not
-// display). Turning the fuller record below into an -add-tools entry, and
-// any change to what a park says, is ticket 2 and 3 of
-// docs/plans/permission-parks.md; until then every caller that used to read
-// permissionRefusedDetail reads this instead.
+// refusalRender is lastRefusalDetail and refusalDetails' shared rendering of
+// one refusal — "<tool>: <command>" when it was correlated to a tool_use, or
+// the tool_result's own text otherwise — the same rendering
+// permissionRefusedDetail used to produce, minus the 120-char clip toolDetail
+// applied for a log line (command is data here, not display).
+func refusalRender(ref refusal) string {
+	if ref.tool == "" {
+		return ref.command
+	}
+	return ref.tool + ": " + ref.command
+}
+
+// lastRefusalDetail renders only the most recent refusal — kept as the
+// single-entry probe addRefusals' own recency tests read (a refusal
+// recurring after another has to sort last), even though a park's aside now
+// reads refusalDetails, every refusal a run drew, instead of this alone.
 func (r runReport) lastRefusalDetail() string {
 	if len(r.refusals) == 0 {
 		return ""
 	}
-	last := r.refusals[len(r.refusals)-1]
-	if last.tool == "" {
-		return last.command
+	return refusalRender(r.refusals[len(r.refusals)-1])
+}
+
+// refusalDetails renders every refusal a run drew, in order, for a park's
+// terminal-only aside — ticket 3 (#432) of docs/plans/permission-parks.md:
+// #390 drew five refusals and only ever one reached the operator. "" when
+// there were none.
+func (r runReport) refusalDetails() string {
+	return joinRefusalDetails(r.refusals)
+}
+
+// joinRefusalDetails is refusalDetails' rendering, shared with a permission
+// park that has to report refusals spanning more than one run — a worked-
+// around refusal deferred from an earlier resume (deferredRefusal.refusals),
+// combined with whatever this run added of its own.
+func joinRefusalDetails(refusals []refusal) string {
+	if len(refusals) == 0 {
+		return ""
 	}
-	return last.tool + ": " + last.command
+	parts := make([]string, len(refusals))
+	for i, ref := range refusals {
+		parts[i] = refusalRender(ref)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // toolResultRefusal reports whether a tool_result's content is the CLI

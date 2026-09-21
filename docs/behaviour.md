@@ -103,17 +103,21 @@ said — its final words if the ask was the last thing it did, an earlier
 turn otherwise. An ask that was the final word parks immediately rather
 than retrying — resuming replays the same session against the same
 allowlist and hits the same wall, so only `-add-tools` or a skill fix gets
-past it:
+past it. The reason now says what to grant, derived from the refusal
+itself:
 
 ```
-  parked  #16 ($2.27) — the run stopped to ask for a permission this allowlist
-  does not grant. To fix it: find the tool it reached for — named in the
-  terminal right after this park, and saved in the shift log named right
-  after that — then either grant it with -add-tools (for a Bash command, add
-  an entry shaped like `-add-tools "Bash(<command>:*)"`) and remove
-  needs-human to retry, or, if the skill should not have reached for that
-  tool at all, fix the skill instead
+  parked  #16 ($2.27) — the run was refused `Bash(echo:*)`. Rerun with
+  -add-tools "Bash(echo:*)", then remove needs-human, or fix the skill.
 ```
+
+Nothing to grant says why instead — a `$VAR`, or a never-grant-table
+command — and nothing derivable falls back to the old terminal pointer. The
+comment also ends with a `Refused: <entry>, <entry>` line, thread-safe
+entries only. A worked-around refusal (kept going, ended calmly) gets a
+hedge instead — issue #390's own refusal was a red herring, the real
+blocker was in its last words — leading with "refused N calls along the
+way" rather than a confident fix.
 
 When the ask was only an earlier turn, polako resumes first if there's work
 to resume into, telling it outright that its turn ends the process. If it

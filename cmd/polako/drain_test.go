@@ -1519,11 +1519,15 @@ func TestDrainParksARefusedToolResultWithoutResuming(t *testing.T) {
 	}
 
 	out := buf.String()
-	if want := "the run stopped to ask for a permission this allowlist does not grant"; !strings.Contains(out, want) {
-		t.Errorf("log is missing %q\ngot:\n%s", want, out)
-	}
-	if want := "gh issue close 1"; !strings.Contains(out, want) {
-		t.Errorf("log should name the refused command\ngot:\n%s", out)
+	// Both raw commands are terminal detail — the aside — never withheld
+	// there, path-bearing one included.
+	for _, want := range []string{
+		"curl -s https://example.com/status",
+		"/Users/x/bin/tool --flag",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log should name the refused command %q\ngot:\n%s", want, out)
+		}
 	}
 	// One run, not the clean-exit resume budget: resuming would only replay
 	// the same session against the same allowlist and hit the same wall.
@@ -1535,13 +1539,28 @@ func TestDrainParksARefusedToolResultWithoutResuming(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the fake gh call log: %v", err)
 	}
-	if want := "the run stopped to ask for a permission"; !strings.Contains(string(posted), want) {
-		t.Errorf("no gh call carried the reason to the thread\ngot:\n%s", posted)
+	// The reason names the grantable entry ticket 3 (#432) derives from the
+	// first refusal, and the footer repeats it.
+	for _, want := range []string{
+		"`Bash(curl:*)`",
+		"-add-tools \"Bash(curl:*)\"",
+		"Refused: Bash(curl:*)",
+	} {
+		if !strings.Contains(string(posted), want) {
+			t.Errorf("no gh call carried %q to the thread\ngot:\n%s", want, posted)
+		}
 	}
-	// The refused command is operator-facing detail (aside), not posted —
-	// same rule as a worktree's local path.
-	if strings.Contains(string(posted), "gh issue close 1") {
-		t.Errorf("the refused command must not reach the public issue thread\ngot:\n%s", posted)
+	// Neither raw command, nor the path-bearing entry addToolsEntryThreadSafe
+	// rejects, may reach the public issue thread — the same rule a worktree's
+	// own local path already follows.
+	for _, mustNotPost := range []string{
+		"curl -s https://example.com/status",
+		"/Users/x/bin/tool --flag",
+		"Bash(/Users/x/bin/tool:*)",
+	} {
+		if strings.Contains(string(posted), mustNotPost) {
+			t.Errorf("%q must not reach the public issue thread\ngot:\n%s", mustNotPost, posted)
+		}
 	}
 }
 
@@ -1584,10 +1603,21 @@ func TestDrainResumesAWorkedAroundRefusalThenParksOnPermission(t *testing.T) {
 		t.Errorf("%d runs dispatched, want 3 (resumed twice before the ceiling)\ngot:\n%s", got, out)
 	}
 	for _, want := range []string{
+		// The truthful, worked-around wording (ticket 3, #432): a hedge, not
+		// a confident "the run stopped to ask" — the run kept going, so the
+		// eventual park doesn't lead by blaming the tool. "cd /w && gofmt
+		// -l ." holds a "&&", so addToolsEntry can derive nothing from it and
+		// the reason falls back to the fixed pointer at the terminal. This
+		// fake redispatches identically on every resume, so the same
+		// refusal is drawn three times (the first run, then two resumes)
+		// and the count accumulates across all of them, not just the last.
+		"the run opened no PR, and was refused 3 calls along the way",
+		"it kept going afterward, so a wider grant may not be the blocker",
 		"the run stopped to ask for a permission this allowlist does not grant",
 		"it has been resumed 2 times after ending a turn without opening a PR " +
 			"and has still not opened one, which needs a human",
-		"the refused command was: Bash: cd /w && gofmt -l .",
+		"refused: Bash: cd /w && gofmt -l .; Bash: cd /w && gofmt -l .; " +
+			"Bash: cd /w && gofmt -l . — final message: Committed the fix; ending here.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log is missing %q\ngot:\n%s", want, out)
@@ -1601,11 +1631,149 @@ func TestDrainResumesAWorkedAroundRefusalThenParksOnPermission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the fake gh call log: %v", err)
 	}
-	if want := "the run stopped to ask for a permission"; !strings.Contains(string(posted), want) {
+	if want := "the run opened no PR, and was refused 3 calls along the way"; !strings.Contains(string(posted), want) {
 		t.Errorf("no gh call carried the reason to the thread\ngot:\n%s", posted)
 	}
-	if strings.Contains(string(posted), "cd /w && gofmt -l .") {
-		t.Errorf("the refused command must not reach the public issue thread\ngot:\n%s", posted)
+	// The refused command and the run's own final message are terminal-only.
+	for _, mustNotPost := range []string{"cd /w && gofmt -l .", "Committed the fix; ending here."} {
+		if strings.Contains(string(posted), mustNotPost) {
+			t.Errorf("%q must not reach the public issue thread\ngot:\n%s", mustNotPost, posted)
+		}
+	}
+}
+
+// Issue #390 itself, for ticket 3 (#432): two refusals (one grantable, one
+// ungrantable), a successful call after the last one, and a calm final
+// message that was the actual diagnosis (an unreachable SSH agent) rather
+// than an ask. #390's own park said "grant a tool" — granting `Bash(ssh:*)`
+// would have fixed nothing. This asserts the eventual park instead leads
+// with the hedge and keeps the run's own words where an operator can read
+// them, off the public thread.
+func TestDrainNamesTheRealMessageOnAMisdiagnosedWorkedAroundRefusal(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "toolrefused390", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	calls := filepath.Join(t.TempDir(), "gh-calls.log")
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
+	leftBehind(t, &cfg)
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a worked-around refusal must not end the drain: %v", err)
+	}
+
+	recs := terminalRecords(t, records, cfg.repo)
+	if len(recs) != 1 || recs[0].Outcome != issueNeedsHuman || recs[0].ParkReason != parkPermission {
+		t.Fatalf("terminal record = %+v, want needs_human / %s", recs, parkPermission)
+	}
+
+	out := buf.String()
+	finalMsg := "git fetch origin keeps failing here — looks like the SSH agent isn't reachable from this session."
+	// This fake redispatches identically on every resume (two refusals per
+	// dispatch), and the shared clean-exit ceiling resumes it twice before
+	// parking on the third — so the count accumulates across all three
+	// dispatches (6), not just the last (2): the exact gap ticket 3's own
+	// review caught, an immediate park that used to see only its own run's
+	// refusals and silently drop what an earlier resume had deferred.
+	oneRound := "Bash: ssh -T git@github.com; Bash: git fetch origin 2>&1; echo RC=$?"
+	for _, want := range []string{
+		"the run opened no PR, and was refused 6 calls along the way",
+		"it kept going afterward, so a wider grant may not be the blocker",
+		// The grantable refusal still drives the advice, hedged rather than
+		// dropped — granting it would have fixed nothing in #390's own case,
+		// but the stream can't tell that apart from a run it would fix.
+		"but if it is: the run was refused `Bash(ssh:*)`. Rerun with `-add-tools \"Bash(ssh:*)\"`",
+		"refused: " + oneRound + "; " + oneRound + "; " + oneRound + " — final message: " + finalMsg,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
+	}
+
+	posted, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatalf("reading the fake gh call log: %v", err)
+	}
+	for _, want := range []string{
+		"the run opened no PR, and was refused 6 calls along the way",
+		"Refused: Bash(ssh:*)",
+	} {
+		if !strings.Contains(string(posted), want) {
+			t.Errorf("no gh call carried %q to the thread\ngot:\n%s", want, posted)
+		}
+	}
+	// The commands and the run's own final message are terminal-only detail.
+	for _, mustNotPost := range []string{"ssh -T git@github.com", "git fetch origin 2>&1", finalMsg} {
+		if strings.Contains(string(posted), mustNotPost) {
+			t.Errorf("%q must not reach the public issue thread\ngot:\n%s", mustNotPost, posted)
+		}
+	}
+}
+
+// Issue #432's own review: a worked-around refusal (run 1) defers to a
+// resume, and that resume hits a *different* refusal it does not recover
+// from — #126's shape landing straight into the immediate-park branch,
+// which used to build its reason and aside from only that run's own
+// refusals, silently dropping whatever an earlier resume had deferred. This
+// asserts both refusals — run 1's deferred one and run 2's own — reach the
+// park.
+func TestDrainMergesADeferredRefusalIntoALaterImmediatePark(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "toolrefusedrecoveredthenrefusedagain", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	calls := filepath.Join(t.TempDir(), "gh-calls.log")
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
+	leftBehind(t, &cfg)
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a refused resume must not end the drain: %v", err)
+	}
+
+	recs := terminalRecords(t, records, cfg.repo)
+	if len(recs) != 1 || recs[0].Outcome != issueNeedsHuman || recs[0].ParkReason != parkPermission {
+		t.Fatalf("terminal record = %+v, want needs_human / %s", recs, parkPermission)
+	}
+	// One dispatch, one resume: the second refusal has nothing to recover
+	// from, so the immediate-park branch fires straight away rather than
+	// spending the clean-exit resume budget.
+	out := buf.String()
+	if got := strings.Count(out, "session started"); got != 2 {
+		t.Errorf("%d runs dispatched, want 2\ngot:\n%s", got, out)
+	}
+	for _, want := range []string{
+		// Confident wording, not the worked-around hedge: this run's own
+		// ending is #126's shape (refused, nothing recovered), even though
+		// an earlier resume of this same issue worked around a refusal of
+		// its own.
+		"the run was refused `Bash(rm:*)`",
+		`Rerun with ` + "`" + `-add-tools "Bash(rm:*)"` + "`",
+		// Run 1's deferred refusal — "cd /w && gofmt -l ." — still reaches
+		// the terminal aside alongside run 2's own "rm -rf /tmp/x".
+		"refused: Bash: cd /w && gofmt -l .; Bash: rm -rf /tmp/x",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
+	}
+
+	posted, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatalf("reading the fake gh call log: %v", err)
+	}
+	if want := "Refused: Bash(rm:*)"; !strings.Contains(string(posted), want) {
+		t.Errorf("no gh call carried %q to the thread\ngot:\n%s", want, posted)
+	}
+	for _, mustNotPost := range []string{"cd /w && gofmt -l .", "rm -rf /tmp/x"} {
+		if strings.Contains(string(posted), mustNotPost) {
+			t.Errorf("%q must not reach the public issue thread\ngot:\n%s", mustNotPost, posted)
+		}
 	}
 }
 
@@ -1644,15 +1812,15 @@ func TestDrainNamesTheDeferredRefusalWhenTheResumeThenCrashes(t *testing.T) {
 	for _, want := range []string{
 		// Leads with the refusal, same as afterCleanExit's own park — the
 		// crash count still gets a clause, but it no longer leads.
-		"the run stopped to ask for a permission this allowlist does not grant",
+		"the run opened no PR, and was refused 1 call along the way",
 		"claude crashed and 1 resume attempts failed",
-		"the refused command was: Bash: cd /w && gofmt -l .",
+		"refused: Bash: cd /w && gofmt -l . — final message: Committed the fix; ending here.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log is missing %q\ngot:\n%s", want, out)
 		}
 	}
-	askAt := strings.Index(out, "the run stopped to ask for a permission")
+	askAt := strings.Index(out, "the run opened no PR, and was refused 1 call along the way")
 	crashAt := strings.Index(out, "claude crashed and 1 resume attempts failed")
 	if askAt < 0 || crashAt < 0 || askAt > crashAt {
 		t.Errorf("the park reason must lead with the refusal and trail with the crash count\ngot:\n%s", out)

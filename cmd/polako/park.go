@@ -57,6 +57,12 @@ type parkedError struct {
 	// the layout of their disk — travels here instead, for the same reason the
 	// resume id is kept out of the reason where the park is logged.
 	aside string
+	// entries are the thread-safe -add-tools entries a permission park could
+	// derive from its refusals, nil for every other park. parkIssue appends
+	// them as their own `Refused: ...` footer, a contract like the plan
+	// footer — see parseParkFooter. Ticket 3 of
+	// docs/plans/permission-parks.md, #432.
+	entries []string
 }
 
 func (e *parkedError) Error() string { return e.reason }
@@ -107,6 +113,17 @@ func parkAsideOf(err error) string {
 		return pe.aside
 	}
 	return ""
+}
+
+// parkEntriesOf reports the -add-tools entries a permission park's thread
+// comment names, or nil — every other park, and a permission park whose
+// refusals derived nothing thread-safe.
+func parkEntriesOf(err error) []string {
+	var pe *parkedError
+	if errors.As(err, &pe) {
+		return pe.entries
+	}
+	return nil
 }
 
 // leftWork is what a run left on disk for one issue: commits on the branch the
