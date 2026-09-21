@@ -2,11 +2,12 @@ package main
 
 // `polako setup` is a read-only readiness report: what a repository has for
 // polako and what it is missing, one row per check, ending with the
-// `polako work` line to run once it looks ready. `-apply` (docs/plans/setup.md,
-// ticket 3) is the one thing that writes: it creates the labels the report
-// found missing, asking `[Y/n]` per step on a terminal (or `-yes`, for a
-// script). Nothing else here is written — no issue, no repo file, no PR; see
-// ticket 4 for those.
+// `polako work` line to run once it looks ready. `-apply` is the one thing
+// that writes: it creates the labels the report found missing (ticket 3),
+// asking `[Y/n]` per step on a terminal (or `-yes`, for a script), and
+// proposes the repo files it found missing through one PR (ticket 4,
+// setup_files.go). Still no issue is ever touched, and no repo setting is
+// changed.
 //
 // Every check degrades rather than fails the whole report: a tool missing
 // from PATH, a gh too old for a field, a repository this gh cannot reach —
