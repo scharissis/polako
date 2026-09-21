@@ -1,0 +1,90 @@
+package main
+
+// docs/plans/setup.md ticket 5's template half: a `.github/ISSUE_TEMPLATE/*`
+// form whose `labels:` key names orchestration state hands it to whoever
+// files the issue, not just a maintainer — docs/security.md already warns
+// "keep it out of your templates" by hand. This is the row that catches it,
+// and the same scan this repository's own self-test
+// (TestIssueTemplatesApplyNoOrchestrationLabel, repo_test.go) uses on
+// polako's own templates — moved here so both read one copy.
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// templateLabelLines pulls the labels: key and its list items out of one
+// issue template's YAML — quoted, dash-list, and inline forms alike, the same
+// as a plain scan for the word "labels" would over-match on unrelated body
+// text.
+func templateLabelLines(form string) []string {
+	var out []string
+	list := false
+	for _, line := range strings.Split(form, "\n") {
+		switch {
+		case strings.HasPrefix(line, "labels:"):
+			out, list = append(out, line), true
+		case list && strings.HasPrefix(strings.TrimSpace(line), "- "):
+			out = append(out, line)
+		default:
+			list = false
+		}
+	}
+	return out
+}
+
+// leakedTemplateLabel reports the first entry in lines that names a member of
+// forbidden (quoted or dash-list) or carries a model:/effort: prefix — the
+// former lets an outsider queue work on a gated repo, the latter raises what
+// an unattended run costs. "" means the template is clean.
+func leakedTemplateLabel(lines []string, forbidden []string) string {
+	for _, line := range lines {
+		for _, label := range forbidden {
+			if strings.Contains(line, `"`+label+`"`) || strings.Contains(line, "- "+label) {
+				return label
+			}
+		}
+		for _, prefix := range []string{"model:", "effort:"} {
+			if strings.Contains(line, prefix) {
+				return prefix + "…"
+			}
+		}
+	}
+	return ""
+}
+
+// setupTemplatesRow scans cfg.dir's issue templates for a labels: key naming
+// the gate label or one of the three labelTable manages. Required: a leaky
+// template defeats -label's own point, that only a maintainer can queue work
+// on a gated repo — see docs/security.md.
+func setupTemplatesRow(cfg config) setupRow {
+	const name = "issue templates"
+	dir := filepath.Join(cfg.dir, ".github", "ISSUE_TEMPLATE")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return setupRow{name: name, status: setupOK}
+	}
+	forbidden := []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel}
+	if cfg.label != "" {
+		forbidden = append(forbidden, cfg.label)
+	}
+	for _, e := range entries {
+		ext := filepath.Ext(e.Name())
+		if ext != ".yml" && ext != ".yaml" {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		if label := leakedTemplateLabel(templateLabelLines(string(b)), forbidden); label != "" {
+			return setupRow{name: name, status: setupMissing, required: true,
+				detail: fmt.Sprintf("%s applies %q — a template's labels are applied whoever files the "+
+					"issue, so this lets an outsider queue work or raise its cost; remove it from labels:",
+					e.Name(), label)}
+		}
+	}
+	return setupRow{name: name, status: setupOK}
+}

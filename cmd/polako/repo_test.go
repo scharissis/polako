@@ -1666,36 +1666,20 @@ func TestIssueTemplatesApplyNoOrchestrationLabel(t *testing.T) {
 	}
 	// The gate label is the operator's choice, so it cannot be named here.
 	// These are the three this repository's own queue rules turn on, plus the
-	// label its README documents as the gate it runs with.
+	// label its README documents as the gate it runs with. leakedTemplateLabel
+	// and templateLabelLines (setup_templates.go) are the same scan the
+	// `polako setup` row itself makes on a target repository — moved there so
+	// both share one copy.
 	forbidden := []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel, "ready"}
 	for _, e := range entries {
 		if filepath.Ext(e.Name()) != ".yml" && filepath.Ext(e.Name()) != ".yaml" {
 			continue
 		}
-		for _, line := range applied(readRepoFile(t, ".github", "ISSUE_TEMPLATE", e.Name())) {
-			for _, label := range forbidden {
-				if strings.Contains(line, `"`+label+`"`) || strings.Contains(line, "- "+label) {
-					t.Errorf(".github/ISSUE_TEMPLATE/%s applies the %q label (%s):"+
-						" a template's labels are applied on creation whoever files the issue,"+
-						" so this lets an outsider queue work for an unattended run",
-						e.Name(), label, strings.TrimSpace(line))
-				}
-			}
-			// model:<value> and effort:<level> raise a run's cost, and a
-			// template applies its labels whoever files the issue — so this
-			// repository's own forms must not hand out `model:opus` or
-			// `effort:max` to an outsider (docs/behaviour.md). The
-			// bare prefix is enough here: applied() only returns `labels:` lines
-			// and their `- ` items, so it catches every YAML form — quoted,
-			// dash-list, and inline `labels: [model:opus]`.
-			for _, prefix := range []string{"model:", "effort:"} {
-				if strings.Contains(line, prefix) {
-					t.Errorf(".github/ISSUE_TEMPLATE/%s applies a %s label (%s):"+
-						" a template's labels are applied on creation whoever files the issue,"+
-						" so this lets an outsider raise an unattended run's cost",
-						e.Name(), prefix, strings.TrimSpace(line))
-				}
-			}
+		form := readRepoFile(t, ".github", "ISSUE_TEMPLATE", e.Name())
+		if label := leakedTemplateLabel(templateLabelLines(form), forbidden); label != "" {
+			t.Errorf(".github/ISSUE_TEMPLATE/%s applies %q: a template's labels are applied on creation "+
+				"whoever files the issue, so this lets an outsider queue work for an unattended run "+
+				"or raise its cost", e.Name(), label)
 		}
 	}
 }
@@ -1882,22 +1866,4 @@ func TestReleaseCheckShouldSkip(t *testing.T) {
 			t.Errorf("releaseCheckShouldSkip(%q) = %v, want %v", c.event, got, c.skip)
 		}
 	}
-}
-
-// applied returns the lines of an issue form that name labels: the `labels:`
-// key itself and, when it is a block list, the items under it.
-func applied(form string) []string {
-	var out []string
-	list := false
-	for _, line := range strings.Split(form, "\n") {
-		switch {
-		case strings.HasPrefix(line, "labels:"):
-			out, list = append(out, line), true
-		case list && strings.HasPrefix(strings.TrimSpace(line), "- "):
-			out = append(out, line)
-		default:
-			list = false
-		}
-	}
-	return out
 }
