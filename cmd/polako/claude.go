@@ -220,7 +220,7 @@ func validateEffort(flagName, effort string) error {
 // the control_request that asks the CLI to register the session — so -p
 // takes no value and --input-format stream-json says why not; -n names the
 // session in the operator's Remote Control list, the same
-// polako-<repo>#<issue> scheme remoteRun used before issue #82 retired it.
+// "polako <repo>#<issue>" scheme remoteRun used before issue #82 retired it.
 func buildArgs(cfg config, prompt, resumeID string) []string {
 	var args []string
 	if resumeID != "" {
@@ -256,6 +256,19 @@ func buildArgs(cfg config, prompt, resumeID string) []string {
 // per invocation, so nothing here needs to disambiguate several in flight.
 const remoteControlRequestID = "rc"
 
+// remoteControlRequest is stdin's first line under -remote: the request
+// asking the CLI to register this session with Remote Control. A named type,
+// marshalled like remoteUserMessage below it rather than hand-built, so
+// nothing here is ever the one line built differently from its sibling.
+type remoteControlRequest struct {
+	Type      string `json:"type"`
+	RequestID string `json:"request_id"`
+	Request   struct {
+		Subtype string `json:"subtype"`
+		Enabled bool   `json:"enabled"`
+	} `json:"request"`
+}
+
 // remoteUserMessage is stdin's second line under -remote: the prompt, carried
 // as a stream-json user message instead of argv. A named type rather than an
 // inline literal so json.Marshal has a shape to work from — content is
@@ -278,12 +291,16 @@ type remoteUserMessage struct {
 // Stdin and closes that pipe's write end once the reader hits EOF, which a
 // fixed buffer always does.
 func remoteStdin(prompt string) io.Reader {
-	const req = `{"type":"control_request","request_id":"` + remoteControlRequestID +
-		`","request":{"subtype":"remote_control","enabled":true}}`
+	var req remoteControlRequest
+	req.Type, req.RequestID = "control_request", remoteControlRequestID
+	req.Request.Subtype, req.Request.Enabled = "remote_control", true
+	reqLine, _ := json.Marshal(req) // plain fields only; this never errors
+
 	var m remoteUserMessage
 	m.Type, m.Message.Role, m.Message.Content = "user", "user", prompt
 	msg, _ := json.Marshal(m) // a string field alone; this never errors
-	return strings.NewReader(req + "\n" + string(msg) + "\n")
+
+	return strings.NewReader(string(reqLine) + "\n" + string(msg) + "\n")
 }
 
 // remoteSessionName is what one invocation is called in the operator's
