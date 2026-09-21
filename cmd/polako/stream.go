@@ -166,6 +166,22 @@ type runReport struct {
 	// hold a local absolute path (a worktree path in a Bash command), so — like
 	// leftWork.where() — it belongs in a park's aside, never its reason.
 	permissionRefusedDetail string
+	// toolSucceededAfterRefusal reports whether a tool_result completed
+	// without error after permissionRefusedDetail's *last* refusal — issue
+	// #461's #402/#318 shape, where the run hit a refusal, found another way,
+	// and kept working. Reset to false every time a new refusal latches, so
+	// it only ever answers for the most recent one. refusalWorkedAround pairs
+	// it with permissionRefusedDetail != "" — the structural #209 signal
+	// alone — rather than permissionRefused, which a final message can also
+	// set on its own (the #138 shape, with nothing to work around).
+	toolSucceededAfterRefusal bool
+	// lastResultIsAsk is permissionRefusal(ev.Result) for the most recent
+	// result event only — assigned, not OR'd, unlike permissionRefused above.
+	// refusalWorkedAround needs the run's *final* word specifically: #126
+	// showed a refusal that was still the blocker despite an innocuous last
+	// message, so this alone is not the whole test, but a final message that
+	// does read as an ask is disqualifying on its own.
+	lastResultIsAsk bool
 	// pendingTools tracks each in-flight tool_use's id to enough of it to name
 	// later, so a refused tool_result — which the CLI reports as flat prose
 	// with no command of its own for a single-command refusal — can still be
@@ -192,6 +208,17 @@ type runReport struct {
 	// run, often the only cause on record and worth a terminal line, since the
 	// full copy is off in the shift log.
 	stderrTail string
+}
+
+// refusalWorkedAround reports whether this run's permission refusal is issue
+// #461's shape rather than #126's: the CLI refused a tool_result mid-run, the
+// run kept going and completed further tool calls anyway, and its final word
+// does not itself read as an ask. #126 is still caught — no successful call
+// followed its refusal — and so is #138 (permissionRefused with no
+// tool_result refusal at all: a final-message ask has nothing to work
+// around).
+func (r runReport) refusalWorkedAround() bool {
+	return r.permissionRefusedDetail != "" && r.toolSucceededAfterRefusal && !r.lastResultIsAsk
 }
 
 // status maps a run to exactly one value, most specific first: a run stopped
@@ -240,6 +267,55 @@ func (r runReport) status() string {
 // tokens actually observed, or a tool use, are not.
 func (r runReport) progressed() bool { return r.observed.Out > 0 || r.toolUses > 0 }
 
+// observeToolResults folds a "user" event's tool_result content into the
+// report: the CLI's own fact that a tool was refused, not the model's later
+// retelling of it — see toolResultRefusal. Latched: it survives a later
+// ordinary result event the same way permissionRefused does. Unlike
+// permissionAsked it still pre-empts an *immediate* resume in the caller —
+// replaying the identical session against the identical allowlist hits the
+// same wall again — unless refusalWorkedAround says otherwise (issue #461):
+// successful tool calls after this refusal's last trip, with a final word
+// that is not itself an ask, mean the run may have found another way and is
+// worth letting try to finish before parking on this.
+func (r *runReport) observeToolResults(ev streamEvent) {
+	for _, c := range ev.Message.Content {
+		if c.Type != "tool_result" {
+			continue
+		}
+		tool, hadTool := r.pendingTools[c.ToolUseID]
+		delete(r.pendingTools, c.ToolUseID)
+		// Counted here, not on the tool_use above: a create still in flight
+		// when -max-issues is reached must not count, or the kill lands
+		// before it returns and N files N-1 (issue #340). A rejected create
+		// the skill retries still counts — see ghIssueCreate's comment on
+		// that coarseness.
+		if hadTool && isIssueCreate(tool.name, tool.input) {
+			r.issueCreates++
+		}
+		if !c.IsError {
+			// A success anywhere before the first refusal is moot —
+			// refusalWorkedAround also requires permissionRefusedDetail set,
+			// so this only ever matters once a refusal has actually latched.
+			r.toolSucceededAfterRefusal = true
+			continue
+		}
+		if text := toolResultContentText(c.ResultText); toolResultRefusal(text) {
+			r.permissionRefused = true
+			// Scoped to *this* refusal's aftermath, not the whole run's.
+			r.toolSucceededAfterRefusal = false
+			// Last-wins, not first: refusalWorkedAround judges the *last*
+			// refusal's aftermath, so the detail named in a park has to be
+			// the same one, or a run with two distinct refusals could report
+			// the wrong (already-resolved) command to grant.
+			if hadTool {
+				r.permissionRefusedDetail = tool.name + toolDetail(tool.input)
+			} else {
+				r.permissionRefusedDetail = text
+			}
+		}
+	}
+}
+
 // observe folds one event into the report.
 func (r *runReport) observe(ev streamEvent) {
 	if ev.SessionID != "" {
@@ -278,38 +354,7 @@ func (r *runReport) observe(ev streamEvent) {
 			}
 		}
 	case "user":
-		// The CLI's own fact that a tool was refused, not the model's later
-		// retelling of it — see toolResultRefusal. Latched: unlike
-		// permissionAsked this pre-empts a resume (below), because resuming
-		// replays the identical session against the identical allowlist.
-		for _, c := range ev.Message.Content {
-			if c.Type != "tool_result" {
-				continue
-			}
-			tool, hadTool := r.pendingTools[c.ToolUseID]
-			delete(r.pendingTools, c.ToolUseID)
-			// Counted here, not on the tool_use above: a create still in
-			// flight when -max-issues is reached must not count, or the kill
-			// lands before it returns and N files N-1 (issue #340). A
-			// rejected create the skill retries still counts — see
-			// ghIssueCreate's comment on that coarseness.
-			if hadTool && isIssueCreate(tool.name, tool.input) {
-				r.issueCreates++
-			}
-			if !c.IsError {
-				continue
-			}
-			if text := toolResultContentText(c.ResultText); toolResultRefusal(text) {
-				r.permissionRefused = true
-				if r.permissionRefusedDetail == "" {
-					if hadTool {
-						r.permissionRefusedDetail = tool.name + toolDetail(tool.input)
-					} else {
-						r.permissionRefusedDetail = text
-					}
-				}
-			}
-		}
+		r.observeToolResults(ev)
 	case "result":
 		firstResult := !r.hasResult
 		r.hasResult = true
@@ -318,11 +363,17 @@ func (r *runReport) observe(ev streamEvent) {
 		if ev.IsError && limitRefusal(ev.Result) {
 			r.limitMsg = ev.Result
 		}
-		// OR, not assign: a mid-run refused tool_result (above) must survive
-		// a clean final result whose own text does not itself read as an
-		// ask — issue #209, where every one of #126's three final messages
-		// was ordinary prose despite the run having been refused a tool.
-		r.permissionRefused = r.permissionRefused || permissionRefusal(ev.Result)
+		// Computed once and read two ways. OR into permissionRefused, not
+		// assign: a mid-run refused tool_result (above) must survive a clean
+		// final result whose own text does not itself read as an ask — issue
+		// #209, where every one of #126's three final messages was ordinary
+		// prose despite the run having been refused a tool. Assigned into
+		// lastResultIsAsk, not OR'd: refusalWorkedAround wants only the
+		// *last* result event's own word, the multi-result-event sibling of
+		// the last-wins fields below (issue #461).
+		resultIsAsk := permissionRefusal(ev.Result)
+		r.permissionRefused = r.permissionRefused || resultIsAsk
+		r.lastResultIsAsk = resultIsAsk
 		// The CLI emits one result event per dequeued prompt, not one per run:
 		// a run woken by ten finished background subagents streams ten, all
 		// flushed at exit (issue #227). num_turns, the two durations and the

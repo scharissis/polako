@@ -568,6 +568,84 @@ func fakeClaude(mode string) int {
 		emit(`{"type":"result","subtype":"success","session_id":"sess-refused","duration_ms":100,` +
 			`"num_turns":2,"total_cost_usd":0.1,"result":"Issue #1 is resolved: nothing left to do."}`)
 		return 0
+	case "toolrefusedrecovered":
+		// Issue #461's #402/#318 shape: the same refused tool_result as
+		// "toolrefused", but this run kept going afterward — one more tool
+		// call, this one successful, then a calm final word that is not
+		// itself an ask. Identical on every dispatch, so a drain that resumes
+		// into this fake still has the same refusal to name once the shared
+		// clean-exit ceiling finally parks it.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-recovered","model":"claude-opus-5"}`)
+		emit(`{"type":"assistant","session_id":"sess-recovered","message":{"content":[` +
+			`{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"cd /w && gofmt -l ."}}]}}`)
+		emit(`{"type":"user","session_id":"sess-recovered","message":{"content":[` +
+			`{"type":"tool_result","tool_use_id":"toolu_1","is_error":true,"content":"This command requires approval"}]}}`)
+		emit(`{"type":"assistant","session_id":"sess-recovered","message":{"content":[` +
+			`{"type":"tool_use","id":"toolu_2","name":"Bash","input":{"command":"gofmt -l /w"}}]}}`)
+		emit(`{"type":"user","session_id":"sess-recovered","message":{"content":[` +
+			`{"type":"tool_result","tool_use_id":"toolu_2","is_error":false,"content":""}]}}`)
+		emit(`{"type":"result","subtype":"success","session_id":"sess-recovered","duration_ms":100,` +
+			`"num_turns":4,"total_cost_usd":0.1,"result":"Committed the fix; ending here."}`)
+		return 0
+	case "toolrefusedrecoveredthencrash":
+		// Issue #461: the deferred refusal from a worked-around clean exit
+		// has to survive the *resume* itself dying instead of ending cleanly
+		// again — giveUpAfterCrash's own share of the fix, not just
+		// afterCleanExit's. Which run this is comes off argv, since it is
+		// the crash arm this proves, not the clean-exit one.
+		if !slices.Contains(os.Args, "--resume") {
+			return fakeClaude("toolrefusedrecovered")
+		}
+		return fakeClaude("crash")
+	case "toolrefusedrecoveredthenquestionthenclean":
+		// Issue #461's ledger-clearing fix: a worked-around refusal (run 1)
+		// defers and resumes; the resumed session (run 2) asks an unrelated
+		// question instead, which -strict-order waits out and folds in; the
+		// fresh run that follows and its own resume (runs 3 and 4) both end
+		// cleanly with no refusal of their own. Once the shared ceiling
+		// finally parks it, the reason must be generic — clearRetries has to
+		// have dropped the question round's now-irrelevant deferred refusal.
+		n, err := countClaudeRun()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		if n == 1 {
+			return fakeClaude("toolrefusedrecovered")
+		}
+		if n == 2 {
+			if err := fakeSkillEffect(mode); err != nil {
+				fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+				return 1
+			}
+		} else {
+			// Runs 3 and 4: the label is still up from run 2's question —
+			// real skill behaviour once an answer is folded in is to clear
+			// it, same as fakeSkillEffect's own "already labelled" branch,
+			// but without also planting a PR: this run still ends with
+			// nothing to show, which is the shape the ceiling park needs.
+			path := os.Getenv(fakeGhEnv)
+			st, err := readGhState(path)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+				return 1
+			}
+			if is := st.Issues[promptIssue()]; is != nil && slices.Contains(is.Labels, awaitingAnswerLabel) {
+				if _, _, code := answerGh(st, []string{"issue", "edit", promptIssue(),
+					"--remove-label", awaitingAnswerLabel}); code != 0 {
+					fmt.Fprintln(os.Stderr, "fake claude: could not remove the answered label")
+					return 1
+				}
+				if err := writeGhState(path, st); err != nil {
+					fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+					return 1
+				}
+			}
+		}
+		emit(`{"type":"system","subtype":"init","session_id":"sess-clean","model":"claude-opus-5"}`)
+		emit(`{"type":"result","subtype":"success","session_id":"sess-clean","duration_ms":100,` +
+			`"num_turns":2,"total_cost_usd":0.1,"result":"Nothing more to do here."}`)
+		return 0
 	case "permissionmidrun":
 		// Issue #182 / #169: the ask lands in a turn partway through, and the
 		// run then ends on a sentence the head anchor cannot match. Same clean
@@ -3273,6 +3351,117 @@ func TestObserveLatchesOnARefusedToolResult(t *testing.T) {
 	if blockedElsewhere.permissionRefused {
 		t.Error("permissionRefused should stay false — a directory restriction is not a permission refusal")
 	}
+}
+
+// Issue #461: #402 and #318 both refused a tool mid-run, then kept going —
+// more tool calls succeeded, and the run ended on a calm word that was not
+// itself an ask. refusalWorkedAround is what tells that shape apart from
+// #126's, which looks the same up to the refusal but has nothing after it,
+// and from #138's, a final-message ask with no tool_result refusal to work
+// around at all.
+func TestRefusalWorkedAround(t *testing.T) {
+	t.Parallel()
+	observe := func(t *testing.T, lines ...string) runReport {
+		t.Helper()
+		var rep runReport
+		for _, l := range lines {
+			ev, ok := parseEvent([]byte(l))
+			if !ok {
+				t.Fatalf("parseEvent rejected %s", l)
+			}
+			rep.observe(ev)
+		}
+		return rep
+	}
+	result := func(text string) string {
+		return `{"type":"result","subtype":"success","result":` + jsonString(text) + `}`
+	}
+
+	cases := []struct {
+		name   string
+		lines  []string
+		want   bool
+		reason string
+	}{
+		{
+			"refused, a successful call followed, calm final word — #402/#318's shape",
+			[]string{
+				toolUseID("toolu_1", "Bash", `{"command":"cd /w && gofmt -l ."}`),
+				toolResult("toolu_1", "This command requires approval", true),
+				toolUseID("toolu_2", "Bash", `{"command":"gofmt -l /w"}`),
+				toolResult("toolu_2", "", false),
+				result("14 commits landed; the review gate finished."),
+			},
+			true, "successful calls followed the last refusal and the final word is not an ask",
+		},
+		{
+			"refused, nothing after it — #126's shape",
+			[]string{
+				toolUseID("toolu_1", "Bash", `{"command":"gh issue close 126"}`),
+				toolResult("toolu_1", "This command requires approval", true),
+				result("Issue #126 is resolved: an earlier run confirmed the fix shipped."),
+			},
+			false, "no successful call followed the refusal, so nothing was worked around",
+		},
+		{
+			"refused, a success followed, but the final word is itself an ask",
+			[]string{
+				toolUseID("toolu_1", "Bash", `{"command":"cd /w"}`),
+				toolResult("toolu_1", "This command requires approval", true),
+				toolUseID("toolu_2", "Read", `{"file_path":"PLAN.md"}`),
+				toolResult("toolu_2", "...", false),
+				result("This requires user confirmation to proceed. Can you approve?"),
+			},
+			false, "a final message that reads as an ask is disqualifying on its own",
+		},
+		{
+			"a second refusal with nothing successful after it, despite a success after the first",
+			[]string{
+				toolUseID("toolu_1", "Bash", `{"command":"cd /w"}`),
+				toolResult("toolu_1", "This command requires approval", true),
+				toolUseID("toolu_2", "Read", `{"file_path":"PLAN.md"}`),
+				toolResult("toolu_2", "...", false),
+				toolUseID("toolu_3", "Bash", `{"command":"gh pr merge 1"}`),
+				toolResult("toolu_3", "This command requires approval", true),
+				result("Nothing left to do here."),
+			},
+			false, "scoped to the *last* refusal, whose own aftermath had no success",
+		},
+		{
+			"no refusal at all",
+			[]string{result("Opened a PR.")},
+			false, "nothing to work around",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rep := observe(t, c.lines...)
+			if got := rep.refusalWorkedAround(); got != c.want {
+				t.Errorf("refusalWorkedAround = %v, want %v — %s", got, c.want, c.reason)
+			}
+		})
+	}
+
+	// Review finding on issue #461: permissionRefusedDetail used to latch on
+	// the *first* refusal, but refusalWorkedAround judges the *last* one's
+	// aftermath — a run whose first refusal got worked around and whose
+	// second did not must still name the second (the actual blocker) in the
+	// park, not the resolved first one.
+	t.Run("names the last refusal, not the first", func(t *testing.T) {
+		rep := observe(t,
+			toolUseID("toolu_1", "Bash", `{"command":"cd /w"}`),
+			toolResult("toolu_1", "This command requires approval", true),
+			toolUseID("toolu_2", "Read", `{"file_path":"PLAN.md"}`),
+			toolResult("toolu_2", "...", false),
+			toolUseID("toolu_3", "Bash", `{"command":"gh pr merge 1"}`),
+			toolResult("toolu_3", "This command requires approval", true),
+			result("Nothing left to do here."),
+		)
+		if want := "Bash: gh pr merge 1"; !strings.Contains(rep.permissionRefusedDetail, want) {
+			t.Errorf("permissionRefusedDetail = %q, want the last (unresolved) refusal %q",
+				rep.permissionRefusedDetail, want)
+		}
+	})
 }
 
 // Issue #182: on #169 the run asked for an ungranted tool in a turn partway
