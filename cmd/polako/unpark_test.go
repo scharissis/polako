@@ -293,3 +293,20 @@ func TestUnparkNamingOneIssuePrintsItsReasonWhole(t *testing.T) {
 		t.Errorf("the listing never says -apply is the next step:\n%s", list.String())
 	}
 }
+
+// The curation notice openQueues prints is a shift's business. Above a
+// listing of parks it's noise — it was the first line of every unpark run.
+func TestUnparkDoesNotMentionProposedIssues(t *testing.T) {
+	t.Parallel()
+	log := captureLog(t)
+	st := &ghState{Issues: map[string]*fakeIssue{
+		"16": {Open: true, Labels: []string{needsHumanLabel}},
+		"30": {Open: true, Labels: []string{proposedLabel}},
+	}}
+	if _, err := readParkedIssues(context.Background(), unparkCfg(t, st), 0); err != nil {
+		t.Fatalf("readParkedIssues: %v", err)
+	}
+	if strings.Contains(log.String(), "awaiting curation") {
+		t.Errorf("unpark named the proposed issues:\n%s", log.String())
+	}
+}
