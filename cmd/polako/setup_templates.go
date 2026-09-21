@@ -82,11 +82,9 @@ func leakedTemplateLabel(lines []string, forbidden []string) string {
 		if slices.Contains(forbidden, token) {
 			return token
 		}
-	}
-	for _, line := range lines {
 		for _, prefix := range []string{"model:", "effort:"} {
-			if strings.Contains(line, prefix) {
-				return prefix + "…"
+			if strings.HasPrefix(token, prefix) {
+				return token
 			}
 		}
 	}

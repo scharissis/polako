@@ -92,6 +92,18 @@ func TestSetupTemplatesRowFlagsAPolicyPrefix(t *testing.T) {
 	}
 }
 
+// A review finding: the model:/effort: check must anchor to the start of the
+// label token, not match anywhere in the line — an unrelated custom label
+// that merely contains "model:" isn't a policy label.
+func TestSetupTemplatesRowIgnoresALabelThatOnlyContainsModelPrefix(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeIssueTemplate(t, dir, "epic.yml", "name: Epic\nlabels: [\"risk-model:high\"]\nbody: []\n")
+	if row := setupTemplatesRow(config{dir: dir}); row.status != setupOK {
+		t.Errorf("row = %+v, want ok — %q is not a model:/effort: policy label", row, "risk-model:high")
+	}
+}
+
 // A non-YAML file, or a labels: key nobody named as forbidden, must not trip
 // the row.
 func TestSetupTemplatesRowIgnoresUnrelatedFiles(t *testing.T) {
