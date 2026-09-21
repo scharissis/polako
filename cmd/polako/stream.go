@@ -166,17 +166,14 @@ type runReport struct {
 	// hold a local absolute path (a worktree path in a Bash command), so — like
 	// leftWork.where() — it belongs in a park's aside, never its reason.
 	permissionRefusedDetail string
-	// toolRefused is the structural half of permissionRefused on its own —
-	// issue #209's signal alone, with none of permissionRefusal's final-text
-	// matching folded in. refusalWorkedAround needs to know this happened
-	// specifically, not merely that permissionRefused ended up true some other
-	// way (a final message alone, the #138 shape, has nothing to work around).
-	toolRefused bool
 	// toolSucceededAfterRefusal reports whether a tool_result completed
-	// without error after toolRefused's *last* trip — issue #461's #402/#318
-	// shape, where the run hit a refusal, found another way, and kept working.
-	// Reset to false every time a new refusal latches, so it only ever answers
-	// for the most recent one.
+	// without error after permissionRefusedDetail's *last* refusal — issue
+	// #461's #402/#318 shape, where the run hit a refusal, found another way,
+	// and kept working. Reset to false every time a new refusal latches, so
+	// it only ever answers for the most recent one. refusalWorkedAround pairs
+	// it with permissionRefusedDetail != "" — the structural #209 signal
+	// alone — rather than permissionRefused, which a final message can also
+	// set on its own (the #138 shape, with nothing to work around).
 	toolSucceededAfterRefusal bool
 	// lastResultIsAsk is permissionRefusal(ev.Result) for the most recent
 	// result event only — assigned, not OR'd, unlike permissionRefused above.
@@ -218,9 +215,10 @@ type runReport struct {
 // run kept going and completed further tool calls anyway, and its final word
 // does not itself read as an ask. #126 is still caught — no successful call
 // followed its refusal — and so is #138 (permissionRefused with no
-// toolRefused at all: a final-message ask has nothing to work around).
+// tool_result refusal at all: a final-message ask has nothing to work
+// around).
 func (r runReport) refusalWorkedAround() bool {
-	return r.toolRefused && r.toolSucceededAfterRefusal && !r.lastResultIsAsk
+	return r.permissionRefusedDetail != "" && r.toolSucceededAfterRefusal && !r.lastResultIsAsk
 }
 
 // status maps a run to exactly one value, most specific first: a run stopped
@@ -296,14 +294,13 @@ func (r *runReport) observeToolResults(ev streamEvent) {
 		}
 		if !c.IsError {
 			// A success anywhere before the first refusal is moot —
-			// refusalWorkedAround also requires toolRefused, so this only
-			// ever matters once a refusal has actually latched.
+			// refusalWorkedAround also requires permissionRefusedDetail set,
+			// so this only ever matters once a refusal has actually latched.
 			r.toolSucceededAfterRefusal = true
 			continue
 		}
 		if text := toolResultContentText(c.ResultText); toolResultRefusal(text) {
 			r.permissionRefused = true
-			r.toolRefused = true
 			// Scoped to *this* refusal's aftermath, not the whole run's.
 			r.toolSucceededAfterRefusal = false
 			// Last-wins, not first: refusalWorkedAround judges the *last*
