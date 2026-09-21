@@ -91,6 +91,46 @@ func TestApplySetupFilesProposesAPR(t *testing.T) {
 	}
 }
 
+// A worktree reused from a dead run (setupWorktree's own existing-remote-
+// branch case) can already carry a commit this call's own write step finds
+// nothing left to do for — missingGitignoreLines comes back empty, so the
+// old wrote-flag logic reported the row ok and left the item out of the PR
+// body, even though the branch this run pushes genuinely carries it. The fix
+// reads what actually changed off a diff against remoteDefault instead.
+func TestProposeSetupFilesReportsAnItemADeadRunAlreadyPushed(t *testing.T) {
+	t.Parallel()
+	work, checkout := upstream(t)
+
+	// Simulate the dead run: it wrote and pushed .gitignore to polako-setup,
+	// then died before opening the PR.
+	gitAt(t, work, "checkout", "-b", setupBranch)
+	if err := appendGitignoreLines(work, setupGitignoreLines); err != nil {
+		t.Fatalf("writing .gitignore in work: %v", err)
+	}
+	gitAt(t, work, "add", ".gitignore")
+	gitAt(t, work, "commit", "-m", setupFilesCommitSubject)
+	gitAt(t, work, "push", "origin", setupBranch)
+	gitAt(t, work, "checkout", "main")
+
+	cfg := setupCfg(t, &ghState{}, checkout)
+	cfg.env = append(cfg.env, gitIdentity...)
+
+	result, err := proposeSetupFiles(context.Background(), cfg, setupFileWants{gitignore: true})
+	if err != nil {
+		t.Fatalf("proposeSetupFiles: %v", err)
+	}
+	if !result.proposedGitignore {
+		t.Errorf("result = %+v, want proposedGitignore true — the dead run's own commit is on the "+
+			"branch even though this call's own write step found nothing left to write", result)
+	}
+	if result.url == "" {
+		t.Errorf("result = %+v, want a PR URL", result)
+	}
+	if body := setupFilesPRBody(result); !strings.Contains(body, "/.polako-scratch/") {
+		t.Errorf("PR body = %q, want it to name the .gitignore lines", body)
+	}
+}
+
 // -yes takes each step's own default: yes for .gitignore and the CLAUDE.md
 // block, no for the scaffold — so a plain -yes run proposes the first two
 // and leaves docs/VISION.md and docs/plans/README.md alone.
