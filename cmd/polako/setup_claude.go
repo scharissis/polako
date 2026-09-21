@@ -183,13 +183,29 @@ func extractClaudeMdBlock(content string) (string, bool) {
 // claudeMdNeedsUpdate reports whether dir's CLAUDE.md is missing the block
 // entirely or carries one that differs from what this run would write today
 // — a stale check command, most likely, or no CLAUDE.md at all.
+//
+// The comparison normalizes CRLF to LF first: a checkout with git's
+// core.autocrlf on (Windows' common default, on a repo with no .gitattributes
+// pinning line endings) hands this an existing block with \r\n even though
+// claudeMdBlockFor always generates \n — a false "needs update" that then
+// writes back exactly what was already there, autocrlf normalizes the stage
+// right back to the original bytes, and the commit that follows has nothing
+// to commit.
 func claudeMdNeedsUpdate(dir string) bool {
 	existing, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
 	if err != nil {
 		return true
 	}
 	got, ok := extractClaudeMdBlock(string(existing))
-	return !ok || got != claudeMdBlockFor(dir, string(existing))
+	if !ok {
+		return true
+	}
+	want := claudeMdBlockFor(dir, string(existing))
+	return normalizeCRLF(got) != normalizeCRLF(want)
+}
+
+func normalizeCRLF(s string) string {
+	return strings.ReplaceAll(s, "\r\n", "\n")
 }
 
 // mergeClaudeMd inserts block into existing: replaced in place when the
