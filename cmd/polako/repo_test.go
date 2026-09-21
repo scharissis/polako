@@ -828,10 +828,15 @@ func TestReviewGateRecordsResumeMarkers(t *testing.T) {
 // only reported background finder subagents starting — not findings — and
 // treated that return as the result. The gate used to assert a Skill call
 // always blocks (d3e9ac8, issues #217/#372); #472 is the same gate's opposite
-// failure, so the wording has to check which one actually happened rather
-// than assume either. A regression back to "control returns to this run only
-// when it has finished" (the old flat-blocking claim) would silently reopen
-// #472's exact loss.
+// failure. The fix does not branch on how complete the return's prose reads
+// — a review of this very change (Angle B, on the first attempt at #472)
+// found that a text-only "does this look done" read still falls through on a
+// return that mixes real findings with a note that other finders are still
+// going, so the gate confirms completion with `ListAgents` instead of
+// trusting any return's wording, complete-looking or not. A regression back
+// to "control returns to this run only when it has finished" (the old
+// flat-blocking claim), or to branching on the return's prose instead of
+// checking `ListAgents`, would silently reopen #472's exact loss.
 func TestReviewGateChecksWhatTheReturnCarries(t *testing.T) {
 	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
@@ -842,13 +847,14 @@ func TestReviewGateChecksWhatTheReturnCarries(t *testing.T) {
 	}
 	for _, marker := range []string{
 		"its return is not automatically the",
-		"return already carries the findings",
-		"return only reports background work still running",
+		"never branching on how complete its prose sounds",
+		"Nothing review-related running",
 	} {
 		if !strings.Contains(skill, marker) {
 			t.Errorf("SKILL.md's review gate no longer says %q — without it a run has no reason"+
-				" to check whether a Skill call's return actually carries the review's findings"+
-				" before treating it as done, which is exactly how #472 lost every finding", marker)
+				" to confirm a Skill call's return actually carries the review's findings, by"+
+				" checking ListAgents rather than trusting the return's own wording, before"+
+				" treating it as done — which is exactly how #472 lost every finding", marker)
 		}
 	}
 }
@@ -856,7 +862,10 @@ func TestReviewGateChecksWhatTheReturnCarries(t *testing.T) {
 // The checkpoint is the actual fix: without it, a run that dies mid-wait on a
 // backgrounded review loses everything the same way #472 did, even with the
 // check above in place to notice it's waiting. Each finder's report has to
-// land in PLAN.md as it arrives, not batched until the whole sweep finishes.
+// land in PLAN.md as it arrives, not batched until the whole sweep finishes —
+// and that has to hold for a return with some findings already in it too, not
+// only the empty-status shape, or the mixed-return gap this wording exists to
+// close reopens the same day it's fixed.
 func TestReviewGateCheckpointsFindingsAsTheyArrive(t *testing.T) {
 	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
@@ -866,7 +875,12 @@ func TestReviewGateCheckpointsFindingsAsTheyArrive(t *testing.T) {
 			" \"pending, unverified\" when it lands — without a per-finder checkpoint, a run" +
 			" that dies mid-wait on a backgrounded review loses every finding again (issue #472)")
 	}
-	if !strings.Contains(skill, "flipping any \"pending, unverified\" checkpoint from the wait above to") {
+	if !strings.Contains(skill, "checkpoint whatever findings it lists — none, some, or all") {
+		t.Error("SKILL.md's review gate no longer checkpoints every return's findings" +
+			" regardless of how complete the return looks — without \"none, some, or all\" a" +
+			" return mixing real findings with still-running work can fall through uncheckpointed")
+	}
+	if !strings.Contains(skill, "flip every \"pending, unverified\" line checkpointed above to") {
 		t.Error("SKILL.md's review gate checkpoints findings as \"pending, unverified\" but no" +
 			" longer says they get flipped to plain \"pending\" once the review actually" +
 			" finishes — step d only ever acts on findings marked plain \"pending\", so an" +
@@ -887,7 +901,7 @@ func TestReviewGateWaitsOutTheVerificationPassToo(t *testing.T) {
 			" #472 died waiting on exactly that, after every finder subagent had already" +
 			" reported, so a stop condition that only checks the finders is insufficient")
 	}
-	if !strings.Contains(skill, "nothing review-related running") {
+	if !strings.Contains(skill, "review-related running") {
 		t.Error("SKILL.md's review gate no longer says to poll until nothing review-related is" +
 			" running — without that exact stop condition, a run resumes on the finders alone" +
 			" and can still end its turn while the verification pass (#472) is going")

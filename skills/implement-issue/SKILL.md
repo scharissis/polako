@@ -44,19 +44,25 @@ hand — nothing to keep alive, nothing to check on, so `ListAgents` or a
 Issues #217 and #372 are both runs that hand-polled the review gate mid-call
 that way.
 
-But a return is not proof the work behind it is done. #472 is the opposite
-failure on the same gate: the review call returned at once, control handed
-back to this run, with the review itself still fanning out finder subagents
-in the background — what came back was a status ("I'll wait for their
-completion notifications"), not findings. Reading that return as the result is
-what lost the run: eight completion notifications later it ended its turn on
-an unfinished ninth, with the review's own verification pass still running per
-`ListAgents`, and nothing was ever written down. So a `Skill` call's return
-gets one look before it's trusted: the actual result in hand means done, move
-on. A status update naming subagents still working is backgrounded work by
-another name, whatever tool started it — switch to the polling rule above,
-slowly, the same as any other wait longer than a glance. Phase 3 step 2c says
-how the review gate specifically checkpoints what arrives while it waits.
+But a return is not proof the work behind it is done, and reading its prose
+for "does this sound finished" is not a safe way to decide — #472 is the
+opposite failure on the same gate, and it is exactly this gap: the review
+call returned at once, control handed back to this run, with the review
+itself still fanning out finder subagents in the background. What came back
+read like a status, not a final report ("I'll wait for their completion
+notifications"), and taking that at face value is what lost the run: eight
+completion notifications later it ended its turn on an unfinished ninth, with
+the review's own verification pass still running per `ListAgents`, and
+nothing was ever written down. A return that instead reads as finished is no
+safer to trust on its own — the same verification pass can still be running
+behind a report that looks complete. So a `Skill` call whose return might be
+backgrounding work gets a ground-truth check before its result is trusted:
+`ListAgents`. Nothing related still running means done, whatever the return
+said. Anything still running is backgrounded work by another name, whatever
+tool started it — switch to the polling rule above, slowly, and check again
+once the wait is up rather than trusting the next thing that arrives either.
+Phase 3 step 2c says how the review gate specifically checkpoints what
+arrives while it waits.
 
 Stopping on purpose is a different thing from stopping to wait. An unanswered
 question ends the run deliberately, flagged with `awaiting-answer` for a human
@@ -572,44 +578,44 @@ don't post again, and stop.
       rather than yours, so a finding lands against the wrong body and a fix
       written there lands outside the branch entirely (issue #219).
       Invoking the review is one call, but its return is not automatically the
-      result — check what actually came back before acting on it. The finder
-      subagents it fans out are the review's own; this run neither starts nor
-      awaits nor watches them directly, and a `Bash: true` filler or a
-      `Monitor` heartbeat beside the call is always waste, whichever branch
-      below applies.
-      - If the return already carries the findings (the review ran to
-        completion within the call): proceed straight to the write-down
-        below. Issue #217 is a run that hand-polled this once a second before
-        the call returned; issue #372 polled every few seconds between
-        `Monitor` timers after #217's floor landed. Neither was waiting on
-        anything real — a completed return has nothing left to poll for, so
-        `ListAgents` beside it is pure waste, the same as before.
-      - If the return only reports background work still running (a status
-        like "I'll wait for their completion notifications", not findings):
-        that is backgrounded work by another name, and it gets the one-turn
-        section's own rule for it — poll slowly, a check every minute or two,
-        not seconds. As each finder's completion notification arrives during
-        that wait, checkpoint it into PLAN.md's `## Review` section right
-        away — "Reviewed through: pending (review in progress)" as a
-        placeholder heading, then that finder's findings each marked "pending,
-        unverified" — before going back to waiting. That is the fix for issue
-        #472: a run that ends mid-wait now leaves whatever landed on disk
-        instead of only in subagent transcripts nothing in polako reads. Keep
-        polling until `ListAgents` shows nothing review-related running —
-        finder subagents and the review's own verification pass both; #472's
-        incident died with the verification pass still going after every
-        finder had already reported, so the finders finishing is not itself
-        the signal to stop waiting.
+      result — a return that reads as a finished report is not proof it is
+      one, since #472's own incident was the review's verification pass still
+      running after every finder had already reported in. So treat *any*
+      return the same way, never branching on how complete its prose sounds:
+      checkpoint whatever findings it lists — none, some, or all — into
+      PLAN.md's `## Review` section right away, each marked "pending,
+      unverified", under a placeholder heading, "Reviewed through: pending
+      (review in progress)". That covers a fully backgrounded return (a
+      status like "I'll wait for their completion notifications", no findings
+      yet), a fully finished one (every finding, checkpointed immediately
+      rather than trusted as final), and anything in between — a return
+      mixing real findings with a note that other finders or the
+      verification pass are still going, which is exactly the shape that
+      falls through a text-only "does this look done" read.
+      Then confirm with the one check that does not depend on reading
+      anyone's prose: `ListAgents`. Nothing review-related running — no
+      finder subagents, and the review's own verification pass too, since
+      that is specifically what #472 was still waiting on — means done, no
+      matter how the return read. Anything still running means this is
+      backgrounded work under the one-turn section's own rule: poll slowly,
+      a check every minute or two, not seconds, checkpointing each further
+      finder notification the same way as it lands, then check `ListAgents`
+      again. The finder subagents and the verification pass are the review's
+      own — this run neither starts nor awaits nor watches them directly —
+      and a `Bash: true` filler or a `Monitor` heartbeat beside any of this is
+      still waste; the wait is on `ListAgents` clearing, nothing faster.
+      Issue #217 is a run that hand-polled a call that was always going to
+      block; issue #372 polled every few seconds between `Monitor` timers
+      after #217's floor landed — neither was ever waiting on anything real,
+      which a slow, `ListAgents`-gated wait here does not reopen.
       Leaving `--fix` off is deliberate: applying fixes is the slow part after
       the review itself is done, and a run that dies during it is exactly
-      what left issue #216's gate with nothing to resume from. So once the
-      findings are actually in hand — immediately on a completed return, or
-      once `ListAgents` shows nothing review-related left running on a
-      backgrounded one — write the `## Review` section in PLAN.md before
-      fixing anything: "Reviewed through: <the commit issue-$issue's HEAD
-      resolves to right now>" and every finding listed, each marked "pending"
-      (flipping any "pending, unverified" checkpoint from the wait above to
-      plain "pending" — d only ever acts on that spelling). That is the
+      what left issue #216's gate with nothing to resume from. So once
+      `ListAgents` confirms nothing review-related is left running, finalize
+      before fixing anything: write "Reviewed through: <the commit
+      issue-$issue's HEAD resolves to right now>" over the placeholder
+      heading, and flip every "pending, unverified" line checkpointed above to
+      plain "pending" — d only ever acts on that spelling. That is the
       expensive part recorded; a death during d below now only costs the
       fixes still pending, not the review that found them. This replaces
       PLAN.md's whole `## Review` section wholesale — the placeholder heading

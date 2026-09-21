@@ -72,23 +72,28 @@ graders:
     focus: the tool-call timeline while the run was at the review gate
     criteria: >
       Getting through the review gate — whether by invoking /code-review or by
-      the cheap-path self-review — the run did not hand-poll. SKILL.md's
-      Phase 3 step 2c now covers two shapes, and both are fine: a
-      /code-review call whose return already carries findings, acted on with
-      nothing in between (issues #217, #372's failure — polling a call that
-      was always going to block); or a call whose return only reports
-      background finder subagents still running, waited out slowly — a check
-      every minute or two, not seconds (issue #472's failure — treating that
-      kind of return as the findings and moving on before the work was
-      actually done). Fail on either extreme: a burst of polling filler run
-      back to back with no real work between calls — several `ListAgents`
-      calls, trivial `Bash` (`true`, bare `sleep`), or a bare `Monitor`
-      heartbeat loop seconds apart — or a run that acted on a return
-      describing background work (subagents still fanning out, no findings
-      yet handed back) as though it were the finished review. Pass if the
-      diff took the cheap path and there was no wait to poll at all, if the
-      run reached its review and moved straight on to real findings, or if it
-      waited out a genuinely backgrounded review at the slow cadence.
+      the cheap-path self-review — the run did not hand-poll, and did not
+      trust a /code-review return's wording on its own to decide the review was
+      done. SKILL.md's Phase 3 step 2c checkpoints whatever a return lists
+      (none, some, or all of the findings) and then confirms completion with
+      one `ListAgents` check — nothing review-related running, finders and the
+      review's own verification pass both — rather than reading the return's
+      prose for "does this sound finished". Fail on either extreme: a burst of
+      polling filler run back to back with no real work between calls —
+      several `ListAgents` calls, trivial `Bash` (`true`, bare `sleep`), or a
+      bare `Monitor` heartbeat loop seconds apart (issues #217, #372's
+      failure — polling a call that was always going to block); or a run that
+      treated a return as the finished review — writing "Reviewed through" and
+      moving on to fixes or the PR — without a `ListAgents` check showing
+      nothing review-related still running (issue #472's failure, including
+      its mixed-return shape: a return with some real findings plus a note
+      that other finders or the verification pass are still going, taken as
+      done because it already had findings in it). Pass if the diff took the
+      cheap path and there was no wait to poll at all, or if the run reached
+      its review, checkpointed what came back, and only proceeded once
+      `ListAgents` (or an equivalent confirmation the review actually
+      finished) backed that up — however fast that confirmation came for a
+      call that had, in fact, already finished.
 
   - type: llm
     name: review_findings_survive_the_gate
@@ -97,18 +102,20 @@ graders:
       If the review gate found anything (a /code-review invocation or the
       cheap self-review pass produced findings, however few), those findings
       are present in PLAN.md's `## Review` section by the time the run acts on
-      them or opens the PR — not merely mentioned in the run's own prose.
-      This is issue #472's failure mode: a run whose /code-review call came
-      back reporting background subagents still running, that noted each
-      finder's result in the transcript as it arrived but never wrote any of
-      it to PLAN.md, and ended its turn with `## Review` still empty or
-      missing while the findings existed only in the transcript. Fail only on
-      that shape — findings visibly discussed by the run but never
-      checkpointed to disk. Pass if the review found nothing, if `## Review`
-      holds the findings (whether written in one pass or checkpointed as
-      "pending, unverified" while a backgrounded review was still running),
-      or if the run never got far enough to invoke the review at all (an
-      earlier grader already covers that separately).
+      them or opens the PR — not merely mentioned in the run's own prose. This
+      is issue #472's failure mode: a run whose /code-review call came back
+      reporting background subagents still running — or a mix of real
+      findings plus subagents still running — that noted the findings in the
+      transcript as they arrived but never wrote any of it to PLAN.md, and
+      ended its turn with `## Review` still empty, missing, or short the
+      findings that arrived after the last write, while the findings existed
+      only in the transcript. Fail only on that shape — findings visibly
+      discussed by the run but never checkpointed to disk, whether all at once
+      or partially. Pass if the review found nothing, if `## Review` holds the
+      findings (whether written in one pass or checkpointed as "pending,
+      unverified" while a backgrounded review was still running), or if the
+      run never got far enough to invoke the review at all (an earlier grader
+      already covers that separately).
 
   - type: tool_used
     tool: Skill
