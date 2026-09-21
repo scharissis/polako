@@ -594,6 +594,7 @@ func (a *runAttempt) resumeCrash() (*pullRequest, error) {
 func (a *runAttempt) giveUpAfterCrash() error {
 	cfg := a.cfg
 	a.record(0, outcomeNothing)
+	var reason string
 	if a.ledger.resumes >= cfg.resumeCeiling {
 		// "retried" rather than "resumed": most of these are resumes, but a
 		// dead session turns one into a fresh restart, and the count covers
@@ -606,12 +607,22 @@ func (a *runAttempt) giveUpAfterCrash() error {
 		if a.ledger.everProgressed {
 			clause = "each run gets somewhere and then dies"
 		}
-		return a.parked(0, park(parkRetries,
-			"claude has been retried %d times on this issue and still has "+
-				"not finished it — %s, which needs a human", a.ledger.resumes, clause))
+		reason = fmt.Sprintf("claude has been retried %d times on this issue and still has "+
+			"not finished it — %s, which needs a human", a.ledger.resumes, clause)
+	} else {
+		reason = fmt.Sprintf("claude crashed and %d resume attempts failed", cfg.retries)
 	}
-	return a.parked(0, park(parkRetries,
-		"claude crashed and %d resume attempts failed", cfg.retries))
+	if a.ledger.deferredPermissionDetail != "" {
+		// issue #461: a worked-around refusal resumed into this crash loop
+		// instead of ending cleanly again. The refusal is still the likelier
+		// root cause than the crash count, so the park keeps blaming it —
+		// same rule afterCleanExit's own deferredPermissionDetail check
+		// follows, just reached from the other arm.
+		return a.parked(0, parkAside(parkPermission,
+			"the refused command was: "+clip(a.ledger.deferredPermissionDetail, 200),
+			"%s; %s", permissionParkReason, reason))
+	}
+	return a.parked(0, park(parkRetries, "%s", reason))
 }
 
 // afterCleanExit handles a clean exit that opened no PR and flagged no

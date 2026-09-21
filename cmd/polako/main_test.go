@@ -587,6 +587,16 @@ func fakeClaude(mode string) int {
 		emit(`{"type":"result","subtype":"success","session_id":"sess-recovered","duration_ms":100,` +
 			`"num_turns":4,"total_cost_usd":0.1,"result":"Committed the fix; ending here."}`)
 		return 0
+	case "toolrefusedrecoveredthencrash":
+		// Issue #461: the deferred refusal from a worked-around clean exit
+		// has to survive the *resume* itself dying instead of ending cleanly
+		// again — giveUpAfterCrash's own share of the fix, not just
+		// afterCleanExit's. Which run this is comes off argv, since it is
+		// the crash arm this proves, not the clean-exit one.
+		if !slices.Contains(os.Args, "--resume") {
+			return fakeClaude("toolrefusedrecovered")
+		}
+		return fakeClaude("crash")
 	case "permissionmidrun":
 		// Issue #182 / #169: the ask lands in a turn partway through, and the
 		// run then ends on a sentence the head anchor cannot match. Same clean

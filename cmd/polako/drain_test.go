@@ -1569,6 +1569,56 @@ func TestDrainResumesAWorkedAroundRefusalThenParksOnPermission(t *testing.T) {
 	}
 }
 
+// Issue #461's crash-arm gap: a worked-around refusal defers to a resume
+// (afterCleanExit), but if that resume then crashes instead of ending
+// cleanly again, giveUpAfterCrash used to park with the generic crash
+// message once the retry budget was spent, silently dropping the refusal.
+func TestDrainNamesTheDeferredRefusalWhenTheResumeThenCrashes(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "toolrefusedrecoveredthencrash", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	cfg.retries = 1
+	calls := filepath.Join(t.TempDir(), "gh-calls.log")
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
+	leftBehind(t, &cfg)
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a crashing resume must not end the drain: %v", err)
+	}
+
+	recs := terminalRecords(t, records, cfg.repo)
+	if len(recs) != 1 || recs[0].Outcome != issueNeedsHuman || recs[0].ParkReason != parkPermission {
+		t.Fatalf("terminal record = %+v, want needs_human / %s", recs, parkPermission)
+	}
+
+	out := buf.String()
+	// The clean-exit resume, then two crashes: -retries 1 forgives one before
+	// giveUpAfterCrash takes over.
+	if got := strings.Count(out, "session started"); got != 3 {
+		t.Errorf("%d runs dispatched, want 3\ngot:\n%s", got, out)
+	}
+	for _, want := range []string{
+		// Leads with the refusal, same as afterCleanExit's own park — the
+		// crash count still gets a clause, but it no longer leads.
+		"the run stopped to ask for a permission this allowlist does not grant",
+		"claude crashed and 1 resume attempts failed",
+		"the refused command was: Bash: cd /w && gofmt -l .",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
+	}
+	askAt := strings.Index(out, "the run stopped to ask for a permission")
+	crashAt := strings.Index(out, "claude crashed and 1 resume attempts failed")
+	if askAt < 0 || crashAt < 0 || askAt > crashAt {
+		t.Errorf("the park reason must lead with the refusal and trail with the crash count\ngot:\n%s", out)
+	}
+}
+
 // Issue #182: the ask does not have to be the run's last word. On #169 it
 // landed in a turn partway through and the run wrapped up on a sentence the
 // head anchor could not catch, so the issue parked as "no PR and no questions".
