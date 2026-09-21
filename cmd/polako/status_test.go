@@ -176,12 +176,14 @@ func TestStatusJSONMatchesTheTextReport(t *testing.T) {
 	want := statusDocQueue{
 		Ready:      []int{3, 5},
 		Blocked:    []statusDocBlocked{{Issue: 7, QuietSeconds: ptrInt64(26 * 3600)}},
-		Parked:     []int{9},
+		Parked:     []statusDocParked{{Issue: 9, Entries: []string{}}},
 		Proposed:   []int{},
 		Containers: []statusDocContainer{},
 	}
 	if !slices.Equal(doc.Queue.Ready, want.Ready) ||
-		!slices.Equal(doc.Queue.Parked, want.Parked) ||
+		!slices.EqualFunc(doc.Queue.Parked, want.Parked, func(a, b statusDocParked) bool {
+			return a.Issue == b.Issue && slices.Equal(a.Entries, b.Entries)
+		}) ||
 		!slices.Equal(doc.Queue.Proposed, want.Proposed) ||
 		!slices.Equal(doc.Queue.Containers, want.Containers) ||
 		!slices.EqualFunc(doc.Queue.Blocked, want.Blocked, func(a, b statusDocBlocked) bool {
@@ -215,6 +217,53 @@ func TestStatusJSONMatchesTheTextReport(t *testing.T) {
 }
 
 func ptrInt64(n int64) *int64 { return &n }
+
+// Issue #435: a parked issue whose own park comment named entries gets its
+// own needs-you clause naming them and pointing at `polako unpark`; one with
+// no park comment at all keeps today's batched clause. Same fixture shape
+// TestUnparkListsEveryParkedIssue (unpark_test.go) drives its own listing
+// through — the read this reuses.
+func TestStatusNamesTheGrantAParkedIssueIsWaitingOn(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues: map[string]*fakeIssue{
+			"16": {Open: true, Labels: []string{needsHumanLabel}, Comments: 1,
+				Bodies: map[int]string{1: parkCommentBody(16, "the run was refused `Bash(echo:*)`", []string{"Bash(echo:*)"})}},
+			"22": {Open: true, Labels: []string{needsHumanLabel}},
+		},
+	})
+
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	got := needsYou(snap)
+	if want := "grant Bash(echo:*) or fix the skill, then polako unpark #16"; !strings.Contains(got, want) {
+		t.Errorf("needsYou = %q, want it to contain %q", got, want)
+	}
+	if want := "decide what to do about #22 (drop needs-human to requeue)"; !strings.Contains(got, want) {
+		t.Errorf("needsYou = %q, want #22 (no park comment) to keep today's line %q", got, want)
+	}
+	// #16 never falls into the batched clause once it has its own.
+	if strings.Contains(got, "decide what to do about #16") {
+		t.Errorf("needsYou = %q, #16 should not also be in the batched clause", got)
+	}
+
+	var out strings.Builder
+	if err := renderStatusJSON(&out, cfg, snap); err != nil {
+		t.Fatalf("renderStatusJSON: %v", err)
+	}
+	var doc statusDoc
+	if err := json.Unmarshal([]byte(out.String()), &doc); err != nil {
+		t.Fatalf("output did not parse as JSON: %v\n%s", err, out.String())
+	}
+	want := []statusDocParked{{Issue: 16, Entries: []string{"Bash(echo:*)"}}, {Issue: 22, Entries: []string{}}}
+	if !slices.EqualFunc(doc.Queue.Parked, want, func(a, b statusDocParked) bool {
+		return a.Issue == b.Issue && slices.Equal(a.Entries, b.Entries)
+	}) {
+		t.Errorf("queue.parked = %+v, want %+v", doc.Queue.Parked, want)
+	}
+}
 
 // An empty backlog still comes back with every array field as `[]`, never
 // `null` — a script doing `.queue.ready[]` must not have to special-case the
@@ -573,8 +622,11 @@ func TestStatusMakesOnlyReadCalls(t *testing.T) {
 			// path publishedVersion itself reads, gh api's -H flag trailing
 			// after it.
 			isMarketplace := fields[1] == updateMarketplacePath
-			if !isComments && !isMarketplace {
-				t.Errorf("status called `gh %s`, which is not the comments or marketplace read", line)
+			// ghViewerLogin (unpark.go), reused for the parked issue's own
+			// park-comment read — reached only because #3 above is parked.
+			isViewer := fields[1] == "user"
+			if !isComments && !isMarketplace && !isViewer {
+				t.Errorf("status called `gh %s`, which is not the comments, marketplace or viewer-login read", line)
 			}
 			continue
 		}

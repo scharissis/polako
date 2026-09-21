@@ -242,6 +242,15 @@ type statusSnapshot struct {
 	// what lets a test drive the comparison without needing a real release
 	// build to run the suite from.
 	selfVersion string
+	// parks is every parked issue's latest park comment, keyed by issue —
+	// unpark's own read (readParkListItems, unpark.go), reused rather than
+	// copied. Best-effort like usage and plans below: nil when the read
+	// failed, which needsYouParts and statusDocFrom both treat as "no
+	// footer on any parked issue" rather than failing the whole snapshot.
+	// Only ever holds parkListItem.entries — never .reason, which is
+	// clipped comment text and would break the "no comment text reaches
+	// the terminal" rule this report holds to everywhere else.
+	parks map[int]parkListItem
 }
 
 // statusPR is one open PR on a branch the skill named, and what GitHub says
@@ -292,6 +301,17 @@ func readStatus(ctx context.Context, cfg config, now time.Time) (statusSnapshot,
 		}
 		if d, ok := quietFor(comments, now); ok {
 			snap.quiet[issue] = d
+		}
+	}
+
+	// Best-effort like the plans read below: a failed gh-viewer-login read
+	// leaves parks nil, and every parked issue falls back to today's
+	// batched clause rather than failing the whole snapshot.
+	if len(snap.queues.parked) > 0 {
+		if parks, err := readParkListItems(ctx, cfg, snap.queues.parked); err == nil {
+			snap.parks = parks
+		} else if ctx.Err() != nil {
+			return snap, ctx.Err()
 		}
 	}
 
@@ -728,9 +748,29 @@ func needsYouParts(snap statusSnapshot) []string {
 	if len(stuck) > 0 {
 		parts = append(parts, "approve the checks waiting on you on PR "+strings.Join(stuck, ", "))
 	}
-	if len(snap.queues.parked) > 0 {
+	// A parked issue whose own park comment named entries a rerun could use
+	// gets its own clause naming them — a footer-less park, or one whose
+	// footer named nothing valid (validParkEntry), keeps today's batched
+	// clause instead. snap.parks is nil (not just empty) when the read
+	// itself failed, and a nil map's lookups all miss the same way an empty
+	// one's would, so every parked issue falls back to the batched clause.
+	var undecided []int
+	for _, issue := range snap.queues.parked {
+		if it, ok := snap.parks[issue]; !ok || len(it.entries) == 0 {
+			undecided = append(undecided, issue)
+		}
+	}
+	if len(undecided) > 0 {
 		parts = append(parts, fmt.Sprintf("decide what to do about %s (drop %s to requeue)",
-			issueRefs(snap.queues.parked), needsHumanLabel))
+			issueRefs(undecided), needsHumanLabel))
+	}
+	for _, issue := range snap.queues.parked {
+		it, ok := snap.parks[issue]
+		if !ok || len(it.entries) == 0 {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("grant %s or fix the skill, then polako unpark #%d",
+			strings.Join(it.entries, ", "), issue))
 	}
 	// Curation is a person's job by construction — nothing else takes the label
 	// off — so a backlog of proposals is one of the things only a person moves.
@@ -754,202 +794,6 @@ func needsYouParts(snap statusSnapshot) []string {
 	return parts
 }
 
-// --- JSON rendering ---
-//
-// A second renderer over statusSnapshot, exactly as buildHTMLReport
-// (statshtml.go) is a second renderer over a stats dataset: every fact below
-// is read out of the same snapshot the text report walks, or computed by the
-// same helper (nextLine, needsYouParts, the PR cell functions) the text
-// report calls — never re-derived. The two can disagree about layout; they
-// cannot disagree about a fact, because there is only one place each fact is
-// computed.
-
-// statusDoc is the whole answer to `polako status -json`, in explicit typed
-// fields rather than map[string]any: a schema that is reviewable, per the
-// acceptance criteria on #118. Reviewable does not mean frozen — #168 widened
-// `queue.containers` from bare issue numbers to objects once the sub-issue
-// rollup's completed count was worth reporting, and said so in docs/reference.md.
-type statusDoc struct {
-	Repo          string         `json:"repo"`
-	Scope         statusDocScope `json:"scope"`
-	Queue         statusDocQueue `json:"queue"`
-	Next          statusDocNext  `json:"next"`
-	PRs           []statusDocPR  `json:"prs"`
-	UndetailedPRs []int          `json:"undetailed_prs"`
-	NeedsYou      []string       `json:"needs_you"`
-	Plans         statusDocPlans `json:"plans"`
-	// Plan is the same line the text report prints, or nil when the usage
-	// probe could not answer — never an empty string standing in for "no
-	// usage", which would be indistinguishable from a genuine 0%.
-	Plan *string `json:"plan,omitempty"`
-	// Published is the release polako has actually published — the same read
-	// the text report's own notice makes, carried here whether or not that
-	// notice fires, since a caller may want to know the current release
-	// either way. Nil when the read failed, timed out, or could not run.
-	Published *string `json:"published,omitempty"`
-}
-
-type statusDocScope struct {
-	Label       string `json:"label"`
-	StrictOrder bool   `json:"strict_order"`
-}
-
-type statusDocQueue struct {
-	Ready      []int                `json:"ready"`
-	Blocked    []statusDocBlocked   `json:"blocked"`
-	Parked     []int                `json:"parked"`
-	Proposed   []int                `json:"proposed"`
-	Containers []statusDocContainer `json:"containers"`
-}
-
-// statusDocContainer is one container issue with its sub-issue rollup, so a
-// caller can tell #113 (6 of 6 closed) from #147 (1 of 5) without a second
-// call — the same widening `blocked` already carries for quiet_seconds.
-// Finished is containerInfo.finished() verbatim: the one place that decides
-// "done" is a Go method, and repeating its comparison in every jq script that
-// reads this document would be exactly the "children invent their own"
-// outcome that method exists to prevent.
-type statusDocContainer struct {
-	Issue     int  `json:"issue"`
-	Total     int  `json:"total"`
-	Completed int  `json:"completed"`
-	Finished  bool `json:"finished"`
-	// Held is containerInfo.held: a human has put needs-human or proposed on the
-	// container, so the drain leaves it alone rather than closing it once
-	// finished. Without this a caller cannot tell a finished container that is
-	// about to be closed from one it must close itself.
-	Held bool `json:"held"`
-}
-
-// toStatusDocContainer is the one place containerInfo becomes a
-// statusDocContainer, so queue.containers and plans.docs[].containers cannot
-// silently diverge in shape the way two copies of this literal would let
-// them.
-func toStatusDocContainer(c containerInfo) statusDocContainer {
-	return statusDocContainer{
-		Issue: c.number, Total: c.total, Completed: c.completed, Finished: c.finished(), Held: c.held,
-	}
-}
-
-// statusDocBlocked is one issue awaiting an answer. QuietSeconds is a pointer
-// because 0 (a reply just landed) and "the thread's age could not be read"
-// are both real, distinct states — the same distinction unknownCell exists to
-// preserve for a PR's fields, applied here to a duration instead of a string.
-type statusDocBlocked struct {
-	Issue        int    `json:"issue"`
-	QuietSeconds *int64 `json:"quiet_seconds,omitempty"`
-}
-
-// statusDocNext is the issue a drain starting now would pick up, and why.
-// Issue is 0 for none; Reason is nextLine(snap) verbatim, which already
-// covers the 0 case in words.
-type statusDocNext struct {
-	Issue  int    `json:"issue"`
-	Reason string `json:"reason"`
-}
-
-// statusDocPR mirrors the text report's table columns. Mergeable, Checks and
-// Review are the same cell strings the table prints, unknownCell ("not read")
-// included: reusing them rather than inventing a JSON-specific sentinel means
-// there is exactly one meaning of "not read", not two.
-type statusDocPR struct {
-	Number    int    `json:"number"`
-	Branch    string `json:"branch"`
-	Issue     int    `json:"issue"`
-	URL       string `json:"url"`
-	Mergeable string `json:"mergeable"`
-	Checks    string `json:"checks"`
-	Review    string `json:"review"`
-}
-
-// renderStatusJSON writes statusDoc as the whole of stdout: one document, no
-// header, no trailing prose, so `polako status -json | jq` works.
-func renderStatusJSON(w io.Writer, cfg config, snap statusSnapshot) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(statusDocFrom(cfg, snap)); err != nil {
-		return fmt.Errorf("could not encode the status report as JSON (%w) — this is a bug in polako; "+
-			"dropping -json still gets you the text report", err)
-	}
-	return nil
-}
-
-func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
-	blocked := make([]statusDocBlocked, 0, len(snap.queues.blocked))
-	for _, issue := range snap.queues.blocked {
-		b := statusDocBlocked{Issue: issue}
-		if d, ok := snap.quiet[issue]; ok {
-			secs := int64(d.Seconds())
-			b.QuietSeconds = &secs
-		}
-		blocked = append(blocked, b)
-	}
-
-	containers := make([]statusDocContainer, 0, len(snap.queues.containers))
-	for _, c := range snap.queues.containers {
-		containers = append(containers, toStatusDocContainer(c))
-	}
-
-	prs := make([]statusDocPR, 0, len(snap.prs))
-	for _, p := range snap.prs {
-		prs = append(prs, statusDocPR{
-			Number:    p.number,
-			Branch:    p.branch,
-			Issue:     p.issue,
-			URL:       p.url,
-			Mergeable: mergeableCell(p),
-			Checks:    checksCell(p),
-			Review:    reviewCell(p),
-		})
-	}
-
-	planDocs := make([]statusDocPlan, 0, len(snap.plans.docs))
-	for _, d := range snap.plans.docs {
-		dcontainers := make([]statusDocContainer, 0, len(d.containers))
-		for _, c := range d.containers {
-			dcontainers = append(dcontainers, toStatusDocContainer(c))
-		}
-		planDocs = append(planDocs, statusDocPlan{
-			Path: d.path, State: string(d.state), Containers: nonNilSlice(dcontainers), OpenChildren: d.openChildren,
-		})
-	}
-	gone := make([]statusDocGone, 0, len(snap.plans.gone))
-	for _, g := range snap.plans.gone {
-		gone = append(gone, statusDocGone{Path: g.path, Issues: nonNilSlice(g.issues)})
-	}
-
-	doc := statusDoc{
-		Repo:  cfg.repo,
-		Scope: statusDocScope{Label: cfg.label, StrictOrder: cfg.strictOrder},
-		Queue: statusDocQueue{
-			Ready:      nonNilSlice(snap.queues.ready),
-			Blocked:    blocked,
-			Parked:     nonNilSlice(snap.queues.parked),
-			Proposed:   nonNilSlice(snap.queues.proposed),
-			Containers: nonNilSlice(containers),
-		},
-		Next:          statusDocNext{Issue: snap.next, Reason: nextLine(snap)},
-		PRs:           prs,
-		UndetailedPRs: nonNilSlice(snap.undetailed),
-		NeedsYou:      nonNilSlice(needsYouParts(snap)),
-		Plans: statusDocPlans{
-			Docs: nonNilSlice(planDocs), Gone: nonNilSlice(gone), Truncated: snap.plans.truncated,
-		},
-	}
-	if line := statusPlanLine(snap); line != "" {
-		doc.Plan = &line
-	}
-	if snap.published != "" {
-		doc.Published = &snap.published
-	}
-	return doc
-}
-
-// nonNilSlice keeps every array field a `[]`, never a JSON `null`, so a
-// script can `.[]` into any of them without special-casing the empty case.
-func nonNilSlice[T any](s []T) []T {
-	if s == nil {
-		return []T{}
-	}
-	return s
-}
+// JSON rendering (statusDoc and its second-renderer derivation) lives in
+// statusjson.go — split out once this file crossed the 1,000-line budget
+// (sizebudget_test.go).
