@@ -175,7 +175,12 @@ func readParkedIssues(ctx context.Context, cfg config, only int) ([]parkListItem
 	parked := q.parked
 	if only != 0 {
 		if !containsInt(parked, only) {
-			return nil, fmt.Errorf("#%d is not open and labelled %s — nothing to unpark", only, needsHumanLabel)
+			// Not just "isn't labelled needs-human" — an open, needs-human
+			// issue with sub-issues is a container (selectableIssues,
+			// backlog.go), structurally excluded from q.parked whatever its
+			// labels, so that overclaims the reason as often as it states it.
+			return nil, fmt.Errorf("#%d isn't a parked issue unpark can act on — check it's open, "+
+				"labelled %s, and not a container", only, needsHumanLabel)
 		}
 		parked = []int{only}
 	}
