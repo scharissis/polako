@@ -124,13 +124,13 @@ plus the command per issue:
   parked  #16 ($2.27) — refused `Bash(echo:*)`
   grants  -add-tools "Bash(echo:*),Bash(curl:*)"
   grants  POLAKO_ADD_TOOLS=Bash(echo:*),Bash(curl:*)
-  grants  gh issue edit 16 --remove-label needs-human
-  grants  gh issue edit 22 --remove-label needs-human
+  grants  polako unpark -apply
 ```
 
 No entries, no block. Each park's own `-notify` call carries only its own
 entries in `POLAKO_NOTIFY_GRANTS` — fired at park time, before this union
-exists.
+exists. [`polako unpark`](reference.md#clearing-a-permission-park-polako-unpark)
+is the attended step that line runs.
 
 When the ask was only an earlier turn, polako resumes first if there's work
 to resume into, telling it outright that its turn ends the process. If it

@@ -112,7 +112,17 @@ type ghState struct {
 	// the fixture whose pool drops below the ceiling once the gate has waited
 	// one reset out. See countUsageProbe.
 	UsageProbes int `json:"usage_probes"`
+
+	// ViewerLogin is what `gh api user --jq .login` answers — unpark's own
+	// read, to tell its own park comment apart from the rest of a thread.
+	// Empty falls back to fakeViewerLogin, so a fixture that never sets this
+	// still has a login every comment's own author defaults to.
+	ViewerLogin string `json:"viewer_login"`
 }
+
+// fakeViewerLogin is ViewerLogin's default — the account every gh call in a
+// test runs as unless a fixture says otherwise.
+const fakeViewerLogin = "polako-bot"
 
 type fakeIssue struct {
 	Open   bool     `json:"open"`
@@ -135,6 +145,13 @@ type fakeIssue struct {
 	Comments int            `json:"comments"`
 	Bots     []int          `json:"bots"`
 	Bodies   map[int]string `json:"bodies"`
+	// CommentLogins is the author login of a comment, keyed by id — unpark's
+	// own read, to tell its own park comment apart from one forged by another
+	// account. Absent (so "") for a comment whose id isn't a key, which
+	// reads as ghState.ViewerLogin (or fakeViewerLogin): every comment this
+	// fake ever writes through `issue comment` is polako's own, and a test
+	// only sets this to describe one that isn't.
+	CommentLogins map[int]string `json:"comment_logins"`
 	// CommentedAt stamps every comment on the thread. Only the newest one's
 	// date is ever read — `status` measures how long a thread has been quiet by
 	// it — so one date says everything a per-comment one would. Empty stands
@@ -230,6 +247,15 @@ type fakeReview struct {
 	SubmittedAt string `json:"submitted_at"`
 }
 
+// viewerLogin is the account every fake gh call in this test runs as: the
+// fixture's own ViewerLogin, or fakeViewerLogin when it never set one.
+func viewerLogin(st *ghState) string {
+	if st.ViewerLogin != "" {
+		return st.ViewerLogin
+	}
+	return fakeViewerLogin
+}
+
 // apiIssue picks the issue number out of the one REST path the drain asks for,
 // repos/{owner}/{repo}/issues/N/comments?per_page=100.
 func apiIssue(path string) string {
@@ -316,16 +342,17 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 	// adds a second — the milestone find-or-create — routed on the path, and
 	// labelExists a third — the label-exists lookup, routed the same way.
 	if at(0) == "api" {
-		if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "milestones") }) {
+		if at(1) == "user" {
+			// unpark's own viewer-login read: `gh api user --jq .login`, no
+			// {owner}/{repo} in the path so it needs no per-issue routing.
+			call = "api user"
+		} else if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "milestones") }) {
 			return answerMilestones(st, args)
-		}
-		if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "contents") }) {
+		} else if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "contents") }) {
 			return answerContents(st, args)
-		}
-		if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "/protection") }) {
+		} else if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "/protection") }) {
 			return answerBranchProtection(st)
-		}
-		if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "/labels/") }) {
+		} else if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "/labels/") }) {
 			call = "api label"
 		} else {
 			call = "api comments"
@@ -482,10 +509,17 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			if slices.Contains(is.Bots, id) {
 				author = "Bot"
 			}
-			comments = append(comments, fmt.Sprintf(`{"id":%d,"user":{"type":%q},"created_at":%q,"body":%q}`,
-				id, author, is.CommentedAt, is.Bodies[id]))
+			login := is.CommentLogins[id]
+			if login == "" {
+				login = viewerLogin(st)
+			}
+			comments = append(comments, fmt.Sprintf(`{"id":%d,"user":{"type":%q,"login":%q},"created_at":%q,"body":%q}`,
+				id, author, login, is.CommentedAt, is.Bodies[id]))
 		}
 		return "[" + strings.Join(comments, ",") + "]", counting, 0
+
+	case "api user":
+		return fmt.Sprintf("%s\n", viewerLogin(st)), false, 0
 
 	case "api label":
 		// labelExists's own call: repos/{owner}/{repo}/labels/<name>, name
@@ -1566,7 +1600,7 @@ func TestDrainParksARefusedToolResultWithoutResuming(t *testing.T) {
 
 // docs/plans/permission-parks.md ticket 4 (#433), end to end: a drain that
 // parks two issues on the same derivable entry ends with one grants block,
-// the union deduplicated, one gh line per issue.
+// the union deduplicated, one `polako unpark -apply` line to clear either.
 func TestDrainEndsWithAGrantsBlockAfterTwoPermissionParks(t *testing.T) {
 	t.Parallel()
 	buf := captureLog(t)
@@ -1584,8 +1618,7 @@ func TestDrainEndsWithAGrantsBlockAfterTwoPermissionParks(t *testing.T) {
 		"parked  #2 ($0.10) — refused `Bash(curl:*)`",
 		`grants  -add-tools "Bash(curl:*)"`,
 		"grants  POLAKO_ADD_TOOLS=Bash(curl:*)",
-		"grants  gh issue edit 1 --remove-label needs-human",
-		"grants  gh issue edit 2 --remove-label needs-human",
+		"grants  polako unpark -apply",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("summary is missing %q\ngot:\n%s", want, out)
@@ -5096,8 +5129,8 @@ func TestDrainSummaryKeepsTheFullReasonWithNoEntries(t *testing.T) {
 }
 
 // docs/plans/permission-parks.md ticket 4 (#433): one paste-ready block, the
-// union of every park's entries with no duplicates, plus the command to
-// clear each issue that carried one.
+// union of every park's entries with no duplicates, plus `polako unpark
+// -apply` to clear whichever of them the operator approves (ticket 5, #434).
 func TestDrainSummaryEndsWithAGrantsBlockUnioningEntries(t *testing.T) {
 	t.Parallel()
 	got := strings.Join(drainSummary([]issueResult{
@@ -5111,8 +5144,7 @@ func TestDrainSummaryEndsWithAGrantsBlockUnioningEntries(t *testing.T) {
 		// #22's own entry folded into #16's rather than appended again.
 		`grants  -add-tools "Bash(echo:*),Bash(curl:*)"`,
 		"grants  POLAKO_ADD_TOOLS=Bash(echo:*),Bash(curl:*)",
-		"grants  gh issue edit 16 --remove-label needs-human",
-		"grants  gh issue edit 22 --remove-label needs-human",
+		"grants  polako unpark -apply",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("summary is missing %q\ngot:\n%s", want, got)

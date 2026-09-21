@@ -194,6 +194,11 @@ func dispatchVerb() bool {
 		runReport("tidy", withShutdownContext(func(ctx context.Context) error {
 			return runTidy(ctx, os.Args[2:], os.Stdout, rpt)
 		}))
+	case "unpark":
+		rpt := newReport(isTerminal(os.Stdout))
+		runReport("unpark", withShutdownContext(func(ctx context.Context) error {
+			return runUnpark(ctx, os.Args[2:], os.Stdin, isTerminal(os.Stdin), os.Stdout, rpt)
+		}))
 	case "update":
 		runReport("update", withShutdownContext(func(ctx context.Context) error {
 			return runUpdate(ctx, config{}, os.Args[2:], os.Stdout)

@@ -417,6 +417,11 @@ func stillWaiting(states map[int]*issueState) []issueResult {
 // is a permission park's own -add-tools entries — ticket 3 of
 // docs/plans/permission-parks.md (#432) — appended as a `Refused: ...`
 // footer parseParkFooter reads back.
+// parkCommentPrefix opens every comment parkIssue posts — shared with
+// unpark.go, which reads it back to tell polako's own park comment apart
+// from the rest of the thread and to find where the reason clause ends.
+const parkCommentPrefix = "**polako parked this issue.** "
+
 func parkIssue(ctx context.Context, cfg config, issue int, reason string, entries []string) {
 	n := strconv.Itoa(issue)
 	_, err := gh(ctx, cfg, "issue", "edit", n, "--add-label", needsHumanLabel)
@@ -440,7 +445,7 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string, entrie
 	// read it as a question of its own and sit waiting for a comment nobody
 	// owes it. Best-effort and silent: the issue is already parked either way.
 	_, _ = gh(ctx, cfg, "issue", "edit", n, "--remove-label", awaitingAnswerLabel)
-	body := fmt.Sprintf("**polako parked this issue.** %s\n\n"+
+	body := fmt.Sprintf(parkCommentPrefix+"%s\n\n"+
 		"Nothing will run on it again until the `%s` label is removed — "+
 		"`gh issue edit %s --remove-label %s`.", reason, needsHumanLabel, n, needsHumanLabel)
 	if footer := parkFooter(entries); footer != "" {
@@ -746,14 +751,10 @@ func drainSummary(results []issueResult, containers, closed []containerInfo, ret
 // parkGrantsBlock is the exit summary's paste-ready line for every permission
 // park this shift made: the union of every entry across every parked issue
 // (deduped, first-seen order), as both the -add-tools flag and the
-// POLAKO_ADD_TOOLS form, then the exact command to clear each issue it came
-// from. Nil when no parked result carried an entry — most drains, which
-// print nothing here, the same "empty bucket is noise" rule the rest of this
-// function follows.
-//
-// No `polako unpark` line: ticket 5 of docs/plans/permission-parks.md hasn't
-// landed, and this block only ever offers a command this build can actually
-// run.
+// POLAKO_ADD_TOOLS form, then `polako unpark` to clear whichever of them the
+// operator approves. Nil when no parked result carried an entry — most
+// drains, which print nothing here, the same "empty bucket is noise" rule
+// the rest of this function follows.
 func parkGrantsBlock(results []issueResult) []string {
 	seen := make(map[string]bool)
 	var union []string
@@ -769,16 +770,11 @@ func parkGrantsBlock(results []issueResult) []string {
 		return nil
 	}
 	value := strings.Join(union, ",")
-	lines := []string{
+	return []string{
 		fmt.Sprintf("  grants  -add-tools %q", value),
 		fmt.Sprintf("  grants  POLAKO_ADD_TOOLS=%s", value),
+		"  grants  polako unpark -apply",
 	}
-	for _, r := range results {
-		if r.parked && len(r.parkEntries) > 0 {
-			lines = append(lines, fmt.Sprintf("  grants  gh issue edit %d --remove-label %s", r.issue, needsHumanLabel))
-		}
-	}
-	return lines
 }
 
 // issueRefs renders a list of issue numbers the way the rest of the output

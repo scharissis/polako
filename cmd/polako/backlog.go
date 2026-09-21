@@ -453,6 +453,11 @@ type issueComment struct {
 		// Type is "Bot" for a GitHub App — Actions, Dependabot, a CI
 		// reporter — and "User" for everyone else.
 		Type string `json:"type"`
+		// Login is read only by `unpark`, to tell polako's own park comment
+		// apart from anything else written on the thread — the same reason
+		// this call goes through the REST API rather than `gh issue view
+		// --json comments`, whose author payload carries a login already.
+		Login string `json:"login"`
 	} `json:"user"`
 	// CreatedAt is read by `status` alone, to say how long a thread has been
 	// quiet. No wait decides on it: comment ids only ever increase, and a

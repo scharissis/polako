@@ -325,6 +325,7 @@ func verbUsage(w io.Writer) {
 			"  status  print where the backlog stands, from GitHub (read-only)\n"+
 			"  stats   report on the run data already recorded (local, read-only)\n"+
 			"  tidy    reclaim the worktrees and branches of finished issues (dry-run by default)\n"+
+			"  unpark  list permission parks and clear the ones you approve (read-only by default)\n"+
 			"  update  bring the installed plugin and binary to the published release\n"+
 			"  setup   report whether a repository is ready for polako (read-only by default)\n\n"+
 			"Run 'polako <verb> -h' for that verb's flags.\n")

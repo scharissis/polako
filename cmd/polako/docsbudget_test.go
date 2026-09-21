@@ -69,8 +69,14 @@ const docsBudget = 500
 // earned. behaviour.md moved once more within the same PR, +2, once review
 // caught the first wording claiming -notify got the shift-end union rather
 // than each park's own entries — the correction needed its own two lines.
+//
+// reference.md moved again in issue #434, ticket 5 of the same plan: a whole
+// new verb, `polako unpark`, needed its own section (flag table and example
+// included) the way every other verb's does — there was no existing
+// paragraph to cut in its place, the way a one-row addition can trim its
+// way in instead.
 var docsDebt = map[string]int{
-	"reference.md": 511,
+	"reference.md": 548,
 	"behaviour.md": 530,
 }
 

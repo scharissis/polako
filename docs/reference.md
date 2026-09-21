@@ -5,8 +5,8 @@ defaults from the [environment](#setting-defaults-from-the-environment). See [se
 
 ## Flags
 
-These are `polako work`'s own; the other six verbs take smaller sets —
-[`plan`](#planning-a-backlog-unattended-polako-plan), [`health`](#auditing-repository-health-unattended-polako-health), [`status`](#where-the-backlog-stands-polako-status) and [`tidy`](#reclaiming-finished-issues-polako-tidy) below,
+These are `polako work`'s own; the other seven verbs take smaller sets —
+[`plan`](#planning-a-backlog-unattended-polako-plan), [`health`](#auditing-repository-health-unattended-polako-health), [`status`](#where-the-backlog-stands-polako-status), [`tidy`](#reclaiming-finished-issues-polako-tidy) and [`unpark`](#clearing-a-permission-park-polako-unpark) below,
 [`stats`](run-data.md#reading-it-back-polako-stats) and [`update`](install.md#update) beside what they describe.
 
 | Flag | Default | Meaning |
@@ -509,3 +509,40 @@ exactly when it carries a finished `issue-N` branch, and left alone
 otherwise, including a detached one.
 
 A repository with nothing to reclaim prints one line and exits 0.
+
+## Clearing a permission park: `polako unpark`
+
+Clearing a park by hand is two steps in two places — edit the launch line,
+remove a label. `unpark` (linked from the exit summary's own `grants` block,
+see [How polako works](behaviour.md)) does both from one place: lists every
+`needs-human` issue with its reason and `-add-tools` entries, `-apply` asks
+before clearing each, then prints the rerun line.
+
+```bash
+$ polako unpark -apply
+scharissis/polako
+parked
+  issue  reason                              entries
+  #16    the run was refused Bash(echo:*)    Bash(echo:*)
+remove needs-human from #16? [y/N] y
+
+polako work -dir . -add-tools "Bash(echo:*)"
+POLAKO_ADD_TOOLS=Bash(echo:*)
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `-repo` | *(whatever `-dir` is a checkout of)* | Repository to clear parks in, `owner/name`. |
+| `-dir` | `.` | Path to the repository's main checkout, used to resolve the repository when `-repo` is not given. |
+| `-apply` | `false` | Ask about each listed issue and remove `needs-human` from the ones you approve — the one write this verb makes. Needs a terminal, or `-yes`. Cannot be set from the environment, like `tidy`'s `-apply`. |
+| `-yes` | `false` | With `-apply`, take the default answer — no — for every question without asking. |
+
+An optional trailing issue number limits this to one issue:
+`polako unpark 16 -apply -yes`. The reason and entries come from polako's
+own latest comment on the thread — authored by the `gh` account this runs
+as and shaped like `parkIssue`'s own write, nothing from anyone else, forged
+footer included. An entry not shaped like anything `-add-tools` would
+propose, or naming a never-grant command, renders `(ignored)` rather than
+joining the rerun line. An issue with no entries can still be unparked; it
+contributes nothing to the union. Every run re-lists straight off GitHub —
+no drain, no grant, nothing stored.
