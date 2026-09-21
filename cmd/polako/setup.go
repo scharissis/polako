@@ -92,14 +92,19 @@ func runSetup(ctx context.Context, args []string, in io.Reader, isTTY bool, out 
 	cfg, rows, defs := readSetup(ctx, cfg, opt.policyLabels)
 	renderSetup(out, rpt, cfg, rows)
 	if opt.apply {
+		// One prompt for both write passes below — see setupPrompt's own
+		// doc comment for why a second Scanner over the same in would
+		// silently drop whatever the first had already read ahead.
+		prompt := newSetupPrompt(in, out, opt.yes)
 		var gateLabel string
-		rows, gateLabel = applySetup(ctx, in, out, cfg, rows, defs, opt.yes)
+		rows, gateLabel = applySetup(ctx, prompt, cfg, rows, defs)
 		if gateLabel != "" {
 			// The line renderSetup already printed named no -label: nothing
 			// had been chosen yet when it ran. Now something has.
 			cfg.label = gateLabel
 			fmt.Fprintf(out, "\n%s\n", suggestedWorkLine(cfg))
 		}
+		rows = applySetupFiles(ctx, prompt, cfg, rows)
 	}
 	if setupFailed(rows) {
 		return errSetupNotReady
@@ -219,6 +224,7 @@ func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []se
 	}
 
 	rows = append(rows, setupOriginHeadRow(ctx, cfg, gitOK))
+	rows = append(rows, setupGitignoreRow(cfg))
 	rows = append(rows, setupPluginRow(ctx, cfg, claudeOK))
 	rows = append(rows, setupSubIssueRow(ctx, cfg, reposOK))
 	defs := setupLabelDefs(cfg, policyLabels)

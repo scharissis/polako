@@ -1,0 +1,174 @@
+package main
+
+// Ticket 4's own tests (docs/plans/setup.md): the .gitignore row is a pure
+// function over a directory, so it's tested directly; the write pass runs
+// real git against upstream()'s bare origin (the same fixture sync_test.go
+// uses) plus the fake gh — hermetic, no network, but a genuine push and pull
+// prove the worktree/branch/PR plumbing rather than a mock of it.
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestSetupGitignoreRowNamesMissingLines(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	row := setupGitignoreRow(config{dir: dir})
+	if row.status != setupMissing || row.required {
+		t.Errorf("row = %+v, want missing and not required with no .gitignore at all", row)
+	}
+	for _, want := range setupGitignoreLines {
+		if !strings.Contains(row.detail, want) {
+			t.Errorf("detail = %q, want it to name %q", row.detail, want)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("/.worktrees/\n/PLAN.md\n"), 0o644); err != nil {
+		t.Fatalf("writing .gitignore: %v", err)
+	}
+	row = setupGitignoreRow(config{dir: dir})
+	if row.status != setupMissing || !strings.Contains(row.detail, "/.polako-scratch/") {
+		t.Errorf("row = %+v, want missing and naming only /.polako-scratch/", row)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("/.worktrees/\n/PLAN.md\n/.polako-scratch/\n"), 0o644); err != nil {
+		t.Fatalf("writing .gitignore: %v", err)
+	}
+	if row := setupGitignoreRow(config{dir: dir}); row.status != setupOK {
+		t.Errorf("row = %+v, want ok with every line present", row)
+	}
+}
+
+// The point of the whole ticket: -apply -yes on a repo missing the
+// .gitignore lines leaves one branch, one commit, one PR — and the push
+// really landed on origin, not just the local worktree.
+func TestApplySetupFilesProposesAPR(t *testing.T) {
+	t.Parallel()
+	work, checkout := upstream(t)
+	cfg := setupCfg(t, &ghState{}, checkout)
+	cfg.env = append(cfg.env, gitIdentity...)
+
+	cfg, rows, _ := readSetup(context.Background(), cfg, false)
+	if r := findSetupRow(t, rows, ".gitignore"); r.status != setupMissing {
+		t.Fatalf("test setup: .gitignore row = %+v, want missing", r)
+	}
+
+	var out strings.Builder
+	rows = applySetupFiles(context.Background(), newSetupPrompt(strings.NewReader(""), &out, true), cfg, rows)
+
+	r := findSetupRow(t, rows, ".gitignore")
+	if r.status != setupMissing || !strings.Contains(r.detail, "proposed: https://example.invalid/pr/") {
+		t.Errorf(".gitignore row = %+v, want it to name the proposed PR", r)
+	}
+	if !strings.Contains(out.String(), "proposed the .gitignore fix") {
+		t.Errorf("output = %q, want it to say the fix was proposed", out.String())
+	}
+
+	gitAt(t, work, "fetch", "origin", "polako-setup")
+	if got := gitAt(t, work, "log", "--oneline", "-1", "FETCH_HEAD"); !strings.Contains(got, setupFilesCommitSubject) {
+		t.Errorf("origin's polako-setup tip = %q, want the %q commit", got, setupFilesCommitSubject)
+	}
+	content := gitAt(t, work, "show", "FETCH_HEAD:.gitignore")
+	for _, want := range setupGitignoreLines {
+		if !strings.Contains(content, want) {
+			t.Errorf("pushed .gitignore = %q, missing %q", content, want)
+		}
+	}
+	// checkout's own default branch must be untouched — the write surface
+	// is a branch and a PR, never a commit where the operator is checked
+	// out. .worktrees/ itself shows up untracked, which is expected: that's
+	// exactly the line this PR proposes, not yet merged into checkout's own
+	// .gitignore.
+	if got := gitAt(t, checkout, "status", "--porcelain", "--untracked-files=no"); got != "" {
+		t.Errorf("checkout has tracked changes: %q", got)
+	}
+	if got := gitAt(t, checkout, "rev-parse", "--abbrev-ref", "HEAD"); got != "main" {
+		t.Errorf("checkout moved off main to %q", got)
+	}
+}
+
+// Restart safety: an open PR from polako-setup means report its URL and
+// write nothing — never a second PR, never a second branch.
+func TestApplySetupFilesReportsAnAlreadyOpenPR(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	cfg := setupCfg(t, &ghState{PRs: map[string]*fakePR{
+		setupBranch: {Number: 7, State: "OPEN"},
+	}}, checkout)
+	cfg.env = append(cfg.env, gitIdentity...)
+
+	cfg, rows, _ := readSetup(context.Background(), cfg, false)
+	var out strings.Builder
+	rows = applySetupFiles(context.Background(), newSetupPrompt(strings.NewReader(""), &out, true), cfg, rows)
+
+	if !strings.Contains(out.String(), "already proposed") {
+		t.Errorf("output = %q, want it to say the fix was already proposed", out.String())
+	}
+	r := findSetupRow(t, rows, ".gitignore")
+	if !strings.Contains(r.detail, "already proposed") {
+		t.Errorf(".gitignore row = %+v, want it to say so", r)
+	}
+	if got := gitAt(t, checkout, "worktree", "list", "--porcelain"); strings.Contains(got, "branch refs/heads/"+setupBranch) {
+		t.Errorf("worktree list = %q, an open PR must not make setup create a worktree", got)
+	}
+}
+
+// Declining the prompt writes nothing — the row stays exactly as read.
+func TestApplySetupFilesDeclineWritesNothing(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	cfg := setupCfg(t, &ghState{}, checkout)
+	cfg.env = append(cfg.env, gitIdentity...)
+
+	cfg, rows, _ := readSetup(context.Background(), cfg, false)
+	before := findSetupRow(t, rows, ".gitignore")
+	var out strings.Builder
+	rows = applySetupFiles(context.Background(), newSetupPrompt(strings.NewReader("n\n"), &out, false), cfg, rows)
+
+	after := findSetupRow(t, rows, ".gitignore")
+	if after != before {
+		t.Errorf(".gitignore row changed after declining: before %+v, after %+v", before, after)
+	}
+	if got := gitAt(t, checkout, "worktree", "list", "--porcelain"); strings.Contains(got, "branch refs/heads/"+setupBranch) {
+		t.Errorf("worktree list = %q, declining must not create a worktree", got)
+	}
+}
+
+// A rerun after the PR already merged — the operator's checkout just hasn't
+// fast-forwarded yet — finds nothing left to add once the worktree is cut
+// from a freshly fetched origin, and reports the row ok rather than opening
+// a PR with no diff.
+func TestApplySetupFilesNothingLeftToAddAfterAMerge(t *testing.T) {
+	t.Parallel()
+	work, checkout := upstream(t)
+	// Simulate the earlier polako-setup PR having already merged upstream.
+	if err := os.WriteFile(filepath.Join(work, ".gitignore"), []byte("/.worktrees/\n/PLAN.md\n/.polako-scratch/\n"), 0o644); err != nil {
+		t.Fatalf("writing .gitignore in work: %v", err)
+	}
+	gitAt(t, work, "add", ".gitignore")
+	gitAt(t, work, "commit", "-m", setupFilesCommitSubject)
+	gitAt(t, work, "push", "origin", "main")
+
+	cfg := setupCfg(t, &ghState{}, checkout) // checkout's own main is still behind
+	cfg.env = append(cfg.env, gitIdentity...)
+
+	cfg, rows, _ := readSetup(context.Background(), cfg, false)
+	if r := findSetupRow(t, rows, ".gitignore"); r.status != setupMissing {
+		t.Fatalf("test setup: .gitignore row = %+v, want missing (checkout hasn't fast-forwarded)", r)
+	}
+
+	var out strings.Builder
+	rows = applySetupFiles(context.Background(), newSetupPrompt(strings.NewReader(""), &out, true), cfg, rows)
+
+	r := findSetupRow(t, rows, ".gitignore")
+	if r.status != setupOK {
+		t.Errorf(".gitignore row = %+v, want ok — the lines were already on origin's default branch", r)
+	}
+	if !strings.Contains(out.String(), "nothing to propose") {
+		t.Errorf("output = %q, want it to say there was nothing left to add", out.String())
+	}
+}
