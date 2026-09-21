@@ -182,8 +182,10 @@ func setupFailed(rows []setupRow) bool {
 // readSetup runs every check in the order the report renders them: the three
 // binaries first, since nothing past them can run without one; then what gh
 // can say about the repository and whether Issues are on; then the
-// independent git and claude checks; then sub-issue support and the labels,
-// both of which need gh and the repository resolved. It hands back cfg too,
+// independent git and claude checks; then sub-issue support, the tree checks
+// ticket 5 added (build tools, issue templates, CI workflow, branch
+// protection, delete-branch-on-merge), and the labels, the last two of which
+// need gh and the repository resolved. It hands back cfg too,
 // with cfg.repo/cfg.ghRepo filled in when -repo was not given — the caller's
 // own copy stops at whatever setupConfig resolved, and renderSetup's header
 // needs the name this function discovered, not that earlier, possibly-empty
@@ -230,6 +232,11 @@ func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []se
 	rows = append(rows, setupVisionRow(cfg))
 	rows = append(rows, setupPluginRow(ctx, cfg, claudeOK))
 	rows = append(rows, setupSubIssueRow(ctx, cfg, reposOK))
+	rows = append(rows, setupBuildToolsRow(cfg))
+	rows = append(rows, setupTemplatesRow(cfg))
+	rows = append(rows, setupCIWorkflowRow(cfg))
+	rows = append(rows, setupBranchProtectionRow(ctx, cfg, reposOK, gitOK))
+	rows = append(rows, setupDeleteBranchOnMergeRow(ctx, cfg, reposOK))
 	defs := setupLabelDefs(cfg, policyLabels)
 	rows = append(rows, setupLabelRows(ctx, cfg, reposOK, defs)...)
 	return cfg, rows, defs
@@ -397,11 +404,15 @@ func renderSetup(w io.Writer, rpt report, cfg config, rows []setupRow) {
 
 // suggestedWorkLine is the report's last line: the `polako work` invocation
 // this repository is ready (or not yet ready) for, -label included whenever
-// one was named so the suggestion matches what was actually checked.
+// one was named and -add-tools included whenever the build-tools row found
+// something uncovered, so the suggestion matches what was actually checked.
 func suggestedWorkLine(cfg config) string {
 	cmd := fmt.Sprintf("polako work -dir %s", cfg.dir)
 	if cfg.label != "" {
 		cmd += " -label " + cfg.label
+	}
+	if tools := missingBuildTools(cfg); len(tools) > 0 {
+		cmd += " " + addToolsFlag(tools)
 	}
 	return cmd + " -dry-run"
 }
