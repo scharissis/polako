@@ -23,11 +23,11 @@ the scratch repo for this case alone, so the other cases stay quick.
 
 `visual-change` is the one case with anything to look at: a static page and a
 `dev` script it can serve. It uses a real Chromium, about 150 MB once into the
-user cache, so it stays as opt-in as the rest of the suite. It's also ahead of
-what the skill does today — the capture pipeline it grades ships across
-`docs/plans/visual-evidence.md`'s tickets 3–6, so most of its graders read red
-until then; `case.yaml` says so, and one of them stays red on purpose even
-after capture ships, until the before shot lands.
+user cache, so it stays as opt-in as the rest of the suite. It shipped ahead
+of what the skill did at the time — the capture pipeline it grades landed
+across tickets 3–6 (#402–#405) of the now-retired visual-evidence plan;
+`case.yaml` says so. Its graders have not been re-run since #405 (before
+shots) merged to confirm they now pass.
 
 `push-blocked` seeds a pre-receive hook on the scratch origin that rejects
 every branch but `main`, with a rejection message shaped like a real one — an

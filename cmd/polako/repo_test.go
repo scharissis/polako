@@ -1186,11 +1186,11 @@ func TestReviewGateRunsItsSubagentsInTheForeground(t *testing.T) {
 	}
 }
 
-// issue #402 (ticket 3 of docs/plans/visual-evidence.md): the publish
-// recipe is git plumbing a run executes unattended, so its sharpest edges —
-// the exact ref name, the flag that would silently clobber a concurrent
-// pusher, the URL-building command, and the scratch dir it reads shots
-// from — are pinned together in the section that documents them.
+// issue #402: the publish recipe is git plumbing a run executes unattended,
+// so its sharpest edges — the exact ref name, the flag that would silently
+// clobber a concurrent pusher, the URL-building command, and the scratch
+// dir it reads shots from — are pinned together in the section that
+// documents them.
 func TestEvidenceRefSectionIsPinned(t *testing.T) {
 	t.Parallel()
 	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")

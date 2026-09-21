@@ -22,10 +22,10 @@ import (
 const planFile = "PLAN.md"
 
 // evidenceDir is the scratch directory the visual-evidence capture flow
-// writes shots to between capture and publish (docs/plans/visual-evidence.md,
-// ticket 1). Untracked by design, so left-work counting has to know to
-// ignore it the same way it already ignores planFile — a dead run's shots
-// would otherwise make tidy refuse the worktree and pad a park message.
+// writes shots to between capture and publish (issue #400). Untracked by
+// design, so left-work counting has to know to ignore it the same way it
+// already ignores planFile — a dead run's shots would otherwise make tidy
+// refuse the worktree and pad a park message.
 const evidenceDir = ".polako-evidence"
 
 // scratchDir is where the skill tells a run — and the review agent it forks —
