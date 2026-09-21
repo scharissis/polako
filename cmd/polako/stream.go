@@ -160,13 +160,14 @@ type runReport struct {
 	// message was verbatim one.
 	permissionRefused bool
 	// refusals is every refusal the stream reported, in the CLI's own words —
-	// issue #430: #390 drew five and the old permissionRefusedDetail string
-	// kept only the first, and kept the whole compound command where the CLI
-	// had already named the one part it refused. Deduplicated and capped at
-	// refusalCap, so a run stuck looping on the same refusal cannot grow this
-	// without bound. May hold a local absolute path (a worktree path in a
-	// Bash command), so — like leftWork.where() — it belongs in a park's
-	// aside, never its reason.
+	// issue #430: #390 drew five, and permissionRefusedDetail (even after
+	// issue #461 made it last-wins instead of the first-wins string it
+	// started as) still kept only one at a time, and kept the whole compound
+	// command where the CLI had already named the one part it refused.
+	// Deduplicated and capped at refusalCap, so a run stuck looping on the
+	// same refusal cannot grow this without bound. May hold a local absolute
+	// path (a worktree path in a Bash command), so — like leftWork.where() —
+	// it belongs in a park's aside, never its reason.
 	refusals []refusal
 	// toolSucceededAfterRefusal reports whether a tool_result completed
 	// without error after refusals' *last* entry — issue #461's #402/#318
@@ -225,9 +226,11 @@ func (r runReport) refusalWorkedAround() bool {
 
 // lastRefusalDetail renders the most recent refusal the way a park still
 // wants to read it today — "<tool>: <command>" when the refusal was
-// correlated to a tool_use, or the tool_result's own text otherwise — same
-// as permissionRefusedDetail used to. Turning the fuller record below into an
-// -add-tools entry, and any change to what a park says, is ticket 2 and 3 of
+// correlated to a tool_use, or the tool_result's own text otherwise — the
+// same rendering permissionRefusedDetail used to produce, minus the 120-char
+// clip toolDetail applied for a log line (command is data here, not
+// display). Turning the fuller record below into an -add-tools entry, and
+// any change to what a park says, is ticket 2 and 3 of
 // docs/plans/permission-parks.md; until then every caller that used to read
 // permissionRefusedDetail reads this instead.
 func (r runReport) lastRefusalDetail() string {
@@ -372,12 +375,15 @@ func (r *runReport) observeToolResults(ev streamEvent) {
 // hadTool are the tool_use correlated by id, when the stream still had it
 // pending; text is the tool_result's own content, kept as command when
 // correlation failed — the same fallback permissionRefusedDetail used to
-// fall back to.
+// fall back to. command is read through toolInputDetail — the same field
+// list toolDetail renders for a log line, here unclipped — so a refused
+// non-Bash tool (Read, Skill, WebFetch, …) still names its actual target
+// instead of just the CLI's generic refusal text.
 func newRefusals(tool pendingTool, hadTool bool, text string) []refusal {
 	toolName, command := "", text
 	if hadTool {
 		toolName = tool.name
-		if c, ok := bashCommand(tool.input); ok {
+		if c, ok := toolInputDetail(tool.input); ok {
 			command = c
 		}
 	}
@@ -398,20 +404,6 @@ func newRefusals(tool pendingTool, hadTool bool, text string) []refusal {
 	default:
 		return []refusal{{tool: toolName, command: command, kind: kind}}
 	}
-}
-
-// bashCommand reads a Bash tool_use's own command field — the raw text, not
-// toolDetail's clipped display form, since a refusal entry's command is data
-// a later ticket derives an -add-tools entry from, not a log line. False for
-// any other tool, or a Bash input this build cannot parse.
-func bashCommand(input json.RawMessage) (string, bool) {
-	var in struct {
-		Command string `json:"command"`
-	}
-	if json.Unmarshal(input, &in) != nil || in.Command == "" {
-		return "", false
-	}
-	return in.Command, true
 }
 
 // observe folds one event into the report.
@@ -655,13 +647,26 @@ func heartbeatLine(elapsed time.Duration, toolUses int, phase stage) string {
 
 // toolDetail extracts the most human-useful field from a tool's input.
 func toolDetail(raw json.RawMessage) string {
+	v, ok := toolInputDetail(raw)
+	if !ok {
+		return ""
+	}
+	return ": " + clip(v, 120)
+}
+
+// toolInputDetail extracts the most human-useful field from a tool's input,
+// raw and unclipped — the shared source both toolDetail (a log line, clipped
+// above) and newRefusals (a refusal record, kept whole for a later ticket to
+// derive an -add-tools entry from) read from, so the two never drift apart
+// on which field counts as "the detail".
+func toolInputDetail(raw json.RawMessage) (string, bool) {
 	var in map[string]any
 	if json.Unmarshal(raw, &in) != nil {
-		return ""
+		return "", false
 	}
 	for _, k := range []string{"command", "file_path", "pattern", "query", "description"} {
 		if v, ok := in[k].(string); ok && v != "" {
-			return ": " + clip(v, 120)
+			return v, true
 		}
 	}
 	// Skill carries none of those keys, so without this the review gate — the
@@ -671,9 +676,9 @@ func toolDetail(raw json.RawMessage) string {
 		if args, _ := in["args"].(string); args != "" {
 			v += " " + args
 		}
-		return ": " + clip(v, 120)
+		return v, true
 	}
-	return ""
+	return "", false
 }
 
 // clip flattens text to one line and truncates it for log output.

@@ -3541,9 +3541,36 @@ func TestObserveKeepsEveryRefusalFromTheCLIsOwnWords(t *testing.T) {
 	}
 }
 
+// A refused non-Bash tool must still name its actual target, not just the
+// CLI's generic refusal sentence — the detail toolDetail already extracts
+// for a log line (file_path, pattern, query, description, skill+args), read
+// here unclipped through the same field list.
+func TestObserveRefusalNamesANonBashTarget(t *testing.T) {
+	t.Parallel()
+	var rep runReport
+	ev, _ := parseEvent([]byte(toolUseID("toolu_1", "Read", `{"file_path":"PLAN.md"}`)))
+	rep.observe(ev)
+	ev, _ = parseEvent([]byte(toolResult("toolu_1", "This command requires approval", true)))
+	rep.observe(ev)
+	if want := "Read: PLAN.md"; rep.lastRefusalDetail() != want {
+		t.Errorf("lastRefusalDetail() = %q, want %q — the refused file, not the CLI's generic text",
+			rep.lastRefusalDetail(), want)
+	}
+
+	rep = runReport{}
+	ev, _ = parseEvent([]byte(toolUseID("toolu_2", "Skill", `{"skill":"review-health","args":"--dry-run"}`)))
+	rep.observe(ev)
+	ev, _ = parseEvent([]byte(toolResult("toolu_2", "This command requires approval", true)))
+	rep.observe(ev)
+	if want := "Skill: review-health --dry-run"; rep.lastRefusalDetail() != want {
+		t.Errorf("lastRefusalDetail() = %q, want %q — the refused skill and its args",
+			rep.lastRefusalDetail(), want)
+	}
+}
+
 // A run stuck looping on the same wall must not grow runReport.refusals
 // without bound: an identical refusal, repeated, dedups to one entry, and
-// distinct refusals stop being recorded once refusalCap is reached.
+// past refusalCap the oldest distinct refusal is evicted, never the newest.
 func TestObserveRefusalsDedupsAndCaps(t *testing.T) {
 	t.Parallel()
 	var rep runReport
