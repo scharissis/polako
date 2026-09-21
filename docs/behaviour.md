@@ -475,14 +475,14 @@ set, for that pass.
 ## A visual change shows itself
 
 **A PR for a visual change carries a screenshot, not just a claim.** Once a
-run's diff touches browser-rendered files and the repo has a script to serve
-them, it starts that server from its own worktree, shoots up to four routes
-it found in the repo's own routing code, and pushes the PNGs to one orphan
-branch on your origin, `polako-evidence`, embedded in the PR body by commit
-sha. Any failure along that chain — no serving script, a missing browser, a
-shot that looks like an error or a login wall — drops back to no images and
-one `## Verification` line; it never parks the issue or asks a question.
-`-visual-evidence=false` on `work` turns the whole thing off.
+run's diff touches browser-rendered files and a script serves them, it
+shoots up to four routes from the repo's own routing code, before the
+first edit and again at the end, and pushes the PNGs to one orphan branch
+on your origin, `polako-evidence`, embedded in the PR body as a
+before/after pair per route — or the after shot alone if the before
+attempt came up empty. A route that gets no shot at all drops back to no
+image and one `## Verification` line; it never parks the issue or asks a
+question. `-visual-evidence=false` on `work` turns the whole thing off.
 
 ## Human touchpoints
 
