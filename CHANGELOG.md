@@ -13,6 +13,17 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.27.0]
+
+### What's Changed
+* feat: setup -apply proposes .gitignore lines through one PR by @scharissis in https://github.com/scharissis/polako/pull/486 (closes #416)
+* fix: a worked-around refusal blocks the clean-exit resume by @scharissis in https://github.com/scharissis/polako/pull/487 (closes #461)
+* fix: a budget park pushes unpushed work and merges a stale resumed branch by @scharissis in https://github.com/scharissis/polako/pull/488 (closes #466)
+* fix: the review gate confirms it's done via ListAgents, not a Skill call's return by @scharissis in https://github.com/scharissis/polako/pull/489 (closes #472)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.26.0...v0.27.0
+
 ## [0.26.0]
 
 ### What's Changed
