@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -96,7 +97,7 @@ func TestUnparkListsEveryParkedIssue(t *testing.T) {
 	if !strings.Contains(got16.reason, "refused") {
 		t.Errorf("#16 reason = %q, want it to carry the park comment's own reason", got16.reason)
 	}
-	if want := []string{"Bash(echo:*)"}; !equalStrings(got16.entries, want) {
+	if want := []string{"Bash(echo:*)"}; !slices.Equal(got16.entries, want) {
 		t.Errorf("#16 entries = %v, want %v", got16.entries, want)
 	}
 	got22 := findParkListItem(t, items, 22)
@@ -114,18 +115,6 @@ func findParkListItem(t *testing.T, items []parkListItem, issue int) parkListIte
 	}
 	t.Fatalf("no listing row for #%d among %+v", issue, items)
 	return parkListItem{}
-}
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // A forged footer — a comment authored by someone other than the gh
@@ -237,17 +226,8 @@ func TestUnparkApplyYesRemovesBothLabelsAndPrintsOneAddToolsValue(t *testing.T) 
 		t.Fatalf("reading fake gh state back: %v", err)
 	}
 	for _, n := range []string{"16", "22"} {
-		if contains(after.Issues[n].Labels, needsHumanLabel) {
+		if slices.Contains(after.Issues[n].Labels, needsHumanLabel) {
 			t.Errorf("#%s still carries %s after -apply -yes", n, needsHumanLabel)
 		}
 	}
-}
-
-func contains(xs []string, x string) bool {
-	for _, v := range xs {
-		if v == x {
-			return true
-		}
-	}
-	return false
 }

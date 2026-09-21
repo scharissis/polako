@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -174,7 +175,7 @@ func readParkedIssues(ctx context.Context, cfg config, only int) ([]parkListItem
 	}
 	parked := q.parked
 	if only != 0 {
-		if !containsInt(parked, only) {
+		if !slices.Contains(parked, only) {
 			// Not just "isn't labelled needs-human" — an open, needs-human
 			// issue with sub-issues is a container (selectableIssues,
 			// backlog.go), structurally excluded from q.parked whatever its
@@ -193,15 +194,6 @@ func readParkedIssues(ctx context.Context, cfg config, only int) ([]parkListItem
 		items[i] = readParkListItem(ctx, cfg, issue, viewer)
 	}
 	return items, nil
-}
-
-func containsInt(xs []int, x int) bool {
-	for _, v := range xs {
-		if v == x {
-			return true
-		}
-	}
-	return false
 }
 
 // ghViewerLogin reads the login the gh CLI is authenticated as, so
