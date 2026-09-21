@@ -272,7 +272,10 @@ func parkCommentReason(body string) string {
 // one smuggled in by a forged author that ghViewerLogin's own check didn't
 // already exclude — so it renders "ignored" instead of joining the rerun
 // line.
-var validParkEntryRe = regexp.MustCompile(`^(?:Bash\((gh(?: [\w.\-]+){1,2}|[\w.\-]+):\*\)|([A-Za-z][A-Za-z0-9]*))$`)
+// The bare-tool-name branch allows an underscore — addToolsEntry (refusals.go)
+// sets that entry to r.tool verbatim, and an MCP tool's own name is commonly
+// "mcp__server__tool".
+var validParkEntryRe = regexp.MustCompile(`^(?:Bash\((gh(?: [\w.\-]+){1,2}|[\w.\-]+):\*\)|([A-Za-z][A-Za-z0-9_]*))$`)
 
 // validParkEntry reports whether entry is safe to offer on the rerun line:
 // shaped like something addToolsEntry could have produced, and not a

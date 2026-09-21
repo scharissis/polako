@@ -167,9 +167,10 @@ func TestValidParkEntry(t *testing.T) {
 		{"Bash(echo:*)", true},
 		{"Bash(gh issue view:*)", true},
 		{"WebFetch", true},
+		{"mcp__server__tool", true},       // an MCP tool's own name, addToolsEntry's other bare-tool shape
 		{"Bash(gh issue edit:*)", false},  // neverGrantTable
 		{"Bash(gh issue close:*)", false}, // neverGrantTable
-		{"Bash(rm -rf:*)", false},         // four words, past the 1-3 word shape
+		{"Bash(rm -rf:*)", false},         // two words, but not `gh` — addToolsEntry never emits this
 		{"Bash(/Users/x/bin/tool:*)", false},
 		{"rm -rf /", false},
 		{"", false},
