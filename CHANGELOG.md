@@ -13,6 +13,24 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.26.0]
+
+### What's Changed
+* fix: make the review gate's blocking-call shape unmissable, add a polling-regression grader by @scharissis in https://github.com/scharissis/polako/pull/468 (closes #372)
+* fix: describe failures, don't paste raw command output by @scharissis in https://github.com/scharissis/polako/pull/470 (closes #386)
+* test: run the suite in parallel — t.Parallel() on 642 of 656 tests by @scharissis in https://github.com/scharissis/polako/pull/473 (closes #318)
+* feat: -visual-evidence on work turns evidence capture off by @scharissis in https://github.com/scharissis/polako/pull/474 (closes #403)
+* docs: retire docs/plans/update.md — every issue it proposed is closed by @scharissis in https://github.com/scharissis/polako/pull/475 (closes #452)
+* docs: record probes 1, 2 and 7 in the visual-evidence plan by @scharissis in https://github.com/scharissis/polako/pull/476
+* fix: range the review gate's post-fix audit instead of reading whole history by @scharissis in https://github.com/scharissis/polako/pull/478 (closes #464)
+* feat: polako setup, a read-only readiness report by @scharissis in https://github.com/scharissis/polako/pull/479 (closes #413)
+* feat: capture a visual change as after shots from the dev server by @scharissis in https://github.com/scharissis/polako/pull/480 (closes #404)
+* feat: setup -apply creates missing labels, asking first by @scharissis in https://github.com/scharissis/polako/pull/481 (closes #415)
+* feat: before shots, so Evidence shows the change by @scharissis in https://github.com/scharissis/polako/pull/482 (closes #405)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.25.0...v0.26.0
+
 ## [0.25.0]
 
 ### What's Changed
