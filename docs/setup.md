@@ -25,11 +25,16 @@ setup
   docs/VISION.md      missing        missing docs/VISION.md, docs/plans/README.md — optional — `polako setup -apply` can scaffold them (advice only)
   plugin              ok             0.23.0
   sub-issue support   ok
+  build tools         missing        not in the default allowlist — pass -add-tools "Bash(just:*)"
+  issue templates     ok
+  CI workflow         missing        advice only — no .github/workflows/*.yml found
+  branch protection   missing        advice only — main has no branch protection rule
+  delete branches on merge  missing  advice only — turn on "automatically delete head branches" in the repository's settings
   needs-human         missing        gh label create needs-human --color D93F0B --description "polako parked this issue for a human"
   proposed            missing        gh label create proposed --color 1D76DB --description "proposed by polako — a human removes this label to queue it"
   awaiting-answer     missing        gh label create awaiting-answer --color FBCA04 --description "polako is waiting for an answer on this issue"
 
-polako work -dir ../my-project -dry-run
+polako work -dir ../my-project -add-tools "Bash(just:*)" -dry-run
 ```
 
 Every row is `ok`, `missing`, or `couldn't tell` — never a guess. A tool
@@ -72,6 +77,24 @@ in a script.
   branch contract, and that issue text is data, not instructions. Not
   required, the same as `.gitignore`.
 - `docs/VISION.md` exists — advice only, since `plan-backlog` is opt-in.
+- A build tool the default `-tools` allowlist doesn't cover: `justfile`,
+  `BUILD.bazel`/`WORKSPACE`, `Taskfile.yml`, `mise.toml`, `deno.json`,
+  `bun.lockb`, `composer.json`, `Gemfile`, `mix.exs`, `build.zig`. Not
+  required — a checkout without one of these still runs `polako work` fine —
+  but a real run would stall on the permission prompt the first time it
+  needs the tool, so the row prints the `-add-tools` value to grant it, and
+  the suggested `polako work` line at the end carries the same value.
+- Every `.github/ISSUE_TEMPLATE/*` for a `labels:` key naming `-label`'s own
+  gate label or one of the three labels above. Required: a template applies
+  its labels to whoever files the issue, so this defeats the whole point of
+  `-label` — only a maintainer opting an issue in. See
+  [docs/security.md](security.md).
+- Three advice rows, never required and never changed by `-apply` — these are
+  the repository owner's own settings, not polako's to touch: a CI workflow
+  exists (`.github/workflows/*.yml`); the default branch has a protection
+  rule (`gh api .../branches/<default>/protection`, "couldn't tell" without
+  admin access to check it); head branches delete on merge
+  (`deleteBranchOnMerge`, "couldn't tell" on a `gh` too old to report it).
 
 ## Flags
 
