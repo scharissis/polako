@@ -26,6 +26,9 @@ func TestClaudeMdCheckCommand(t *testing.T) {
 		{"go.mod", map[string]string{"go.mod": "module example\n"}, "go test ./..."},
 		{"package.json with a test script", map[string]string{"package.json": `{"scripts":{"test":"jest"}}`}, "npm test"},
 		{"package.json without a test script", map[string]string{"package.json": `{"scripts":{"build":"tsc"}}`}, claudeMdCheckCommandUnknown},
+		{"package.json npm init placeholder", map[string]string{
+			"package.json": `{"scripts":{"test":"echo \"Error: no test specified\" && exit 1"}}`,
+		}, claudeMdCheckCommandUnknown},
 		{"package.json malformed", map[string]string{"package.json": `not json`}, claudeMdCheckCommandUnknown},
 		{"Cargo.toml", map[string]string{"Cargo.toml": "[package]\nname = \"example\"\n"}, "cargo test"},
 		{"pyproject.toml", map[string]string{"pyproject.toml": "[project]\nname = \"example\"\n"}, "pytest"},

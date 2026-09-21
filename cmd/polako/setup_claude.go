@@ -93,7 +93,14 @@ func packageJSONHasTestScript(dir string) bool {
 	if err := json.Unmarshal(b, &pkg); err != nil {
 		return false
 	}
-	return strings.TrimSpace(pkg.Scripts["test"]) != ""
+	script := strings.TrimSpace(pkg.Scripts["test"])
+	if script == "" {
+		return false
+	}
+	// npm init -y's own placeholder: `echo "Error: no test specified" && exit
+	// 1`, non-empty but not a real test command — recommending `npm test`
+	// for it would just always fail.
+	return !strings.Contains(strings.ToLower(script), "no test specified")
 }
 
 // claudeMdBlock is the block this run would write today, sized to dir's own
