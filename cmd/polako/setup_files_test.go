@@ -269,3 +269,27 @@ func TestProposeSetupFilesRefusesWhenDirAndRepoDisagree(t *testing.T) {
 		t.Errorf("worktree list = %q, a repo mismatch must not create a worktree", got)
 	}
 }
+
+// A second remote (a fork setup) that happens to already carry a branch
+// named polako-setup must not make setupWorktree try to build from
+// origin/polako-setup, which never existed — it should cut a fresh branch
+// from origin's default branch instead, the same as if no polako-setup
+// branch existed anywhere.
+func TestSetupWorktreeIgnoresANonOriginRemoteBranch(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	gitAt(t, base, "init", "--bare", "fork")
+	_, checkout := upstream(t)
+	gitAt(t, checkout, "remote", "add", "fork", filepath.Join(base, "fork"))
+	gitAt(t, checkout, "push", "fork", "HEAD:refs/heads/"+setupBranch)
+	gitAt(t, checkout, "fetch", "fork")
+
+	cfg := config{dir: checkout, env: gitIdentity}
+	path, err := setupWorktree(context.Background(), cfg, "origin/main")
+	if err != nil {
+		t.Fatalf("setupWorktree with a same-named branch on a non-origin remote: %v", err)
+	}
+	if got := gitAt(t, path, "log", "--oneline", "-1"); !strings.Contains(got, "first") {
+		t.Errorf("worktree HEAD = %q, want it cut from origin/main, not the fork remote's branch", got)
+	}
+}

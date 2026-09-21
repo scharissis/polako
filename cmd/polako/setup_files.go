@@ -247,7 +247,11 @@ func setupWorktree(ctx context.Context, cfg config, remoteDefault string) (strin
 	}
 	path := filepath.Join(cfg.dir, ".worktrees", setupBranch)
 	local, _ := git(ctx, cfg, "branch", "--list", setupBranch)
-	remote, _ := git(ctx, cfg, "branch", "-r", "--list", "*/"+setupBranch)
+	// origin specifically, not */setupBranch: the worktree add below is
+	// origin/setupBranch too, and a repo with a second remote (a fork setup)
+	// that happens to carry a same-named branch there must not make this
+	// probe pass while that add then fails on a ref that never existed.
+	remote, _ := git(ctx, cfg, "branch", "-r", "--list", "origin/"+setupBranch)
 	switch {
 	case strings.TrimSpace(string(local)) != "":
 		if _, err := git(ctx, cfg, "worktree", "add", path, setupBranch); err != nil {
