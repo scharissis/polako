@@ -407,8 +407,11 @@ func stillWaiting(states map[int]*issueState) []issueResult {
 // the queue, and a comment saying what happened. Both are best-effort — a
 // GitHub call that fails must not end a drain that is otherwise healthy — but
 // a label that did not take means the next drain retries this issue, so that
-// one says so out loud rather than failing quietly.
-func parkIssue(ctx context.Context, cfg config, issue int, reason string) {
+// one says so out loud rather than failing quietly. entries, when non-empty,
+// is a permission park's own -add-tools entries — ticket 3 of
+// docs/plans/permission-parks.md (#432) — appended as a `Refused: ...`
+// footer parseParkFooter reads back.
+func parkIssue(ctx context.Context, cfg config, issue int, reason string, entries []string) {
 	n := strconv.Itoa(issue)
 	_, err := gh(ctx, cfg, "issue", "edit", n, "--add-label", needsHumanLabel)
 	if err != nil {
@@ -434,6 +437,9 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string) {
 	body := fmt.Sprintf("**polako parked this issue.** %s\n\n"+
 		"Nothing will run on it again until the `%s` label is removed — "+
 		"`gh issue edit %s --remove-label %s`.", reason, needsHumanLabel, n, needsHumanLabel)
+	if footer := parkFooter(entries); footer != "" {
+		body += "\n\n" + footer
+	}
 	if _, cerr := gh(ctx, cfg, "issue", "comment", n, "--body", body); cerr != nil {
 		cfg.narrate(sevWarning, "could not comment on issue #%d (%v) — the reason is in this log and in the exit summary",
 			issue, cerr)
@@ -454,7 +460,7 @@ func parkAndMoveOn(ctx context.Context, cfg config, issue int, st *issueState, r
 	// A park is exactly when somebody wants to read what the run actually did,
 	// and the session is the whole transcript of it.
 	resumeHint(cfg, issue, st)
-	parkIssue(ctx, cfg, issue, reason)
+	parkIssue(ctx, cfg, issue, reason, parkEntriesOf(err))
 	// After the park, not before: by now the label and the comment saying why
 	// are on the issue, so somebody following the notification finds the whole
 	// story there.

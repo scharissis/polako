@@ -79,25 +79,54 @@ type resumeLedger struct {
 	// kinds are exclusive, and a second bool is one more thing every place
 	// that clears the first has to remember.
 	kind string
-	// deferredPermissionDetail carries a worked-around refusal's detail
-	// (issue #461) across the resume afterCleanExit let it try instead of
-	// parking straight away. A later run of this same issue may open a PR —
-	// then this is never read again — or end with no PR of its own, with or
-	// without a fresh refusal; either way the eventual park still blames the
-	// original refusal rather than reporting "produced nothing" or the bound
-	// that actually stopped the resuming. Empty means no such refusal is
-	// pending. Cleared by clearRetries: a fresh start (a reply folded in)
-	// means whatever comes next is answering a different question, not still
-	// working around this refusal, so a later unrelated park must not keep
-	// blaming it (issue #461's own review — a -strict-order question
-	// answered mid-issue reuses this same ledger for the run after it).
-	deferredPermissionDetail string
+	// deferred carries a worked-around refusal's record (issue #461) across
+	// the resume afterCleanExit let it try instead of parking straight away.
+	// A later run of this same issue may open a PR — then this is never read
+	// again — or end with no PR of its own, with or without a fresh refusal;
+	// either way the eventual park still blames the original refusal rather
+	// than reporting "produced nothing" or the bound that actually stopped
+	// the resuming. Zero means no such refusal is pending. Cleared by
+	// clearRetries: a fresh start (a reply folded in) means whatever comes
+	// next is answering a different question, not still working around this
+	// refusal, so a later unrelated park must not keep blaming it (issue
+	// #461's own review — a -strict-order question answered mid-issue reuses
+	// this same ledger for the run after it).
+	deferred deferredRefusal
+}
+
+// deferredRefusal is what afterCleanExit records once a worked-around
+// refusal (issue #461) lets a resume try to finish the job — everything the
+// eventual park needs if it never does, computed once at the point the
+// refusal is deferred rather than recomputed from a later run's own (likely
+// empty) report. detail and message are terminal-only (a command or a final
+// message can carry a local absolute path); reason and entries are what gets
+// posted. Ticket 3 of docs/plans/permission-parks.md (#432).
+type deferredRefusal struct {
+	detail  string   // every refused command this run drew, joined
+	count   int      // how many refusals it drew
+	reason  string   // permissionParkReasonWorkedAround's full text
+	entries []string // thread-safe -add-tools entries, for the Refused: footer
+	message string   // the run's own clipped final words
+}
+
+// deferredRefusalAside renders a deferred refusal's terminal-only detail for
+// a park's aside: every command it drew, and, when there is one, the run's
+// own clipped final words — #390's shape, where that sentence (an
+// unreachable SSH agent) was the actual tell.
+func deferredRefusalAside(dp deferredRefusal) string {
+	aside := "refused: " + clip(dp.detail, 400)
+	if dp.message != "" {
+		aside += " — final message: " + clip(dp.message, 200)
+	}
+	return aside
 }
 
 // clearRetries is what a fresh start does: a reply arrived, or a PR opened, so
 // nothing is owed a resume, the crash budget starts over, and a refusal this
 // issue was resuming past is no longer this run's to blame.
-func (l *resumeLedger) clearRetries() { l.fruitless, l.kind, l.deferredPermissionDetail = 0, "", "" }
+func (l *resumeLedger) clearRetries() {
+	l.fruitless, l.kind, l.deferred = 0, "", deferredRefusal{}
+}
 
 // noteCrashResume books a crash-driven resume: another retry, resuming the
 // dead session by id. progressed is rep.progressed() — a run that did real
@@ -617,15 +646,19 @@ func (a *runAttempt) giveUpAfterCrash() error {
 	} else {
 		reason = fmt.Sprintf("claude crashed and %d resume attempts failed", cfg.retries)
 	}
-	if a.ledger.deferredPermissionDetail != "" {
+	if a.ledger.deferred.detail != "" {
 		// issue #461: a worked-around refusal resumed into this crash loop
 		// instead of ending cleanly again. The refusal is still the likelier
 		// root cause than the crash count, so the park keeps blaming it —
-		// same rule afterCleanExit's own deferredPermissionDetail check
-		// follows, just reached from the other arm.
-		return a.parked(0, parkAside(parkPermission,
-			"the refused command was: "+clip(a.ledger.deferredPermissionDetail, 200),
-			"%s; %s", permissionParkReason, reason))
+		// same rule afterCleanExit's own deferred check follows, just reached
+		// from the other arm.
+		dp := a.ledger.deferred
+		return a.parked(0, &parkedError{
+			category: parkPermission,
+			reason:   fmt.Sprintf("%s; %s", dp.reason, reason),
+			aside:    deferredRefusalAside(dp),
+			entries:  dp.entries,
+		})
 	}
 	return a.parked(0, park(parkRetries, "%s", reason))
 }
@@ -655,6 +688,7 @@ func (a *runAttempt) afterCleanExit() (*pullRequest, error) {
 	// after all, the message.
 	left := inspectLeftWork(a.ctx, a.cfg, a.issue)
 
+	allowlist := resolveTools(a.cfg.tools, a.cfg.addTools)
 	workedAround := a.rep.permissionRefused && a.rep.refusalWorkedAround()
 	if a.rep.permissionRefused && !workedAround {
 		// Resuming replays the identical session against the identical
@@ -663,7 +697,12 @@ func (a *runAttempt) afterCleanExit() (*pullRequest, error) {
 		// clean-exit resume budget finding that out the slow way. #126's own
 		// shape (refused, then nothing more attempted) and #138's (the final
 		// message is itself the ask) both land here.
-		return nil, a.parkCleanExit(parkPermission, permissionParkReason, a.rep.lastRefusalDetail(), left)
+		entries, _, _ := permissionParkEntries(a.rep.refusals, allowlist)
+		aside := ""
+		if d := a.rep.refusalDetails(); d != "" {
+			aside = "refused: " + clip(d, 400)
+		}
+		return nil, a.parkCleanExit(parkPermission, permissionParkReasonFor(a.rep.refusals, allowlist), aside, entries, left)
 	}
 	if workedAround {
 		// Remembered on the ledger, not just this attempt's own report: if the
@@ -671,7 +710,14 @@ func (a *runAttempt) afterCleanExit() (*pullRequest, error) {
 		// with or without a fresh refusal of its own — the eventual park has
 		// to keep blaming this refusal rather than reporting "produced
 		// nothing" or whatever bound actually stopped the resuming.
-		a.ledger.deferredPermissionDetail = a.rep.lastRefusalDetail()
+		entries, _, _ := permissionParkEntries(a.rep.refusals, allowlist)
+		a.ledger.deferred = deferredRefusal{
+			detail:  a.rep.refusalDetails(),
+			count:   len(a.rep.refusals),
+			reason:  permissionParkReasonWorkedAround(a.rep.refusals, allowlist),
+			entries: entries,
+			message: clip(strings.TrimSpace(a.rep.lastResultText), 200),
+		}
 	}
 
 	bound, boundWhy, resume := a.cleanExitDisposition(left)
@@ -714,26 +760,27 @@ func (a *runAttempt) afterCleanExit() (*pullRequest, error) {
 		// reason the crash arm files those causes that way — otherwise
 		// clearing needs-human after -add-tools just burns back into the same
 		// ceiling.
-		reason = permissionParkReason
+		reason = permissionParkReasonFor(a.rep.refusals, allowlist)
 		if bound == "" {
 			category = parkPermission
 		}
 	}
-	refusedCmd := ""
-	if a.ledger.deferredPermissionDetail != "" {
+	aside, entries := "", []string(nil)
+	if a.ledger.deferred.detail != "" {
 		// Unlike permissionAsked above, the category does not follow the
 		// bound here: this is a structural refusal (#209's own signal), not a
 		// weaker prose-based one, and the resume was already the concession —
 		// #461's whole point is that this park keeps blaming the refusal
 		// rather than the ceiling or budget that happened to be what actually
 		// stopped the resuming.
-		reason, category = permissionParkReason, parkPermission
-		refusedCmd = a.ledger.deferredPermissionDetail
+		dp := a.ledger.deferred
+		reason, category = dp.reason, parkPermission
+		aside, entries = deferredRefusalAside(dp), dp.entries
 	}
 	if bound != "" {
 		reason += "; " + bound
 	}
-	return nil, a.parkCleanExit(category, reason, refusedCmd, left)
+	return nil, a.parkCleanExit(category, reason, aside, entries, left)
 }
 
 // cleanExitDisposition decides what to do with a clean exit that left work
@@ -819,27 +866,35 @@ func (r *issueLoop) budgetPark(cause string) error {
 }
 
 // parkCleanExit parks a clean exit under category, with left's summary of
-// what is on disk appended to reason for the person picking it up.
-func (a *runAttempt) parkCleanExit(category, reason, refusedCmd string, left leftWork) error {
+// what is on disk appended to reason for the person picking it up. extraAside
+// is one more caller-built clause for the terminal only — a refused
+// command can carry a local absolute path (a worktree path inside a Bash
+// command) exactly the way a worktree's own path can, see leftWork.where(),
+// so it travels here rather than in reason, which is posted to the issue
+// thread verbatim. entries are the thread-safe -add-tools entries a
+// permission park's reason could derive, if any — carried on the
+// parkedError so parkIssue can add its own Refused: footer to the same
+// comment (ticket 3 of docs/plans/permission-parks.md, #432).
+func (a *runAttempt) parkCleanExit(category, reason, extraAside string, entries []string, left leftWork) error {
 	if a.st.fetchAuthFailed {
 		reason = fetchAuthParkReason + "; " + reason
 	}
 	if d := left.describe(); d != "" {
 		reason += "; " + d
 	}
-	// The refused command can carry a local absolute path (a worktree path
-	// inside a Bash command) exactly the way a worktree's own path can — see
-	// leftWork.where() — so it travels beside it in aside, never in reason,
-	// which is posted to the issue thread verbatim. Joined the same way
-	// leftWork.describe() joins its own optional clauses.
 	var asideParts []string
 	if w := left.where(); w != "" {
 		asideParts = append(asideParts, w)
 	}
-	if refusedCmd != "" {
-		asideParts = append(asideParts, "the refused command was: "+clip(refusedCmd, 200))
+	if extraAside != "" {
+		asideParts = append(asideParts, extraAside)
 	}
-	return a.parked(0, parkAside(category, strings.Join(asideParts, " — "), "%s", reason))
+	return a.parked(0, &parkedError{
+		category: category,
+		reason:   reason,
+		aside:    strings.Join(asideParts, " — "),
+		entries:  entries,
+	})
 }
 
 // superviseToClose is the loop's PR-exists arm: wait on an open PR through

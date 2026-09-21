@@ -69,3 +69,53 @@ func firstField(s string) string {
 	}
 	return ""
 }
+
+// parkFooterPrefix is the fixed leading phrase a permission park's comment
+// ends with when it has -add-tools entries to name. A contract like
+// planFooterPrefix: parkIssue writes it, parseParkFooter reads it back, and
+// a test holds both to the same wording. Ticket 3 of
+// docs/plans/permission-parks.md (#432).
+const parkFooterPrefix = "Refused: "
+
+// parkFooter renders entries as the footer parkIssue appends to a permission
+// park's comment, or "" for no entries — no footer at all rather than an
+// empty one.
+func parkFooter(entries []string) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	return parkFooterPrefix + strings.Join(entries, ", ")
+}
+
+// parseParkFooter reads the entries back out of a park comment — the last
+// matching line, tolerant of a leading quote or indent, the same rules
+// parsePlanFooter follows and for the same reason: a body that quotes an
+// earlier park's footer in its prose still ends with its own, and this
+// comment's own is never anything but the last line polako itself wrote.
+// False for a body with no such line, or one naming no entries at all.
+func parseParkFooter(body string) ([]string, bool) {
+	var line string
+	for _, l := range strings.Split(body, "\n") {
+		if t := strings.TrimLeft(l, "> \t"); strings.HasPrefix(t, parkFooterPrefix) {
+			line = t
+		}
+	}
+	if line == "" {
+		return nil, false
+	}
+	rest := strings.TrimSpace(line[len(parkFooterPrefix):])
+	if rest == "" {
+		return nil, false
+	}
+	fields := strings.Split(rest, ", ")
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return out, true
+}
