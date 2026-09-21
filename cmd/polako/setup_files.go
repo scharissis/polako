@@ -147,7 +147,12 @@ func proposeSetupFiles(ctx context.Context, cfg config) (string, error) {
 		return "", fmt.Errorf("-dir is a checkout of %s, not %s (-repo) — the file-proposal write needs "+
 			"-dir to be a checkout of the repository being set up", local, cfg.repo)
 	}
-	if _, err := git(ctx, cfg, "fetch", "origin", "--quiet"); err != nil {
+	// Retried like syncDefaultBranch's own fetch: waking from sleep is
+	// exactly when the network hasn't reassociated yet, and a fetch is safe
+	// to repeat.
+	if _, err := retryRead(ctx, cfg, "git fetch origin", func() ([]byte, error) {
+		return git(ctx, cfg, "fetch", "origin", "--quiet")
+	}); err != nil {
 		return "", fmt.Errorf("fetching origin: %w", err)
 	}
 	head, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short")
