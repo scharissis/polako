@@ -3650,6 +3650,110 @@ func TestObserveRefusalsDedupsAndCaps(t *testing.T) {
 	}
 }
 
+// The acceptance table from issue #431, plus the CLI-named-part,
+// ungrantable and uncorrelated cases ticket 1 (#430) already covers.
+func TestAddToolsEntryDerivesTheGrantOrExplainsWhyNot(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		refusal   refusal
+		wantEntry string
+		wantKind  addToolsKind
+	}{
+		{
+			name:      "bash refusal takes the first word",
+			refusal:   refusal{tool: "Bash", command: `echo "exit:$?"`, kind: refusalPlain},
+			wantEntry: `Bash(echo:*)`,
+		},
+		{
+			name:      "an @ in the command doesn't confuse the split",
+			refusal:   refusal{tool: "Bash", command: "ssh -T git@github.com", kind: refusalPlain},
+			wantEntry: "Bash(ssh:*)",
+		},
+		{
+			name:     "gh takes three words and lands on the never table",
+			refusal:  refusal{tool: "Bash", command: "gh issue close 1 --comment x", kind: refusalPlain},
+			wantKind: addToolsNever,
+		},
+		{
+			name:     "gh pr merge is never granted",
+			refusal:  refusal{tool: "Bash", command: "gh pr merge 7", kind: refusalPlain},
+			wantKind: addToolsNever,
+		},
+		{
+			name:      "a non-Bash tool names itself, ignoring its command",
+			refusal:   refusal{tool: "WebFetch", command: "https://example.com", kind: refusalPlain},
+			wantEntry: "WebFetch",
+		},
+		{
+			name:     "an entry the allowlist already grants is dropped",
+			refusal:  refusal{tool: "Bash", command: "git status", kind: refusalPlain},
+			wantKind: addToolsGranted,
+		},
+		{
+			name:     "no named part and a shell operator is ambiguous, not guessed at",
+			refusal:  refusal{tool: "Bash", command: "a; b", kind: refusalPart},
+			wantKind: addToolsAmbiguous,
+		},
+		{
+			name:      "an absolute path still yields an entry",
+			refusal:   refusal{tool: "Bash", command: "/Users/x/bin/tool --flag", kind: refusalPlain},
+			wantEntry: "Bash(/Users/x/bin/tool:*)",
+		},
+		{
+			name: "the CLI's named part is trusted over the whole compound line",
+			refusal: refusal{
+				tool:    "Bash",
+				command: `git fetch origin 2>&1; echo "exit:$?"`,
+				part:    `echo "exit:$?"`,
+				kind:    refusalPart,
+			},
+			wantEntry: `Bash(echo:*)`,
+		},
+		{
+			name:     "ungrantable yields no entry",
+			refusal:  refusal{tool: "Bash", command: "git fetch origin 2>&1; echo RC=$?", kind: refusalUngrantable},
+			wantKind: addToolsUngrantable,
+		},
+		{
+			name:     "an uncorrelated refusal has nothing to derive from",
+			refusal:  refusal{command: "This command requires approval", kind: refusalPlain},
+			wantKind: addToolsUnknown,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			entry, kind := addToolsEntry(tt.refusal, defaultTools)
+			if entry != tt.wantEntry || kind != tt.wantKind {
+				t.Errorf("addToolsEntry(%+v) = (%q, %q), want (%q, %q)",
+					tt.refusal, entry, kind, tt.wantEntry, tt.wantKind)
+			}
+		})
+	}
+}
+
+func TestAddToolsEntryThreadSafe(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		entry string
+		safe  bool
+	}{
+		{"Bash(echo:*)", true},
+		{"Bash(ssh:*)", true},
+		{"WebFetch", true},
+		{"Bash(/Users/x/bin/tool:*)", false},
+		{"Bash(rm -rf ~/data:*)", false},
+		{`Bash(echo $HOME:*)`, false},
+		{`Bash(a\b:*)`, false},
+	}
+	for _, tt := range tests {
+		if got := addToolsEntryThreadSafe(tt.entry); got != tt.safe {
+			t.Errorf("addToolsEntryThreadSafe(%q) = %v, want %v", tt.entry, got, tt.safe)
+		}
+	}
+}
+
 // Issue #182: on #169 the run asked for an ungranted tool in a turn partway
 // through, then ended on a different sentence the head anchor could not catch,
 // and parked as "no PR and no questions". observe now reads every assistant
