@@ -3275,6 +3275,96 @@ func TestObserveLatchesOnARefusedToolResult(t *testing.T) {
 	}
 }
 
+// Issue #461: #402 and #318 both refused a tool mid-run, then kept going —
+// more tool calls succeeded, and the run ended on a calm word that was not
+// itself an ask. refusalWorkedAround is what tells that shape apart from
+// #126's, which looks the same up to the refusal but has nothing after it,
+// and from #138's, a final-message ask with no tool_result refusal to work
+// around at all.
+func TestRefusalWorkedAround(t *testing.T) {
+	t.Parallel()
+	observe := func(t *testing.T, lines ...string) runReport {
+		t.Helper()
+		var rep runReport
+		for _, l := range lines {
+			ev, ok := parseEvent([]byte(l))
+			if !ok {
+				t.Fatalf("parseEvent rejected %s", l)
+			}
+			rep.observe(ev)
+		}
+		return rep
+	}
+	result := func(text string) string {
+		return `{"type":"result","subtype":"success","result":` + jsonString(text) + `}`
+	}
+
+	cases := []struct {
+		name   string
+		lines  []string
+		want   bool
+		reason string
+	}{
+		{
+			"refused, a successful call followed, calm final word — #402/#318's shape",
+			[]string{
+				toolUseID("toolu_1", "Bash", `{"command":"cd /w && gofmt -l ."}`),
+				toolResult("toolu_1", "This command requires approval", true),
+				toolUseID("toolu_2", "Bash", `{"command":"gofmt -l /w"}`),
+				toolResult("toolu_2", "", false),
+				result("14 commits landed; the review gate finished."),
+			},
+			true, "successful calls followed the last refusal and the final word is not an ask",
+		},
+		{
+			"refused, nothing after it — #126's shape",
+			[]string{
+				toolUseID("toolu_1", "Bash", `{"command":"gh issue close 126"}`),
+				toolResult("toolu_1", "This command requires approval", true),
+				result("Issue #126 is resolved: an earlier run confirmed the fix shipped."),
+			},
+			false, "no successful call followed the refusal, so nothing was worked around",
+		},
+		{
+			"refused, a success followed, but the final word is itself an ask",
+			[]string{
+				toolUseID("toolu_1", "Bash", `{"command":"cd /w"}`),
+				toolResult("toolu_1", "This command requires approval", true),
+				toolUseID("toolu_2", "Read", `{"file_path":"PLAN.md"}`),
+				toolResult("toolu_2", "...", false),
+				result("This requires user confirmation to proceed. Can you approve?"),
+			},
+			false, "a final message that reads as an ask is disqualifying on its own",
+		},
+		{
+			"a second refusal with nothing successful after it, despite a success after the first",
+			[]string{
+				toolUseID("toolu_1", "Bash", `{"command":"cd /w"}`),
+				toolResult("toolu_1", "This command requires approval", true),
+				toolUseID("toolu_2", "Read", `{"file_path":"PLAN.md"}`),
+				toolResult("toolu_2", "...", false),
+				toolUseID("toolu_3", "Bash", `{"command":"gh pr merge 1"}`),
+				toolResult("toolu_3", "This command requires approval", true),
+				result("Nothing left to do here."),
+			},
+			false, "scoped to the *last* refusal, whose own aftermath had no success",
+		},
+		{
+			"no refusal at all",
+			[]string{result("Opened a PR.")},
+			false, "nothing to work around",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rep := observe(t, c.lines...)
+			if got := rep.refusalWorkedAround(); got != c.want {
+				t.Errorf("refusalWorkedAround = %v, want %v — %s", got, c.want, c.reason)
+			}
+		})
+	}
+}
+
 // Issue #182: on #169 the run asked for an ungranted tool in a turn partway
 // through, then ended on a different sentence the head anchor could not catch,
 // and parked as "no PR and no questions". observe now reads every assistant
