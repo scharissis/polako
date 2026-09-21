@@ -743,17 +743,6 @@ func drainSummary(results []issueResult, containers, closed []containerInfo, ret
 	return append(lines, epics...)
 }
 
-// quotedEntries renders -add-tools entries the way a park's own reason
-// paragraph does: backtick-quoted, comma-joined — the same string whether it
-// is read on the thread or in this shortened summary line.
-func quotedEntries(entries []string) string {
-	quoted := make([]string, len(entries))
-	for i, e := range entries {
-		quoted[i] = "`" + e + "`"
-	}
-	return strings.Join(quoted, ", ")
-}
-
 // parkGrantsBlock is the exit summary's paste-ready line for every permission
 // park this shift made: the union of every entry across every parked issue
 // (deduped, first-seen order), as both the -add-tools flag and the

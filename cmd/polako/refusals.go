@@ -165,6 +165,18 @@ func permissionParkEntries(refusals []refusal, allowlist string) (entries []stri
 	return entries, ungrantable, never
 }
 
+// quotedEntries renders -add-tools entries backtick-quoted and comma-joined
+// — shared by permissionParkAdviceFrom's thread-facing paragraph and
+// drainSummary's shortened `parked` line (drain.go), so the two can never
+// drift into two different formats for the same entries.
+func quotedEntries(entries []string) string {
+	quoted := make([]string, len(entries))
+	for i, e := range entries {
+		quoted[i] = "`" + e + "`"
+	}
+	return strings.Join(quoted, ", ")
+}
+
 // permissionParkAdviceFrom builds a park's advice clause from an
 // already-derived entries/ungrantable/never triple — permissionParkEntries'
 // own return — so a caller that also needs the entries themselves (for the
@@ -172,13 +184,9 @@ func permissionParkEntries(refusals []refusal, allowlist string) (entries []stri
 func permissionParkAdviceFrom(entries []string, ungrantable, never bool) (advice string, ok bool) {
 	switch {
 	case len(entries) > 0:
-		quoted := make([]string, len(entries))
-		for i, e := range entries {
-			quoted[i] = "`" + e + "`"
-		}
 		return fmt.Sprintf("the run was refused %s. Rerun with `-add-tools \"%s\"`, "+
 			"then remove needs-human — or fix the skill if it shouldn't reach for these.",
-			strings.Join(quoted, ", "), strings.Join(entries, ",")), true
+			quotedEntries(entries), strings.Join(entries, ",")), true
 	case ungrantable && never:
 		return "one command held a `$VAR`, which no `-add-tools` entry allows, and another " +
 			"is one polako doesn't hand out automatically — the skill has to change both.", true
