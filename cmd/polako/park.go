@@ -135,6 +135,18 @@ type leftWork struct {
 	// once this is set: reclaim must leave the first for a human rather than
 	// force past a state it could not inspect.
 	unreadable bool
+	// pushed is whether branch's tip matches its remote-tracking ref. False
+	// covers both "confirmed not pushed" and "no remote-tracking ref to check
+	// at all" — every reader of this field runs before any PR exists for this
+	// branch (dispatchRun's budget gate and the clean-exit park both live
+	// inside that same no-PR arm of the loop), so an absent ref cannot mean
+	// "merged and deleted" the way it can for tidy's own reclaim sweep; it can
+	// only mean the branch never reached origin. Biasing the unreadable case
+	// toward "not pushed" undercounts in the direction budget.go's own caps
+	// already do: the failure this exists to report — #318's branch on one
+	// machine's disk and nowhere else — is worse to miss than a spurious
+	// "not pushed" is to over-report.
+	pushed bool
 }
 
 // salvageable reports whether a run got far enough that a person should start
@@ -160,6 +172,13 @@ func (w leftWork) describe() string {
 		}
 		branch = fmt.Sprintf("branch %s has %s", w.branch, commits)
 	}
+	if w.commits > 0 {
+		if w.pushed {
+			branch += ", pushed to origin"
+		} else {
+			branch += ", not pushed to origin"
+		}
+	}
 	clauses := []string{branch}
 	if w.path != "" {
 		changes := "no uncommitted changes"
@@ -170,6 +189,24 @@ func (w leftWork) describe() string {
 	}
 	return strings.Join(clauses, " and ") +
 		" — the run left work behind, so start there rather than from scratch"
+}
+
+// branchPushed reports whether branch's local tip matches its remote-tracking
+// ref, and whether that comparison could be made at all — false, false when
+// there is no remote-tracking ref to compare against, whether because the
+// branch was never pushed or because something (GitHub, on merge) deleted it.
+// Shared by leftWork's own probe and tidy's unpushedReason, which both need
+// exactly this comparison.
+func branchPushed(ctx context.Context, cfg config, branch string) (pushed, known bool) {
+	remoteSHA, err := git(ctx, cfg, "rev-parse", "--verify", "-q", "refs/remotes/origin/"+branch)
+	if err != nil {
+		return false, false
+	}
+	localSHA, err := git(ctx, cfg, "rev-parse", branch)
+	if err != nil {
+		return false, false
+	}
+	return strings.TrimSpace(string(remoteSHA)) == strings.TrimSpace(string(localSHA)), true
 }
 
 // where names the worktree on disk, for the log and nothing else. It is the one
@@ -204,6 +241,7 @@ func inspectLeftWork(ctx context.Context, cfg config, issue int) leftWork {
 			}
 		}
 	}
+	w.pushed, _ = branchPushed(ctx, cfg, w.branch)
 	if list, err := git(ctx, cfg, "worktree", "list", "--porcelain"); err == nil {
 		w.path = worktreeFor(string(list), w.branch)
 	}

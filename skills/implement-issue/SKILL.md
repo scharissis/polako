@@ -312,6 +312,21 @@ branch, which would discard them. Then, by case:
   main checkout never descend into it. That path is `<worktree>`, carried
   forward the same way.
 
+If the branch already existed — found by `git branch --list` or `git branch
+-r --list` above, not freshly created with `-b` off the default branch —
+bring it up to date before Phase 2 starts: `git -C <worktree> merge` the
+`origin/…` ref Phase 1 resolved. A branch a previous run, or a previous
+shift, left behind can be commits behind the default branch by the time this
+run reaches it, and planning or implementing against that stale a base risks
+missing what the rest of the repo has done to files this issue touches
+since. A clean merge — "already up to date" included — needs one line in
+PLAN.md saying so and the sha merged in, so a later run knows this step is
+already done. A merge with conflicts this run cannot settle on its own is a
+question for the issue thread, not something to force past or leave
+half-resolved: `git -C <worktree> merge --abort` first, so the worktree is
+left the way this step found it, then ask the way "Asking a question" above
+describes.
+
 Scratch files go in one place: `<worktree>/.polako-scratch/`. A diff too big
 to read from Bash output, a body file for `--body-file`, anything else
 throwaway — never the worktree root, and never `/tmp`, which this session

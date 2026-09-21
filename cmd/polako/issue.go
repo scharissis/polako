@@ -305,7 +305,7 @@ func (r *issueLoop) dispatchRun() (*pullRequest, error) {
 	// on the result event, so it can bound the next run and never the one
 	// that spent it.
 	if reason := overBudget(cfg, *r.tally); reason != "" {
-		return nil, r.parked(0, park(parkBudget, "%s", reason))
+		return nil, r.parked(0, r.budgetPark(reason))
 	}
 
 	// The label is durable, so "it is up after the run" does not by itself
@@ -451,8 +451,7 @@ func (a *runAttempt) classifyNoPR(runErr error, wasBlocked bool) (*pullRequest, 
 	// reason quotes them.
 	if errors.Is(runErr, errBudget) {
 		a.record(0, outcomeNothing)
-		return nil, a.parked(0, park(parkBudget, "%s",
-			cmp.Or(overBudget(cfg, *a.tally), runErr.Error())))
+		return nil, a.parked(0, a.budgetPark(cmp.Or(overBudget(cfg, *a.tally), runErr.Error())))
 	}
 	if errors.Is(runErr, errLimit) {
 		return a.waitOutLimit()
@@ -569,7 +568,7 @@ func (a *runAttempt) resumeCrash() (*pullRequest, error) {
 	// never makes, after sleeping -retry-wait for it, is a worse diagnosis
 	// than the park it is really doing.
 	if reason := overBudget(cfg, *a.tally); reason != "" {
-		return nil, a.parked(0, park(parkBudget, "%s", reason))
+		return nil, a.parked(0, a.budgetPark(reason))
 	}
 	progressed := a.rep.progressed()
 	a.ledger.noteCrashResume(progressed)
@@ -779,6 +778,45 @@ func (a *runAttempt) cleanExitDisposition(left leftWork) (bound, boundWhy string
 // named first rather than left for #390's misattribution to repeat.
 const fetchAuthParkReason = "polako's own fetch couldn't authenticate just before this run; " +
 	"fix git access in -dir (`ssh-add -l`, or an https remote), then remove needs-human"
+
+// budgetPark builds a budget park's error: cause is overBudget's own sentence
+// (or errBudget's, on the leg that classifies a run the cap killed mid-run),
+// and inspectLeftWork's account of what is on disk is appended the same way
+// parkCleanExit appends it — so the person clearing needs-human knows
+// whether to pick up a real change or start from scratch. #318 is the case
+// that named the gap (issue #466): a run killed at the cap left two commits
+// and 33 dirty files nowhere but its own disk, and the park comment named the
+// cap and nothing else.
+//
+// Unlike every other park, this one writes: a branch inspectLeftWork finds
+// with commits not on its remote-tracking ref gets pushed to origin,
+// best-effort, before the message is built. A budget park is exactly #318's
+// own case — killed by the clock, with nothing durable saying where the work
+// went — and pushing a branch nothing points a PR at yet is not a merge and
+// touches no default branch, so "nothing merges itself" holds; see "What
+// leaves the machine" in CLAUDE.md, which this is the reasoning for. A failed
+// push is folded into the reason rather than swallowed, since that is the one
+// case where the work really is nowhere but this disk.
+func (r *issueLoop) budgetPark(cause string) error {
+	left := inspectLeftWork(r.ctx, r.cfg, r.issue)
+	reason := cause
+	if left.commits > 0 && !left.pushed {
+		if _, err := git(r.ctx, r.cfg, "push", "origin", left.branch); err != nil {
+			reason += fmt.Sprintf("; tried to push branch %s to origin so the work "+
+				"is not only on this machine, but the push failed — push it by hand "+
+				"(`git push origin %s`), then remove needs-human", left.branch, left.branch)
+		} else {
+			left.pushed = true
+		}
+	}
+	if d := left.describe(); d != "" {
+		reason += "; " + d
+	}
+	if w := left.where(); w != "" {
+		return parkAside(parkBudget, w, "%s", reason)
+	}
+	return park(parkBudget, "%s", reason)
+}
 
 // parkCleanExit parks a clean exit under category, with left's summary of
 // what is on disk appended to reason for the person picking it up.

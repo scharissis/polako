@@ -471,18 +471,11 @@ func issueFinished(ctx context.Context, cfg config, issue int, branch string) (w
 // established the content is on the default branch, which is the only
 // guarantee this sweep makes.
 func unpushedReason(ctx context.Context, cfg config, branch string) string {
-	remoteSHA, err := git(ctx, cfg, "rev-parse", "--verify", "-q", "refs/remotes/origin/"+branch)
-	if err != nil {
+	pushed, known := branchPushed(ctx, cfg, branch)
+	if !known || pushed {
 		return ""
 	}
-	localSHA, err := git(ctx, cfg, "rev-parse", branch)
-	if err != nil {
-		return ""
-	}
-	if strings.TrimSpace(string(remoteSHA)) != strings.TrimSpace(string(localSHA)) {
-		return fmt.Sprintf("has commits not pushed to origin/%s", branch)
-	}
-	return ""
+	return fmt.Sprintf("has commits not pushed to origin/%s", branch)
 }
 
 // samePath reports whether a and b name the same location on disk, resolving
