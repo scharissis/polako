@@ -140,15 +140,26 @@ func applySetupFiles(ctx context.Context, prompt *setupPrompt, cfg config, rows 
 		return rows
 	}
 	if pr != nil && pr.State != "MERGED" {
-		verb := "already proposed"
+		// prForBranch fetches no file list, so this can't say which of the
+		// wanted items the open PR actually holds — a rerun that now also
+		// wants CLAUDE.md, say, would otherwise be told it's "already
+		// proposed" when it isn't. Say the PR itself is open instead, and
+		// tell the human what to do about it; that self-heals once they
+		// merge or close it.
+		verb := "a setup PR is already proposed"
 		if pr.State == "CLOSED" {
-			verb = "already proposed, then closed without merging"
+			verb = "a setup PR was already proposed, then closed without merging"
 		}
-		fmt.Fprintf(prompt.out, "  setup PR %s: %s\n", verb, pr.URL)
-		for idx, on := range map[int]bool{gitignoreIdx: want.gitignore, claudeIdx: want.claudeMd, visionIdx: want.scaffold} {
-			if idx >= 0 && on {
-				rows[idx].detail = verb + ": " + pr.URL
-			}
+		detail := verb + " — merge or close it, then rerun: " + pr.URL
+		fmt.Fprintf(prompt.out, "  %s: %s\n", verb, pr.URL)
+		if gitignoreIdx >= 0 && want.gitignore {
+			rows[gitignoreIdx].detail = detail
+		}
+		if claudeIdx >= 0 && want.claudeMd {
+			rows[claudeIdx].detail = detail
+		}
+		if visionIdx >= 0 && want.scaffold {
+			rows[visionIdx].detail = detail
 		}
 		return rows
 	}
