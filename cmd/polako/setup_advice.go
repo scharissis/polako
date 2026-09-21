@@ -87,7 +87,8 @@ func setupBranchProtectionRow(ctx context.Context, cfg config, reposOK, gitOK bo
 		return readBranchProtection(ctx, cfg, branch)
 	})
 	if err != nil {
-		return setupRow{name: name, status: setupUnknown, detail: fmt.Sprintf("could not read (%v)", err)}
+		return setupRow{name: name, status: setupUnknown,
+			detail: fmt.Sprintf("could not read %s's branch protection (%v) — is gh authenticated?", branch, err)}
 	}
 	switch state {
 	case branchProtectionOn:
@@ -133,7 +134,8 @@ func setupDeleteBranchOnMergeRow(ctx context.Context, cfg config, reposOK bool) 
 		return readDeleteBranchOnMerge(ctx, cfg)
 	})
 	if err != nil {
-		return setupRow{name: name, status: setupUnknown, detail: fmt.Sprintf("could not read (%v)", err)}
+		return setupRow{name: name, status: setupUnknown,
+			detail: fmt.Sprintf("could not read the repository's setting (%v) — is gh authenticated?", err)}
 	}
 	if !result.known {
 		return setupRow{name: name, status: setupUnknown, detail: "this gh does not report deleteBranchOnMerge"}
