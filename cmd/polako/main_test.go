@@ -3492,24 +3492,28 @@ func TestEnvDefaultsRejectAValueTheFlagCannotParse(t *testing.T) {
 	}
 }
 
-// The three flags that are actions rather than preferences. POLAKO_VERSION
+// The four flags that are actions rather than preferences. POLAKO_VERSION
 // is what a Dockerfile or CI job pins an install with, POLAKO_DRY_RUN is what
-// an operator exports to preview one repository and forgets, and POLAKO_APPLY
-// is that same risk mirrored onto `tidy`. Honouring any of them would turn a
-// later run into something other than what its operator typed that day: a
-// drain that prints and exits 0 without touching the backlog, for the first
-// two, or a `tidy` that quietly deletes worktrees and branches nobody meant
-// to run live, for the third.
+// an operator exports to preview one repository and forgets, POLAKO_APPLY
+// is that same risk mirrored onto `tidy`, and POLAKO_YES mirrors it again
+// onto `setup -apply`. Honouring any of them would turn a later run into
+// something other than what its operator typed that day: a drain that prints
+// and exits 0 without touching the backlog, for the first two, a `tidy` that
+// quietly deletes worktrees and branches nobody meant to run live, for the
+// third, or a `setup -apply` that writes every label without asking, for the
+// fourth.
 func TestEnvDefaultsIgnoreTheActionFlags(t *testing.T) {
 	t.Setenv("POLAKO_VERSION", "0.6.0")
 	t.Setenv("POLAKO_DRY_RUN", "1")
 	t.Setenv("POLAKO_APPLY", "1")
+	t.Setenv("POLAKO_YES", "1")
 
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	showVersion := fs.Bool("version", false, "")
 	dry := fs.Bool("dry-run", false, "")
 	apply := fs.Bool("apply", false, "")
+	yes := fs.Bool("yes", false, "")
 	if err := applyEnvDefaults(fs); err != nil {
 		t.Fatalf("applyEnvDefaults: %v", err)
 	}
@@ -3521,5 +3525,8 @@ func TestEnvDefaultsIgnoreTheActionFlags(t *testing.T) {
 	}
 	if *apply {
 		t.Error("-apply must not be settable from the environment")
+	}
+	if *yes {
+		t.Error("-yes must not be settable from the environment")
 	}
 }

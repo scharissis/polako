@@ -351,7 +351,7 @@ happens when it breaks something at 3am.
 | [docs/behaviour.md](docs/behaviour.md) | What polako does when a run crashes, an issue stalls, a PR goes red, or it needs a human. FAQ at the bottom. |
 | [docs/install.md](docs/install.md) | Every install path, `polako update` and its flags, pinning, and using it on another project. |
 | [docs/reference.md](docs/reference.md) | Every flag for `work`, `plan`, `health`, `status` and `tidy`, plus `-dry-run`, `-notify`, `-remote` and environment defaults. |
-| [docs/setup.md](docs/setup.md) | `polako setup`, the read-only report on whether a repository is ready. |
+| [docs/setup.md](docs/setup.md) | `polako setup`, the report on whether a repository is ready, and `-apply` to fix what it's missing. |
 | [docs/run-data.md](docs/run-data.md) | What each run records (`work`, `plan` and `health` alike), spending caps, and the `polako stats` report. |
 | [docs/security.md](docs/security.md) | The threat model, the tool allowlist, the `-label` gate, and what leaves your machine. |
 | [docs/hardening.md](docs/hardening.md) | Wrapping a shift in an egress firewall of your own, and why polako does not ship one. |

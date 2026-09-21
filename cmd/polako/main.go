@@ -220,7 +220,7 @@ func dispatchVerb() bool {
 		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 		defer stop()
 		rpt := newReport(isTerminal(os.Stdout))
-		runReport("setup", func() error { return runSetup(ctx, os.Args[2:], os.Stdin, os.Stdout, rpt) })
+		runReport("setup", func() error { return runSetup(ctx, os.Args[2:], os.Stdin, isTerminal(os.Stdin), os.Stdout, rpt) })
 	case "version", "-version", "--version":
 		// Reachable without a verb, because it is what an operator asks
 		// exactly when they are unsure what they are running.

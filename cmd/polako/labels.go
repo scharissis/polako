@@ -77,3 +77,12 @@ func labelExists(ctx context.Context, cfg config, name string) (bool, error) {
 func isNotFoundError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "HTTP 404")
 }
+
+// isAlreadyExistsError reports whether ensureLabel's own create failed
+// because the label was already there — gh's own wording for it, matched
+// case-insensitively since exact casing isn't documented. Not a write
+// failure to report: the label exists, which is exactly what the create
+// wanted.
+func isAlreadyExistsError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "already exists")
+}

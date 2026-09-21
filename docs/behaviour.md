@@ -432,11 +432,11 @@ still takes the epic's model. A child overrides with its own label, or with
 `model:default` to escape the epic and use the account default. One hop only,
 no grandparents.
 
-polako never creates these labels: applying one for the first time creates it
-in the same GitHub gesture, and only someone with triage rights can. The prefix
-matches case-insensitively. Two labels of one family, or a typo like
-`effort:medim`, warns and falls through rather than guessing. A label that
-fails to read falls through too — it is a preference, not a gate.
+polako never creates these labels, except `setup -apply -policy-labels`:
+applying one for the first time otherwise creates it in the same GitHub gesture,
+and only someone with triage rights can. The prefix matches case-insensitively.
+Two of one family, or a typo like `effort:medim`, warns rather than guesses. A
+label that fails to read falls through too — it is a preference, not a gate.
 
 ## Account-level stops
 

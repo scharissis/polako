@@ -107,7 +107,7 @@ func TestLabelGateRefusesOnlyAMissingLabel(t *testing.T) {
 	if err == nil {
 		t.Fatal("labelGate let a label the repository does not have through")
 	}
-	for _, want := range []string{"typo", "gh label create typo"} {
+	for _, want := range []string{"typo", "gh label create typo", "polako setup -apply -label typo"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal does not mention %q:\n%s", want, err)
 		}

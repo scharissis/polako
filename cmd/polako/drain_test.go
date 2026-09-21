@@ -58,6 +58,11 @@ type ghState struct {
 	// only by `setup`. nil stands for true — the common case, and the one
 	// every fixture predating this field describes without setting it.
 	IssuesEnabled *bool `json:"issues_enabled"`
+	// DenyLabelCreate is a token with no write access to the repository:
+	// `label create` fails every time, the way gh's own HTTP 403 does, so
+	// applySetup's test can prove its refusal message never repeats the raw
+	// gh stderr.
+	DenyLabelCreate bool `json:"deny_label_create"`
 	// NoIssuesEnabledField is a gh too old for `hasIssuesEnabled`: it rejects
 	// the whole `repo view --json` set that names it, before it asks GitHub
 	// anything, the same shape OldGh and NoParentField already take for their
@@ -571,6 +576,11 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 		return "", true, 0
 
 	case "label create":
+		if st.DenyLabelCreate {
+			fmt.Fprintf(os.Stderr, "HTTP 403: Resource not accessible by integration "+
+				"(https://api.github.com/repos/%s/labels)\n", st.Repo)
+			return "", false, 1
+		}
 		if slices.Contains(st.Labels, at(2)) {
 			fmt.Fprintf(os.Stderr, "label already exists: %s\n", at(2))
 			return "", false, 1
