@@ -264,7 +264,13 @@ var refusalPartsRe = regexp.MustCompile(`(?i)the following parts? requires? appr
 
 // refusalParts splits the CLI's own part list — its own text, not a shell
 // parse; see splitCommand's (notify.go) own refusal to become one. Nil when
-// the refusal text does not name any parts.
+// the refusal text does not name any parts. The split is a plain ", ", so a
+// part whose own text happens to contain ", " (a quoted string with a comma
+// in it) splits wrong — the CLI's own text gives no escaping to parse
+// against, so no client-side split can fully disambiguate it; a wrong split
+// still yields refusalPart entries, just with the join point in the wrong
+// place, and the raw refusal text always survives in the correlated
+// tool_use's own command besides.
 func refusalParts(text string) []string {
 	m := refusalPartsRe.FindStringSubmatch(strings.TrimSpace(text))
 	if m == nil {
