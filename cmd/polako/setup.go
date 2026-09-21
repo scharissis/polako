@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
 type setupOptions struct {
@@ -182,8 +183,10 @@ func setupFailed(rows []setupRow) bool {
 // readSetup runs every check in the order the report renders them: the three
 // binaries first, since nothing past them can run without one; then what gh
 // can say about the repository and whether Issues are on; then the
-// independent git and claude checks; then sub-issue support and the labels,
-// both of which need gh and the repository resolved. It hands back cfg too,
+// independent git and claude checks; then sub-issue support, the tree checks
+// ticket 5 added (build tools, issue templates, CI workflow, branch
+// protection, delete-branch-on-merge), and the labels, the last two of which
+// need gh and the repository resolved. It hands back cfg too,
 // with cfg.repo/cfg.ghRepo filled in when -repo was not given — the caller's
 // own copy stops at whatever setupConfig resolved, and renderSetup's header
 // needs the name this function discovered, not that earlier, possibly-empty
@@ -230,6 +233,11 @@ func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []se
 	rows = append(rows, setupVisionRow(cfg))
 	rows = append(rows, setupPluginRow(ctx, cfg, claudeOK))
 	rows = append(rows, setupSubIssueRow(ctx, cfg, reposOK))
+	rows = append(rows, setupBuildToolsRow(cfg))
+	rows = append(rows, setupTemplatesRow(cfg))
+	rows = append(rows, setupCIWorkflowRow(cfg))
+	rows = append(rows, setupBranchProtectionRow(ctx, cfg, reposOK, gitOK))
+	rows = append(rows, setupDeleteBranchOnMergeRow(ctx, cfg, reposOK))
 	defs := setupLabelDefs(cfg, policyLabels)
 	rows = append(rows, setupLabelRows(ctx, cfg, reposOK, defs)...)
 	return cfg, rows, defs
@@ -328,15 +336,34 @@ func setupOriginHeadRow(ctx context.Context, cfg config, gitOK bool) setupRow {
 	if !gitOK {
 		return setupRow{name: name, status: setupUnknown, detail: "git isn't on PATH"}
 	}
-	if _, err := git(ctx, cfg, "rev-parse", "--git-dir"); err != nil {
-		return setupRow{name: name, status: setupMissing, required: true,
-			detail: fmt.Sprintf("-dir %s is not a git checkout", cfg.dir)}
-	}
-	if _, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short"); err != nil {
+	if _, notCheckout, err := originDefaultBranch(ctx, cfg); err != nil {
+		if notCheckout {
+			return setupRow{name: name, status: setupMissing, required: true,
+				detail: fmt.Sprintf("-dir %s is not a git checkout", cfg.dir)}
+		}
 		return setupRow{name: name, status: setupMissing, required: true,
 			detail: "run `git remote set-head origin -a`"}
 	}
 	return setupRow{name: name, status: setupOK}
+}
+
+// originDefaultBranch resolves origin's default branch name — stripped of
+// its "origin/" prefix — via the same two git calls setupOriginHeadRow's own
+// doc comment already draws a distinction between: notCheckout true means
+// -dir isn't a git checkout at all, false with a non-nil err means it is,
+// but origin/HEAD isn't set (`git remote set-head origin -a` fixes it).
+// Shared with setupBranchProtectionRow (setup_advice.go), which needs the
+// branch name itself, so the two rows don't each spawn their own git
+// subprocess for the same question.
+func originDefaultBranch(ctx context.Context, cfg config) (branch string, notCheckout bool, err error) {
+	if _, err := git(ctx, cfg, "rev-parse", "--git-dir"); err != nil {
+		return "", true, err
+	}
+	out, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short")
+	if err != nil {
+		return "", false, err
+	}
+	return strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/"), false, nil
 }
 
 // setupPluginRow reuses pluginVersion and skewComparison — the same reads
@@ -397,11 +424,15 @@ func renderSetup(w io.Writer, rpt report, cfg config, rows []setupRow) {
 
 // suggestedWorkLine is the report's last line: the `polako work` invocation
 // this repository is ready (or not yet ready) for, -label included whenever
-// one was named so the suggestion matches what was actually checked.
+// one was named and -add-tools included whenever the build-tools row found
+// something uncovered, so the suggestion matches what was actually checked.
 func suggestedWorkLine(cfg config) string {
 	cmd := fmt.Sprintf("polako work -dir %s", cfg.dir)
 	if cfg.label != "" {
 		cmd += " -label " + cfg.label
+	}
+	if tools, err := missingBuildTools(cfg); err == nil && len(tools) > 0 {
+		cmd += " " + addToolsFlag(tools)
 	}
 	return cmd + " -dry-run"
 }

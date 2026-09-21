@@ -66,7 +66,8 @@ shift, and why that stays yours rather than a polako flag.
 triage permission or better, so it means a maintainer opts each issue in
 before the supervisor touches it. An outsider can still file an issue, just
 not start a run with it — unless a template's `labels:` key hands them the
-gate label on creation. Keep it out of your templates.
+gate label on creation. Keep it out of your templates; `polako setup` checks
+for this too (docs/setup.md) and fails its report if it finds one.
 
 ```bash
 polako work -label ready-for-claude

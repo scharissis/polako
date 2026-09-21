@@ -37,6 +37,18 @@ var labelTable = []labelDef{
 	{name: awaitingAnswerLabel, color: "FBCA04", description: "polako is waiting for an answer on this issue", required: true},
 }
 
+// labelTableNames is every name labelTable holds, in table order — the one
+// place setup_templates.go and its self-test (repo_test.go) each add a
+// gate label to, so a future addition to labelTable can't leave either
+// stale.
+func labelTableNames() []string {
+	names := make([]string, len(labelTable))
+	for i, l := range labelTable {
+		names[i] = l.name
+	}
+	return names
+}
+
 // labelByName looks up one label's definition. Every call site names one of
 // the three consts above, so a miss means this table fell out of sync with
 // main.go, not bad input — hence the panic rather than a second error path
@@ -76,6 +88,14 @@ func labelExists(ctx context.Context, cfg config, name string) (bool, error) {
 // exist" versus every other way an api call can fail.
 func isNotFoundError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "HTTP 404")
+}
+
+// isForbiddenError reports whether a gh api call failed because the token
+// can't reach the resource — branch protection is admin-only, so a token with
+// less than that gets a 403 rather than an answer. Matched the same way
+// isNotFoundError is: gh gives no separate exit code for it.
+func isForbiddenError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "HTTP 403")
 }
 
 // isAlreadyExistsError reports whether ensureLabel's own create failed

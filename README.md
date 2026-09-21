@@ -127,6 +127,15 @@ the by-hand commands.
 
 ## Try it
 
+Check the repository is ready first — what it has for polako and what's
+missing, read-only:
+
+```bash
+polako setup -dir ../my-project
+```
+
+See [docs/setup.md](docs/setup.md) for what it checks and `-apply`.
+
 Look first — `-dry-run` resolves the next issue and prints the command it
 would run, nothing else:
 

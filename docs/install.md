@@ -205,21 +205,10 @@ silently.
 ## Using it on another project
 
 Nothing here is tied to one repository or language — `-dir` points anywhere.
-The one thing worth tuning per project is the tool allowlist, because an
-unattended run stalls if a command it needs would raise a permission prompt.
-
-The default `-tools` set covers git, the handful of gh subcommands the skill
-uses (`gh issue view`/`comment`, `gh pr create`, plus read-only `gh pr
-view`/`list`/`diff`), the tools the skill itself needs (`Read`, `Write`,
-`Edit`, `Glob`, `Grep`, `Skill`, `TodoWrite`), and the usual entry points for
-npm/pnpm/yarn, Go, Cargo, Make, Python/uv/pytest, dotnet, Maven and Gradle.
-One more entry is added per run and isn't in `-tools`: the run may add and
-remove labels on the single issue it was dispatched for, which is how it raises
-`awaiting-answer`. For anything else, widen it rather than replacing it:
-
-```bash
-polako work -add-tools "Bash(bazel:*),Bash(just:*)"
-```
+Run `polako setup -dir ../my-project` first: it reports what the repository
+has for polako and what's missing, including any build tool the default
+allowlist doesn't cover, and prints the `-add-tools` value to add it — see
+[docs/setup.md](setup.md).
 
 Two other knobs matter when moving between repos:
 
