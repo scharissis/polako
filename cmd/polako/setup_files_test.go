@@ -172,3 +172,45 @@ func TestApplySetupFilesNothingLeftToAddAfterAMerge(t *testing.T) {
 		t.Errorf("output = %q, want it to say there was nothing left to add", out.String())
 	}
 }
+
+func TestRepoFromOriginURLParsesEveryCloneShape(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		url  string
+		want string
+	}{
+		{"https://github.com/scharissis/polako.git", "scharissis/polako"},
+		{"https://github.com/scharissis/polako", "scharissis/polako"},
+		{"git@github.com:scharissis/polako.git", "scharissis/polako"},
+		{"ssh://git@github.com/scharissis/polako.git", "scharissis/polako"},
+	}
+	for _, c := range cases {
+		_, checkout := upstream(t)
+		gitAt(t, checkout, "remote", "set-url", "origin", c.url)
+		cfg := config{dir: checkout}
+		got, err := repoFromOriginURL(context.Background(), cfg)
+		if err != nil || got != c.want {
+			t.Errorf("repoFromOriginURL(%q) = %q, %v, want %q, nil", c.url, got, err, c.want)
+		}
+	}
+}
+
+// -repo naming a different repository than -dir is a checkout of is a real,
+// documented combination for the read-only report ("instead of whichever
+// -dir is a checkout of") — but the write path operates on -dir's own local
+// origin, so it has to refuse rather than silently push a branch to the
+// wrong repository.
+func TestProposeSetupFilesRefusesWhenDirAndRepoDisagree(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	gitAt(t, checkout, "remote", "set-url", "origin", "https://github.com/someone/unrelated.git")
+	cfg := config{dir: checkout, repo: "example/repo", ghRepo: "example/repo", env: gitIdentity}
+
+	_, err := proposeSetupFiles(context.Background(), cfg)
+	if err == nil || !strings.Contains(err.Error(), "someone/unrelated") || !strings.Contains(err.Error(), "example/repo") {
+		t.Errorf("proposeSetupFiles err = %v, want it to name both someone/unrelated and example/repo", err)
+	}
+	if got := gitAt(t, checkout, "worktree", "list", "--porcelain"); strings.Contains(got, "branch refs/heads/"+setupBranch) {
+		t.Errorf("worktree list = %q, a repo mismatch must not create a worktree", got)
+	}
+}

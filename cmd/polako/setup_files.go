@@ -128,6 +128,15 @@ func applySetupFiles(ctx context.Context, prompt *setupPrompt, cfg config, rows 
 // runs in the worktree, through a copy of cfg pointed at its path. Returns
 // the PR's URL, or "" when there was nothing left to add (see the caller).
 func proposeSetupFiles(ctx context.Context, cfg config) (string, error) {
+	// -repo lets the read-only report check a repository -dir isn't a
+	// checkout of ("instead of whichever -dir is a checkout of" — setup.go's
+	// own -repo flag doc). Every git write below operates on cfg.dir's local
+	// origin, not cfg.repo, so that combination has to be refused here or it
+	// silently pushes a branch to a repository the operator never named.
+	if local, err := repoFromOriginURL(ctx, cfg); err == nil && local != "" && !strings.EqualFold(local, cfg.repo) {
+		return "", fmt.Errorf("-dir is a checkout of %s, not %s (-repo) — the file-proposal write needs "+
+			"-dir to be a checkout of the repository being set up", local, cfg.repo)
+	}
 	if _, err := git(ctx, cfg, "fetch", "origin", "--quiet"); err != nil {
 		return "", fmt.Errorf("fetching origin: %w", err)
 	}
@@ -179,6 +188,38 @@ func proposeSetupFiles(ctx context.Context, cfg config) (string, error) {
 		return "", fmt.Errorf("opening the PR: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// repoFromOriginURL extracts "owner/repo" from cfg.dir's local origin
+// remote — the same shapes GitHub hands out its own clone URLs in:
+// https://host/owner/repo(.git), ssh://git@host/owner/repo(.git), and the
+// scp-like git@host:owner/repo(.git). "", nil for anything else, including a
+// local filesystem path (a bare repo on disk, as every test fixture here
+// uses): never a guess, since the caller only acts on a positive, confident
+// mismatch.
+func repoFromOriginURL(ctx context.Context, cfg config) (string, error) {
+	out, err := git(ctx, cfg, "remote", "get-url", "origin")
+	if err != nil {
+		return "", err
+	}
+	url := strings.TrimSuffix(strings.TrimSpace(string(out)), ".git")
+	switch {
+	case strings.HasPrefix(url, "https://"), strings.HasPrefix(url, "http://"), strings.HasPrefix(url, "ssh://"):
+		_, url, _ = strings.Cut(url, "://")
+		if _, rest, ok := strings.Cut(url, "@"); ok {
+			url = rest // ssh://git@host/owner/repo -> host/owner/repo
+		}
+	case strings.Contains(url, "@") && strings.Contains(url, ":"):
+		_, rest, _ := strings.Cut(url, "@")
+		url = strings.Replace(rest, ":", "/", 1) // git@host:owner/repo -> host/owner/repo
+	default:
+		return "", nil // a local path, not a hosted remote — nothing to compare
+	}
+	parts := strings.Split(strings.Trim(url, "/"), "/")
+	if len(parts) < 3 {
+		return "", nil
+	}
+	return parts[len(parts)-2] + "/" + parts[len(parts)-1], nil
 }
 
 // setupWorktree finds or creates the worktree proposeSetupFiles writes in.
