@@ -35,6 +35,8 @@ func TestClaudeMdCheckCommand(t *testing.T) {
 		{"Makefile test target wins over go.mod", map[string]string{
 			"Makefile": "test:\n\tgo test ./...\n", "go.mod": "module example\n",
 		}, "make test"},
+		{"GNUmakefile test target", map[string]string{"GNUmakefile": "test:\n\tgo test ./...\n"}, "make test"},
+		{"lowercase makefile test target", map[string]string{"makefile": "test:\n\tgo test ./...\n"}, "make test"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

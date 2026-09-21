@@ -65,12 +65,21 @@ func fileExistsIn(dir, rel string) bool {
 // body of some other target.
 var makefileTestTargetRe = regexp.MustCompile(`(?m)^test\s*:`)
 
+// make itself tries these three names in this order (GNU make's own
+// manual); a repo can use any of them.
+var makefileNames = []string{"Makefile", "makefile", "GNUmakefile"}
+
 func makefileHasTestTarget(dir string) bool {
-	b, err := os.ReadFile(filepath.Join(dir, "Makefile"))
-	if err != nil {
-		return false
+	for _, name := range makefileNames {
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		if makefileTestTargetRe.Match(b) {
+			return true
+		}
 	}
-	return makefileTestTargetRe.Match(b)
+	return false
 }
 
 func packageJSONHasTestScript(dir string) bool {
