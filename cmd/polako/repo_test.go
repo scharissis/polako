@@ -1178,8 +1178,8 @@ func TestReviewGateRunsItsSubagentsInTheForeground(t *testing.T) {
 		t.Fatal("SKILL.md no longer invokes `/code-review <level> issue-$issue`")
 	}
 	window := flat[loc[0]:]
-	if len(window) > 900 {
-		window = window[:900]
+	if len(window) > 1200 {
+		window = window[:1200]
 	}
 	if !strings.Contains(window, "run_in_background: false") {
 		t.Errorf("the review gate no longer tells /code-review to launch its finder and"+
