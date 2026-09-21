@@ -78,6 +78,14 @@ func isNotFoundError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "HTTP 404")
 }
 
+// isForbiddenError reports whether a gh api call failed because the token
+// can't reach the resource — branch protection is admin-only, so a token with
+// less than that gets a 403 rather than an answer. Matched the same way
+// isNotFoundError is: gh gives no separate exit code for it.
+func isForbiddenError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "HTTP 403")
+}
+
 // isAlreadyExistsError reports whether ensureLabel's own create failed
 // because the label was already there — gh's own wording for it, matched
 // case-insensitively since exact casing isn't documented. Not a write

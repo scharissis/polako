@@ -69,6 +69,19 @@ type ghState struct {
 	// own fields.
 	NoIssuesEnabledField bool `json:"no_issues_enabled_field"`
 
+	// DeleteBranchOnMerge is what `deleteBranchOnMerge` reports on `repo
+	// view`, read only by `setup`'s advice row.
+	DeleteBranchOnMerge bool `json:"delete_branch_on_merge"`
+	// NoDeleteBranchOnMergeField is a gh too old for `deleteBranchOnMerge` —
+	// the same rejection shape NoIssuesEnabledField takes for its own field.
+	NoDeleteBranchOnMergeField bool `json:"no_delete_branch_on_merge_field"`
+	// BranchProtected and NoAdminAccess are setup's branch-protection row:
+	// `gh api .../branches/<default>/protection` answers 200 (protected), 404
+	// (BranchProtected false, the default) or 403 (NoAdminAccess true — a
+	// token without admin can't tell either way).
+	BranchProtected bool `json:"branch_protected"`
+	NoAdminAccess   bool `json:"no_admin_access"`
+
 	// FailReads is a network that has not come back yet after the host woke:
 	// the next N calls of a kind ("issue list", "pr list") fail the way gh does
 	// when it cannot reach GitHub, and then it answers normally again. Keyed by
@@ -309,6 +322,9 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 		if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "contents") }) {
 			return answerContents(st, args)
 		}
+		if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "/protection") }) {
+			return answerBranchProtection(st)
+		}
 		if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "/labels/") }) {
 			call = "api label"
 		} else {
@@ -355,15 +371,23 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			fmt.Fprintf(os.Stderr, "unknown JSON field: %q\n", "hasIssuesEnabled")
 			return "", false, 1
 		}
+		if st.NoDeleteBranchOnMergeField && strings.Contains(fields, "deleteBranchOnMerge") {
+			fmt.Fprintf(os.Stderr, "unknown JSON field: %q\n", "deleteBranchOnMerge")
+			return "", false, 1
+		}
 		vis := st.Visibility
 		if vis == "" {
 			vis = "PRIVATE"
 		}
-		if !strings.Contains(fields, "hasIssuesEnabled") {
-			return fmt.Sprintf(`{"nameWithOwner":%q,"visibility":%q}`, st.Repo, vis), false, 0
+		parts := []string{fmt.Sprintf(`"nameWithOwner":%q`, st.Repo), fmt.Sprintf(`"visibility":%q`, vis)}
+		if strings.Contains(fields, "hasIssuesEnabled") {
+			enabled := st.IssuesEnabled == nil || *st.IssuesEnabled
+			parts = append(parts, fmt.Sprintf(`"hasIssuesEnabled":%v`, enabled))
 		}
-		enabled := st.IssuesEnabled == nil || *st.IssuesEnabled
-		return fmt.Sprintf(`{"nameWithOwner":%q,"visibility":%q,"hasIssuesEnabled":%v}`, st.Repo, vis, enabled), false, 0
+		if strings.Contains(fields, "deleteBranchOnMerge") {
+			parts = append(parts, fmt.Sprintf(`"deleteBranchOnMerge":%v`, st.DeleteBranchOnMerge))
+		}
+		return "{" + strings.Join(parts, ",") + "}", false, 0
 
 	case "issue list":
 		if flagVal("--search") != "" {
@@ -682,6 +706,22 @@ func answerContents(st *ghState, args []string) (out string, changed bool, code 
 	}
 	return fmt.Sprintf(`{"name":"scharissis","plugins":[{"name":%q,"source":{"source":"github",`+
 		`"repo":%q,"ref":%q}}]}`, pluginName, updateRepo, st.PublishedRef), false, 0
+}
+
+// answerBranchProtection is setup's own branch-protection row: 200 with an
+// empty object when BranchProtected, 403 when NoAdminAccess (checked first —
+// a token without admin gets that regardless of the real state), 404
+// otherwise — the three answers readBranchProtection distinguishes.
+func answerBranchProtection(st *ghState) (out string, changed bool, code int) {
+	if st.NoAdminAccess {
+		fmt.Fprintln(os.Stderr, "HTTP 403: Resource not accessible by integration")
+		return "", false, 1
+	}
+	if !st.BranchProtected {
+		fmt.Fprintln(os.Stderr, "gh: Branch not protected (HTTP 404)")
+		return "", false, 1
+	}
+	return "{}", false, 0
 }
 
 func answerMilestones(st *ghState, args []string) (out string, changed bool, code int) {
