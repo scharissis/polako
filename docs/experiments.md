@@ -65,6 +65,8 @@ happened; if that is most of the batch, the comparison is not one.
 | `size-backfill` | Cost and park rate differ enough by size to be worth routing on, and enough closed issues carry an `Estimate:` line to make the comparison real. | None — `gh issue list --state closed --json number,body`, an `Estimate:` regex in `jq`, joined to the metrics JSONL on issue number. | *pending* — gates a triage run for unsized issues (never filed as an issue; needs this row plus a `model-by-size` saving first). | *open* |
 | `long-tail` | The ≥120-turn runs spend their turns somewhere nameable — the review gate, test loops, exploration — rather than nowhere in particular. | None — reopen those runs' transcripts (`claude --resume <session>`) and records, and read where the turns go. | *pending* — gates a single awaited subagent trial to keep the main loop small (never filed as an issue; needs this row to say where the tail's turns actually go). | *open* |
 | `visual-evidence-on` | Evidence adds little to `$/merged` on a frontend repo and causes zero parks. | Default on against `-visual-evidence=false`, same repo. | *pending* — compare cost per merged PR and the park rate between the two tags. | *open* |
+| `evidence-preview` | Shots from `build` plus `preview` are steadier than shots from `dev`. | Skill wording: prefer `preview` when the script exists, against today's `dev`-only wording. | *pending* — compare the shot failure/retry rate between the two tags. | *open* |
+| `evidence-webserver` | Where the repo has Playwright, a scratch `webServer` config beats background-and-stop. | Skill wording for that rung, against today's background-and-stop lifecycle. | *pending* — compare the shot failure/retry rate and turns spent in the capture step between the two tags. | *open* |
 
 The `remediation-sonnet` and `stall-30m` rows come from
 `docs/continuous-improvement.md`, pillar 4, which chose them because the
@@ -80,9 +82,16 @@ design in [behaviour.md](behaviour.md#which-model-and-effort-a-run-gets);
 `remediation-effort-medium` waited on the `-remediation-effort` knob and could
 not be filed until it shipped (#365).
 
-The `visual-evidence-on` row comes from `docs/plans/visual-evidence.md`'s own
-Experiments table — filed here once ticket 4 (#404) shipped the capture the
-row measures.
+The `visual-evidence-on`, `evidence-preview` and `evidence-webserver` rows
+come from `docs/plans/visual-evidence.md` (retired: every issue it proposed —
+#399's six children, #400-#405 — closed). Its durable design already lives in
+`skills/implement-issue/SKILL.md`'s Evidence ref section, `docs/security.md`
+and `docs/reference.md`; these three rows are the only part of the plan that
+was still open. `visual-evidence-on` was filed here once ticket 4 (#404)
+shipped the capture it measures; the other two move here with the retirement,
+unfiled as batches. Ticket 7, an optional remediation re-shoot, was never
+filed — it waits on a ledger row asking for it, the same way `model-by-size`
+gates the two tickets below.
 
 The `model-by-size`, `size-backfill` and `long-tail` rows come from
 `docs/plans/tiered-orchestration.md` (retired: every issue it proposed —

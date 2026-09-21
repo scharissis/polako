@@ -50,9 +50,9 @@ const docsBudget = 500
 //
 // behaviour.md's ceiling moved again in issue #404: it was already at 501
 // with no slack, and documenting that a visual change's PR now carries an
-// actual screenshot — the thing docs/plans/visual-evidence.md's earlier
-// tickets only staged a channel for — had no existing paragraph on offer to
-// cut instead.
+// actual screenshot — the thing the earlier tickets of that same epic, #399
+// (#400-#403), only staged a channel for — had no existing paragraph on
+// offer to cut instead.
 //
 // behaviour.md's ceiling moved again in issue #432: it was already at 513
 // with no slack, and documenting that a permission park's reason now
