@@ -692,6 +692,27 @@ func TestReviewGateNamesTheBranch(t *testing.T) {
 	}
 }
 
+// codeReviewInvocationWindow returns flat (already whitespace-flattened
+// SKILL.md text) starting at the `/code-review <level> issue-$issue`
+// invocation, capped to capLen bytes — shared by every test below that
+// checks what accompanies that invocation, so a change to the invocation's
+// own syntax only needs fixing in one place. The level is no longer literal
+// — issue #225 scales it to the diff size — so the match is any single level
+// token.
+func codeReviewInvocationWindow(t *testing.T, flat string, capLen int) string {
+	t.Helper()
+	loc := regexp.MustCompile(`/code-review \S+ issue-\$issue`).FindStringIndex(flat)
+	if loc == nil {
+		t.Fatal("SKILL.md no longer invokes `/code-review <level> issue-$issue`;" +
+			" the mandatory review gate before a PR is gone")
+	}
+	window := flat[loc[0]:]
+	if len(window) > capLen {
+		window = window[:capLen]
+	}
+	return window
+}
+
 // Naming the branch aims what the review diffs. It does not aim where the
 // review's own forked agent and the finder subagents under it read and write:
 // they start in the session's cwd, the main checkout, and this skill never
@@ -709,17 +730,7 @@ func TestReviewGateNamesTheWorktree(t *testing.T) {
 	// fail a skill that is still correct — the same reason
 	// TestReviewGateDoesNotAutoApplyFixes moved off a line window.
 	flat := strings.Join(strings.Fields(skill), " ")
-	// The level is no longer literal — issue #225 scales it to the diff size —
-	// so match `/code-review <level> issue-$issue` for any single level token.
-	loc := regexp.MustCompile(`/code-review \S+ issue-\$issue`).FindStringIndex(flat)
-	if loc == nil {
-		t.Fatal("SKILL.md no longer invokes `/code-review <level> issue-$issue`;" +
-			" the mandatory review gate before a PR is gone")
-	}
-	window := flat[loc[0]:]
-	if len(window) > 320 {
-		window = window[:320]
-	}
+	window := codeReviewInvocationWindow(t, flat, 320)
 	if !strings.Contains(window, "<worktree>") {
 		t.Errorf("the review gate invokes /code-review without naming <worktree> alongside the"+
 			" branch, so its forked agent and the finder subagents under it stay in the session"+
@@ -1145,18 +1156,33 @@ func TestSkillSendsScratchFilesToTheScratchDir(t *testing.T) {
 			" no `rm` granted to delete it, it is one more file tidy counts as left work", scratchDir)
 	}
 
-	loc := regexp.MustCompile(`/code-review \S+ issue-\$issue`).FindStringIndex(flat)
-	if loc == nil {
-		t.Fatal("SKILL.md no longer invokes `/code-review <level> issue-$issue`")
-	}
-	window := flat[loc[0]:]
-	if len(window) > 600 {
-		window = window[:600]
-	}
+	window := codeReviewInvocationWindow(t, flat, 600)
 	if !strings.Contains(window, "<worktree>/"+scratchDir+"/") {
 		t.Errorf("the review gate invokes /code-review without telling it where scratch files go,"+
 			" so its agent dumps large diffs into the worktree root and the worktree can't be"+
 			" reclaimed after the merge:\n\t%s", window)
+	}
+}
+
+// Issue #494: the review agent's own finder and verifier subagents are one
+// level below the main run's own wait (#217, #372, #472) — backgrounded by
+// CLI default, they leave the review agent busy-polling (Bash: true,
+// ListAgents, sleep) and then asking each one to restate an answer it
+// already gave. #418 burned most of a 45-minute budget that way. Telling
+// /code-review to launch them in the foreground removes the wait entirely,
+// so it has to be in the same request as the worktree and scratch-dir
+// instructions.
+func TestReviewGateRunsItsSubagentsInTheForeground(t *testing.T) {
+	t.Parallel()
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+	flat := strings.Join(strings.Fields(skill), " ")
+
+	window := codeReviewInvocationWindow(t, flat, 1200)
+	if !strings.Contains(window, "run_in_background: false") {
+		t.Errorf("the review gate no longer tells /code-review to launch its finder and"+
+			" verifier subagents in the foreground (run_in_background: false) — without it"+
+			" they background by CLI default and the review agent busy-polls and asks each"+
+			" one to restate its answer, the waste issue #494 (and #418) found:\n\t%s", window)
 	}
 }
 
