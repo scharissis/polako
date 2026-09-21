@@ -3,9 +3,9 @@ description: >
   A run whose change is visual should show the change: a screenshot pushed to
   polako-evidence, embedded in the PR body by commit SHA. That pipeline shipped
   in tickets 3-6 (#402-#405) of the now-retired visual-evidence plan; this case
-  existed first so those tickets had something to grade against. The graders
-  below have not been re-run since #405 (before shots) merged to confirm they
-  now pass.
+  existed first so those tickets had something to grade against, and none of
+  the graders below has been re-run since to confirm it passes.
+  before_shot_precedes_first_edit's own criteria says more about the last one.
 prompt: /polako:implement-issue 1
 scaffold_script: scaffold.sh
 runs: 1
@@ -58,8 +58,8 @@ graders:
       A "before" screenshot was taken before the first Edit tool call touched
       index.html or style.css. This grader was expected to stay red until
       ticket 6 (#405) shipped the before shot — v1's capture (ticket 4) was
-      after-only by design. #405 has merged, but this case has not been
-      re-run to confirm the grader now passes.
+      after-only by design. #405 merged, so this is the one to check first
+      on the next run of this case.
 
   - type: tool_used
     tool: Skill
