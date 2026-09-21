@@ -98,7 +98,8 @@ operator learns one gap per failed run.
 **Shape.** A new verb on `tidy`'s shape that reads and prints, nothing else.
 
 - `cmd/polako/setup.go`: `runSetup(ctx, args, in, out, rpt)` on
-  `flag.NewFlagSet`, `applyEnvDefaults`, `errFlagsReported`. Flags `-dir`,
+  `flag.NewFlagSet`, `applyEnvDefaults`, `errFlagsReported` — ticket 3 adds
+  an `isTTY bool` parameter alongside `in`. Flags `-dir`,
   `-repo`, `-label`, in the `XxxVar(&target, "name"` form `declaredFlags`
   needs. Dispatch in `main()` through `runReport` with its own
   `signal.NotifyContext`. `main` is a line under `funcBudget`

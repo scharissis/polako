@@ -1,8 +1,9 @@
 # Getting a repository ready: `polako setup`
 
-`polako setup` is a read-only readiness report. It doesn't write anything —
-it prints what the repository has for polako, what it's missing, and the
-`polako work` line to run once it looks ready.
+`polako setup` is a readiness report: it prints what the repository has for
+polako, what it's missing, and the `polako work` line to run once it looks
+ready. By default it's read-only; `-apply` is the one flag that writes — see
+below.
 
 ```bash
 polako setup -dir ../my-project
@@ -66,7 +67,7 @@ in a script.
 | `-label` | *(none)* | Gate label `polako work -label` would use — checked as one more row, and named in the suggested command at the end of the report. |
 | `-apply` | off | Create the labels the report found missing, asking `[Y/n]` first — see below. |
 | `-yes` | off | With `-apply`, take the default answer for every step without asking. Required when stdin isn't a terminal. |
-| `-policy-labels` | off | With `-apply`, also offer the `model:`/`effort:` policy labels — tier aliases only. |
+| `-policy-labels` | off | Show the `model:`/`effort:` policy labels in the report too, and, with `-apply`, offer to create them — tier aliases only. |
 
 They take environment defaults the same way every other verb's flags do,
 except `-apply` and `-yes`: those are actions, not preferences, so a

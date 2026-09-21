@@ -318,7 +318,7 @@ func verbUsage(w io.Writer) {
 			"  stats   report on the run data already recorded (local, read-only)\n"+
 			"  tidy    reclaim the worktrees and branches of finished issues (dry-run by default)\n"+
 			"  update  bring the installed plugin and binary to the published release\n"+
-			"  setup   report whether a repository is ready for polako (read-only)\n\n"+
+			"  setup   report whether a repository is ready for polako (read-only by default)\n\n"+
 			"Run 'polako <verb> -h' for that verb's flags.\n")
 }
 

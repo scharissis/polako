@@ -53,7 +53,8 @@ func runSetup(ctx context.Context, args []string, in io.Reader, isTTY bool, out 
 	fs.BoolVar(&opt.yes, "yes", false,
 		"with -apply, take the default answer for every step without asking — required when stdin isn't a terminal")
 	fs.BoolVar(&opt.policyLabels, "policy-labels", false,
-		"with -apply, also offer the model:/effort: policy labels (tier aliases only) — see docs/behaviour.md")
+		"show the model:/effort: policy labels in the report too, and, with -apply, offer to create them "+
+			"(tier aliases only) — see docs/behaviour.md")
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako setup [flags]\n\n"+
 			"Prints a read-only readiness report: what this repository has for polako\n"+
@@ -88,11 +89,17 @@ func runSetup(ctx context.Context, args []string, in io.Reader, isTTY bool, out 
 	if err != nil {
 		return err
 	}
-	cfg, rows := readSetup(ctx, cfg, opt.policyLabels)
+	cfg, rows, defs := readSetup(ctx, cfg, opt.policyLabels)
 	renderSetup(out, rpt, cfg, rows)
 	if opt.apply {
-		defs := setupLabelDefs(cfg, opt.policyLabels)
-		rows = applySetup(ctx, in, out, cfg, rows, defs, opt.yes)
+		var gateLabel string
+		rows, gateLabel = applySetup(ctx, in, out, cfg, rows, defs, opt.yes)
+		if gateLabel != "" {
+			// The line renderSetup already printed named no -label: nothing
+			// had been chosen yet when it ran. Now something has.
+			cfg.label = gateLabel
+			fmt.Fprintf(out, "\n%s\n", suggestedWorkLine(cfg))
+		}
 	}
 	if setupFailed(rows) {
 		return errSetupNotReady
@@ -174,8 +181,11 @@ func setupFailed(rows []setupRow) bool {
 // with cfg.repo/cfg.ghRepo filled in when -repo was not given — the caller's
 // own copy stops at whatever setupConfig resolved, and renderSetup's header
 // needs the name this function discovered, not that earlier, possibly-empty
-// one.
-func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []setupRow) {
+// one. It also hands back the label defs it checked, so -apply (applySetup)
+// works from the exact same list this read pass did rather than building its
+// own second copy — two independent calls to setupLabelDefs would have to
+// stay byte-for-byte in sync for applySetup's rows/defs correlation to hold.
+func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []setupRow, []labelDef) {
 	claudeOK := onPath(cfg.claudeBin)
 	ghOK := onPath(cfg.ghBin)
 	gitOK := onPath("git")
@@ -211,8 +221,9 @@ func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []se
 	rows = append(rows, setupOriginHeadRow(ctx, cfg, gitOK))
 	rows = append(rows, setupPluginRow(ctx, cfg, claudeOK))
 	rows = append(rows, setupSubIssueRow(ctx, cfg, reposOK))
-	rows = append(rows, setupLabelRows(ctx, cfg, reposOK, policyLabels)...)
-	return cfg, rows
+	defs := setupLabelDefs(cfg, policyLabels)
+	rows = append(rows, setupLabelRows(ctx, cfg, reposOK, defs)...)
+	return cfg, rows, defs
 }
 
 func onPath(bin string) bool {

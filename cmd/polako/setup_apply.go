@@ -93,11 +93,11 @@ func checkLabelDef(ctx context.Context, cfg config, reposOK bool, l labelDef) se
 	}
 }
 
-// setupLabelRows is setupLabelDefs checked one by one — the queue gate the
-// operator is about to point `polako work` at, plus whatever -policy-labels
-// asked for.
-func setupLabelRows(ctx context.Context, cfg config, reposOK, policyLabels bool) []setupRow {
-	defs := setupLabelDefs(cfg, policyLabels)
+// setupLabelRows is defs checked one by one — the queue gate the operator is
+// about to point `polako work` at, plus whatever -policy-labels asked for.
+// Takes defs rather than building it, so readSetup's one setupLabelDefs call
+// is the only one — see readSetup's own comment for why that matters.
+func setupLabelRows(ctx context.Context, cfg config, reposOK bool, defs []labelDef) []setupRow {
 	rows := make([]setupRow, len(defs))
 	for i, l := range defs {
 		rows[i] = checkLabelDef(ctx, cfg, reposOK, l)
@@ -166,12 +166,22 @@ func (p *setupPrompt) name(question, suggestion string) string {
 // with an unrelated row that happens to share the label's name).
 //
 // Mutates and returns rows so the caller's setupFailed check reflects what
-// this pass actually created, without a second full read pass.
-func applySetup(ctx context.Context, in io.Reader, out io.Writer, cfg config, rows []setupRow, defs []labelDef, yes bool) []setupRow {
+// this pass actually created, without a second full read pass. gateLabel is
+// the name chosen by the public-repo prompt below, or "" if that branch
+// never ran — the caller's suggested `polako work` line was printed before
+// this ran and so cannot have named a label nobody had chosen yet; this is
+// how it finds out what to add.
+func applySetup(ctx context.Context, in io.Reader, out io.Writer, cfg config, rows []setupRow, defs []labelDef, yes bool) ([]setupRow, string) {
 	prompt := newSetupPrompt(in, out, yes)
-	if cfg.label == "" && strings.EqualFold(cfg.visibility, "PUBLIC") {
-		name := prompt.name("this repository is public and has no gate label — name one to create", "ready")
-		def := labelDef{name: name, color: "ededed", description: "gate label for `polako work -label`", required: true}
+	var gateLabel string
+	// queueGate rather than a hand-rolled visibility check, the same reason
+	// setup.go's setupRepoOKRow calls it instead of reimplementing it: this
+	// note can never drift from what a real `polako work` run would refuse
+	// on. cfg.label is always "" here (the branch below only widens it), so
+	// this is exactly "public, no gate label, not -ungated".
+	if cfg.label == "" && queueGate(cfg.visibility, cfg.label, false) != nil {
+		gateLabel = prompt.name("this repository is public and has no gate label — name one to create", "ready")
+		def := labelDef{name: gateLabel, color: "ededed", description: "gate label for `polako work -label`", required: true}
 		defs = append(defs, def)
 		rows = append(rows, checkLabelDef(ctx, cfg, true, def))
 	}
@@ -205,5 +215,5 @@ func applySetup(ctx context.Context, in io.Reader, out io.Writer, cfg config, ro
 		rows[ri] = setupRow{name: def.name, status: setupOK, required: def.required}
 		fmt.Fprintf(out, "  created %q\n", def.name)
 	}
-	return rows
+	return rows, gateLabel
 }
