@@ -365,6 +365,14 @@ func fakeClaude(mode string) int {
 		emit(`{"type":"control_response","response":{"subtype":"error","request_id":"rc",` +
 			`"error":"Remote Control initialization failed"}}`)
 		return 0
+	case "remotewrongid":
+		// A control_response success, but for a request this run never
+		// sent — request_id "other" rather than remoteControlRequestID's
+		// "rc". Must be read as no reply at all, not as this run's own
+		// registration.
+		emit(`{"type":"control_response","response":{"subtype":"success","request_id":"other",` +
+			`"response":{"session_url":"https://claude.ai/code/session/unrelated"}}}`)
+		return fakeClaude("stream")
 	case "envcanary":
 		// Reports what the parent's environment looked like from in here.
 		// stderr rather than an event, because the narration carries it
@@ -2553,6 +2561,24 @@ func TestExecClaudeCarriesChildStderrIntoTheNarration(t *testing.T) {
 	}
 }
 
+// The mirror image of the -remote=true dispatch test below: -remote=false
+// must leave the child's actual stdin untouched, not just buildArgs's argv —
+// TestBuildArgsNeverAsksForRemoteControl already pins the argv layer, this
+// pins the exec.Cmd wiring a refactor of startClaude's `if cfg.remote`
+// gating could otherwise regress silently.
+func TestDispatchUnderRemoteFalseLeavesStdinUntouched(t *testing.T) {
+	t.Parallel()
+	cfg := fakeClaudeConfig(t, "stream")
+	stdin := watchClaudeStdin(t, &cfg)
+
+	if _, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0); err != nil {
+		t.Fatalf("a healthy run: %v", err)
+	}
+	if got := stdin(); got != "" {
+		t.Errorf("-remote=false must leave stdin empty, got %q", got)
+	}
+}
+
 // buildArgs is asserted directly above, but the argv and stdin a child
 // actually receives is the thing the promise was made about, so pin that end
 // too: a real dispatch under -remote must reach the CLI carrying the
@@ -2641,6 +2667,31 @@ func TestDispatchUnderRemoteLogsNoReply(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "no Remote Control reply — this run stayed unwatched") {
 		t.Errorf("the silence should be narrated once, got:\n%s", buf.String())
+	}
+}
+
+// A control_response carrying some other request's id must be read as no
+// reply at all, not as this run's own registration outcome — the guard
+// issue #471's own review added after a finder pointed out request_id was
+// parsed but never checked.
+func TestDispatchUnderRemoteIgnoresAMismatchedRequestID(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg := fakeClaudeConfig(t, "remotewrongid")
+	cfg.remote, cfg.repo, cfg.remoteName = true, "example/repo", "polako example/repo#7"
+
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0)
+	if err != nil {
+		t.Fatalf("a healthy run under -remote: %v", err)
+	}
+	if rep.remoteRegistered || rep.remoteURL != "" || rep.remoteError != "" {
+		t.Errorf("a mismatched request_id must not be read as this run's own reply, got %+v", rep)
+	}
+	if !strings.Contains(buf.String(), "no Remote Control reply — this run stayed unwatched") {
+		t.Errorf("a mismatched reply should still be narrated as no reply, got:\n%s", buf.String())
+	}
+	if strings.Contains(buf.String(), "unrelated") {
+		t.Errorf("the unrelated reply's own session URL must never be narrated, got:\n%s", buf.String())
 	}
 }
 
