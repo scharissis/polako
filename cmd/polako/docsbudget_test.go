@@ -66,10 +66,12 @@ const docsBudget = 500
 // behaviour.md was at 517 with no slack for the exit summary's new grants
 // block, and the paragraph just above it (ticket 3, #432) was trimmed as
 // far as it goes without losing the worked-around hedge those four issues
-// earned.
+// earned. behaviour.md moved once more within the same PR, +2, once review
+// caught the first wording claiming -notify got the shift-end union rather
+// than each park's own entries — the correction needed its own two lines.
 var docsDebt = map[string]int{
 	"reference.md": 511,
-	"behaviour.md": 528,
+	"behaviour.md": 530,
 }
 
 func TestDocsStayWithinLineBudget(t *testing.T) {

@@ -128,7 +128,9 @@ plus the command per issue:
   grants  gh issue edit 22 --remove-label needs-human
 ```
 
-No entries, no block. `-notify` gets the same union in `POLAKO_NOTIFY_GRANTS`.
+No entries, no block. Each park's own `-notify` call carries only its own
+entries in `POLAKO_NOTIFY_GRANTS` — fired at park time, before this union
+exists.
 
 When the ask was only an earlier turn, polako resumes first if there's work
 to resume into, telling it outright that its turn ends the process. If it
