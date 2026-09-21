@@ -580,7 +580,17 @@ don't post again, and stop.
       worktree root or `/tmp`. The usual one is a dump of a diff too big to
       read from Bash output: the session refuses `/tmp`, the review falls
       back to an improvised name in the worktree root, and that file strands
-      the worktree after the merge. `medium` asks the review for "fewer, high-confidence findings"
+      the worktree after the merge. Tell it too to launch its finder and
+      verifier subagents in the foreground — `run_in_background: false`, all
+      in one message — so every report comes back inside that same call.
+      Backgrounded, none of it reaches the review agent on its own: #418 saw
+      it launch 8 finders backgrounded, then burn most of a 45-minute budget
+      busy-polling (`Bash: true`, `ListAgents`, `sleep`) for reports that
+      never arrived that way, then `SendMessage` each finder and the two
+      verifiers asking them to restate what they'd already finished — real
+      work still unopened at the cap. Foreground avoids the whole loop: no
+      `Bash: true`, no `sleep`, no restate `SendMessage`, because there is
+      nothing left to poll for. `medium` asks the review for "fewer, high-confidence findings"
       and a smaller subagent fan-out; `high` asks for "broader coverage" and
       the full one. Both halves aim the review and neither is optional: the
       branch aims what it diffs, `<worktree>` aims where it works. The review
