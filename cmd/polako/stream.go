@@ -245,7 +245,7 @@ func (r runReport) lastRefusalDetail() string {
 // words: which tool it was (when correlated back to its tool_use), the
 // command that tool_use carried, the specific part the CLI named for a
 // compound-command refusal, and a kind telling a grantable refusal apart from
-// one no grant fixes. Comparable, so addRefusals can dedup with slices.Contains.
+// one no grant fixes. Comparable, so addRefusals can dedup with slices.Index.
 type refusal struct {
 	tool    string
 	command string
@@ -254,22 +254,28 @@ type refusal struct {
 }
 
 // refusalCap bounds runReport.refusals so a run stuck looping on the same
-// wall cannot grow it without bound — deduplication already stops an
-// identical refusal from counting twice, this stops distinct ones from
-// piling up past what a park could usefully show.
+// wall cannot grow it without bound. addRefusals evicts the oldest entry
+// once this is reached, never the newest — a park reports what is actually
+// still blocking the run, not whatever happened to arrive first.
 const refusalCap = 20
 
-// addRefusals appends new refusal entries, skipping any already present and
-// stopping once refusalCap is reached.
+// addRefusals appends new refusal entries, keeping refusals ordered by
+// recency: a refusal identical to one already present is moved to the end
+// rather than dropped in place, so lastRefusalDetail — which reads the last
+// entry — always names the most recently occurring refusal, not the first
+// time it happened. Capped at refusalCap by evicting the oldest entry, so a
+// run stuck looping on the same wall cannot grow this without bound while
+// the most recent refusals — the ones a park would actually report — are
+// never the ones forgotten.
 func (r *runReport) addRefusals(new []refusal) {
 	for _, nr := range new {
-		if len(r.refusals) >= refusalCap {
-			return
-		}
-		if slices.Contains(r.refusals, nr) {
-			continue
+		if i := slices.Index(r.refusals, nr); i >= 0 {
+			r.refusals = append(r.refusals[:i], r.refusals[i+1:]...)
 		}
 		r.refusals = append(r.refusals, nr)
+		if len(r.refusals) > refusalCap {
+			r.refusals = r.refusals[len(r.refusals)-refusalCap:]
+		}
 	}
 }
 

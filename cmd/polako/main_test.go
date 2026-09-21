@@ -3570,6 +3570,36 @@ func TestObserveRefusalsDedupsAndCaps(t *testing.T) {
 	if len(rep.refusals) != refusalCap {
 		t.Errorf("got %d refusals for %d distinct ones, want capped at %d", len(rep.refusals), refusalCap+5, refusalCap)
 	}
+	if want := "Bash: tool" + fmt.Sprint(refusalCap+4) + " --flag"; rep.lastRefusalDetail() != want {
+		t.Errorf("lastRefusalDetail() = %q, want %q — the cap must evict the oldest, never the newest",
+			rep.lastRefusalDetail(), want)
+	}
+
+	// A refusal identical to an earlier, non-consecutive one must still be
+	// read as the *last* one: recurring after a distinct refusal B means B
+	// is resolved (or at least not what's currently blocking), and reporting
+	// B instead of the recurrence would send an operator to grant the wrong
+	// command.
+	rep = runReport{}
+	a := toolUseID("toolu_a", "Bash", `{"command":"git fetch origin"}`)
+	b := toolUseID("toolu_b", "Bash", `{"command":"npm test"}`)
+	refuse := func(id string) string { return toolResult(id, "This command requires approval", true) }
+	for _, l := range []string{a, refuse("toolu_a"), b, refuse("toolu_b")} {
+		ev, _ := parseEvent([]byte(l))
+		rep.observe(ev)
+	}
+	aAgain := toolUseID("toolu_a2", "Bash", `{"command":"git fetch origin"}`)
+	for _, l := range []string{aAgain, refuse("toolu_a2")} {
+		ev, _ := parseEvent([]byte(l))
+		rep.observe(ev)
+	}
+	if len(rep.refusals) != 2 {
+		t.Fatalf("got %d refusals, want 2 (A and B, A's recurrence deduplicated)", len(rep.refusals))
+	}
+	if want := "Bash: git fetch origin"; rep.lastRefusalDetail() != want {
+		t.Errorf("lastRefusalDetail() = %q, want %q — A recurred after B, so A is the last one, not B",
+			rep.lastRefusalDetail(), want)
+	}
 }
 
 // Issue #182: on #169 the run asked for an ungranted tool in a turn partway
