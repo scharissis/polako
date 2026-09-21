@@ -28,14 +28,7 @@ type planFooter struct {
 // and a footer that is not the last line — it holds the line only to the
 // phrase and the path.
 func parsePlanFooter(body string) (planFooter, bool) {
-	// The last matching line, not the first: a body that quotes an earlier
-	// proposal's footer in its prose still ends with its own.
-	var line string
-	for _, l := range strings.Split(body, "\n") {
-		if t := strings.TrimLeft(l, "> \t"); strings.HasPrefix(t, planFooterPrefix) {
-			line = t
-		}
-	}
+	line := lastFooterLine(body, planFooterPrefix)
 	if line == "" {
 		return planFooter{}, false
 	}
@@ -70,6 +63,21 @@ func firstField(s string) string {
 	return ""
 }
 
+// lastFooterLine finds the last line of body starting with prefix, tolerant
+// of a leading quote marker or indent — shared by parsePlanFooter and
+// parseParkFooter, both of which read the *last* matching line rather than
+// the first: a body that quotes an earlier footer in its prose still ends
+// with its own. "" when no line matches.
+func lastFooterLine(body, prefix string) string {
+	var line string
+	for _, l := range strings.Split(body, "\n") {
+		if t := strings.TrimLeft(l, "> \t"); strings.HasPrefix(t, prefix) {
+			line = t
+		}
+	}
+	return line
+}
+
 // parkFooterPrefix is the fixed leading phrase a permission park's comment
 // ends with when it has -add-tools entries to name. A contract like
 // planFooterPrefix: parkIssue writes it, parseParkFooter reads it back, and
@@ -94,12 +102,7 @@ func parkFooter(entries []string) string {
 // comment's own is never anything but the last line polako itself wrote.
 // False for a body with no such line, or one naming no entries at all.
 func parseParkFooter(body string) ([]string, bool) {
-	var line string
-	for _, l := range strings.Split(body, "\n") {
-		if t := strings.TrimLeft(l, "> \t"); strings.HasPrefix(t, parkFooterPrefix) {
-			line = t
-		}
-	}
+	line := lastFooterLine(body, parkFooterPrefix)
 	if line == "" {
 		return nil, false
 	}
