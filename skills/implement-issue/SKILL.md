@@ -179,9 +179,9 @@ no PR ever points at it.
 
 This run's optional second argument is `$evidence`. `no-evidence` turns the
 whole channel off for this run: no push, and step 3's `## Evidence` bullet
-below is written as omitted. Nothing in this skill takes a screenshot yet —
-that's a later ticket — so today this section is the channel a future
-capture step pushes through, not something every run exercises.
+below is written as omitted. Phase 2 decides whether this run captures
+anything at all — most changes aren't visual, so most runs push nothing
+through this channel even with the argument left on.
 
 Shots wait in `<worktree>/.polako-evidence/` between capture and publish,
 untracked — never staged with `git add`, and never present in any commit on
@@ -340,10 +340,43 @@ If PLAN.md doesn't exist in the worktree, or new answers have appeared:
    Write PLAN.md BEFORE implementing — even when the issue is clear. A few
    bullets is enough: approach, files to touch, scope decisions, anything
    deliberately left out. It's the resume point if this session dies.
-2. If anything genuinely blocks implementation: record the questions in
+2. Decide whether this change is visual, and write the decision into
+   PLAN.md. Skip this step entirely when this run's evidence argument is
+   `no-evidence` — the channel is off, so there's nothing to decide. Both
+   of these have to hold, read off the plan just written: the files it
+   touches include browser-rendered sources (`.tsx`, `.jsx`, `.vue`,
+   `.svelte`, `.astro`, `.css`, `.scss`, `.html`, or a template file), and
+   `<worktree>/package.json`, read with Read, has a `dev`, `start`,
+   `preview` or `storybook` script. No `package.json` fails the second
+   test outright — no code change in that repo is visual.
+   Routes come from the repo, never the issue: every shot is a route this
+   run found in the repo's own routing code, and PLAN.md cites the file
+   that defines it. A changed component with a story, in a repo with a
+   `storybook` script, is shot through its story's iframe URL instead —
+   `playwright screenshot` can't click, so v1 only reaches URL-addressable
+   states. The issue's own text may describe the change; it never supplies
+   a URL, a route, a count or a viewport — issue text may only ever make a
+   run cheaper, never dearer or wider, the same rule the model tier
+   follows.
+   Write the result into PLAN.md as its own section, before moving on:
+
+       ## Visual evidence
+       Decision: capture | skip — <reason>
+       Launch: <exact command, from package.json scripts>
+       Shots (at most 4):
+       - <slug> — <path> — <routing file that defines it>
+       After: pending
+       Published: pending
+
+   A `skip` decision needs only its first line and the reason — there's
+   nothing to launch or shoot, so the rest of the block stays unwritten.
+   There's no `Before:` line: this run only ever shoots after, at the
+   final commit — a later ticket adds before shots and the resume rules
+   that come with them.
+3. If anything genuinely blocks implementation: record the questions in
    PLAN.md under "## Open questions", then ask them the way "Asking a
    question" above describes, and stop.
-3. If the thread answers previously posted questions, fold them into
+4. If the thread answers previously posted questions, fold them into
    PLAN.md, mark it FINAL, and clear the flag the way "Asking a question"
    above describes.
 
@@ -590,10 +623,62 @@ don't post again, and stop.
    Leave PLAN.md itself uncommitted throughout, same as every other section
    in it — it resumes because the worktree persists across runs of this
    issue, not because it is on a commit.
-3. Before opening a PR, confirm PLAN.md's `## Review` section shows no
+3. If PLAN.md's `## Visual evidence` block reads `Decision: capture` and
+   `After:` isn't already `captured @ <this exact HEAD>`, take that shot
+   now — at this final HEAD, before opening the PR. Every command below
+   already sits inside this run's grant; none of it needs `curl`, `sleep`
+   or `node`.
+   a. Start the server in the background: Bash with `run_in_background:
+      true` running the block's `Launch:` command (`npm --prefix
+      <worktree> run <script>`, `pnpm -C <worktree> ...`, `yarn --cwd
+      <worktree> ...`).
+   b. Read the tool result's output file. It names the local URL once the
+      server's ready. Most dev servers print that within a second or two
+      — Read the file again a few times if the line isn't there yet, not
+      a `sleep` loop, since none is granted.
+   c. Shoot each route the block lists: `npx --yes playwright screenshot
+      --viewport-size=1280,800 --wait-for-timeout=1500 <url>
+      <worktree>/.polako-evidence/after-<slug>.png`. `<url>` is always
+      the loopback address the server itself printed, on the port it
+      chose — never a host or port from the issue. If the repo has its
+      own Playwright dependency, shoot with that copy instead of `npx`'s.
+   d. A shot that fails with `Executable doesn't exist` means no browser
+      is cached: run `npx --yes playwright install chromium` once — it
+      lands in the operator's own cache, this repo changes not at all —
+      and retry that one shot once. Any other failure, or a second one
+      here, is the ladder's cue to stop trying.
+   e. Stop the server regardless of how c and d went: TaskStop on the
+      task id the background Bash call returned. It's a deferred tool —
+      load it with ToolSearch first if this session hasn't already —
+      outside `--allowedTools`, and probe evidence shows it runs with no
+      permission prompt. This isn't optional: a server left up holds the
+      port the repo's own test suite may want next.
+   Look before publishing: Read every surviving PNG, and drop any that
+   shows an error overlay, a blank page, a login wall, or anything that
+   looks like a credential or personal data. A dropped shot is a rung on
+   the ladder, not a reason to stop or ask. Caps, fixed regardless of what
+   the repo or the issue says: 1280x800, PNG, at most four, about 500 KB
+   each — an oversized file is dropped, never downscaled.
+   The ladder: no serving script, the server never prints a URL, every
+   route's shot fails, the browser install fails twice, or the look step
+   drops every survivor — each ends the same way. Stop trying, write
+   `After: not captured — <what was tried>` into PLAN.md, and carry that
+   same line into the PR body's `## Verification` below. Never a park,
+   never a question on the thread — the same rule "Evidence ref" above
+   gives a push that never lands.
+   With at least one surviving shot, publish it through the "Evidence
+   ref" recipe above, then write `After: captured @ <this HEAD>` and
+   either `Published: <the evidence commit sha>` or, if the push itself
+   never lands, `Published: gave up — <what was tried>` — no sha to embed
+   either way means the PR body's `## Evidence` bullet gets written as
+   omitted, same as `no-evidence`.
+   Before opening a PR, confirm PLAN.md's `## Review` section shows no
    finding still "pending" — step 2 shouldn't reach here otherwise, but this
-   is cheap enough to check rather than assume. Then open the PR with a real
-   title and description — never bare --fill:
+   is cheap enough to check rather than assume — and, if this step ran,
+   that `.polako-evidence` never reached issue-$issue's own branch:
+   `git -C <worktree> log <base>..HEAD --oneline -- .polako-evidence`
+   empty, `<base>` the same `origin/…` ref Phase 1 resolved. Then open
+   the PR with a real title and description — never bare --fill:
    - Title: one line in the repo's commit convention, stating the
      user-visible change (usually the primary commit subject).
    - Body: write it to `<worktree>/.polako-scratch/PR_BODY.md` (absolute
@@ -642,4 +727,13 @@ don't post again, and stop.
      auto-closing the issue is what advances the automation.
    - Leave the body file where it is. The scratch directory ignores itself,
      so it can't be committed, and no `rm` is in this run's grant.
+   - Once `gh pr create` returns, and only if the `## Visual evidence`
+     block reads `Decision: capture`: `git -C <worktree> clean -fdq --
+     .polako-evidence`. Not before — a failed `gh pr create` still wants
+     the shots on hand to retry against. This has to run whether this
+     turn's own shoot ran or not: a run that shoots and publishes, then
+     dies before `gh pr create` succeeds, leaves `After: captured @ <sha>`
+     for the next run to find already done — that resumed run skips
+     straight to `gh pr create` without re-shooting, and the cleanup still
+     has to fire once that succeeds.
 4. Report the PR URL.

@@ -64,6 +64,7 @@ happened; if that is most of the batch, the comparison is not one.
 | `model-by-size` | An `S` issue merges at the same rate on a cheaper `-model-by-size` cell as it does on the inherited model, for less per merged PR. | `-model-by-size` for a whole batch, against a batch at the default. Runs only now that the flag exists (#395). | *pending* — compare cost and park rate per merged PR against the baseline, split on `model_source`. | *open* |
 | `size-backfill` | Cost and park rate differ enough by size to be worth routing on, and enough closed issues carry an `Estimate:` line to make the comparison real. | None — `gh issue list --state closed --json number,body`, an `Estimate:` regex in `jq`, joined to the metrics JSONL on issue number. | *pending* — gates a triage run for unsized issues (never filed as an issue; needs this row plus a `model-by-size` saving first). | *open* |
 | `long-tail` | The ≥120-turn runs spend their turns somewhere nameable — the review gate, test loops, exploration — rather than nowhere in particular. | None — reopen those runs' transcripts (`claude --resume <session>`) and records, and read where the turns go. | *pending* — gates a single awaited subagent trial to keep the main loop small (never filed as an issue; needs this row to say where the tail's turns actually go). | *open* |
+| `visual-evidence-on` | Evidence adds little to `$/merged` on a frontend repo and causes zero parks. | Default on against `-visual-evidence=false`, same repo. | *pending* — compare cost per merged PR and the park rate between the two tags. | *open* |
 
 The `remediation-sonnet` and `stall-30m` rows come from
 `docs/continuous-improvement.md`, pillar 4, which chose them because the
@@ -78,6 +79,10 @@ The `remediation-effort-medium` and `plan-best` rows come from the model/effort
 design in [behaviour.md](behaviour.md#which-model-and-effort-a-run-gets);
 `remediation-effort-medium` waited on the `-remediation-effort` knob and could
 not be filed until it shipped (#365).
+
+The `visual-evidence-on` row comes from `docs/plans/visual-evidence.md`'s own
+Experiments table — filed here once ticket 4 (#404) shipped the capture the
+row measures.
 
 The `model-by-size`, `size-backfill` and `long-tail` rows come from
 `docs/plans/tiered-orchestration.md` (retired: every issue it proposed —

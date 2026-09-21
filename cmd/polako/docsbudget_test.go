@@ -47,9 +47,15 @@ const docsBudget = 500
 // 509, and the only cut on offer — the -dry-run example's `remote`
 // narration line — would have left that example showing less than a
 // default-flags run actually prints, which is worse than the line it saves.
+//
+// behaviour.md's ceiling moved again in issue #404: it was already at 501
+// with no slack, and documenting that a visual change's PR now carries an
+// actual screenshot — the thing docs/plans/visual-evidence.md's earlier
+// tickets only staged a channel for — had no existing paragraph on offer to
+// cut instead.
 var docsDebt = map[string]int{
 	"reference.md": 510,
-	"behaviour.md": 501,
+	"behaviour.md": 513,
 }
 
 func TestDocsStayWithinLineBudget(t *testing.T) {
