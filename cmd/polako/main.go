@@ -174,53 +174,35 @@ func dispatchVerb() bool {
 		os.Args = append(os.Args[:1], os.Args[2:]...)
 		return false
 	case "plan":
-		// Its own context, cancelled by the same signals work honours: the
-		// preflight probes make a handful of gh calls, and Ctrl+C partway
-		// through should end them rather than be ignored.
-		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
-		defer stop()
-		runReport("plan", func() error { return runPlan(ctx, os.Args[2:], os.Stdout) })
+		runReport("plan", withShutdownContext(func(ctx context.Context) error {
+			return runPlan(ctx, os.Args[2:], os.Stdout)
+		}))
 	case "health":
-		// Its own context for the same reason plan's is: preflight makes a
-		// handful of gh calls, and Ctrl+C partway through should end them
-		// rather than be ignored.
-		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
-		defer stop()
-		runReport("health", func() error { return runHealth(ctx, os.Args[2:], os.Stdout) })
+		runReport("health", withShutdownContext(func(ctx context.Context) error {
+			return runHealth(ctx, os.Args[2:], os.Stdout)
+		}))
 	case "stats":
 		rpt := newReport(isTerminal(os.Stdout))
 		runReport("stats", func() error { return runStats(os.Args[2:], os.Stdout, os.Stderr, time.Now(), rpt) })
 	case "status":
-		// Its own context, cancelled by the same signals work honours: a
-		// snapshot makes a handful of gh calls, and Ctrl+C partway through
-		// should end them rather than be ignored.
-		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
-		defer stop()
 		rpt := newReport(isTerminal(os.Stdout))
-		runReport("status", func() error { return runStatus(ctx, os.Args[2:], os.Stdout, time.Now(), rpt) })
+		runReport("status", withShutdownContext(func(ctx context.Context) error {
+			return runStatus(ctx, os.Args[2:], os.Stdout, time.Now(), rpt)
+		}))
 	case "tidy":
-		// Its own context for the same reason status gets one: this makes gh
-		// and git calls, and some of them mutate, so Ctrl+C partway through
-		// should end them rather than be ignored.
-		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
-		defer stop()
 		rpt := newReport(isTerminal(os.Stdout))
-		runReport("tidy", func() error { return runTidy(ctx, os.Args[2:], os.Stdout, rpt) })
+		runReport("tidy", withShutdownContext(func(ctx context.Context) error {
+			return runTidy(ctx, os.Args[2:], os.Stdout, rpt)
+		}))
 	case "update":
-		// Its own context for the same reason tidy's is: `claude plugin
-		// update` and `go install` are writes, and Ctrl+C partway through
-		// should end them rather than be ignored.
-		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
-		defer stop()
-		runReport("update", func() error { return runUpdate(ctx, config{}, os.Args[2:], os.Stdout) })
+		runReport("update", withShutdownContext(func(ctx context.Context) error {
+			return runUpdate(ctx, config{}, os.Args[2:], os.Stdout)
+		}))
 	case "setup":
-		// Its own context for the same reason status gets one: this makes gh
-		// and git calls, and Ctrl+C partway through should end them rather
-		// than be ignored.
-		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
-		defer stop()
 		rpt := newReport(isTerminal(os.Stdout))
-		runReport("setup", func() error { return runSetup(ctx, os.Args[2:], os.Stdin, isTerminal(os.Stdin), os.Stdout, rpt) })
+		runReport("setup", withShutdownContext(func(ctx context.Context) error {
+			return runSetup(ctx, os.Args[2:], os.Stdin, isTerminal(os.Stdin), os.Stdout, rpt)
+		}))
 	case "version", "-version", "--version":
 		// Reachable without a verb, because it is what an operator asks
 		// exactly when they are unsure what they are running.
@@ -257,6 +239,19 @@ func dispatchVerb() bool {
 // costs the cross-compile nothing — they are simply never delivered there.
 func shutdownSignals() []os.Signal {
 	return []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
+}
+
+// withShutdownContext wraps fn in the context every gh/git-calling verb in
+// dispatchVerb needs: each makes a handful of those calls, some mutating, and
+// Ctrl+C partway through should end them rather than be ignored. The context
+// is cancelled by the same signals work honours, and stop() runs once fn
+// returns.
+func withShutdownContext(fn func(ctx context.Context) error) func() error {
+	return func() error {
+		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
+		defer stop()
+		return fn(ctx)
+	}
 }
 
 func run(ctx context.Context, cfg config) error {
