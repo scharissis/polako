@@ -147,19 +147,36 @@ func claudeMdBlockFor(dir, existing string) string {
 	return strings.TrimRight(fmt.Sprintf(claudeMdBlockTemplate, command), "\n")
 }
 
-// extractClaudeMdBlock finds the first marked region in content, markers
-// included. The first occurrence, matching mergeClaudeMd's own choice of
-// which region to replace when a file somehow carries the markers twice.
-func extractClaudeMdBlock(content string) (string, bool) {
-	begin := strings.Index(content, claudeMdBeginMarker)
+// findClaudeMdMarkers locates a clean marked region in content: the first
+// begin marker, paired with the next end marker after it, but only when no
+// second begin marker sits between them. An unpaired begin (no end at all,
+// or another begin arriving first) doesn't count as a region — pairing it
+// with a later, unrelated end is what let an orphan begin swallow everything
+// a rerun had put between them; see mergeClaudeMd's own doc comment.
+func findClaudeMdMarkers(content string) (begin, end int, ok bool) {
+	begin = strings.Index(content, claudeMdBeginMarker)
 	if begin < 0 {
+		return 0, 0, false
+	}
+	rest := content[begin+len(claudeMdBeginMarker):]
+	relEnd := strings.Index(rest, claudeMdEndMarker)
+	if relEnd < 0 {
+		return 0, 0, false
+	}
+	if relBegin := strings.Index(rest, claudeMdBeginMarker); relBegin >= 0 && relBegin < relEnd {
+		return 0, 0, false
+	}
+	end = begin + len(claudeMdBeginMarker) + relEnd + len(claudeMdEndMarker)
+	return begin, end, true
+}
+
+// extractClaudeMdBlock finds the first clean marked region in content,
+// markers included.
+func extractClaudeMdBlock(content string) (string, bool) {
+	begin, end, ok := findClaudeMdMarkers(content)
+	if !ok {
 		return "", false
 	}
-	rel := strings.Index(content[begin:], claudeMdEndMarker)
-	if rel < 0 {
-		return "", false
-	}
-	end := begin + rel + len(claudeMdEndMarker)
 	return content[begin:end], true
 }
 
@@ -181,11 +198,8 @@ func claudeMdNeedsUpdate(dir string) bool {
 // Everything outside the markers is untouched, which is what makes a
 // same-for-same replace byte-identical to what was already there.
 func mergeClaudeMd(existing, block string) string {
-	if begin := strings.Index(existing, claudeMdBeginMarker); begin >= 0 {
-		if rel := strings.Index(existing[begin:], claudeMdEndMarker); rel >= 0 {
-			end := begin + rel + len(claudeMdEndMarker)
-			return existing[:begin] + block + existing[end:]
-		}
+	if begin, end, ok := findClaudeMdMarkers(existing); ok {
+		return existing[:begin] + block + existing[end:]
 	}
 	if strings.TrimSpace(existing) == "" {
 		return block + "\n"

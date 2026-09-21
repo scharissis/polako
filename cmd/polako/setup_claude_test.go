@@ -122,6 +122,25 @@ func TestMergeClaudeMdReplacesInPlace(t *testing.T) {
 	}
 }
 
+// A stray begin marker with no matching end (a human's own edit, or a file
+// left mid-edit) must not later pair with some unrelated end marker and eat
+// whatever sits between them. The first merge appends a full block after the
+// orphan, untouched; the second merge must not treat the orphan begin and
+// the first merge's own end marker as a pair.
+func TestMergeClaudeMdOrphanBeginDoesNotEatLaterText(t *testing.T) {
+	t.Parallel()
+	existing := "# My repo\n\n<!-- polako:begin -->\nsome unrelated human text\n"
+	first := mergeClaudeMd(existing, "<!-- polako:begin -->\nblock v1\n<!-- polako:end -->")
+	if !strings.Contains(first, "some unrelated human text") {
+		t.Fatalf("first merge = %q, lost the human text", first)
+	}
+
+	second := mergeClaudeMd(first, "<!-- polako:begin -->\nblock v2\n<!-- polako:end -->")
+	if !strings.Contains(second, "some unrelated human text") {
+		t.Errorf("second merge = %q, ate the human text between the orphan begin and the real block", second)
+	}
+}
+
 // The acceptance criterion this issue names outright: a rerun on a CLAUDE.md
 // that already carries the block leaves it byte-identical.
 func TestWriteClaudeMdBlockIsByteIdenticalOnRerun(t *testing.T) {
