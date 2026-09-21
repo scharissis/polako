@@ -93,16 +93,26 @@ func applySetupFiles(ctx context.Context, prompt *setupPrompt, cfg config, rows 
 	if !prompt.confirm(fmt.Sprintf("propose the missing .gitignore lines through a PR on %q?", setupBranch)) {
 		return rows
 	}
-	// Restart safety, the same rule the drain holds to for issue-N: an open
-	// PR from this branch means report it and stop, never a second PR.
+	// Restart safety, the same rule the drain holds to for issue-N: an
+	// existing PR from this branch means report it and stop, never a second
+	// one. That covers OPEN (still waiting on a human) and CLOSED (a human
+	// declined it — reopening the exact same proposal would override that
+	// decision) alike. MERGED is the one state that falls through: the
+	// worktree below is cut from a freshly fetched default branch, so if the
+	// merge already landed the lines, proposeSetupFiles finds nothing left
+	// to add and reports the row ok instead of stopping on a stale "missing".
 	pr, err := prForBranch(ctx, cfg, setupBranch)
 	if err != nil {
 		fmt.Fprintf(prompt.out, "  could not check for an existing %s PR (%v) — skipping\n", setupBranch, err)
 		return rows
 	}
-	if pr != nil && pr.State == "OPEN" {
-		fmt.Fprintf(prompt.out, "  .gitignore fix already proposed: %s\n", pr.URL)
-		rows[idx].detail = "already proposed: " + pr.URL
+	if pr != nil && pr.State != "MERGED" {
+		verb := "already proposed"
+		if pr.State == "CLOSED" {
+			verb = "already proposed, then closed without merging"
+		}
+		fmt.Fprintf(prompt.out, "  .gitignore fix %s: %s\n", verb, pr.URL)
+		rows[idx].detail = verb + ": " + pr.URL
 		return rows
 	}
 	url, err := proposeSetupFiles(ctx, cfg)

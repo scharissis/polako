@@ -117,6 +117,61 @@ func TestApplySetupFilesReportsAnAlreadyOpenPR(t *testing.T) {
 	}
 }
 
+// A PR closed without merging is a human's decision to decline the
+// proposal — rerunning -apply must not silently reopen the same fix.
+func TestApplySetupFilesDoesNotReproposeAfterAHumanClosesThePR(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	cfg := setupCfg(t, &ghState{PRs: map[string]*fakePR{
+		setupBranch: {Number: 9, State: "CLOSED"},
+	}}, checkout)
+	cfg.env = append(cfg.env, gitIdentity...)
+
+	cfg, rows, _ := readSetup(context.Background(), cfg, false)
+	var out strings.Builder
+	rows = applySetupFiles(context.Background(), newSetupPrompt(strings.NewReader(""), &out, true), cfg, rows)
+
+	if !strings.Contains(out.String(), "closed without merging") {
+		t.Errorf("output = %q, want it to say the PR was closed without merging", out.String())
+	}
+	r := findSetupRow(t, rows, ".gitignore")
+	if !strings.Contains(r.detail, "closed without merging") {
+		t.Errorf(".gitignore row = %+v, want it to say so", r)
+	}
+	if got := gitAt(t, checkout, "worktree", "list", "--porcelain"); strings.Contains(got, "branch refs/heads/"+setupBranch) {
+		t.Errorf("worktree list = %q, a closed PR must not make setup create a new one", got)
+	}
+}
+
+// A merged PR falls through to the normal flow rather than being treated as
+// "already handled": the worktree, cut from a freshly fetched default
+// branch, already carries the merged lines, so proposeSetupFiles finds
+// nothing left to add and the row reports ok instead of staying "missing".
+func TestApplySetupFilesFallsThroughOnAMergedPR(t *testing.T) {
+	t.Parallel()
+	work, checkout := upstream(t)
+	if err := os.WriteFile(filepath.Join(work, ".gitignore"), []byte("/.worktrees/\n/PLAN.md\n/.polako-scratch/\n"), 0o644); err != nil {
+		t.Fatalf("writing .gitignore in work: %v", err)
+	}
+	gitAt(t, work, "add", ".gitignore")
+	gitAt(t, work, "commit", "-m", setupFilesCommitSubject)
+	gitAt(t, work, "push", "origin", "main")
+
+	cfg := setupCfg(t, &ghState{PRs: map[string]*fakePR{
+		setupBranch: {Number: 11, State: "MERGED"},
+	}}, checkout)
+	cfg.env = append(cfg.env, gitIdentity...)
+
+	cfg, rows, _ := readSetup(context.Background(), cfg, false)
+	var out strings.Builder
+	rows = applySetupFiles(context.Background(), newSetupPrompt(strings.NewReader(""), &out, true), cfg, rows)
+
+	r := findSetupRow(t, rows, ".gitignore")
+	if r.status != setupOK {
+		t.Errorf(".gitignore row = %+v, want ok — a merged PR must fall through to the normal detection", r)
+	}
+}
+
 // Declining the prompt writes nothing — the row stays exactly as read.
 func TestApplySetupFilesDeclineWritesNothing(t *testing.T) {
 	t.Parallel()
