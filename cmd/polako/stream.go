@@ -363,15 +363,17 @@ func (r *runReport) observe(ev streamEvent) {
 		if ev.IsError && limitRefusal(ev.Result) {
 			r.limitMsg = ev.Result
 		}
-		// OR, not assign: a mid-run refused tool_result (above) must survive
-		// a clean final result whose own text does not itself read as an
-		// ask — issue #209, where every one of #126's three final messages
-		// was ordinary prose despite the run having been refused a tool.
-		r.permissionRefused = r.permissionRefused || permissionRefusal(ev.Result)
-		// Assign, not OR: refusalWorkedAround wants only the *last* result
-		// event's own word, the multi-result-event sibling of the last-wins
-		// fields below (issue #461).
-		r.lastResultIsAsk = permissionRefusal(ev.Result)
+		// Computed once and read two ways. OR into permissionRefused, not
+		// assign: a mid-run refused tool_result (above) must survive a clean
+		// final result whose own text does not itself read as an ask — issue
+		// #209, where every one of #126's three final messages was ordinary
+		// prose despite the run having been refused a tool. Assigned into
+		// lastResultIsAsk, not OR'd: refusalWorkedAround wants only the
+		// *last* result event's own word, the multi-result-event sibling of
+		// the last-wins fields below (issue #461).
+		resultIsAsk := permissionRefusal(ev.Result)
+		r.permissionRefused = r.permissionRefused || resultIsAsk
+		r.lastResultIsAsk = resultIsAsk
 		// The CLI emits one result event per dequeued prompt, not one per run:
 		// a run woken by ten finished background subagents streams ten, all
 		// flushed at exit (issue #227). num_turns, the two durations and the
