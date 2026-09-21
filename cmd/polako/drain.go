@@ -409,6 +409,25 @@ func stillWaiting(states map[int]*issueState) []issueResult {
 	return out
 }
 
+// parkCommentPrefix opens every comment parkIssue posts — shared with
+// unpark.go, which reads it back to tell polako's own park comment apart
+// from the rest of the thread and to find where the reason clause ends.
+const parkCommentPrefix = "**polako parked this issue.** "
+
+// parkCommentBody is the comment parkIssue posts — pulled out so unpark_test.go
+// can build the exact same shape a real park would have left, rather than a
+// second, driftable copy of the template.
+func parkCommentBody(issue int, reason string, entries []string) string {
+	n := strconv.Itoa(issue)
+	body := fmt.Sprintf(parkCommentPrefix+"%s\n\n"+
+		"Nothing will run on it again until the `%s` label is removed — "+
+		"`gh issue edit %s --remove-label %s`.", reason, needsHumanLabel, n, needsHumanLabel)
+	if footer := parkFooter(entries); footer != "" {
+		body += "\n\n" + footer
+	}
+	return body
+}
+
 // parkIssue hands one issue back to a person: the label that takes it out of
 // the queue, and a comment saying what happened. Both are best-effort — a
 // GitHub call that fails must not end a drain that is otherwise healthy — but
@@ -417,11 +436,6 @@ func stillWaiting(states map[int]*issueState) []issueResult {
 // is a permission park's own -add-tools entries — ticket 3 of
 // docs/plans/permission-parks.md (#432) — appended as a `Refused: ...`
 // footer parseParkFooter reads back.
-// parkCommentPrefix opens every comment parkIssue posts — shared with
-// unpark.go, which reads it back to tell polako's own park comment apart
-// from the rest of the thread and to find where the reason clause ends.
-const parkCommentPrefix = "**polako parked this issue.** "
-
 func parkIssue(ctx context.Context, cfg config, issue int, reason string, entries []string) {
 	n := strconv.Itoa(issue)
 	_, err := gh(ctx, cfg, "issue", "edit", n, "--add-label", needsHumanLabel)
@@ -445,12 +459,7 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string, entrie
 	// read it as a question of its own and sit waiting for a comment nobody
 	// owes it. Best-effort and silent: the issue is already parked either way.
 	_, _ = gh(ctx, cfg, "issue", "edit", n, "--remove-label", awaitingAnswerLabel)
-	body := fmt.Sprintf(parkCommentPrefix+"%s\n\n"+
-		"Nothing will run on it again until the `%s` label is removed — "+
-		"`gh issue edit %s --remove-label %s`.", reason, needsHumanLabel, n, needsHumanLabel)
-	if footer := parkFooter(entries); footer != "" {
-		body += "\n\n" + footer
-	}
+	body := parkCommentBody(issue, reason, entries)
 	if _, cerr := gh(ctx, cfg, "issue", "comment", n, "--body", body); cerr != nil {
 		cfg.narrate(sevWarning, "could not comment on issue #%d (%v) — the reason is in this log and in the exit summary",
 			issue, cerr)

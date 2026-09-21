@@ -85,8 +85,15 @@ func runUnpark(ctx context.Context, args []string, in io.Reader, isTTY bool, out
 	}
 	renderUnpark(out, rpt, cfg, items)
 	if opt.apply {
-		prompt := newSetupPrompt(in, out, opt.yes)
-		union := applyUnpark(ctx, prompt, out, cfg, items)
+		// -yes means "clear everything, don't ask" here — not setup's own
+		// "take each step's own default", since every question below shares
+		// one default (no) and a script passing -yes wants the opposite of
+		// it. So the prompt itself is built with yes=false (confirmDefault's
+		// own short-circuit would otherwise hand back that same no) and
+		// opt.yes is applied as a bypass in applyUnpark instead; stdin is
+		// never read once it's set, matching the no-terminal refusal above.
+		prompt := newSetupPrompt(in, out, false)
+		union := applyUnpark(ctx, prompt, opt.yes, out, cfg, items)
 		printUnparkRerunLine(out, cfg, union)
 	}
 	return nil
@@ -253,12 +260,14 @@ func parkCommentReason(body string) string {
 }
 
 // validParkEntryRe matches the two shapes addToolsEntry (refusals.go) ever
-// produces: a Bash command of one to three plain words wrapped Bash(...:*),
-// or a bare tool name. Anything else in a footer didn't come from parkIssue's
-// own write — a hand-edited comment, or one smuggled in by a forged author
-// that ghViewerLogin's own check didn't already exclude — so it renders
-// "ignored" instead of joining the rerun line.
-var validParkEntryRe = regexp.MustCompile(`^(?:Bash\(([\w.\-]+(?: [\w.\-]+){0,2}):\*\)|([A-Za-z][A-Za-z0-9]*))$`)
+// produces: a Bash command wrapped Bash(...:*) — a single plain word, or,
+// only for `gh` (the one case addToolsEntry takes three words instead of
+// one), `gh` plus one or two more — or a bare tool name. Anything else in a
+// footer didn't come from parkIssue's own write — a hand-edited comment, or
+// one smuggled in by a forged author that ghViewerLogin's own check didn't
+// already exclude — so it renders "ignored" instead of joining the rerun
+// line.
+var validParkEntryRe = regexp.MustCompile(`^(?:Bash\((gh(?: [\w.\-]+){1,2}|[\w.\-]+):\*\)|([A-Za-z][A-Za-z0-9]*))$`)
 
 // validParkEntry reports whether entry is safe to offer on the rerun line:
 // shaped like something addToolsEntry could have produced, and not a
@@ -279,13 +288,19 @@ func validParkEntry(entry string) bool {
 
 // applyUnpark asks about each listed issue in turn — "remove needs-human
 // from #N? [y/N]", default no — and on yes, removes the label, its only
-// write. It returns the union of the approved issues' own entries, deduped
-// in first-seen order, for the rerun line.
-func applyUnpark(ctx context.Context, prompt *setupPrompt, out io.Writer, cfg config, items []parkListItem) []string {
+// write. autoApprove is -yes: every question approves without touching
+// stdin at all, rather than taking that no default. It returns the union of
+// the approved issues' own entries, deduped in first-seen order, for the
+// rerun line.
+func applyUnpark(ctx context.Context, prompt *setupPrompt, autoApprove bool, out io.Writer, cfg config, items []parkListItem) []string {
 	seen := make(map[string]bool)
 	var union []string
 	for _, it := range items {
-		if !prompt.confirmDefault(fmt.Sprintf("remove %s from #%d?", needsHumanLabel, it.issue), false) {
+		approved := autoApprove
+		if !autoApprove {
+			approved = prompt.confirmDefault(fmt.Sprintf("remove %s from #%d?", needsHumanLabel, it.issue), false)
+		}
+		if !approved {
 			continue
 		}
 		if _, err := gh(ctx, cfg, "issue", "edit", strconv.Itoa(it.issue), "--remove-label", needsHumanLabel); err != nil {
