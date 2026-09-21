@@ -61,6 +61,7 @@ example/my-project — running /polako:implement-issue per issue, polling every 
 ready: #12, #14, #19
 waiting on an answer: #9
 issue #12 would be worked next; the invocation follows on stdout
+-remote is on, so the prompt travels on stdin, not argv: /polako:implement-issue 12
 claude -p --input-format stream-json --permission-mode acceptEdits -n 'polako example/my-project#12' --allowedTools '…' --output-format stream-json --verbose
 ```
 
@@ -135,15 +136,14 @@ muted.
 ### Watching a shift from anywhere: `-remote`
 
 A shift's runs are unattended and invisible — output exists only in the
-terminal that started it. `-remote` registers each one with Remote
-Control, watchable and typeable from claude.ai/code and the mobile app —
-the operator's own claude.ai account, already running the model. It's a
-stream-json request over stdin, probed by hand and confirmed by no doc
-([issue #52](https://github.com/scharissis/polako/issues/52) settled the
-argument; [issue #471](https://github.com/scharissis/polako/issues/471)
-found the channel; see [security.md](security.md) for the trade). polako
-never waits on the reply — a success or an error each log once, neither
-logs "stayed unwatched" — and `-remote=false` keeps runs to this machine.
+terminal that started it. `-remote` registers each one with Remote Control,
+watchable and typeable from claude.ai/code and the mobile app — the
+operator's own claude.ai account. It's a stream-json request over stdin,
+probed by hand, confirmed by no doc ([issue #52](https://github.com/scharissis/polako/issues/52)
+settled the argument, [issue #471](https://github.com/scharissis/polako/issues/471) found it;
+see [security.md](security.md) for the trade). polako never waits on the
+reply — a success or an error each log once, neither logs "stayed
+unwatched" — `-remote=false` keeps runs to this machine.
 
 ### The shift log: `-log`
 
