@@ -306,12 +306,14 @@ func (r *runReport) observeToolResults(ev streamEvent) {
 			r.toolRefused = true
 			// Scoped to *this* refusal's aftermath, not the whole run's.
 			r.toolSucceededAfterRefusal = false
-			if r.permissionRefusedDetail == "" {
-				if hadTool {
-					r.permissionRefusedDetail = tool.name + toolDetail(tool.input)
-				} else {
-					r.permissionRefusedDetail = text
-				}
+			// Last-wins, not first: refusalWorkedAround judges the *last*
+			// refusal's aftermath, so the detail named in a park has to be
+			// the same one, or a run with two distinct refusals could report
+			// the wrong (already-resolved) command to grant.
+			if hadTool {
+				r.permissionRefusedDetail = tool.name + toolDetail(tool.input)
+			} else {
+				r.permissionRefusedDetail = text
 			}
 		}
 	}

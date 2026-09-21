@@ -3441,6 +3441,27 @@ func TestRefusalWorkedAround(t *testing.T) {
 			}
 		})
 	}
+
+	// Review finding on issue #461: permissionRefusedDetail used to latch on
+	// the *first* refusal, but refusalWorkedAround judges the *last* one's
+	// aftermath — a run whose first refusal got worked around and whose
+	// second did not must still name the second (the actual blocker) in the
+	// park, not the resolved first one.
+	t.Run("names the last refusal, not the first", func(t *testing.T) {
+		rep := observe(t,
+			toolUseID("toolu_1", "Bash", `{"command":"cd /w"}`),
+			toolResult("toolu_1", "This command requires approval", true),
+			toolUseID("toolu_2", "Read", `{"file_path":"PLAN.md"}`),
+			toolResult("toolu_2", "...", false),
+			toolUseID("toolu_3", "Bash", `{"command":"gh pr merge 1"}`),
+			toolResult("toolu_3", "This command requires approval", true),
+			result("Nothing left to do here."),
+		)
+		if want := "Bash: gh pr merge 1"; !strings.Contains(rep.permissionRefusedDetail, want) {
+			t.Errorf("permissionRefusedDetail = %q, want the last (unresolved) refusal %q",
+				rep.permissionRefusedDetail, want)
+		}
+	})
 }
 
 // Issue #182: on #169 the run asked for an ungranted tool in a turn partway
