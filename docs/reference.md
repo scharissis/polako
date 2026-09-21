@@ -361,15 +361,7 @@ never asking whether a shift is running — so it's useful from a laptop about
 a shift running on a server. The closing `needs you:` line is the point of
 the whole thing — items only a person can move. A PR polako would remediate
 itself (conflicting, red, or an unanswered review) is deliberately not on
-it: that's still polako's job.
-
-A parked issue whose own park comment named entries — the same ones
-[`polako unpark`](#clearing-a-permission-park-polako-unpark) itself would
-read — gets its own clause naming them, `grant Bash(echo:*) or fix the skill,
-then polako unpark #5` above, instead of the batched "decide what to do
-about" clause every other parked issue still gets. One comment read per
-parked issue, the same viewer-only read and strict-shape filter `unpark`
-itself uses, reused rather than copied.
+it: that's still polako's job. A parked issue with a named grant gets its own clause instead of the batched one — `polako unpark`'s own read, reused.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
@@ -452,13 +444,7 @@ table row for row; its `gone` is `{ "path", "issues" }`.
 not bare numbers — `{ "issue", "total", "completed", "finished", "held" }` —
 so a caller can tell a finished container from one in progress without a
 second call. For a finished one, `held: false` means the next shift is about
-to close it, `held: true` means it's the caller's.
-
-`queue.parked` is objects too, `{ "issue", "entries" }` — `entries` is the
-same `-add-tools` list `polako unpark` would read off the issue's own park
-comment, empty for a park with no comment or none `polako unpark` would
-treat as valid.
-
+to close it, `held: true` means it's the caller's. `queue.parked` is `{ "issue", "entries" }` the same way — `polako unpark`'s own read.
 Every array field is always `[]`, never `null`; `quiet_seconds`, `plan` and
 `published` can be *absent* instead of a fake zero or empty string. Same
 rule as the text report: no issue, PR or comment text, only numbers,
