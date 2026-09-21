@@ -418,8 +418,8 @@ func (r *runReport) observe(ev streamEvent) {
 			}
 		}
 	case "control_response":
-		if ev.Response == nil {
-			return // not a shape this run recognises — same as no reply
+		if ev.Response == nil || ev.Response.RequestID != remoteControlRequestID {
+			return // not this run's own request — same as no reply
 		}
 		switch ev.Response.Subtype {
 		case "success":
@@ -542,14 +542,17 @@ func (el *eventLog) event(ev streamEvent) {
 		// says where to go watch the run, an error says why nowhere
 		// exists to go watch it. Logged once, here, the moment it
 		// arrives; claudeVerdict covers the case where neither ever does.
-		if ev.Response == nil {
-			return
+		if ev.Response == nil || ev.Response.RequestID != remoteControlRequestID {
+			return // not this run's own request
 		}
 		switch ev.Response.Subtype {
 		case "success":
 			el.u.logf("[claude] registered with Remote Control: %s", ev.Response.Response.SessionURL)
 		case "error":
-			el.u.logf("[claude] Remote Control did not register: %s", ev.Response.Error)
+			// sevWarning, not logf's plain sevProgress: a confirmed
+			// registration failure is worth more than the milder "no reply
+			// at all" case claudeVerdict reports at sevWarning too.
+			el.u.narrate(sevWarning, "[claude] Remote Control did not register: %s", ev.Response.Error)
 		}
 	}
 }
