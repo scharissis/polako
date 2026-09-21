@@ -85,13 +85,18 @@ type resumeLedger struct {
 	// without a fresh refusal; either way the eventual park still blames the
 	// original refusal rather than reporting "produced nothing" or the bound
 	// that actually stopped the resuming. Empty means no such refusal is
-	// pending.
+	// pending. Cleared by clearRetries: a fresh start (a reply folded in)
+	// means whatever comes next is answering a different question, not still
+	// working around this refusal, so a later unrelated park must not keep
+	// blaming it (issue #461's own review — a -strict-order question
+	// answered mid-issue reuses this same ledger for the run after it).
 	deferredPermissionDetail string
 }
 
 // clearRetries is what a fresh start does: a reply arrived, or a PR opened, so
-// nothing is owed a resume and the crash budget starts over.
-func (l *resumeLedger) clearRetries() { l.fruitless, l.kind = 0, "" }
+// nothing is owed a resume, the crash budget starts over, and a refusal this
+// issue was resuming past is no longer this run's to blame.
+func (l *resumeLedger) clearRetries() { l.fruitless, l.kind, l.deferredPermissionDetail = 0, "", "" }
 
 // noteCrashResume books a crash-driven resume: another retry, resuming the
 // dead session by id. progressed is rep.progressed() — a run that did real

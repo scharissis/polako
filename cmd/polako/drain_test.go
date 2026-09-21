@@ -1619,6 +1619,54 @@ func TestDrainNamesTheDeferredRefusalWhenTheResumeThenCrashes(t *testing.T) {
 	}
 }
 
+// Issue #461's ledger-clearing fix: deferredPermissionDetail must not outlive
+// a fresh start. Under -strict-order, a worked-around refusal's resume can
+// itself ask an unrelated question, which the same processIssue call waits
+// out and folds in — reusing the same ledger, not a fresh one. A later,
+// unrelated park (the shared clean-exit ceiling, spent on two runs that never
+// saw a refusal at all) must not still blame the resolved one.
+func TestDrainClearsTheDeferredRefusalOnceAQuestionIsAnswered(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "toolrefusedrecoveredthenquestionthenclean", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		Labels: []string{awaitingAnswerLabel},
+	})
+	cfg.strictOrder = true
+	calls := filepath.Join(t.TempDir(), "gh-calls.log")
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
+	leftBehind(t, &cfg)
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a question round must not end the drain: %v", err)
+	}
+
+	recs := terminalRecords(t, records, cfg.repo)
+	if len(recs) != 1 || recs[0].Outcome != issueNeedsHuman || recs[0].ParkReason != parkRetries {
+		t.Fatalf("terminal record = %+v, want needs_human / %s", recs, parkRetries)
+	}
+
+	out := buf.String()
+	// The worked-around refusal, the question round's own run, and two more
+	// clean exits before the shared ceiling parks it.
+	if got := strings.Count(out, "session started"); got != 4 {
+		t.Errorf("%d runs dispatched, want 4\ngot:\n%s", got, out)
+	}
+	if want := "somebody replied on #1 — re-running to fold the answers in"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+	if want := "the run completed without opening a PR; it has been resumed 2 times " +
+		"after ending a turn without opening a PR and has still not opened one, " +
+		"which needs a human"; !strings.Contains(out, want) {
+		t.Errorf("log is missing the generic park reason %q\ngot:\n%s", want, out)
+	}
+	if strings.Contains(out, "the run stopped to ask for a permission this allowlist does not grant") {
+		t.Errorf("parked still blaming the resolved refusal\ngot:\n%s", out)
+	}
+}
+
 // Issue #182: the ask does not have to be the run's last word. On #169 it
 // landed in a turn partway through and the run wrapped up on a sentence the
 // head anchor could not catch, so the issue parked as "no PR and no questions".

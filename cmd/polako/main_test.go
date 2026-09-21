@@ -597,6 +597,55 @@ func fakeClaude(mode string) int {
 			return fakeClaude("toolrefusedrecovered")
 		}
 		return fakeClaude("crash")
+	case "toolrefusedrecoveredthenquestionthenclean":
+		// Issue #461's ledger-clearing fix: a worked-around refusal (run 1)
+		// defers and resumes; the resumed session (run 2) asks an unrelated
+		// question instead, which -strict-order waits out and folds in; the
+		// fresh run that follows and its own resume (runs 3 and 4) both end
+		// cleanly with no refusal of their own. Once the shared ceiling
+		// finally parks it, the reason must be generic — clearRetries has to
+		// have dropped the question round's now-irrelevant deferred refusal.
+		n, err := countClaudeRun()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		if n == 1 {
+			return fakeClaude("toolrefusedrecovered")
+		}
+		if n == 2 {
+			if err := fakeSkillEffect(mode); err != nil {
+				fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+				return 1
+			}
+		} else {
+			// Runs 3 and 4: the label is still up from run 2's question —
+			// real skill behaviour once an answer is folded in is to clear
+			// it, same as fakeSkillEffect's own "already labelled" branch,
+			// but without also planting a PR: this run still ends with
+			// nothing to show, which is the shape the ceiling park needs.
+			path := os.Getenv(fakeGhEnv)
+			st, err := readGhState(path)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+				return 1
+			}
+			if is := st.Issues[promptIssue()]; is != nil && slices.Contains(is.Labels, awaitingAnswerLabel) {
+				if _, _, code := answerGh(st, []string{"issue", "edit", promptIssue(),
+					"--remove-label", awaitingAnswerLabel}); code != 0 {
+					fmt.Fprintln(os.Stderr, "fake claude: could not remove the answered label")
+					return 1
+				}
+				if err := writeGhState(path, st); err != nil {
+					fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+					return 1
+				}
+			}
+		}
+		emit(`{"type":"system","subtype":"init","session_id":"sess-clean","model":"claude-opus-5"}`)
+		emit(`{"type":"result","subtype":"success","session_id":"sess-clean","duration_ms":100,` +
+			`"num_turns":2,"total_cost_usd":0.1,"result":"Nothing more to do here."}`)
+		return 0
 	case "permissionmidrun":
 		// Issue #182 / #169: the ask lands in a turn partway through, and the
 		// run then ends on a sentence the head anchor cannot match. Same clean
