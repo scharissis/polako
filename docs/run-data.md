@@ -38,11 +38,11 @@ endpoint, no phone-home. The one exception is
 [`-post-summary`](#putting-it-on-the-pr--post-summary), off by default,
 which puts one line of numbers on your own merged PR; the installed skill
 itself collects nothing, it's a prompt.
-[`-remote`](reference.md#watching-a-shift-from-anywhere--remote) isn't a
-second exception today: no `claude` CLI registers headless runs with Remote
-Control, so nothing about the session goes anywhere — see
-[security.md](security.md#-remote-and-why-it-is-not-in-that-table) for the
-day a CLI does.
+[`-remote`](reference.md#watching-a-shift-from-anywhere--remote) is a second
+exception: each run registers with Remote Control, readable through the
+operator's own claude.ai account — no run data, only the live session — see
+[security.md](security.md#-remote) for what that channel actually
+carries.
 
 To write nothing at all:
 
