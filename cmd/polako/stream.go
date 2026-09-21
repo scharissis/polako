@@ -158,22 +158,24 @@ type runReport struct {
 	// which is what let a park assert "no questions" over a run whose final
 	// message was verbatim one.
 	permissionRefused bool
-	// permissionRefusedDetail names what was refused, when the stream gives
-	// it: the tool_use correlated by id to the refused tool_result (preferred
-	// — it has the actual command, which a single-command refusal's own
-	// content text does not), or failing that the tool_result's own text
-	// (which does name the parts, for a refused compound Bash command). May
-	// hold a local absolute path (a worktree path in a Bash command), so — like
-	// leftWork.where() — it belongs in a park's aside, never its reason.
-	permissionRefusedDetail string
+	// refusals is every refusal the stream reported, in the CLI's own words —
+	// issue #430: #390 drew five, and permissionRefusedDetail (even after
+	// issue #461 made it last-wins instead of the first-wins string it
+	// started as) still kept only one at a time, and kept the whole compound
+	// command where the CLI had already named the one part it refused.
+	// Deduplicated and capped at refusalCap, so a run stuck looping on the
+	// same refusal cannot grow this without bound. May hold a local absolute
+	// path (a worktree path in a Bash command), so — like leftWork.where() —
+	// it belongs in a park's aside, never its reason.
+	refusals []refusal
 	// toolSucceededAfterRefusal reports whether a tool_result completed
-	// without error after permissionRefusedDetail's *last* refusal — issue
-	// #461's #402/#318 shape, where the run hit a refusal, found another way,
-	// and kept working. Reset to false every time a new refusal latches, so
-	// it only ever answers for the most recent one. refusalWorkedAround pairs
-	// it with permissionRefusedDetail != "" — the structural #209 signal
-	// alone — rather than permissionRefused, which a final message can also
-	// set on its own (the #138 shape, with nothing to work around).
+	// without error after refusals' *last* entry — issue #461's #402/#318
+	// shape, where the run hit a refusal, found another way, and kept
+	// working. Reset to false every time a new refusal latches, so it only
+	// ever answers for the most recent one. refusalWorkedAround pairs it with
+	// len(refusals) > 0 — the structural #209 signal alone — rather than
+	// permissionRefused, which a final message can also set on its own (the
+	// #138 shape, with nothing to work around).
 	toolSucceededAfterRefusal bool
 	// lastResultIsAsk is permissionRefusal(ev.Result) for the most recent
 	// result event only — assigned, not OR'd, unlike permissionRefused above.
@@ -208,17 +210,6 @@ type runReport struct {
 	// run, often the only cause on record and worth a terminal line, since the
 	// full copy is off in the shift log.
 	stderrTail string
-}
-
-// refusalWorkedAround reports whether this run's permission refusal is issue
-// #461's shape rather than #126's: the CLI refused a tool_result mid-run, the
-// run kept going and completed further tool calls anyway, and its final word
-// does not itself read as an ask. #126 is still caught — no successful call
-// followed its refusal — and so is #138 (permissionRefused with no
-// tool_result refusal at all: a final-message ask has nothing to work
-// around).
-func (r runReport) refusalWorkedAround() bool {
-	return r.permissionRefusedDetail != "" && r.toolSucceededAfterRefusal && !r.lastResultIsAsk
 }
 
 // status maps a run to exactly one value, most specific first: a run stopped
@@ -294,8 +285,8 @@ func (r *runReport) observeToolResults(ev streamEvent) {
 		}
 		if !c.IsError {
 			// A success anywhere before the first refusal is moot —
-			// refusalWorkedAround also requires permissionRefusedDetail set,
-			// so this only ever matters once a refusal has actually latched.
+			// refusalWorkedAround also requires refusals non-empty, so this
+			// only ever matters once a refusal has actually latched.
 			r.toolSucceededAfterRefusal = true
 			continue
 		}
@@ -303,15 +294,7 @@ func (r *runReport) observeToolResults(ev streamEvent) {
 			r.permissionRefused = true
 			// Scoped to *this* refusal's aftermath, not the whole run's.
 			r.toolSucceededAfterRefusal = false
-			// Last-wins, not first: refusalWorkedAround judges the *last*
-			// refusal's aftermath, so the detail named in a park has to be
-			// the same one, or a run with two distinct refusals could report
-			// the wrong (already-resolved) command to grant.
-			if hadTool {
-				r.permissionRefusedDetail = tool.name + toolDetail(tool.input)
-			} else {
-				r.permissionRefusedDetail = text
-			}
+			r.addRefusals(newRefusals(tool, hadTool, text))
 		}
 	}
 }
@@ -557,13 +540,26 @@ func heartbeatLine(elapsed time.Duration, toolUses int, phase stage) string {
 
 // toolDetail extracts the most human-useful field from a tool's input.
 func toolDetail(raw json.RawMessage) string {
+	v, ok := toolInputDetail(raw)
+	if !ok {
+		return ""
+	}
+	return ": " + clip(v, 120)
+}
+
+// toolInputDetail extracts the most human-useful field from a tool's input,
+// raw and unclipped — the shared source both toolDetail (a log line, clipped
+// above) and newRefusals (a refusal record, kept whole for a later ticket to
+// derive an -add-tools entry from) read from, so the two never drift apart
+// on which field counts as "the detail".
+func toolInputDetail(raw json.RawMessage) (string, bool) {
 	var in map[string]any
 	if json.Unmarshal(raw, &in) != nil {
-		return ""
+		return "", false
 	}
 	for _, k := range []string{"command", "file_path", "pattern", "query", "description"} {
 		if v, ok := in[k].(string); ok && v != "" {
-			return ": " + clip(v, 120)
+			return v, true
 		}
 	}
 	// Skill carries none of those keys, so without this the review gate — the
@@ -573,9 +569,9 @@ func toolDetail(raw json.RawMessage) string {
 		if args, _ := in["args"].(string); args != "" {
 			v += " " + args
 		}
-		return ": " + clip(v, 120)
+		return v, true
 	}
-	return ""
+	return "", false
 }
 
 // clip flattens text to one line and truncates it for log output.

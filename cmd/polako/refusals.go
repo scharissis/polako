@@ -197,18 +197,201 @@ func permissionAskMidRun(text string) bool {
 	return headMatchesAny(text, permissionAskSignatures...)
 }
 
+// sigMultipleOps and sigSimpleExpansion are named separately from
+// toolRefusalSignatures' third member (the plain "this command requires
+// approval" has no separate classification to share) because refusalKindOf
+// below has to test for them individually — naming them once keeps the two
+// switches from drifting apart on the exact wording.
+const (
+	sigMultipleOps     = "this bash command contains multiple operations"
+	sigSimpleExpansion = "contains simple_expansion"
+)
+
 // toolRefusalSignatures are the CLI's own wrapper text for a tool_result the
 // permission system refused outright — observed verbatim on issue #209
 // (session 902c1c34-d4db-40cc-b00c-aa8f82242472): a plain "This command
 // requires approval" for a single command, and, for a compound Bash command,
 // "This Bash command contains multiple operations. The following parts
-// require approval: ..." naming the parts. Unlike permissionAskSignatures
-// this is CLI prose, not the model's, so — like authFailure and
-// limitRefusal — it is trusted rather than treated as one phrasing among
-// many.
+// require approval: ..." naming the parts. "Contains simple_expansion"
+// joined this list on issue #430 (#390's own session): a `$VAR` in the
+// command, refused for a reason no `-add-tools` entry fixes — the command has
+// to be phrased differently — but still a refusal, so it still latches
+// permissionRefused below. Unlike permissionAskSignatures this is CLI prose,
+// not the model's, so — like authFailure and limitRefusal — it is trusted
+// rather than treated as one phrasing among many.
 var toolRefusalSignatures = []string{
 	"this command requires approval",
-	"this bash command contains multiple operations",
+	sigMultipleOps,
+	sigSimpleExpansion,
+}
+
+// refusalKind tells apart a refusal a wider allowlist can fix from one no
+// grant can — see refusalKindOf.
+type refusalKind string
+
+const (
+	// refusalPlain is a whole single command the CLI refused outright —
+	// "This command requires approval".
+	refusalPlain refusalKind = "plain"
+	// refusalPart is one named part of a compound Bash command the CLI
+	// refused — "The following part(s) require approval: …" — one refusal
+	// entry per part it named.
+	refusalPart refusalKind = "part"
+	// refusalUngrantable is "Contains simple_expansion": a $VAR in the
+	// command. No -add-tools entry fixes it.
+	refusalUngrantable refusalKind = "ungrantable"
+)
+
+// refusalKindOf classifies a refused tool_result's own text into which of
+// toolRefusalSignatures matched. Only called once toolResultRefusal has
+// already said this text is a refusal at all.
+func refusalKindOf(text string) refusalKind {
+	switch {
+	case headMatchesAny(text, sigMultipleOps):
+		return refusalPart
+	case headMatchesAny(text, sigSimpleExpansion):
+		return refusalUngrantable
+	default:
+		return refusalPlain
+	}
+}
+
+// refusalPartsRe extracts the CLI's own comma-separated list of parts it
+// refused out of a compound Bash command's refusal text — "The following
+// part requires approval: X" or, naming more than one, "...parts require
+// approval: X, Y".
+var refusalPartsRe = regexp.MustCompile(`(?i)the following parts? requires? approval:\s*(.+)$`)
+
+// refusalParts splits the CLI's own part list — its own text, not a shell
+// parse; see splitCommand's (notify.go) own refusal to become one. Nil when
+// the refusal text does not name any parts. The split is a plain ", ", so a
+// part whose own text happens to contain ", " (a quoted string with a comma
+// in it) splits wrong — the CLI's own text gives no escaping to parse
+// against, so no client-side split can fully disambiguate it; a wrong split
+// still yields refusalPart entries, just with the join point in the wrong
+// place, and the raw refusal text always survives in the correlated
+// tool_use's own command besides.
+func refusalParts(text string) []string {
+	m := refusalPartsRe.FindStringSubmatch(strings.TrimSpace(text))
+	if m == nil {
+		return nil
+	}
+	fields := strings.Split(m[1], ", ")
+	parts := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if f = strings.TrimSpace(f); f != "" {
+			parts = append(parts, f)
+		}
+	}
+	return parts
+}
+
+// refusal is one CLI-reported refusal of a tool call, kept in the CLI's own
+// words: which tool it was (when correlated back to its tool_use), the
+// command that tool_use carried, the specific part the CLI named for a
+// compound-command refusal, and a kind telling a grantable refusal apart from
+// one no grant fixes. Comparable, so addRefusals can dedup with slices.Index.
+type refusal struct {
+	tool    string
+	command string
+	part    string
+	kind    refusalKind
+}
+
+// refusalCap bounds runReport.refusals so a run stuck looping on the same
+// wall cannot grow it without bound. addRefusals evicts the oldest entry
+// once this is reached, never the newest — a park reports what is actually
+// still blocking the run, not whatever happened to arrive first.
+const refusalCap = 20
+
+// addRefusals appends new refusal entries, keeping refusals ordered by
+// recency: a refusal identical to one already present is moved to the end
+// rather than dropped in place, so lastRefusalDetail — which reads the last
+// entry — always names the most recently occurring refusal, not the first
+// time it happened. Capped at refusalCap by evicting the oldest entry, so a
+// run stuck looping on the same wall cannot grow this without bound while
+// the most recent refusals — the ones a park would actually report — are
+// never the ones forgotten.
+func (r *runReport) addRefusals(new []refusal) {
+	for _, nr := range new {
+		if i := slices.Index(r.refusals, nr); i >= 0 {
+			r.refusals = append(r.refusals[:i], r.refusals[i+1:]...)
+		}
+		r.refusals = append(r.refusals, nr)
+		if len(r.refusals) > refusalCap {
+			r.refusals = r.refusals[len(r.refusals)-refusalCap:]
+		}
+	}
+}
+
+// newRefusals turns one refused tool_result into the refusal entries it
+// names — more than one when the CLI's own text lists several parts of a
+// compound Bash command (one entry per part), exactly one otherwise. tool and
+// hadTool are the tool_use correlated by id, when the stream still had it
+// pending; text is the tool_result's own content, kept as command when
+// correlation failed — the same fallback permissionRefusedDetail used to
+// fall back to. command is read through toolInputDetail — the same field
+// list toolDetail renders for a log line, here unclipped — so a refused
+// non-Bash tool (Read, Skill, WebFetch, …) still names its actual target
+// instead of just the CLI's generic refusal text.
+func newRefusals(tool pendingTool, hadTool bool, text string) []refusal {
+	toolName, command := "", text
+	if hadTool {
+		toolName = tool.name
+		if c, ok := toolInputDetail(tool.input); ok {
+			command = c
+		}
+	}
+	switch kind := refusalKindOf(text); kind {
+	case refusalPart:
+		parts := refusalParts(text)
+		if len(parts) == 0 {
+			// The CLI said "multiple operations" but this build could not
+			// parse which parts — one entry rather than losing the refusal
+			// entirely, still kind refusalPart: the CLI's own wording said
+			// this was a compound-command refusal, and that classification
+			// doesn't change just because this build couldn't split it.
+			return []refusal{{tool: toolName, command: command, kind: kind}}
+		}
+		out := make([]refusal, len(parts))
+		for i, p := range parts {
+			out[i] = refusal{tool: toolName, command: command, part: p, kind: refusalPart}
+		}
+		return out
+	default:
+		return []refusal{{tool: toolName, command: command, kind: kind}}
+	}
+}
+
+// refusalWorkedAround reports whether this run's permission refusal is issue
+// #461's shape rather than #126's: the CLI refused a tool_result mid-run, the
+// run kept going and completed further tool calls anyway, and its final word
+// does not itself read as an ask. #126 is still caught — no successful call
+// followed its refusal — and so is #138 (permissionRefused with no
+// tool_result refusal at all: a final-message ask has nothing to work
+// around).
+func (r runReport) refusalWorkedAround() bool {
+	return len(r.refusals) > 0 && r.toolSucceededAfterRefusal && !r.lastResultIsAsk
+}
+
+// lastRefusalDetail renders the most recent refusal the way a park still
+// wants to read it today — "<tool>: <command>" when the refusal was
+// correlated to a tool_use, or the tool_result's own text otherwise — the
+// same rendering permissionRefusedDetail used to produce, minus the 120-char
+// clip toolDetail applied for a log line (command is data here, not
+// display). Turning the fuller record below into an -add-tools entry, and
+// any change to what a park says, is ticket 2 and 3 of
+// docs/plans/permission-parks.md; until then every caller that used to read
+// permissionRefusedDetail reads this instead.
+func (r runReport) lastRefusalDetail() string {
+	if len(r.refusals) == 0 {
+		return ""
+	}
+	last := r.refusals[len(r.refusals)-1]
+	if last.tool == "" {
+		return last.command
+	}
+	return last.tool + ": " + last.command
 }
 
 // toolResultRefusal reports whether a tool_result's content is the CLI
