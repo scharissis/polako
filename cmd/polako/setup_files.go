@@ -1,15 +1,16 @@
 package main
 
-// Ticket 4's own half of `polako setup` (docs/plans/setup.md): the one tree
-// row that reads the checkout directly rather than gh, and -apply's first
-// write beyond a label — one commit, on a `polako-setup` branch, built in a
+// Ticket 4's own half of `polako setup` (docs/plans/setup.md): the tree rows
+// that read the checkout directly rather than gh, and -apply's first write
+// beyond a label — one commit, on a `polako-setup` branch, built in a
 // worktree, pushed, behind one PR a human merges. Split out of setup.go and
 // setup_apply.go so both stay closer to the repo's own median length as this
 // grows; see setup.go for the read-only report and setup_apply.go for the
-// label half of -apply these functions sit beside.
-//
-// Out of scope here: the CLAUDE.md block and the docs/VISION.md scaffold
-// (docs/plans/setup.md, the rest of ticket 4) — a later ticket, not this one.
+// label half of -apply these functions sit beside. The .gitignore row and
+// write live here; the CLAUDE.md block (setup_claude.go) and the
+// docs/VISION.md scaffold (setup_scaffold.go) are split into their own files
+// but share this file's write pass and restart-safety rules — one PR from
+// `polako-setup` covers whichever of the three a run accepts.
 
 import (
 	"context"
@@ -80,72 +81,150 @@ func readGitignoreLines(dir string) []string {
 	return lines
 }
 
+// setupFileWants is which of the three files this run asked to propose —
+// built from the three prompts applySetupFiles asks, in order, before it
+// ever looks for an existing PR.
+type setupFileWants struct {
+	gitignore, claudeMd, scaffold bool
+}
+
+func (w setupFileWants) any() bool { return w.gitignore || w.claudeMd || w.scaffold }
+
+// setupFilesResult is what the branch proposeSetupFiles pushed actually
+// carries over remoteDefault — distinct from setupFileWants because a
+// requested item can turn out to already be satisfied on the freshly-fetched
+// worktree (the merged-PR fallthrough case .gitignore already had),
+// independently of whether the other requested items changed anything. Each
+// row needs its own verdict, not one shared by the whole PR. Decided from a
+// diff against remoteDefault, not from whether this call's own write step
+// did anything — a worktree reused from a dead run's own earlier commit
+// already carries an item this call finds nothing left to write, and that
+// item is still on the branch and still belongs in the PR.
+type setupFilesResult struct {
+	url                                                   string
+	proposedGitignore, proposedClaudeMd, proposedScaffold bool
+}
+
 // applySetupFiles is -apply's file-proposal pass, run once after the label
 // pass (applySetup) using the same prompt — see setupPrompt's own doc
 // comment for why one Scanner has to serve every question this run asks.
 // Best-effort like applySetup's own creates: a failure here is reported and
 // setup moves on, never ends the run.
 func applySetupFiles(ctx context.Context, prompt *setupPrompt, cfg config, rows []setupRow) []setupRow {
-	idx := slices.IndexFunc(rows, func(r setupRow) bool { return r.name == ".gitignore" })
-	if idx < 0 || rows[idx].status != setupMissing {
+	gitignoreIdx := slices.IndexFunc(rows, func(r setupRow) bool { return r.name == ".gitignore" })
+	claudeIdx := slices.IndexFunc(rows, func(r setupRow) bool { return r.name == "CLAUDE.md" })
+	visionIdx := slices.IndexFunc(rows, func(r setupRow) bool { return r.name == visionMdPath })
+
+	var want setupFileWants
+	if gitignoreIdx >= 0 && rows[gitignoreIdx].status == setupMissing {
+		want.gitignore = prompt.confirm(fmt.Sprintf("propose the missing .gitignore lines through a PR on %q?", setupBranch))
+	}
+	if claudeIdx >= 0 && rows[claudeIdx].status == setupMissing {
+		want.claudeMd = prompt.confirm(fmt.Sprintf("propose the CLAUDE.md polako block through a PR on %q?", setupBranch))
+	}
+	if visionIdx >= 0 && rows[visionIdx].status == setupMissing {
+		want.scaffold = prompt.confirmDefault(
+			"also scaffold docs/VISION.md and docs/plans/README.md through the same PR?", false)
+	}
+	if !want.any() {
 		return rows
 	}
-	if !prompt.confirm(fmt.Sprintf("propose the missing .gitignore lines through a PR on %q?", setupBranch)) {
-		return rows
-	}
+
 	// Restart safety, the same rule the drain holds to for issue-N: an
 	// existing PR from this branch means report it and stop, never a second
 	// one. That covers OPEN (still waiting on a human) and CLOSED (a human
 	// declined it — reopening the exact same proposal would override that
 	// decision) alike. MERGED is the one state that falls through: the
-	// worktree below is cut from a freshly fetched default branch, so if the
-	// merge already landed the lines, proposeSetupFiles finds nothing left
-	// to add and reports the row ok instead of stopping on a stale "missing".
+	// worktree below is cut from a freshly fetched default branch, so
+	// whatever already landed there is found already satisfied rather than
+	// stopping on a stale "missing". A third case never reaches this check
+	// at all: a branch pushed but with no PR yet (a dead run that died
+	// between the push and gh pr create) finds pr == nil here and falls
+	// through to proposeSetupFiles, which reuses that branch (setupWorktree)
+	// and opens the PR that never got opened — its rows and body built from
+	// a fresh diff against remoteDefault, not from whatever this call would
+	// have written itself, so an item the dead run already committed still
+	// gets reported and named.
 	pr, err := prForBranch(ctx, cfg, setupBranch)
 	if err != nil {
 		fmt.Fprintf(prompt.out, "  could not check for an existing %s PR (%v) — skipping\n", setupBranch, err)
 		return rows
 	}
 	if pr != nil && pr.State != "MERGED" {
-		verb := "already proposed"
+		// prForBranch fetches no file list, so this can't say which of the
+		// wanted items the open PR actually holds — a rerun that now also
+		// wants CLAUDE.md, say, would otherwise be told it's "already
+		// proposed" when it isn't. Say the PR itself is open instead, and
+		// tell the human what to do about it; that self-heals once they
+		// merge or close it.
+		verb := "a setup PR is already proposed"
 		if pr.State == "CLOSED" {
-			verb = "already proposed, then closed without merging"
+			verb = "a setup PR was already proposed, then closed without merging"
 		}
-		fmt.Fprintf(prompt.out, "  .gitignore fix %s: %s\n", verb, pr.URL)
-		rows[idx].detail = verb + ": " + pr.URL
+		detail := verb + " — merge or close it, then rerun: " + pr.URL
+		fmt.Fprintf(prompt.out, "  %s: %s\n", verb, pr.URL)
+		if gitignoreIdx >= 0 && want.gitignore {
+			rows[gitignoreIdx].detail = detail
+		}
+		if claudeIdx >= 0 && want.claudeMd {
+			rows[claudeIdx].detail = detail
+		}
+		if visionIdx >= 0 && want.scaffold {
+			rows[visionIdx].detail = detail
+		}
 		return rows
 	}
-	url, err := proposeSetupFiles(ctx, cfg)
-	switch {
-	case err != nil:
-		fmt.Fprintf(prompt.out, "  could not propose the .gitignore fix (%v)\n", err)
-	case url == "":
-		// Nothing left to add — a previous polako-setup PR already merged
-		// and the worktree, cut fresh from origin's default branch, proves
-		// it. The row read from cfg.dir was simply stale.
-		rows[idx] = setupRow{name: ".gitignore", status: setupOK}
-		fmt.Fprintln(prompt.out, "  .gitignore already has every line — nothing to propose")
-	default:
-		fmt.Fprintf(prompt.out, "  proposed the .gitignore fix: %s\n", url)
-		rows[idx].detail = "proposed: " + url
+
+	result, err := proposeSetupFiles(ctx, cfg, want)
+	if err != nil {
+		fmt.Fprintf(prompt.out, "  could not propose the setup PR (%v)\n", err)
+		return rows
+	}
+	if want.gitignore {
+		rows[gitignoreIdx] = resolveSetupFileRow(".gitignore", result.proposedGitignore, result.url)
+	}
+	if want.claudeMd {
+		rows[claudeIdx] = resolveSetupFileRow("CLAUDE.md", result.proposedClaudeMd, result.url)
+	}
+	if want.scaffold {
+		rows[visionIdx] = resolveSetupFileRow(visionMdPath, result.proposedScaffold, result.url)
+	}
+	if result.url == "" {
+		fmt.Fprintln(prompt.out, "  nothing left to propose — already on the default branch")
+	} else {
+		fmt.Fprintf(prompt.out, "  proposed the setup PR: %s\n", result.url)
 	}
 	return rows
 }
 
+// resolveSetupFileRow is one requested item's row once proposeSetupFiles has
+// run: ok when the freshly-fetched worktree already had it and the pushed
+// branch carries no change for it, missing-with-a-link when the branch does
+// (whether this call's own write step added it or an earlier dead run's
+// commit already had) and a PR is now waiting on a human.
+func resolveSetupFileRow(name string, proposed bool, url string) setupRow {
+	if !proposed {
+		return setupRow{name: name, status: setupOK}
+	}
+	return setupRow{name: name, status: setupMissing, detail: "proposed: " + url}
+}
+
 // proposeSetupFiles does the write pass ticket 4 draws: fetch, resolve
 // origin's default branch, and `worktree add` all run in the main checkout
-// (cfg); everything past that — writing the file, `add`, `commit`, `push` —
-// runs in the worktree, through a copy of cfg pointed at its path. Returns
-// the PR's URL, or "" when there was nothing left to add (see the caller).
-func proposeSetupFiles(ctx context.Context, cfg config) (string, error) {
+// (cfg); everything past that — writing the files, `add`, `commit`, `push` —
+// runs in the worktree, through a copy of cfg pointed at its path. Each
+// requested item is checked against the freshly-fetched worktree before
+// being written, so one already satisfied there (a previous polako-setup PR
+// that merged some but not all of them) is skipped rather than redone.
+func proposeSetupFiles(ctx context.Context, cfg config, want setupFileWants) (setupFilesResult, error) {
 	// -repo lets the read-only report check a repository -dir isn't a
 	// checkout of ("instead of whichever -dir is a checkout of" — setup.go's
 	// own -repo flag doc). Every git write below operates on cfg.dir's local
 	// origin, not cfg.repo, so that combination has to be refused here or it
 	// silently pushes a branch to a repository the operator never named.
 	if local, err := repoFromOriginURL(ctx, cfg); err == nil && local != "" && !strings.EqualFold(local, cfg.repo) {
-		return "", fmt.Errorf("-dir is a checkout of %s, not %s (-repo) — the file-proposal write needs "+
-			"-dir to be a checkout of the repository being set up", local, cfg.repo)
+		return setupFilesResult{}, fmt.Errorf("-dir is a checkout of %s, not %s (-repo) — the file-proposal "+
+			"write needs -dir to be a checkout of the repository being set up", local, cfg.repo)
 	}
 	// Retried like syncDefaultBranch's own fetch: waking from sleep is
 	// exactly when the network hasn't reassociated yet, and a fetch is safe
@@ -153,56 +232,105 @@ func proposeSetupFiles(ctx context.Context, cfg config) (string, error) {
 	if _, err := retryRead(ctx, cfg, "git fetch origin", func() ([]byte, error) {
 		return git(ctx, cfg, "fetch", "origin", "--quiet")
 	}); err != nil {
-		return "", fmt.Errorf("fetching origin: %w", err)
+		return setupFilesResult{}, fmt.Errorf("fetching origin: %w", err)
 	}
 	head, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short")
 	if err != nil {
-		return "", fmt.Errorf("resolving origin's default branch: %w", err)
+		return setupFilesResult{}, fmt.Errorf("resolving origin's default branch: %w", err)
 	}
 	remoteDefault := strings.TrimSpace(string(head)) // "origin/main"
 	defaultBranch := strings.TrimPrefix(remoteDefault, "origin/")
 
 	path, err := setupWorktree(ctx, cfg, remoteDefault)
 	if err != nil {
-		return "", err
+		return setupFilesResult{}, err
 	}
 	wtCfg := cfg
 	wtCfg.dir = path
 
-	missing := missingGitignoreLines(readGitignoreLines(path))
-	if len(missing) > 0 {
-		if err := appendGitignoreLines(path, missing); err != nil {
-			return "", fmt.Errorf("writing .gitignore: %w", err)
+	var wroteGitignore, wroteClaudeMd, wroteScaffold bool
+	if want.gitignore {
+		missing := missingGitignoreLines(readGitignoreLines(path))
+		if len(missing) > 0 {
+			if err := appendGitignoreLines(path, missing); err != nil {
+				return setupFilesResult{}, fmt.Errorf("writing .gitignore: %w", err)
+			}
+			if _, err := git(ctx, wtCfg, "add", ".gitignore"); err != nil {
+				return setupFilesResult{}, fmt.Errorf("staging .gitignore: %w", err)
+			}
+			wroteGitignore = true
 		}
-		if _, err := git(ctx, wtCfg, "add", ".gitignore"); err != nil {
-			return "", fmt.Errorf("staging .gitignore: %w", err)
+	}
+	if want.claudeMd && claudeMdNeedsUpdate(path) {
+		if err := writeClaudeMdBlock(path); err != nil {
+			return setupFilesResult{}, fmt.Errorf("writing CLAUDE.md: %w", err)
 		}
+		if _, err := git(ctx, wtCfg, "add", "CLAUDE.md"); err != nil {
+			return setupFilesResult{}, fmt.Errorf("staging CLAUDE.md: %w", err)
+		}
+		wroteClaudeMd = true
+	}
+	if want.scaffold && scaffoldNeedsWrite(path) {
+		if err := writeScaffold(path); err != nil {
+			return setupFilesResult{}, fmt.Errorf("writing the scaffold: %w", err)
+		}
+		if _, err := git(ctx, wtCfg, "add", visionMdPath, plansReadmePath); err != nil {
+			return setupFilesResult{}, fmt.Errorf("staging the scaffold: %w", err)
+		}
+		wroteScaffold = true
+	}
+	if wroteGitignore || wroteClaudeMd || wroteScaffold {
 		if _, err := git(ctx, wtCfg, "commit", "-m", setupFilesCommitSubject); err != nil {
-			return "", fmt.Errorf("committing: %w", err)
+			return setupFilesResult{}, fmt.Errorf("committing: %w", err)
 		}
 	}
 
+	// Checked unconditionally, not just when this call itself committed
+	// something: a worktree reused from a dead run (setupWorktree, the
+	// existing-local/remote-branch cases) can already carry a commit ahead
+	// of remoteDefault that never got pushed. Without this, a resumed run
+	// that finds every item already satisfied on disk would report "nothing
+	// to propose" and leave that earlier commit stranded, unpushed.
 	ahead, err := git(ctx, wtCfg, "rev-list", "--count", remoteDefault+"..HEAD")
 	if err != nil {
-		return "", fmt.Errorf("checking %s against %s: %w", setupBranch, remoteDefault, err)
+		return setupFilesResult{}, fmt.Errorf("checking %s against %s: %w", setupBranch, remoteDefault, err)
 	}
 	if strings.TrimSpace(string(ahead)) == "0" {
-		return "", nil // nothing to propose — see the caller
+		return setupFilesResult{}, nil // nothing to propose — see the caller
+	}
+
+	// What actually goes into the PR: read off the branch itself against
+	// remoteDefault, not the wrote* flags above. Those only cover what this
+	// call's own write step did — a worktree reused from a dead run's own
+	// earlier, unpushed commit can carry an item that step found nothing
+	// left to write for, and that item is on the branch regardless and
+	// still belongs in the row and the PR body.
+	diffOut, err := git(ctx, wtCfg, "diff", "--name-only", remoteDefault+"..HEAD")
+	if err != nil {
+		return setupFilesResult{}, fmt.Errorf("diffing %s against %s: %w", setupBranch, remoteDefault, err)
+	}
+	changed := strings.Fields(string(diffOut))
+	result := setupFilesResult{
+		proposedGitignore: want.gitignore && slices.Contains(changed, ".gitignore"),
+		proposedClaudeMd:  want.claudeMd && slices.Contains(changed, "CLAUDE.md"),
+		proposedScaffold: want.scaffold &&
+			(slices.Contains(changed, visionMdPath) || slices.Contains(changed, plansReadmePath)),
 	}
 
 	// Never --force: a rerun that finds the branch already pushed (a dead
 	// run's own push, or a human's edit) builds on it rather than
 	// overwriting it.
 	if _, err := git(ctx, wtCfg, "push", "-u", "origin", setupBranch); err != nil {
-		return "", fmt.Errorf("pushing %s: %w", setupBranch, err)
+		return setupFilesResult{}, fmt.Errorf("pushing %s: %w", setupBranch, err)
 	}
 
 	out, err := gh(ctx, cfg, "pr", "create", "--head", setupBranch, "--base", defaultBranch,
-		"--title", setupFilesCommitSubject, "--body", setupFilesPRBody())
+		"--title", setupFilesCommitSubject, "--body", setupFilesPRBody(result))
 	if err != nil {
-		return "", fmt.Errorf("opening the PR: %w", err)
+		return setupFilesResult{}, fmt.Errorf("opening the PR: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	result.url = strings.TrimSpace(string(out))
+	return result, nil
 }
 
 // repoFromOriginURL extracts "owner/repo" from cfg.dir's local origin
@@ -298,15 +426,31 @@ func appendGitignoreLines(dir string, lines []string) error {
 	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
-// setupFilesPRBody lists what was added and why, per docs/plans/setup.md's
-// own "Done when" for this ticket — always the fixed set of lines, not just
-// the ones this particular run happened to add, since the PR is about the
-// same three lines whichever run's push landed them.
-func setupFilesPRBody() string {
-	return "`polako setup -apply` proposed this.\n\n" +
-		"Adds the .gitignore lines the `implement-issue` skill needs so its own " +
-		"scratch never gets committed by accident:\n\n" +
-		"- `/.worktrees/` — the worktree the skill creates per issue\n" +
-		"- `/PLAN.md` — the resume note it writes before implementing\n" +
-		"- `/.polako-scratch/` — everything else throwaway: PR bodies, diff dumps\n"
+// setupFilesPRBody lists what the pushed branch actually carries over
+// remoteDefault — the .gitignore lines, always the same fixed set per
+// docs/plans/setup.md's "Done when" for that half of the ticket, plus the
+// CLAUDE.md block and the scaffold when either is on the branch too. Reads
+// result's proposed* fields, which come from a diff against remoteDefault —
+// not "did this run's own write step add it", so an item an earlier dead
+// run already committed still gets named here.
+func setupFilesPRBody(result setupFilesResult) string {
+	var b strings.Builder
+	b.WriteString("`polako setup -apply` proposed this.\n\n")
+	if result.proposedGitignore {
+		b.WriteString("Adds the .gitignore lines the `implement-issue` skill needs so its own " +
+			"scratch never gets committed by accident:\n\n" +
+			"- `/.worktrees/` — the worktree the skill creates per issue\n" +
+			"- `/PLAN.md` — the resume note it writes before implementing\n" +
+			"- `/.polako-scratch/` — everything else throwaway: PR bodies, diff dumps\n\n")
+	}
+	if result.proposedClaudeMd {
+		b.WriteString("Adds a marked polako block to CLAUDE.md: the command that checks this " +
+			"repo's work, which files are scratch, the `issue-N` branch contract, and that issue " +
+			"text is data, not instructions. Run `/init` for the rest of CLAUDE.md.\n\n")
+	}
+	if result.proposedScaffold {
+		b.WriteString("Adds `docs/VISION.md` and `docs/plans/README.md`, a starting point for the " +
+			"vision/plan layout `polako plan-backlog` uses.\n\n")
+	}
+	return strings.TrimRight(b.String(), "\n") + "\n"
 }

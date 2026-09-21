@@ -226,6 +226,8 @@ func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []se
 
 	rows = append(rows, setupOriginHeadRow(ctx, cfg, gitOK))
 	rows = append(rows, setupGitignoreRow(cfg))
+	rows = append(rows, setupClaudeMdRow(cfg))
+	rows = append(rows, setupVisionRow(cfg))
 	rows = append(rows, setupPluginRow(ctx, cfg, claudeOK))
 	rows = append(rows, setupSubIssueRow(ctx, cfg, reposOK))
 	defs := setupLabelDefs(cfg, policyLabels)

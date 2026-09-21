@@ -119,24 +119,41 @@ func newSetupPrompt(in io.Reader, out io.Writer, yes bool) *setupPrompt {
 	return &setupPrompt{scan: bufio.NewScanner(in), out: out, yes: yes}
 }
 
-// confirm asks "step [Y/n] ", default yes on an empty line. -yes skips the
-// question outright. An EOF is not the same as an empty line: it means
+// confirm asks "step [Y/n] ", default yes on an empty line — confirmDefault
+// with defaultYes true. Every step but the scaffold prompt (setup_files.go)
+// defaults to yes.
+func (p *setupPrompt) confirm(step string) bool {
+	return p.confirmDefault(step, true)
+}
+
+// confirmDefault is confirm generalized to a caller-chosen default. -yes
+// means "take the default answer for every step without asking" — not
+// "answer yes to everything" — so a defaultYes-false step (the scaffold
+// prompt) has to decline under -yes, the same as an operator hitting enter
+// on it would. An EOF is not the same as an empty line either way: it means
 // stdin closed — an operator's Ctrl-D meant to back out, or a terminal that
 // died mid-run — so it declines rather than accepting the default, and every
-// later confirm() in the same run declines too, since bufio.Scanner keeps
-// returning false once its reader is exhausted. -apply's own preflight above
-// already refused a non-terminal stdin without -yes, so this path is never
-// reached by -yes itself; only a live terminal reaches it.
-func (p *setupPrompt) confirm(step string) bool {
+// later confirmDefault() in the same run declines too, since bufio.Scanner
+// keeps returning false once its reader is exhausted. -apply's own preflight
+// above already refused a non-terminal stdin without -yes, so this path is
+// never reached by -yes itself; only a live terminal reaches it.
+func (p *setupPrompt) confirmDefault(step string, defaultYes bool) bool {
 	if p.yes {
-		return true
+		return defaultYes
 	}
-	fmt.Fprintf(p.out, "%s [Y/n] ", step)
+	hint := "[Y/n]"
+	if !defaultYes {
+		hint = "[y/N]"
+	}
+	fmt.Fprintf(p.out, "%s %s ", step, hint)
 	if !p.scan.Scan() {
 		return false
 	}
 	a := strings.ToLower(strings.TrimSpace(p.scan.Text()))
-	return a == "" || a == "y" || a == "yes"
+	if a == "" {
+		return defaultYes
+	}
+	return a == "y" || a == "yes"
 }
 
 // name asks question, offering suggestion as the default an empty answer (or
