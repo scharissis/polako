@@ -37,6 +37,18 @@ var labelTable = []labelDef{
 	{name: awaitingAnswerLabel, color: "FBCA04", description: "polako is waiting for an answer on this issue", required: true},
 }
 
+// labelTableNames is every name labelTable holds, in table order — the one
+// place setup_templates.go and its self-test (repo_test.go) each add a
+// gate label to, so a future addition to labelTable can't leave either
+// stale.
+func labelTableNames() []string {
+	names := make([]string, len(labelTable))
+	for i, l := range labelTable {
+		names[i] = l.name
+	}
+	return names
+}
+
 // labelByName looks up one label's definition. Every call site names one of
 // the three consts above, so a miss means this table fell out of sync with
 // main.go, not bad input — hence the panic rather than a second error path

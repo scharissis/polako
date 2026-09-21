@@ -1665,12 +1665,12 @@ func TestIssueTemplatesApplyNoOrchestrationLabel(t *testing.T) {
 		t.Fatalf("reading %s: %v", dir, err)
 	}
 	// The gate label is the operator's choice, so it cannot be named here.
-	// These are the three this repository's own queue rules turn on, plus the
-	// label its README documents as the gate it runs with. leakedTemplateLabel
-	// and templateLabelLines (setup_templates.go) are the same scan the
-	// `polako setup` row itself makes on a target repository — moved there so
-	// both share one copy.
-	forbidden := []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel, "ready"}
+	// labelTableNames() is every label this repository's own queue rules turn
+	// on; "ready" is the one its README documents as the gate it runs with.
+	// leakedTemplateLabel and templateLabelLines (setup_templates.go) are the
+	// same scan the `polako setup` row itself makes on a target repository —
+	// moved there so both share one copy.
+	forbidden := append(labelTableNames(), "ready")
 	for _, e := range entries {
 		if filepath.Ext(e.Name()) != ".yml" && filepath.Ext(e.Name()) != ".yaml" {
 			continue

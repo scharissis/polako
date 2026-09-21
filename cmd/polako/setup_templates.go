@@ -109,7 +109,7 @@ func setupTemplatesRow(cfg config) setupRow {
 		// on a definite "missing", so this can't silently pass as ok either.
 		return setupRow{name: name, status: setupUnknown, detail: fmt.Sprintf("could not read %s (%v)", dir, err)}
 	}
-	forbidden := []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel}
+	forbidden := labelTableNames()
 	if cfg.label != "" {
 		forbidden = append(forbidden, cfg.label)
 	}
