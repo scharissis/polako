@@ -307,6 +307,30 @@ func TestPolicyLabelDefsAreTierAliasesOnly(t *testing.T) {
 	}
 }
 
+// -label naming a policy-label name (an odd but real invocation) must not
+// produce two labelDefs for the same name — the second create attempt would
+// otherwise fail "already exists" right after the first one's own success.
+// required is promoted to true, since a name given through -label is always
+// required, whichever source in the list carries that flag.
+func TestSetupLabelDefsDedupesALabelMatchingAPolicyName(t *testing.T) {
+	t.Parallel()
+	cfg := config{label: "model:opus"}
+	defs := setupLabelDefs(cfg, true)
+
+	var matches []labelDef
+	for _, d := range defs {
+		if d.name == "model:opus" {
+			matches = append(matches, d)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("setupLabelDefs() has %d entries named %q, want 1: %+v", len(matches), "model:opus", matches)
+	}
+	if !matches[0].required {
+		t.Errorf("model:opus = %+v, want required — it came in through -label", matches[0])
+	}
+}
+
 // readSetup shows the policy labels in the report too, not only when -apply
 // is given — an operator previewing what -policy-labels would offer.
 func TestReadSetupIncludesPolicyLabelRowsWhenRequested(t *testing.T) {
@@ -356,6 +380,28 @@ func TestApplySetupCreatesMissingRequiredLabelsIdempotently(t *testing.T) {
 	rows2 = applySetup(context.Background(), strings.NewReader(""), &out2, cfg, rows2, defs, true)
 	if out2.String() != "" {
 		t.Errorf("second -apply -yes run wrote %q, want nothing left to create", out2.String())
+	}
+}
+
+// An EOF on stdin (a closed terminal, or Ctrl-D) is not an empty line: it
+// must decline rather than accept the default, and every remaining step in
+// the same run must decline too, since a Scanner keeps returning false once
+// its reader is exhausted. Before this fix, EOF read as "yes" and every
+// missing required label got created silently.
+func TestApplySetupEOFDeclinesRatherThanAcceptsTheDefault(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	cfg := setupCfg(t, &ghState{}, checkout)
+
+	cfg, rows := readSetup(context.Background(), cfg, false)
+	defs := setupLabelDefs(cfg, false)
+	var out strings.Builder
+	rows = applySetup(context.Background(), strings.NewReader(""), &out, cfg, rows, defs, false)
+
+	for _, name := range []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel} {
+		if r := findSetupRow(t, rows, name); r.status != setupMissing {
+			t.Errorf("row %q = %+v, want still missing — EOF must decline, not accept the default", name, r)
+		}
 	}
 }
 
@@ -415,6 +461,34 @@ func TestApplySetupPromptsForGateLabelOnPublicRepoWithNoLabel(t *testing.T) {
 	exists, err := labelExists(context.Background(), cfg, "ready")
 	if err != nil || !exists {
 		t.Errorf("labelExists(ready) = %v, %v, want true, nil", exists, err)
+	}
+}
+
+// A label created by someone else between the read pass and applySetup's own
+// create (simulated here by creating it directly first, so applySetup's own
+// ensureLabel call fails "already exists") is not a write failure: the row
+// ends up ok, and the output never says the run needs write access.
+func TestApplySetupTreatsAlreadyExistsAsSuccess(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	cfg := setupCfg(t, &ghState{}, checkout)
+
+	cfg, rows := readSetup(context.Background(), cfg, false)
+	defs := setupLabelDefs(cfg, false)
+	l := labelByName(needsHumanLabel)
+	if err := ensureLabel(context.Background(), cfg, l.name, l.color, l.description); err != nil {
+		t.Fatalf("test setup: ensureLabel: %v", err)
+	}
+
+	var out strings.Builder
+	rows = applySetup(context.Background(), strings.NewReader(""), &out, cfg, rows, defs, true)
+
+	r := findSetupRow(t, rows, needsHumanLabel)
+	if r.status != setupOK {
+		t.Errorf("row %q = %+v, want ok — the label exists, which is what the create wanted", needsHumanLabel, r)
+	}
+	if strings.Contains(out.String(), "needs write access") {
+		t.Errorf("output = %q, an already-existing label must not read as a write failure", out.String())
 	}
 }
 

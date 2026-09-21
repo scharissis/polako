@@ -17,20 +17,41 @@ import (
 )
 
 // setupLabelDefs is every label this run cares about: the fixed table,
-// -label's own when it names one the table does not already cover, and, with
-// policyLabels, the tier-alias set -policy-labels offers to -apply. Shared by
-// setupLabelRows (the read path) and applySetup (the write path), so both
-// agree on exactly which labels are in scope for one invocation.
+// -label's own, and, with policyLabels, the tier-alias set -policy-labels
+// offers to -apply. Shared by setupLabelRows (the read path) and applySetup
+// (the write path), so both agree on exactly which labels are in scope for
+// one invocation.
 func setupLabelDefs(cfg config, policyLabels bool) []labelDef {
 	defs := slices.Clone(labelTable)
-	if cfg.label != "" && !slices.ContainsFunc(labelTable, func(l labelDef) bool { return l.name == cfg.label }) {
+	if cfg.label != "" {
 		defs = append(defs, labelDef{name: cfg.label, color: "ededed",
 			description: "gate label for `polako work -label`", required: true})
 	}
 	if policyLabels {
 		defs = append(defs, policyLabelDefs()...)
 	}
-	return defs
+	return dedupeLabelDefs(defs)
+}
+
+// dedupeLabelDefs drops a later entry that repeats an earlier one's name.
+// -label can name anything, including a name labelTable or the policy set
+// already carries — -label model:opus is a real, if odd, invocation — so the
+// three sources above can produce the same name twice. Keeps the first
+// occurrence; required is promoted to true if any duplicate asked for it, so
+// a required -label colliding with an optional policy label stays required.
+// Without this, applySetup would offer to create the same label twice in one
+// run: the second attempt fails "already exists" right after the first
+// attempt's own success.
+func dedupeLabelDefs(defs []labelDef) []labelDef {
+	out := make([]labelDef, 0, len(defs))
+	for _, d := range defs {
+		if i := slices.IndexFunc(out, func(o labelDef) bool { return o.name == d.name }); i >= 0 {
+			out[i].required = out[i].required || d.required
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
 }
 
 // policyLabelDefs is what -policy-labels adds: the model: family, tier
@@ -98,17 +119,21 @@ func newSetupPrompt(in io.Reader, out io.Writer, yes bool) *setupPrompt {
 	return &setupPrompt{scan: bufio.NewScanner(in), out: out, yes: yes}
 }
 
-// confirm asks "step [Y/n] ", default yes. -yes skips the question outright,
-// same as an unanswered EOF: -apply's own preflight above already refused a
-// non-terminal stdin without -yes, so an EOF reached from here is either
-// -yes itself or a terminal that closed mid-run, and neither should hang.
+// confirm asks "step [Y/n] ", default yes on an empty line. -yes skips the
+// question outright. An EOF is not the same as an empty line: it means
+// stdin closed — an operator's Ctrl-D meant to back out, or a terminal that
+// died mid-run — so it declines rather than accepting the default, and every
+// later confirm() in the same run declines too, since bufio.Scanner keeps
+// returning false once its reader is exhausted. -apply's own preflight above
+// already refused a non-terminal stdin without -yes, so this path is never
+// reached by -yes itself; only a live terminal reaches it.
 func (p *setupPrompt) confirm(step string) bool {
 	if p.yes {
 		return true
 	}
 	fmt.Fprintf(p.out, "%s [Y/n] ", step)
 	if !p.scan.Scan() {
-		return true
+		return false
 	}
 	a := strings.ToLower(strings.TrimSpace(p.scan.Text()))
 	return a == "" || a == "y" || a == "yes"
@@ -160,6 +185,16 @@ func applySetup(ctx context.Context, in io.Reader, out io.Writer, cfg config, ro
 			continue
 		}
 		if err := ensureLabel(ctx, cfg, def.name, def.color, def.description); err != nil {
+			if isAlreadyExistsError(err) {
+				// Someone else created it between the read pass and here —
+				// a concurrent operator, or (with -policy-labels) an -label
+				// that collided with a name dedupeLabelDefs let through
+				// under a different required flag. Either way the label
+				// exists now, which is what this step wanted.
+				rows[ri] = setupRow{name: def.name, status: setupOK, required: def.required}
+				fmt.Fprintf(out, "  %q already exists\n", def.name)
+				continue
+			}
 			// Named rather than relayed: the likeliest cause by far is a
 			// token without push access, and raw gh stderr for that is a
 			// wall of JSON an operator has to decode to reach the same
