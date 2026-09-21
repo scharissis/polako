@@ -19,16 +19,22 @@ import (
 // .github/workflows counts, whatever it actually runs.
 func setupCIWorkflowRow(cfg config) setupRow {
 	const name = "CI workflow"
-	entries, err := os.ReadDir(filepath.Join(cfg.dir, ".github", "workflows"))
-	if err == nil {
+	dir := filepath.Join(cfg.dir, ".github", "workflows")
+	entries, err := os.ReadDir(dir)
+	switch {
+	case err == nil:
 		for _, e := range entries {
 			ext := filepath.Ext(e.Name())
 			if ext == ".yml" || ext == ".yaml" {
 				return setupRow{name: name, status: setupOK}
 			}
 		}
+		return setupRow{name: name, status: setupMissing, detail: "advice only — no .github/workflows/*.yml found"}
+	case os.IsNotExist(err):
+		return setupRow{name: name, status: setupMissing, detail: "advice only — no .github/workflows/*.yml found"}
+	default:
+		return setupRow{name: name, status: setupUnknown, detail: fmt.Sprintf("could not read %s (%v)", dir, err)}
 	}
-	return setupRow{name: name, status: setupMissing, detail: "advice only — no .github/workflows/*.yml found"}
 }
 
 // branchProtectionState is readBranchProtection's answer: three states, not

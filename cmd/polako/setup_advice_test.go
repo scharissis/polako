@@ -30,6 +30,22 @@ func TestSetupCIWorkflowRow(t *testing.T) {
 	}
 }
 
+// A review finding: a real read failure on .github/workflows (here, it
+// exists as a plain file, not a directory) must not read as "no CI".
+func TestSetupCIWorkflowRowUnknownOnAReadFailure(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".github"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".github", "workflows"), nil, 0o644); err != nil {
+		t.Fatalf("writing: %v", err)
+	}
+	if row := setupCIWorkflowRow(config{dir: dir}); row.status != setupUnknown {
+		t.Errorf("row = %+v, want %q — a real read failure, not \"no CI\"", row, setupUnknown)
+	}
+}
+
 func TestSetupBranchProtectionRow(t *testing.T) {
 	t.Parallel()
 	_, checkout := upstream(t)

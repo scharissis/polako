@@ -44,18 +44,25 @@ var buildToolTable = []buildToolDef{
 // missingBuildTools is which of buildToolTable's tools cfg.dir's root has a
 // marker for, deduped (BUILD.bazel and WORKSPACE both mean bazel) and in
 // buildToolTable's own order. Shared by the row below and suggestedWorkLine,
-// so the two can never name a different set.
-func missingBuildTools(cfg config) []string {
+// so the two can never name a different set. A stat failure other than the
+// marker simply not existing (permission denied, a transient FS error) comes
+// back as an error rather than being read as "not present" — the caller
+// decides what that means for its own row.
+func missingBuildTools(cfg config) ([]string, error) {
 	var tools []string
 	for _, d := range buildToolTable {
-		if _, err := os.Stat(filepath.Join(cfg.dir, d.marker)); err != nil {
-			continue
-		}
-		if !slices.Contains(tools, d.tool) {
-			tools = append(tools, d.tool)
+		_, err := os.Stat(filepath.Join(cfg.dir, d.marker))
+		switch {
+		case err == nil:
+			if !slices.Contains(tools, d.tool) {
+				tools = append(tools, d.tool)
+			}
+		case os.IsNotExist(err):
+		default:
+			return nil, err
 		}
 	}
-	return tools
+	return tools, nil
 }
 
 // addToolsFlag renders tools as the -add-tools value a human would paste onto
@@ -74,7 +81,10 @@ func addToolsFlag(tools []string) string {
 // it just heads off a stall an operator would otherwise find at 2am.
 func setupBuildToolsRow(cfg config) setupRow {
 	const name = "build tools"
-	tools := missingBuildTools(cfg)
+	tools, err := missingBuildTools(cfg)
+	if err != nil {
+		return setupRow{name: name, status: setupUnknown, detail: fmt.Sprintf("could not check the checkout for build tools (%v)", err)}
+	}
 	if len(tools) == 0 {
 		return setupRow{name: name, status: setupOK}
 	}

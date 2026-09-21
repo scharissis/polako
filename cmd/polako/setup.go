@@ -411,7 +411,7 @@ func suggestedWorkLine(cfg config) string {
 	if cfg.label != "" {
 		cmd += " -label " + cfg.label
 	}
-	if tools := missingBuildTools(cfg); len(tools) > 0 {
+	if tools, err := missingBuildTools(cfg); err == nil && len(tools) > 0 {
 		cmd += " " + addToolsFlag(tools)
 	}
 	return cmd + " -dry-run"

@@ -7,6 +7,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -55,6 +56,29 @@ func TestSetupBuildToolsRowDedupesBazel(t *testing.T) {
 	row := setupBuildToolsRow(config{dir: dir})
 	if got := strings.Count(row.detail, "bazel"); got != 1 {
 		t.Errorf("detail = %q, want exactly one mention of bazel, got %d", row.detail, got)
+	}
+}
+
+// A review finding: a real stat failure (here, a directory with no execute
+// permission, so every marker stat fails with permission-denied rather than
+// not-exist) must not read as "no build tools present".
+func TestSetupBuildToolsRowUnknownOnAStatFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits don't block stat the same way on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses the permission bits this test relies on")
+	}
+	t.Parallel()
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "locked")
+	if err := os.Mkdir(dir, 0o000); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) }) // let t.TempDir's own cleanup remove it
+	row := setupBuildToolsRow(config{dir: dir})
+	if row.status != setupUnknown {
+		t.Errorf("row = %+v, want %q — a real stat failure, not \"nothing present\"", row, setupUnknown)
 	}
 }
 
