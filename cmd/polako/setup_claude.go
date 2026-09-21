@@ -108,7 +108,43 @@ func packageJSONHasTestScript(dir string) bool {
 // doesn't either, and the two have to compare equal for a rerun on an
 // already-correct CLAUDE.md to come out byte-identical.
 func claudeMdBlock(dir string) string {
-	return strings.TrimRight(fmt.Sprintf(claudeMdBlockTemplate, claudeMdCheckCommand(dir)), "\n")
+	return claudeMdBlockFor(dir, "")
+}
+
+// claudeMdCheckLineRe matches the block's one substituted line, capturing
+// whatever command currently sits there.
+var claudeMdCheckLineRe = regexp.MustCompile("(?m)^- Check your work with `(.+)`\\.$")
+
+// claudeMdExistingCheckCommand reads the check command already recorded in
+// existing's marked block — "" when there is no block, or its check line is
+// still the unknown placeholder, either of which means there is nothing
+// worth keeping.
+func claudeMdExistingCheckCommand(existing string) string {
+	block, ok := extractClaudeMdBlock(existing)
+	if !ok {
+		return ""
+	}
+	m := claudeMdCheckLineRe.FindStringSubmatch(block)
+	if m == nil || m[1] == claudeMdCheckCommandUnknown {
+		return ""
+	}
+	return m[1]
+}
+
+// claudeMdBlockFor is the block this run would write into dir's CLAUDE.md
+// given its current content. Detection wins when it finds something; when it
+// comes back unknown, a human's own fill-in already sitting in existing's
+// block is kept rather than reverted to the placeholder — claudeMdCheckCommand
+// has no way to see that fill-in, so treating unknown as "nothing to keep"
+// would make every rerun undo it.
+func claudeMdBlockFor(dir, existing string) string {
+	command := claudeMdCheckCommand(dir)
+	if command == claudeMdCheckCommandUnknown {
+		if kept := claudeMdExistingCheckCommand(existing); kept != "" {
+			command = kept
+		}
+	}
+	return strings.TrimRight(fmt.Sprintf(claudeMdBlockTemplate, command), "\n")
 }
 
 // extractClaudeMdBlock finds the first marked region in content, markers
@@ -136,7 +172,7 @@ func claudeMdNeedsUpdate(dir string) bool {
 		return true
 	}
 	got, ok := extractClaudeMdBlock(string(existing))
-	return !ok || got != claudeMdBlock(dir)
+	return !ok || got != claudeMdBlockFor(dir, string(existing))
 }
 
 // mergeClaudeMd inserts block into existing: replaced in place when the
@@ -165,7 +201,7 @@ func writeClaudeMdBlock(dir string) error {
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	merged := mergeClaudeMd(string(existing), claudeMdBlock(dir))
+	merged := mergeClaudeMd(string(existing), claudeMdBlockFor(dir, string(existing)))
 	return os.WriteFile(path, []byte(merged), 0o644)
 }
 

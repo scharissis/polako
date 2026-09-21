@@ -152,6 +152,42 @@ func TestWriteClaudeMdBlockIsByteIdenticalOnRerun(t *testing.T) {
 	}
 }
 
+// A human filling in the "(fill this in...)" placeholder by hand must
+// survive a rerun — claudeMdCheckCommand still can't detect anything, and a
+// naive rerun would revert the fill-in right back to the placeholder.
+func TestWriteClaudeMdBlockKeepsAHumansFillIn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := writeClaudeMdBlock(dir); err != nil {
+		t.Fatalf("writeClaudeMdBlock (first run): %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("reading CLAUDE.md: %v", err)
+	}
+	filled := strings.Replace(string(content), claudeMdCheckCommandUnknown, "make check", 1)
+	if filled == string(content) {
+		t.Fatalf("test setup: placeholder not found in the written block")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte(filled), 0o644); err != nil {
+		t.Fatalf("writing the human's fill-in: %v", err)
+	}
+
+	if claudeMdNeedsUpdate(dir) {
+		t.Errorf("claudeMdNeedsUpdate is true right after a human's own fill-in — it should be kept, not flagged")
+	}
+	if err := writeClaudeMdBlock(dir); err != nil {
+		t.Fatalf("writeClaudeMdBlock (rerun): %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("reading CLAUDE.md after rerun: %v", err)
+	}
+	if string(got) != filled {
+		t.Errorf("CLAUDE.md changed on rerun after a human's fill-in:\nbefore:\n%s\nafter:\n%s", filled, got)
+	}
+}
+
 func TestSetupClaudeMdRow(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
