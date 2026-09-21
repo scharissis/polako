@@ -786,7 +786,7 @@ func parkGrantsBlock(results []issueResult) []string {
 	}
 	for _, r := range results {
 		if r.parked && len(r.parkEntries) > 0 {
-			lines = append(lines, fmt.Sprintf("  grants  gh issue edit %d --remove-label needs-human", r.issue))
+			lines = append(lines, fmt.Sprintf("  grants  gh issue edit %d --remove-label %s", r.issue, needsHumanLabel))
 		}
 	}
 	return lines
