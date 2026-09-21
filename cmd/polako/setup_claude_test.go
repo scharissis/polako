@@ -76,6 +76,20 @@ func TestClaudeMdBlockIsShortAndNamesTheCheckCommand(t *testing.T) {
 	}
 }
 
+// Ties the block's wording to setupGitignoreLines directly, so the two can't
+// drift the way they did before (the block once named a root-level PR_BODY.md
+// that was never the real scratch path).
+func TestClaudeMdBlockNamesEachGitignoreLine(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	block := claudeMdBlock(dir)
+	for _, want := range setupGitignoreLines {
+		if !strings.Contains(block, want) {
+			t.Errorf("block = %q, want it to name %q", block, want)
+		}
+	}
+}
+
 func TestMergeClaudeMdCreatesWhenNoFile(t *testing.T) {
 	t.Parallel()
 	got := mergeClaudeMd("", "<!-- polako:begin -->\nx\n<!-- polako:end -->")
