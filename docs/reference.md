@@ -346,7 +346,7 @@ open prs on issue branches
   #61  issue-14  #14    mergeable  failing (test-mac)  clear                        https://github.com/scharissis/polako/pull/61
   #58  issue-19  #19    mergeable  passing             answered, awaiting re-review  https://github.com/scharissis/polako/pull/58
 
-needs you: reply on #9; review and merge PR #58; decide what to do about #5 (drop needs-human to requeue); curate #27, #28 (drop proposed to queue them)
+needs you: reply on #9; review and merge PR #58; grant Bash(echo:*) or fix the skill, then polako unpark #5; curate #27, #28 (drop proposed to queue them)
 ```
 
 Below that table, `plan documents` adds one row per file under `docs/plans/`:
@@ -362,6 +362,14 @@ a shift running on a server. The closing `needs you:` line is the point of
 the whole thing — items only a person can move. A PR polako would remediate
 itself (conflicting, red, or an unanswered review) is deliberately not on
 it: that's still polako's job.
+
+A parked issue whose own park comment named entries — the same ones
+[`polako unpark`](#clearing-a-permission-park-polako-unpark) itself would
+read — gets its own clause naming them, `grant Bash(echo:*) or fix the skill,
+then polako unpark #5` above, instead of the batched "decide what to do
+about" clause every other parked issue still gets. One comment read per
+parked issue, the same viewer-only read and strict-shape filter `unpark`
+itself uses, reused rather than copied.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
@@ -404,7 +412,7 @@ polako status -json | jq .
   "queue": {
     "ready": [14, 19, 23],
     "blocked": [{ "issue": 9, "quiet_seconds": 93600 }],
-    "parked": [5],
+    "parked": [{ "issue": 5, "entries": ["Bash(echo:*)"] }],
     "proposed": [27, 28],
     "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false, "held": false }]
   },
@@ -423,7 +431,7 @@ polako status -json | jq .
   "needs_you": [
     "reply on #9",
     "review and merge PR #58",
-    "decide what to do about #5 (drop needs-human to requeue)",
+    "grant Bash(echo:*) or fix the skill, then polako unpark #5",
     "curate #27, #28 (drop proposed to queue them)"
   ],
   "plans": { "docs": [{ "path": "docs/plans/backlog-fill.md", "state": "active", "open_children": 4, "containers": [{ "issue": 101, "total": 6, "completed": 2, "finished": false, "held": false }] }], "gone": [], "truncated": false },
@@ -445,6 +453,12 @@ not bare numbers — `{ "issue", "total", "completed", "finished", "held" }` —
 so a caller can tell a finished container from one in progress without a
 second call. For a finished one, `held: false` means the next shift is about
 to close it, `held: true` means it's the caller's.
+
+`queue.parked` is objects too, `{ "issue", "entries" }` — `entries` is the
+same `-add-tools` list `polako unpark` would read off the issue's own park
+comment, empty for a park with no comment or none `polako unpark` would
+treat as valid.
+
 Every array field is always `[]`, never `null`; `quiet_seconds`, `plan` and
 `published` can be *absent* instead of a fake zero or empty string. Same
 rule as the text report: no issue, PR or comment text, only numbers,
