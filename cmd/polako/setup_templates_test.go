@@ -28,6 +28,26 @@ func TestSetupTemplatesRowOKWithNoTemplatesDir(t *testing.T) {
 	}
 }
 
+// A review finding: a real read failure (ISSUE_TEMPLATE existing as a plain
+// file, here — permission-denied is the same class) must not read as "no
+// templates" on this required row.
+func TestSetupTemplatesRowUnknownOnAReadFailure(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".github"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// ISSUE_TEMPLATE as a plain file, not a directory: os.ReadDir fails with
+	// ENOTDIR, not ErrNotExist.
+	if err := os.WriteFile(filepath.Join(dir, ".github", "ISSUE_TEMPLATE"), nil, 0o644); err != nil {
+		t.Fatalf("writing: %v", err)
+	}
+	row := setupTemplatesRow(config{dir: dir})
+	if row.status != setupUnknown {
+		t.Errorf("row = %+v, want %q — a real read failure, not \"no templates\"", row, setupUnknown)
+	}
+}
+
 func TestSetupTemplatesRowOKWithCleanTemplates(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

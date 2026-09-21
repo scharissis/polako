@@ -100,7 +100,14 @@ func setupTemplatesRow(cfg config) setupRow {
 	dir := filepath.Join(cfg.dir, ".github", "ISSUE_TEMPLATE")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return setupRow{name: name, status: setupOK}
+		if os.IsNotExist(err) {
+			return setupRow{name: name, status: setupOK}
+		}
+		// Anything else — permission denied, ISSUE_TEMPLATE existing as a
+		// plain file, a transient FS error — means this check didn't actually
+		// run, not that it found nothing. Required rows only fail the report
+		// on a definite "missing", so this can't silently pass as ok either.
+		return setupRow{name: name, status: setupUnknown, detail: fmt.Sprintf("could not read %s (%v)", dir, err)}
 	}
 	forbidden := []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel}
 	if cfg.label != "" {
@@ -111,9 +118,10 @@ func setupTemplatesRow(cfg config) setupRow {
 		if ext != ".yml" && ext != ".yaml" {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		path := filepath.Join(dir, e.Name())
+		b, err := os.ReadFile(path)
 		if err != nil {
-			continue
+			return setupRow{name: name, status: setupUnknown, detail: fmt.Sprintf("could not read %s (%v)", path, err)}
 		}
 		if label := leakedTemplateLabel(templateLabelLines(string(b)), forbidden); label != "" {
 			return setupRow{name: name, status: setupMissing, required: true,
