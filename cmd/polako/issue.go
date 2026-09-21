@@ -8,8 +8,9 @@ package main
 // Its loop has two arms. dispatchRun is the one taken while no PR exists yet:
 // it runs Claude and classifies what came back, through the per-attempt
 // helpers on runAttempt. superviseToClose is the other: a PR exists, so wait
-// it out to merged or parked. resumeLedger is the four interlocking retry
-// counters both the crash arm and the clean-exit arm read.
+// it out to merged or parked. resumeLedger is the interlocking retry
+// counters both the crash arm and the clean-exit arm read, plus the one
+// non-counter detail a worked-around refusal needs carried across a resume.
 
 import (
 	"cmp"
@@ -78,11 +79,25 @@ type resumeLedger struct {
 	// kinds are exclusive, and a second bool is one more thing every place
 	// that clears the first has to remember.
 	kind string
+	// deferredPermissionDetail carries a worked-around refusal's detail
+	// (issue #461) across the resume afterCleanExit let it try instead of
+	// parking straight away. A later run of this same issue may open a PR —
+	// then this is never read again — or end with no PR of its own, with or
+	// without a fresh refusal; either way the eventual park still blames the
+	// original refusal rather than reporting "produced nothing" or the bound
+	// that actually stopped the resuming. Empty means no such refusal is
+	// pending. Cleared by clearRetries: a fresh start (a reply folded in)
+	// means whatever comes next is answering a different question, not still
+	// working around this refusal, so a later unrelated park must not keep
+	// blaming it (issue #461's own review — a -strict-order question
+	// answered mid-issue reuses this same ledger for the run after it).
+	deferredPermissionDetail string
 }
 
 // clearRetries is what a fresh start does: a reply arrived, or a PR opened, so
-// nothing is owed a resume and the crash budget starts over.
-func (l *resumeLedger) clearRetries() { l.fruitless, l.kind = 0, "" }
+// nothing is owed a resume, the crash budget starts over, and a refusal this
+// issue was resuming past is no longer this run's to blame.
+func (l *resumeLedger) clearRetries() { l.fruitless, l.kind, l.deferredPermissionDetail = 0, "", "" }
 
 // noteCrashResume books a crash-driven resume: another retry, resuming the
 // dead session by id. progressed is rep.progressed() — a run that did real
@@ -290,7 +305,7 @@ func (r *issueLoop) dispatchRun() (*pullRequest, error) {
 	// on the result event, so it can bound the next run and never the one
 	// that spent it.
 	if reason := overBudget(cfg, *r.tally); reason != "" {
-		return nil, r.parked(0, park(parkBudget, "%s", reason))
+		return nil, r.parked(0, r.budgetPark(reason))
 	}
 
 	// The label is durable, so "it is up after the run" does not by itself
@@ -436,8 +451,7 @@ func (a *runAttempt) classifyNoPR(runErr error, wasBlocked bool) (*pullRequest, 
 	// reason quotes them.
 	if errors.Is(runErr, errBudget) {
 		a.record(0, outcomeNothing)
-		return nil, a.parked(0, park(parkBudget, "%s",
-			cmp.Or(overBudget(cfg, *a.tally), runErr.Error())))
+		return nil, a.parked(0, a.budgetPark(cmp.Or(overBudget(cfg, *a.tally), runErr.Error())))
 	}
 	if errors.Is(runErr, errLimit) {
 		return a.waitOutLimit()
@@ -554,7 +568,7 @@ func (a *runAttempt) resumeCrash() (*pullRequest, error) {
 	// never makes, after sleeping -retry-wait for it, is a worse diagnosis
 	// than the park it is really doing.
 	if reason := overBudget(cfg, *a.tally); reason != "" {
-		return nil, a.parked(0, park(parkBudget, "%s", reason))
+		return nil, a.parked(0, a.budgetPark(reason))
 	}
 	progressed := a.rep.progressed()
 	a.ledger.noteCrashResume(progressed)
@@ -585,6 +599,7 @@ func (a *runAttempt) resumeCrash() (*pullRequest, error) {
 func (a *runAttempt) giveUpAfterCrash() error {
 	cfg := a.cfg
 	a.record(0, outcomeNothing)
+	var reason string
 	if a.ledger.resumes >= cfg.resumeCeiling {
 		// "retried" rather than "resumed": most of these are resumes, but a
 		// dead session turns one into a fresh restart, and the count covers
@@ -597,12 +612,22 @@ func (a *runAttempt) giveUpAfterCrash() error {
 		if a.ledger.everProgressed {
 			clause = "each run gets somewhere and then dies"
 		}
-		return a.parked(0, park(parkRetries,
-			"claude has been retried %d times on this issue and still has "+
-				"not finished it — %s, which needs a human", a.ledger.resumes, clause))
+		reason = fmt.Sprintf("claude has been retried %d times on this issue and still has "+
+			"not finished it — %s, which needs a human", a.ledger.resumes, clause)
+	} else {
+		reason = fmt.Sprintf("claude crashed and %d resume attempts failed", cfg.retries)
 	}
-	return a.parked(0, park(parkRetries,
-		"claude crashed and %d resume attempts failed", cfg.retries))
+	if a.ledger.deferredPermissionDetail != "" {
+		// issue #461: a worked-around refusal resumed into this crash loop
+		// instead of ending cleanly again. The refusal is still the likelier
+		// root cause than the crash count, so the park keeps blaming it —
+		// same rule afterCleanExit's own deferredPermissionDetail check
+		// follows, just reached from the other arm.
+		return a.parked(0, parkAside(parkPermission,
+			"the refused command was: "+clip(a.ledger.deferredPermissionDetail, 200),
+			"%s; %s", permissionParkReason, reason))
+	}
+	return a.parked(0, park(parkRetries, "%s", reason))
 }
 
 // afterCleanExit handles a clean exit that opened no PR and flagged no
@@ -613,27 +638,40 @@ func (a *runAttempt) giveUpAfterCrash() error {
 // nearly — exactly what resume exists for. The fourth asked the operator to
 // approve a tool this allowlist never granted and ended its turn unheard —
 // see rep.permissionRefused below, whose fix (-add-tools) is not something
-// resuming the same session can reach.
+// resuming the same session can reach — unless the run worked around it and
+// kept going (rep.refusalWorkedAround, issue #461), in which case it is worth
+// letting the resume machinery try to finish the job before assuming so.
 //
 // The first three (decided nothing, paused forever, ran out of road) are told
 // apart by that work on disk, not rep.progressed(): every clean exit
 // progressed — the run this was written for scored 59 turns and 58 tool
 // uses — so progress cannot separate them. Whether the branch has commits, or
 // the worktree is dirty, can. The fourth is told apart by the run's own final
-// words instead, classified by permissionRefusal, and checked first: no amount
-// of salvageable work changes what fixes it.
+// words instead, classified by permissionRefusal, and checked first — unless
+// worked around, no amount of salvageable work changes what fixes it.
 func (a *runAttempt) afterCleanExit() (*pullRequest, error) {
 	a.record(0, outcomeNothing)
 	// One probe, feeding both the decision and, if it turns out to be a park
 	// after all, the message.
 	left := inspectLeftWork(a.ctx, a.cfg, a.issue)
 
-	if a.rep.permissionRefused {
+	workedAround := a.rep.permissionRefused && a.rep.refusalWorkedAround()
+	if a.rep.permissionRefused && !workedAround {
 		// Resuming replays the identical session against the identical
 		// allowlist, so it hits the same wall again — only the operator can
 		// grant the tool, so park straight away rather than spending the
-		// clean-exit resume budget finding that out the slow way.
+		// clean-exit resume budget finding that out the slow way. #126's own
+		// shape (refused, then nothing more attempted) and #138's (the final
+		// message is itself the ask) both land here.
 		return nil, a.parkCleanExit(parkPermission, permissionParkReason, a.rep.permissionRefusedDetail, left)
+	}
+	if workedAround {
+		// Remembered on the ledger, not just this attempt's own report: if the
+		// resume below still ends with no PR — this run's or a later one's,
+		// with or without a fresh refusal of its own — the eventual park has
+		// to keep blaming this refusal rather than reporting "produced
+		// nothing" or whatever bound actually stopped the resuming.
+		a.ledger.deferredPermissionDetail = a.rep.permissionRefusedDetail
 	}
 
 	bound, boundWhy, resume := a.cleanExitDisposition(left)
@@ -642,8 +680,14 @@ func (a *runAttempt) afterCleanExit() (*pullRequest, error) {
 		// an API drop, a rate limit, a host that woke mid-run — and this is
 		// not: the process ended because the model ended its turn, and waiting
 		// changes nothing about what the next attempt finds.
-		a.cfg.logf("the run ended its turn without opening a PR but left work "+
-			"behind — resuming it to finish (%d/%d)", a.ledger.cleanResumes, cleanExitResumeCeiling)
+		if workedAround {
+			a.cfg.logf("the run was refused a tool mid-run but kept going and left work "+
+				"behind — resuming it to finish before treating the refusal as the blocker (%d/%d)",
+				a.ledger.cleanResumes, cleanExitResumeCeiling)
+		} else {
+			a.cfg.logf("the run ended its turn without opening a PR but left work "+
+				"behind — resuming it to finish (%d/%d)", a.ledger.cleanResumes, cleanExitResumeCeiling)
+		}
 		return nil, nil
 	}
 
@@ -675,10 +719,21 @@ func (a *runAttempt) afterCleanExit() (*pullRequest, error) {
 			category = parkPermission
 		}
 	}
+	refusedCmd := ""
+	if a.ledger.deferredPermissionDetail != "" {
+		// Unlike permissionAsked above, the category does not follow the
+		// bound here: this is a structural refusal (#209's own signal), not a
+		// weaker prose-based one, and the resume was already the concession —
+		// #461's whole point is that this park keeps blaming the refusal
+		// rather than the ceiling or budget that happened to be what actually
+		// stopped the resuming.
+		reason, category = permissionParkReason, parkPermission
+		refusedCmd = a.ledger.deferredPermissionDetail
+	}
 	if bound != "" {
 		reason += "; " + bound
 	}
-	return nil, a.parkCleanExit(category, reason, "", left)
+	return nil, a.parkCleanExit(category, reason, refusedCmd, left)
 }
 
 // cleanExitDisposition decides what to do with a clean exit that left work
@@ -723,6 +778,45 @@ func (a *runAttempt) cleanExitDisposition(left leftWork) (bound, boundWhy string
 // named first rather than left for #390's misattribution to repeat.
 const fetchAuthParkReason = "polako's own fetch couldn't authenticate just before this run; " +
 	"fix git access in -dir (`ssh-add -l`, or an https remote), then remove needs-human"
+
+// budgetPark builds a budget park's error: cause is overBudget's own sentence
+// (or errBudget's, on the leg that classifies a run the cap killed mid-run),
+// and inspectLeftWork's account of what is on disk is appended the same way
+// parkCleanExit appends it — so the person clearing needs-human knows
+// whether to pick up a real change or start from scratch. #318 is the case
+// that named the gap (issue #466): a run killed at the cap left two commits
+// and 33 dirty files nowhere but its own disk, and the park comment named the
+// cap and nothing else.
+//
+// Unlike every other park, this one writes: a branch inspectLeftWork finds
+// with commits not on its remote-tracking ref gets pushed to origin,
+// best-effort, before the message is built. A budget park is exactly #318's
+// own case — killed by the clock, with nothing durable saying where the work
+// went — and pushing a branch nothing points a PR at yet is not a merge and
+// touches no default branch, so "nothing merges itself" holds; see "What
+// leaves the machine" in CLAUDE.md, which this is the reasoning for. A failed
+// push is folded into the reason rather than swallowed, since that is the one
+// case where the work really is nowhere but this disk.
+func (r *issueLoop) budgetPark(cause string) error {
+	left := inspectLeftWork(r.ctx, r.cfg, r.issue)
+	reason := cause
+	if left.commits > 0 && !left.pushed {
+		if _, err := git(r.ctx, r.cfg, "push", "origin", left.branch); err != nil {
+			reason += fmt.Sprintf("; tried to push branch %s to origin so the work "+
+				"is not only on this machine, but the push failed — push it by hand "+
+				"(`git push origin %s`), then remove needs-human", left.branch, left.branch)
+		} else {
+			left.pushed = true
+		}
+	}
+	if d := left.describe(); d != "" {
+		reason += "; " + d
+	}
+	if w := left.where(); w != "" {
+		return parkAside(parkBudget, w, "%s", reason)
+	}
+	return park(parkBudget, "%s", reason)
+}
 
 // parkCleanExit parks a clean exit under category, with left's summary of
 // what is on disk appended to reason for the person picking it up.

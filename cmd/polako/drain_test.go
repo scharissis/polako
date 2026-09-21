@@ -1232,7 +1232,7 @@ func TestDrainParkSaysWhatTheRunLeftBehind(t *testing.T) {
 	for _, want := range []string{
 		"the run completed without opening a PR; it has been resumed 2 times " +
 			"after ending a turn without opening a PR and has still not opened one, which needs " +
-			"a human; branch issue-1 has 1 commit " +
+			"a human; branch issue-1 has 1 commit, not pushed to origin " +
 			"and its worktree has uncommitted changes in 1 file — the run left work behind, " +
 			"so start there rather than from scratch",
 		// Where it is goes to the terminal only, beside the resume id and for
@@ -1505,6 +1505,168 @@ func TestDrainParksARefusedToolResultWithoutResuming(t *testing.T) {
 	}
 }
 
+// Issue #461: #402 and #318's actual shape — a refused tool_result the run
+// worked around, with successful tool calls and a calm final word after it.
+// Before this fix the refusal parked the issue on the spot, throwing away
+// finished work (#402: 14 commits and a completed review gate, with only the
+// eval and the PR left). Now it gets the same clean-exit resume any other
+// run with work on disk gets, and only parks once that shared ceiling is
+// spent — still blaming the refusal, not the ceiling that actually stopped
+// the resuming.
+func TestDrainResumesAWorkedAroundRefusalThenParksOnPermission(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "toolrefusedrecovered", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	calls := filepath.Join(t.TempDir(), "gh-calls.log")
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
+	leftBehind(t, &cfg)
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a worked-around refusal must not end the drain: %v", err)
+	}
+
+	recs := terminalRecords(t, records, cfg.repo)
+	if len(recs) != 1 || recs[0].Outcome != issueNeedsHuman || recs[0].ParkReason != parkPermission {
+		t.Fatalf("terminal record = %+v, want needs_human / %s", recs, parkPermission)
+	}
+
+	out := buf.String()
+	// The shared clean-exit ceiling is 2: this fake reruns identically on
+	// every dispatch, so the run resumes twice before the third dispatch's
+	// classification finally parks it — proof the refusal alone did not park
+	// it early the way TestDrainParksARefusedToolResultWithoutResuming's
+	// unrecovered #126 shape still does.
+	if got := strings.Count(out, "session started"); got != 3 {
+		t.Errorf("%d runs dispatched, want 3 (resumed twice before the ceiling)\ngot:\n%s", got, out)
+	}
+	for _, want := range []string{
+		"the run stopped to ask for a permission this allowlist does not grant",
+		"it has been resumed 2 times after ending a turn without opening a PR " +
+			"and has still not opened one, which needs a human",
+		"the refused command was: Bash: cd /w && gofmt -l .",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "the run completed without opening a PR") {
+		t.Errorf("parked with the generic reason despite the deferred refusal\ngot:\n%s", out)
+	}
+
+	posted, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatalf("reading the fake gh call log: %v", err)
+	}
+	if want := "the run stopped to ask for a permission"; !strings.Contains(string(posted), want) {
+		t.Errorf("no gh call carried the reason to the thread\ngot:\n%s", posted)
+	}
+	if strings.Contains(string(posted), "cd /w && gofmt -l .") {
+		t.Errorf("the refused command must not reach the public issue thread\ngot:\n%s", posted)
+	}
+}
+
+// Issue #461's crash-arm gap: a worked-around refusal defers to a resume
+// (afterCleanExit), but if that resume then crashes instead of ending
+// cleanly again, giveUpAfterCrash used to park with the generic crash
+// message once the retry budget was spent, silently dropping the refusal.
+func TestDrainNamesTheDeferredRefusalWhenTheResumeThenCrashes(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "toolrefusedrecoveredthencrash", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	cfg.retries = 1
+	calls := filepath.Join(t.TempDir(), "gh-calls.log")
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
+	leftBehind(t, &cfg)
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a crashing resume must not end the drain: %v", err)
+	}
+
+	recs := terminalRecords(t, records, cfg.repo)
+	if len(recs) != 1 || recs[0].Outcome != issueNeedsHuman || recs[0].ParkReason != parkPermission {
+		t.Fatalf("terminal record = %+v, want needs_human / %s", recs, parkPermission)
+	}
+
+	out := buf.String()
+	// The clean-exit resume, then two crashes: -retries 1 forgives one before
+	// giveUpAfterCrash takes over.
+	if got := strings.Count(out, "session started"); got != 3 {
+		t.Errorf("%d runs dispatched, want 3\ngot:\n%s", got, out)
+	}
+	for _, want := range []string{
+		// Leads with the refusal, same as afterCleanExit's own park — the
+		// crash count still gets a clause, but it no longer leads.
+		"the run stopped to ask for a permission this allowlist does not grant",
+		"claude crashed and 1 resume attempts failed",
+		"the refused command was: Bash: cd /w && gofmt -l .",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
+	}
+	askAt := strings.Index(out, "the run stopped to ask for a permission")
+	crashAt := strings.Index(out, "claude crashed and 1 resume attempts failed")
+	if askAt < 0 || crashAt < 0 || askAt > crashAt {
+		t.Errorf("the park reason must lead with the refusal and trail with the crash count\ngot:\n%s", out)
+	}
+}
+
+// Issue #461's ledger-clearing fix: deferredPermissionDetail must not outlive
+// a fresh start. Under -strict-order, a worked-around refusal's resume can
+// itself ask an unrelated question, which the same processIssue call waits
+// out and folds in — reusing the same ledger, not a fresh one. A later,
+// unrelated park (the shared clean-exit ceiling, spent on two runs that never
+// saw a refusal at all) must not still blame the resolved one.
+func TestDrainClearsTheDeferredRefusalOnceAQuestionIsAnswered(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "toolrefusedrecoveredthenquestionthenclean", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		Labels: []string{awaitingAnswerLabel},
+	})
+	cfg.strictOrder = true
+	calls := filepath.Join(t.TempDir(), "gh-calls.log")
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
+	leftBehind(t, &cfg)
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a question round must not end the drain: %v", err)
+	}
+
+	recs := terminalRecords(t, records, cfg.repo)
+	if len(recs) != 1 || recs[0].Outcome != issueNeedsHuman || recs[0].ParkReason != parkRetries {
+		t.Fatalf("terminal record = %+v, want needs_human / %s", recs, parkRetries)
+	}
+
+	out := buf.String()
+	// The worked-around refusal, the question round's own run, and two more
+	// clean exits before the shared ceiling parks it.
+	if got := strings.Count(out, "session started"); got != 4 {
+		t.Errorf("%d runs dispatched, want 4\ngot:\n%s", got, out)
+	}
+	if want := "somebody replied on #1 — re-running to fold the answers in"; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, out)
+	}
+	if want := "the run completed without opening a PR; it has been resumed 2 times " +
+		"after ending a turn without opening a PR and has still not opened one, " +
+		"which needs a human"; !strings.Contains(out, want) {
+		t.Errorf("log is missing the generic park reason %q\ngot:\n%s", want, out)
+	}
+	if strings.Contains(out, "the run stopped to ask for a permission this allowlist does not grant") {
+		t.Errorf("parked still blaming the resolved refusal\ngot:\n%s", out)
+	}
+}
+
 // Issue #182: the ask does not have to be the run's last word. On #169 it
 // landed in a turn partway through and the run wrapped up on a sentence the
 // head anchor could not catch, so the issue parked as "no PR and no questions".
@@ -1567,11 +1729,15 @@ func TestLeftWorkDescribe(t *testing.T) {
 				"— the run left work behind, so start there rather than from scratch"},
 		{"committed but never pushed, worktree tidy",
 			leftWork{branch: "issue-42", counted: true, path: "/w", commits: 2},
-			"branch issue-42 has 2 commits and its worktree has no uncommitted changes " +
+			"branch issue-42 has 2 commits, not pushed to origin and its worktree has no uncommitted changes " +
+				"— the run left work behind, so start there rather than from scratch"},
+		{"committed and pushed, worktree tidy",
+			leftWork{branch: "issue-42", counted: true, path: "/w", commits: 2, pushed: true},
+			"branch issue-42 has 2 commits, pushed to origin and its worktree has no uncommitted changes " +
 				"— the run left work behind, so start there rather than from scratch"},
 		{"a worktree somebody already removed",
 			leftWork{branch: "issue-42", counted: true, commits: 1},
-			"branch issue-42 has 1 commit — the run left work behind, so start there rather than from scratch"},
+			"branch issue-42 has 1 commit, not pushed to origin — the run left work behind, so start there rather than from scratch"},
 		// A checkout with no origin/HEAD to compare against. "no commits" is the
 		// half of this a person acts on, so an uncounted branch says so rather
 		// than reporting the zero it never established.
@@ -1698,11 +1864,111 @@ func TestInspectLeftWorkAgainstARealCheckout(t *testing.T) {
 		if w.path != "" {
 			t.Errorf("path = %q, want \"\" — the directory is gone", w.path)
 		}
-		want := "branch issue-4 has 1 commit — the run left work behind, so start there rather than from scratch"
+		want := "branch issue-4 has 1 commit, not pushed to origin — the run left work behind, so start there rather than from scratch"
 		if got := w.describe(); got != want {
 			t.Errorf("describe() = %q, want %q", got, want)
 		}
 	})
+
+	t.Run("a pushed branch says so", func(t *testing.T) {
+		_, checkout := upstream(t)
+		wt := filepath.Join(t.TempDir(), "checkout-issue-6")
+		gitAt(t, checkout, "worktree", "add", wt, "-b", "issue-6")
+		commit(t, wt, "half-the-change")
+		gitAt(t, checkout, "push", "origin", "issue-6")
+
+		w := inspectLeftWork(context.Background(), config{dir: checkout, branchPrefix: "issue-"}, 6)
+		if !w.pushed {
+			t.Error("pushed = false, want true — the branch is on origin at the same sha")
+		}
+		want := "branch issue-6 has 1 commit, pushed to origin and its worktree has no uncommitted changes " +
+			"— the run left work behind, so start there rather than from scratch"
+		if got := w.describe(); got != want {
+			t.Errorf("describe() = %q, want %q", got, want)
+		}
+	})
+}
+
+// budgetLoop is a minimal issueLoop wired at checkout, for calling
+// budgetPark directly rather than driving a whole shift through drain().
+func budgetLoop(cfg config, issue int) *issueLoop {
+	return &issueLoop{ctx: context.Background(), cfg: cfg, issue: issue}
+}
+
+// The whole point of #466: a budget park with real commits on the branch
+// pushes them to origin rather than leaving the only copy on one machine's
+// disk — #318's own failure. A push that lands has nothing more to say
+// beyond describe()'s own "pushed to origin".
+func TestBudgetParkPushesUnpushedCommits(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	wt := filepath.Join(t.TempDir(), "checkout-issue-1")
+	gitAt(t, checkout, "worktree", "add", wt, "-b", "issue-1")
+	sha := commit(t, wt, "half-the-change")
+	cfg := config{dir: checkout, branchPrefix: "issue-"}
+
+	err := budgetLoop(cfg, 1).budgetPark("this shift has spent $9.00 on it")
+	reason, parked := parkReason(err)
+	if !parked {
+		t.Fatalf("budgetPark did not return a parkedError: %v", err)
+	}
+	if !strings.Contains(reason, "branch issue-1 has 1 commit, pushed to origin") {
+		t.Errorf("park reason = %q, want it to report the branch as pushed after the push", reason)
+	}
+
+	remote := gitAt(t, checkout, "ls-remote", "origin", "issue-1")
+	if !strings.Contains(remote, sha) {
+		t.Errorf("origin does not have issue-1 at %s: %q", sha, remote)
+	}
+}
+
+// A push that fails is folded into the park reason, not swallowed — that is
+// the one case where the branch really is nowhere but this disk, so it is
+// the one case a human reading the park comment most needs to hear about.
+func TestBudgetParkFoldsAFailedPushIntoTheReason(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	wt := filepath.Join(t.TempDir(), "checkout-issue-1")
+	gitAt(t, checkout, "worktree", "add", wt, "-b", "issue-1")
+	commit(t, wt, "half-the-change")
+	unreachableOrigin(t, checkout)
+	cfg := config{dir: checkout, branchPrefix: "issue-"}
+
+	err := budgetLoop(cfg, 1).budgetPark("this shift has spent $9.00 on it")
+	reason, parked := parkReason(err)
+	if !parked {
+		t.Fatalf("budgetPark did not return a parkedError: %v", err)
+	}
+	if !strings.Contains(reason, "tried to push branch issue-1 to origin") || !strings.Contains(reason, "the push failed") {
+		t.Errorf("park reason = %q, want it to say the push failed", reason)
+	}
+	// Not just that it failed — what to do about it, the same as this
+	// file's other park reasons (fetchAuthParkReason).
+	if !strings.Contains(reason, "push it by hand (`git push origin issue-1`), then remove needs-human") {
+		t.Errorf("park reason = %q, want it to tell the human how to recover", reason)
+	}
+	// Still says what is there, push failure or not — the person picking
+	// this up needs both facts.
+	if !strings.Contains(reason, "branch issue-1 has 1 commit, not pushed to origin") {
+		t.Errorf("park reason = %q, want it to still describe the branch", reason)
+	}
+}
+
+// A budget park with nothing salvageable on the branch never touches git
+// push at all — there is nothing there to preserve.
+func TestBudgetParkPushesNothingWithNoCommits(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	cfg := config{dir: checkout, branchPrefix: "issue-"}
+
+	err := budgetLoop(cfg, 1).budgetPark("this shift has spent $9.00 on it")
+	reason, parked := parkReason(err)
+	if !parked {
+		t.Fatalf("budgetPark did not return a parkedError: %v", err)
+	}
+	if reason != "this shift has spent $9.00 on it" {
+		t.Errorf("park reason = %q, want the cause alone with nothing appended", reason)
+	}
 }
 
 // Between two shifts a human merges PRs by hand, and every one leaves a

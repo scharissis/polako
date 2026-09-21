@@ -8,7 +8,7 @@ skill invocation, and scores the artifacts left behind.
 | --- | --- | --- |
 | `clear-issue` | implement-issue | a specified issue reaches a PR, plan written first, body ends `Closes #1` |
 | `ambiguous-issue` | implement-issue | an under-specified issue produces questions and the `awaiting-answer` label — and no PR |
-| `review-gate` | implement-issue | `/code-review` fires, aimed at `issue-1`, before `gh pr create`, and the gate wait is blocked on — not hand-polled (#217, #372) |
+| `review-gate` | implement-issue | `/code-review` fires, aimed at `issue-1`, before `gh pr create`; the gate wait is neither hand-polled (#217, #372) nor mistaken for done before it is (#472); and its findings survive to `## Review` |
 | `resume-existing-plan` | implement-issue | an existing worktree and PLAN.md are resumed, not rewritten |
 | `one-turn` | implement-issue | a slow verification step is waited out in the turn, not deferred to one that never comes |
 | `visual-change` | implement-issue | a screenshot reaches `polako-evidence` and the PR body's blob link names a real commit on it |
