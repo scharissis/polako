@@ -44,6 +44,13 @@ const envCanaryVar = "POLAKO_TEST_ENV_CANARY"
 // leaves no other trace at all.
 const fakeArgsLogEnv = "POLAKO_FAKE_ARGS_LOG"
 
+// fakeStdinLogEnv names a file the fake claude run writes whatever it read
+// from stdin to — the -remote invocation's own control_request and user
+// message, which never reach argv at all (see remoteStdin). Read once,
+// before mode dispatch, the same way recordFakeArgs is: a mode that delegates
+// to another by recursing must not read stdin twice.
+const fakeStdinLogEnv = "POLAKO_FAKE_STDIN_LOG"
+
 // fakeEnv turns alternating key, value pairs into KEY=value entries for
 // config.env, which hands them to a child without t.Setenv on the parent —
 // the thing that would otherwise bar the test from t.Parallel(). A pair whose
@@ -96,6 +103,7 @@ func TestMain(m *testing.M) {
 		// Here rather than inside fakeClaude, which recurses: a mode that
 		// delegates to another must still count as the one invocation it is.
 		recordFakeArgs()
+		recordFakeStdin()
 		os.Exit(fakeClaude(mode))
 	}
 	clearEnvDefaults()
@@ -335,6 +343,27 @@ func fakeClaude(mode string) int {
 			`"modelUsage":{"claude-opus-5":{"inputTokens":100,"outputTokens":190,"cacheReadInputTokens":300,` +
 			`"cacheCreationInputTokens":400,"costUSD":0.45},` +
 			`"claude-haiku-4-5":{"inputTokens":0,"outputTokens":10,"costUSD":0.05}}}`)
+		return 0
+	case "remoteok":
+		// A control_response success, before the init event — the earlier of
+		// the two orderings issue #471 probed by hand ("the reply lands in
+		// 0.5-2s, before or after init"). Delegates to "stream" for the rest,
+		// so this only has to add the one line the -remote path cares about.
+		emit(`{"type":"control_response","response":{"subtype":"success","request_id":"rc",` +
+			`"response":{"session_url":"https://claude.ai/code/session/abc123"}}}`)
+		return fakeClaude("stream")
+	case "remoteerror":
+		// A control_response error, after the result event — the later of
+		// the two orderings. Its own small stream rather than delegating,
+		// since "stream" returns before this mode gets to add anything after
+		// its own result event.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-remote-err","model":"claude-opus-5",` +
+			`"slash_commands":["implement-issue"]}`)
+		emit(`{"type":"result","subtype":"success","session_id":"sess-remote-err","duration_ms":10,` +
+			`"num_turns":1,"total_cost_usd":0.01,"result":"done",` +
+			`"usage":{"input_tokens":1,"output_tokens":1}}`)
+		emit(`{"type":"control_response","response":{"subtype":"error","request_id":"rc",` +
+			`"error":"Remote Control initialization failed"}}`)
 		return 0
 	case "envcanary":
 		// Reports what the parent's environment looked like from in here.
@@ -899,6 +928,47 @@ func watchClaudeArgs(t *testing.T, cfg *config) func() []string {
 			t.Fatalf("reading the fake CLI's argv log: %v", err)
 		}
 		return strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
+	}
+}
+
+// recordFakeStdin copies whatever this invocation read from stdin into the
+// file fakeStdinLogEnv names, if a test asked for one. Reading an unset
+// cmd.Stdin hits the null device and returns immediately, so this is safe to
+// call unconditionally rather than gating it on -remote — the same
+// best-effort, silent shape recordFakeArgs has.
+func recordFakeStdin() {
+	path := os.Getenv(fakeStdinLogEnv)
+	if path == "" {
+		return
+	}
+	b, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.Write(b)
+}
+
+// watchClaudeStdin points the fake CLI at a fresh log and returns the reader
+// for it: everything the invocation wrote to stdin. It records the log path
+// on cfg.env, so the config must be built first.
+func watchClaudeStdin(t *testing.T, cfg *config) func() string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "claude-stdin.log")
+	setFakeEnv(cfg, fakeStdinLogEnv, path)
+	return func() string {
+		b, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return ""
+		}
+		if err != nil {
+			t.Fatalf("reading the fake CLI's stdin log: %v", err)
+		}
+		return string(b)
 	}
 }
 
@@ -2056,30 +2126,43 @@ func TestEffortFlagGate(t *testing.T) {
 	}
 }
 
-// -remote asks for something no CLI delivers in print mode, so the invocation
-// must carry nothing for it either way round — issue #82. Both settings are
-// pinned because only the pair says what the flag means now: on is not "sends
-// the flag", it is "would, once a CLI takes it", and off has to stay identical
-// to on for as long as that is true.
+// -remote=false has to keep today's argv byte for byte — the one thing the
+// flag's re-arm on issue #471 must not disturb. -remote=true moves the
+// prompt off argv onto stdin (see startClaude/remoteStdin) and adds -n; old
+// invocations never carried --remote-control either (that was the retired
+// flag issue #82 found inert) and the re-armed ones don't carry it now —
+// the channel changed, not the argument.
 func TestBuildArgsNeverAsksForRemoteControl(t *testing.T) {
 	t.Parallel()
 	off := config{permissionMode: "acceptEdits", tools: "Read", repo: "example/repo"}
 	on := off
-	on.remote = true
+	on.remote, on.remoteName = true, "polako example/repo#52"
 
 	for _, tc := range []struct {
 		name string
 		cfg  config
 	}{{"-remote on", on}, {"-remote off", off}} {
 		if got := buildArgs(tc.cfg, "/implement-issue 52", ""); slices.Contains(got, "--remote-control") {
-			t.Errorf("%s: no CLI registers headless runs, so nothing should ask, got %v", tc.name, got)
+			t.Errorf("%s: that flag was retired on issue #82, got %v", tc.name, got)
 		}
 	}
 
-	// The flag being inert is the whole claim, so pin it as one: -remote must
-	// make no difference at all to what claude is invoked with.
-	if !slices.Equal(buildArgs(on, "/implement-issue 52", ""), buildArgs(off, "/implement-issue 52", "")) {
-		t.Error("-remote=false must invoke claude exactly as -remote does, and neither may register")
+	offArgs := buildArgs(off, "/implement-issue 52", "")
+	if !slices.Contains(offArgs, "/implement-issue 52") || slices.Contains(offArgs, "--input-format") ||
+		slices.Contains(offArgs, "-n") {
+		t.Errorf("-remote=false must invoke claude exactly as before the re-arm, got %v", offArgs)
+	}
+
+	onArgs := buildArgs(on, "/implement-issue 52", "")
+	if slices.Contains(onArgs, "/implement-issue 52") {
+		t.Errorf("-remote=true must not carry the prompt on argv — it travels over stdin instead, got %v", onArgs)
+	}
+	if !slices.Contains(onArgs, "--input-format") {
+		t.Errorf("-remote=true must ask for stream-json input, got %v", onArgs)
+	}
+	i := slices.Index(onArgs, "-n")
+	if i < 0 || onArgs[i+1] != "polako example/repo#52" {
+		t.Errorf("-remote=true must name the session -n polako <repo>#<issue>, got %v", onArgs)
 	}
 }
 
@@ -2470,18 +2553,22 @@ func TestExecClaudeCarriesChildStderrIntoTheNarration(t *testing.T) {
 	}
 }
 
-// buildArgs is asserted directly above, but the argv a child actually receives
-// is the thing the promise was made about, so pin that end too: a real dispatch
-// under -remote must reach the CLI carrying nothing to register with. Issue #82
-// is what the pair guards against coming back — a flag reintroduced anywhere
-// between buildArgs and exec would pass the unit test and still overpromise.
-func TestDispatchNeverSendsRemoteControlToTheCLI(t *testing.T) {
+// buildArgs is asserted directly above, but the argv and stdin a child
+// actually receives is the thing the promise was made about, so pin that end
+// too: a real dispatch under -remote must reach the CLI carrying the
+// control_request and the prompt as a user message, named on argv, and never
+// the literal prompt on argv itself. issue #471 re-armed what issue #82 found
+// inert.
+func TestDispatchUnderRemoteRegistersAndLogsTheSessionURL(t *testing.T) {
 	t.Parallel()
-	cfg := fakeClaudeConfig(t, "stream")
-	cfg.remote, cfg.repo = true, "example/repo"
+	buf := captureLog(t)
+	cfg := fakeClaudeConfig(t, "remoteok")
+	cfg.remote, cfg.repo, cfg.remoteName = true, "example/repo", "polako example/repo#7"
 	args := watchClaudeArgs(t, &cfg)
+	stdin := watchClaudeStdin(t, &cfg)
 
-	if _, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0); err != nil {
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0)
+	if err != nil {
 		t.Fatalf("a healthy run under -remote: %v", err)
 	}
 	got := args()
@@ -2489,12 +2576,71 @@ func TestDispatchNeverSendsRemoteControlToTheCLI(t *testing.T) {
 		t.Fatalf("want exactly one dispatch — there is nothing left to re-dispatch for — got %v", got)
 	}
 	if strings.Contains(got[0], "--remote-control") {
-		t.Errorf("no CLI registers headless runs, so none should be asked: %s", got[0])
+		t.Errorf("that flag was retired on issue #82: %s", got[0])
 	}
-	// The session name went with the flag: no CLI reads it, and leaving it on
-	// the command line would be the same false promise one argument along.
-	if strings.Contains(got[0], "polako example/repo#") {
-		t.Errorf("the session name has no reader left; it should not be passed: %s", got[0])
+	if strings.Contains(got[0], "/implement-issue 7") {
+		t.Errorf("the prompt must travel over stdin, not argv, under -remote: %s", got[0])
+	}
+	if !strings.Contains(got[0], "-n polako example/repo#7") {
+		t.Errorf("the session must be named on argv: %s", got[0])
+	}
+
+	lines := strings.Split(strings.TrimSuffix(stdin(), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("stdin should carry exactly two lines — the control_request and the prompt — got %v", lines)
+	}
+	if !strings.Contains(lines[0], `"subtype":"remote_control"`) {
+		t.Errorf("stdin's first line should be the control_request, got %q", lines[0])
+	}
+	if !strings.Contains(lines[1], `"content":"/implement-issue 7"`) {
+		t.Errorf("stdin's second line should carry the prompt as a user message, got %q", lines[1])
+	}
+
+	if !rep.remoteRegistered || rep.remoteURL != "https://claude.ai/code/session/abc123" {
+		t.Errorf("a success reply should register and capture the session URL, got %+v", rep)
+	}
+	if !strings.Contains(buf.String(), "registered with Remote Control: https://claude.ai/code/session/abc123") {
+		t.Errorf("the session URL should be narrated once, got:\n%s", buf.String())
+	}
+}
+
+// A reply is not guaranteed either way — the CLI may refuse the request, or
+// never answer at all — and neither may hang, fail or re-dispatch the run.
+func TestDispatchUnderRemoteLogsAnErrorReply(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg := fakeClaudeConfig(t, "remoteerror")
+	cfg.remote, cfg.repo, cfg.remoteName = true, "example/repo", "polako example/repo#7"
+
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0)
+	if err != nil {
+		t.Fatalf("a healthy run under -remote: %v", err)
+	}
+	if rep.remoteRegistered || rep.remoteError != "Remote Control initialization failed" {
+		t.Errorf("an error reply should be captured, not registered, got %+v", rep)
+	}
+	if !strings.Contains(buf.String(), "Remote Control did not register: Remote Control initialization failed") {
+		t.Errorf("the error should be narrated once, got:\n%s", buf.String())
+	}
+}
+
+func TestDispatchUnderRemoteLogsNoReply(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	// "stream" never emits a control_response at all — the CLI simply never
+	// answers, which is as valid an outcome as a reply either way.
+	cfg := fakeClaudeConfig(t, "stream")
+	cfg.remote, cfg.repo, cfg.remoteName = true, "example/repo", "polako example/repo#7"
+
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0)
+	if err != nil {
+		t.Fatalf("a healthy run under -remote: %v", err)
+	}
+	if rep.remoteRegistered || rep.remoteError != "" {
+		t.Errorf("no reply should leave both unset, got %+v", rep)
+	}
+	if !strings.Contains(buf.String(), "no Remote Control reply — this run stayed unwatched") {
+		t.Errorf("the silence should be narrated once, got:\n%s", buf.String())
 	}
 }
 
