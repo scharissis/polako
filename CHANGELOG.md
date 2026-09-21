@@ -13,6 +13,19 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.28.0]
+
+### What's Changed
+* feat: setup writes a marked polako block into CLAUDE.md and scaffolds docs by @scharissis in https://github.com/scharissis/polako/pull/490 (closes #417)
+* fix: implement-issue stops when origin can't be fetched, doesn't work from a stale base by @scharissis in https://github.com/scharissis/polako/pull/493 (closes #420)
+* feat: keep every refused tool call, with the part the CLI named by @scharissis in https://github.com/scharissis/polako/pull/495 (closes #430)
+* feat: derive the -add-tools entry from a refusal by @scharissis in https://github.com/scharissis/polako/pull/496 (closes #431)
+* fix: run the review gate's finder and verifier subagents in the foreground by @scharissis in https://github.com/scharissis/polako/pull/497 (closes #494)
+* feat: setup flags uncovered build tools and leaky issue templates by @scharissis in https://github.com/scharissis/polako/pull/498 (closes #418)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.27.0...v0.28.0
+
 ## [0.27.0]
 
 ### What's Changed
