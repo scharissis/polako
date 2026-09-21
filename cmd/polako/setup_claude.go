@@ -215,6 +215,6 @@ func setupClaudeMdRow(cfg config) setupRow {
 		return setupRow{name: name, status: setupOK}
 	}
 	return setupRow{name: name, status: setupMissing,
-		detail: "missing the polako block — `polako setup -apply` proposes it through a PR; " +
+		detail: "the polako block is missing or out of date — `polako setup -apply` proposes it through a PR; " +
 			"run `/init` for the rest of CLAUDE.md"}
 }
