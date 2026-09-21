@@ -20,6 +20,12 @@ func setupCIWorkflowRow(cfg config) setupRow {
 	const name = "CI workflow"
 	dir := filepath.Join(cfg.dir, ".github", "workflows")
 	entries, err := os.ReadDir(dir)
+	// workflows existing as a plain file is ENOTDIR on Unix but collapses
+	// into ErrNotExist on Windows, so os.IsNotExist alone can't tell
+	// "missing" from "a real read failure" there — stat it first.
+	if info, statErr := os.Lstat(dir); err != nil && statErr == nil && !info.IsDir() {
+		return setupRow{name: name, status: setupUnknown, detail: fmt.Sprintf("could not read %s (%v)", dir, err)}
+	}
 	switch {
 	case err == nil:
 		for _, e := range entries {

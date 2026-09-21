@@ -100,13 +100,19 @@ func setupTemplatesRow(cfg config) setupRow {
 	dir := filepath.Join(cfg.dir, ".github", "ISSUE_TEMPLATE")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		// ISSUE_TEMPLATE existing as a plain file is ENOTDIR on Unix but
+		// collapses into ErrNotExist on Windows, so os.IsNotExist alone can't
+		// tell "missing" from "a real read failure" there — stat it first.
+		if info, statErr := os.Lstat(dir); statErr == nil && !info.IsDir() {
+			return setupRow{name: name, status: setupUnknown, detail: fmt.Sprintf("could not read %s (%v)", dir, err)}
+		}
 		if os.IsNotExist(err) {
 			return setupRow{name: name, status: setupOK}
 		}
-		// Anything else — permission denied, ISSUE_TEMPLATE existing as a
-		// plain file, a transient FS error — means this check didn't actually
-		// run, not that it found nothing. Required rows only fail the report
-		// on a definite "missing", so this can't silently pass as ok either.
+		// Anything else — permission denied, a transient FS error — means
+		// this check didn't actually run, not that it found nothing.
+		// Required rows only fail the report on a definite "missing", so
+		// this can't silently pass as ok either.
 		return setupRow{name: name, status: setupUnknown, detail: fmt.Sprintf("could not read %s (%v)", dir, err)}
 	}
 	forbidden := labelTableNames()
