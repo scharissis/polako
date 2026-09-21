@@ -53,9 +53,16 @@ const docsBudget = 500
 // actual screenshot — the thing docs/plans/visual-evidence.md's earlier
 // tickets only staged a channel for — had no existing paragraph on offer to
 // cut instead.
+//
+// behaviour.md's ceiling moved again in issue #432: it was already at 513
+// with no slack, and documenting that a permission park's reason now
+// derives its fix from the refusal itself, plus the worked-around hedge
+// (issue #390), had no existing paragraph on offer to cut instead — every
+// sentence in that section already earned its place across #126, #138,
+// #209 and #461.
 var docsDebt = map[string]int{
 	"reference.md": 510,
-	"behaviour.md": 513,
+	"behaviour.md": 517,
 }
 
 func TestDocsStayWithinLineBudget(t *testing.T) {
