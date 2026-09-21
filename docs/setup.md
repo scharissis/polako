@@ -84,6 +84,15 @@ in a script.
   but a real run would stall on the permission prompt the first time it
   needs the tool, so the row prints the `-add-tools` value to grant it, and
   the suggested `polako work` line at the end carries the same value.
+
+  The default set itself covers git, the gh subcommands the skill uses (`gh
+  issue view`/`comment`, `gh pr create`, plus read-only `gh pr
+  view`/`list`/`diff`), the tools the skill itself needs (`Read`, `Write`,
+  `Edit`, `Glob`, `Grep`, `Skill`, `TodoWrite`), and the usual entry points
+  for npm/pnpm/yarn, Go, Cargo, Make, Python/uv/pytest, dotnet, Maven and
+  Gradle — plus one per-run grant this row doesn't check: adding and
+  removing labels on the single issue a run was dispatched for, which is how
+  it raises `awaiting-answer`.
 - Every `.github/ISSUE_TEMPLATE/*` for a `labels:` key naming `-label`'s own
   gate label or one of the three labels above. Required: a template applies
   its labels to whoever files the issue, so this defeats the whole point of

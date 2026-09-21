@@ -18,7 +18,7 @@ These are `polako work`'s own; the other six verbs take smaller sets —
 | `-label` | *(none)* | Only process issues carrying this label. Doubles as an access control — see [Security](security.md). A label the repository has never defined refuses at preflight, naming the fix, rather than draining an empty queue and reporting success. |
 | `-ungated` | `false` | Work a public repository without a `-label` gate. Without one or the other, `polako work` refuses to start on a public repo — see [Security](security.md). |
 | `-ignore-skew` | `false` | Start even when the installed skill is older than this binary. Without it, that mismatch refuses to start — a stale skill risks missing fixes and the shared branch-name contract ([issue #239](https://github.com/scharissis/polako/issues/239)); see [Update](install.md#update). |
-| `-tools` | *(see below)* | `--allowedTools` for unattended runs. **Replaces** the default set. |
+| `-tools` | *(see [setup.md](setup.md))* | `--allowedTools` for unattended runs. **Replaces** the default set. |
 | `-add-tools` | *(none)* | Extra `--allowedTools` entries, **appended** to `-tools`. |
 | `-permission-mode` | `acceptEdits` | Passed to `claude --permission-mode`. |
 | `-model` / `-effort` | *(the CLI's own defaults)* | Passed to `claude --model` and `--effort` (one of `low`, `medium`, `high`, `xhigh`, `max`). Vary them between batches to compare — see [Run data & cost tracking](run-data.md). |
