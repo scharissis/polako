@@ -454,8 +454,8 @@ func statsDocRunsLogFrom(ds dataset) []statsDocRun {
 	return rows
 }
 
-// nonNilSlice is status.go's — reused here so both -json documents keep the
-// same "empty array, never null" promise without two copies of the helper.
+// nonNilSlice is statusjson.go's — reused here so both -json documents keep
+// the same "empty array, never null" promise without two copies of the helper.
 
 // nonNilMap is nonNilSlice's twin for the breakdown maps: `{}`, never `null`.
 func nonNilMap[K comparable, V any](m map[K]V) map[K]V {

@@ -185,13 +185,35 @@ func readParkedIssues(ctx context.Context, cfg config, only int) ([]parkListItem
 		}
 		parked = []int{only}
 	}
-	viewer, err := ghViewerLogin(ctx, cfg)
+	byIssue, err := readParkListItems(ctx, cfg, parked)
 	if err != nil {
 		return nil, err
 	}
 	items := make([]parkListItem, len(parked))
 	for i, issue := range parked {
-		items[i] = readParkListItem(ctx, cfg, issue, viewer)
+		items[i] = byIssue[issue]
+	}
+	return items, nil
+}
+
+// readParkListItems reads every named issue's latest park comment, keyed by
+// issue number — the one gh-viewer-login read and the per-issue comment
+// reads readParkedIssues itself needs, factored out so status's own
+// needs-you line (status.go) can reuse the same viewer-only read and
+// strict-shape filter without re-deriving the parked queue a second time.
+// Empty for no issues, so a caller with nothing parked pays for no gh call
+// at all.
+func readParkListItems(ctx context.Context, cfg config, issues []int) (map[int]parkListItem, error) {
+	if len(issues) == 0 {
+		return nil, nil
+	}
+	viewer, err := ghViewerLogin(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	items := make(map[int]parkListItem, len(issues))
+	for _, issue := range issues {
+		items[issue] = readParkListItem(ctx, cfg, issue, viewer)
 	}
 	return items, nil
 }
