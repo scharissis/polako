@@ -588,9 +588,12 @@ don't post again, and stop.
       busy-polling (`Bash: true`, `ListAgents`, `sleep`) for reports that
       never arrived that way, then `SendMessage` each finder and the two
       verifiers asking them to restate what they'd already finished — real
-      work still unopened at the cap. Foreground avoids the whole loop: no
+      work still unopened at the cap. Foreground removes that one loop — no
       `Bash: true`, no `sleep`, no restate `SendMessage`, because there is
-      nothing left to poll for. `medium` asks the review for "fewer, high-confidence findings"
+      nothing left to poll for at the finder/verifier level. It does not
+      remove the wait below for the review's own separate verification
+      pass (issue #472): that still needs its own `ListAgents` check once
+      the review returns. `medium` asks the review for "fewer, high-confidence findings"
       and a smaller subagent fan-out; `high` asks for "broader coverage" and
       the full one. Both halves aim the review and neither is optional: the
       branch aims what it diffs, `<worktree>` aims where it works. The review
