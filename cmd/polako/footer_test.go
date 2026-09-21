@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestParsePlanFooter(t *testing.T) {
 	t.Parallel()
@@ -106,6 +109,87 @@ func TestParsePlanFooter(t *testing.T) {
 			}
 			if ok && got != tc.want {
 				t.Errorf("parsePlanFooter() = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// parkFooter and parseParkFooter are two sides of the same contract as
+// planFooter/parsePlanFooter — ticket 3 of docs/plans/permission-parks.md
+// (#432): parkIssue writes the footer, unpark and status (not yet built)
+// read it back.
+func TestParkFooterRoundTrips(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		entries []string
+		want    string
+	}{
+		{name: "no entries, no footer", entries: nil, want: ""},
+		{name: "one entry", entries: []string{"Bash(echo:*)"}, want: "Refused: Bash(echo:*)"},
+		{
+			name:    "several entries, comma joined",
+			entries: []string{"Bash(echo:*)", "Bash(ssh:*)"},
+			want:    "Refused: Bash(echo:*), Bash(ssh:*)",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := parkFooter(tc.entries); got != tc.want {
+				t.Errorf("parkFooter(%v) = %q, want %q", tc.entries, got, tc.want)
+			}
+			if tc.want == "" {
+				return
+			}
+			body := "**polako parked this issue.** some reason.\n\n" + tc.want
+			gotEntries, ok := parseParkFooter(body)
+			if !ok || !slices.Equal(gotEntries, tc.entries) {
+				t.Errorf("parseParkFooter(%q) = (%v, %v), want (%v, true)", body, gotEntries, ok, tc.entries)
+			}
+		})
+	}
+}
+
+func TestParseParkFooter(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		body string
+		want []string
+		ok   bool
+	}{
+		{name: "no footer", body: "**polako parked this issue.** the run completed without opening a PR.", ok: false},
+		{name: "empty body", body: "", ok: false},
+		{
+			name: "footer not the last line",
+			body: "**polako parked this issue.** ...\n\nRefused: Bash(echo:*)\n\n" +
+				"Nothing will run on it again until needs-human is removed.\n",
+			want: []string{"Bash(echo:*)"},
+			ok:   true,
+		},
+		{
+			name: "quoted earlier footer then the real one",
+			body: "> Refused: Bash(old:*)\n\nThis supersedes it.\n\nRefused: Bash(echo:*), Bash(ssh:*)\n",
+			want: []string{"Bash(echo:*)", "Bash(ssh:*)"},
+			ok:   true,
+		},
+		{name: "phrase present but nothing after it", body: "Refused: \n", ok: false},
+		{
+			name: "prose mention mid-sentence does not parse",
+			body: "The comment ends `Refused: <entry>` when polako can derive one.\n",
+			ok:   false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := parseParkFooter(tc.body)
+			if ok != tc.ok {
+				t.Fatalf("ok = %v, want %v (got %v)", ok, tc.ok, got)
+			}
+			if ok && !slices.Equal(got, tc.want) {
+				t.Errorf("parseParkFooter() = %v, want %v", got, tc.want)
 			}
 		})
 	}
