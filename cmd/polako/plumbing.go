@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -38,6 +39,45 @@ func parseRepoFlag(repo string) (string, error) {
 		return "", fmt.Errorf("-repo %q is not owner/name — e.g. -repo %s", repo, "octocat/hello-world")
 	}
 	return repo, nil
+}
+
+// resolveRepoConfig finishes a starting config the same way tidyConfig,
+// unparkConfig and statusConfig each did independently before this: check gh
+// is on PATH, make -dir absolute, and pin the repository into ghRepo — from
+// -repo if given, else resolved with `gh repo view`. cfg already carries
+// ghBin and whatever verb-specific fields the caller set; this only adds
+// dir, repo and ghRepo.
+//
+// access is the clause naming the caller in the PATH error — "tidy reads
+// GitHub", "unpark reads and writes GitHub", "status reads GitHub" — since
+// the wording isn't identical between verbs; each caller passes its own so
+// the error text this produces is byte-identical to what it replaced.
+func resolveRepoConfig(ctx context.Context, cfg config, dir, repoFlag, access string) (config, error) {
+	if _, err := exec.LookPath(cfg.ghBin); err != nil {
+		return cfg, fmt.Errorf("%q not found on PATH (%w) — %s through it", cfg.ghBin, err, access)
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return cfg, fmt.Errorf("resolving -dir: %w", err)
+	}
+	cfg.dir = abs
+
+	repo, err := parseRepoFlag(repoFlag)
+	if err != nil {
+		return cfg, err
+	}
+	if repo != "" {
+		cfg.repo, cfg.ghRepo = repo, repo
+		return cfg, nil
+	}
+	out, err := gh(ctx, cfg, "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
+	if err != nil {
+		return cfg, fmt.Errorf("no GitHub repository reachable from %s (is gh authenticated?): %w — "+
+			"or name one with -repo owner/name", cfg.dir, err)
+	}
+	cfg.repo = strings.TrimSpace(string(out))
+	cfg.ghRepo = cfg.repo
+	return cfg, nil
 }
 
 // ghArgs names the repository on a call that would otherwise be resolved from
