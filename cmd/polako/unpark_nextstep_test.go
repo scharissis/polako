@@ -1,6 +1,6 @@
 package main
 
-// Tests for parkNextStep (unpark_work.go) — docs/designs/unpark.md ticket 4:
+// Tests for parkNextStep (unpark_work.go) — issue #533:
 // the fixed table mapping each park category to one short next-step
 // sentence, printed in the one-issue view and beside each -apply question.
 

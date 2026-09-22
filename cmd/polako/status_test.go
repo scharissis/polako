@@ -272,8 +272,7 @@ func TestStatusNamesTheGrantAParkedIssueIsWaitingOn(t *testing.T) {
 // permission_refused gets its own needs-you clause too, not just the
 // permission case above — and a hand-labelled issue (no park comment of
 // polako's own) still keeps today's batched clause. Same fixture shape
-// TestStatusNamesTheGrantAParkedIssueIsWaitingOn drives, for the category
-// half of docs/designs/unpark.md ticket 6.
+// TestStatusNamesTheGrantAParkedIssueIsWaitingOn drives.
 func TestStatusNamesTheParkCategoryClause(t *testing.T) {
 	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{

@@ -1759,7 +1759,7 @@ func TestNoVersionedModelIDsInSource(t *testing.T) {
 	}
 }
 
-// Ticket 3 of docs/designs/unpark.md (#532): unpark's next-shift line has to
+// Issue #532: unpark's next-shift line has to
 // come from the drain's own restart-safety decision, not a copy of it, so a
 // change to one can't silently leave the other describing something
 // different. issue.go's loop and unpark_work.go's nextShiftLine both have to

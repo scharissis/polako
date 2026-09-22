@@ -76,16 +76,15 @@ const docsBudget = 500
 // paragraph to cut in its place, the way a one-row addition can trim its
 // way in instead.
 //
-// behaviour.md's ceiling moved again in issue #530, ticket 1 of
-// docs/plans/unpark.md: it was already at 530 with no slack, and naming the
-// new `Park: <category>` footer every park comment now carries needed one
-// more line than the existing sentence had room for.
+// behaviour.md's ceiling moved again in issue #530: it was already at 530
+// with no slack, and naming the new `Park: <category>` footer every park
+// comment now carries needed one more line than the existing sentence had
+// room for.
 //
-// reference.md moved again in issue #532, ticket 3 of the same plan: it was
-// already at 548 with no slack, and documenting the `next shift` line and
-// its stale-red-CI warning — a genuinely new part of `unpark`'s output, not
-// a reword of an existing one — had no existing paragraph on offer to cut
-// instead.
+// reference.md moved again in issue #532: it was already at 548 with no
+// slack, and documenting the `next shift` line and its stale-red-CI
+// warning — a genuinely new part of `unpark`'s output, not a reword of an
+// existing one — had no existing paragraph on offer to cut instead.
 var docsDebt = map[string]int{
 	"reference.md": 559,
 	"behaviour.md": 531,
