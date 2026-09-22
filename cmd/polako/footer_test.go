@@ -202,8 +202,8 @@ func TestParseParkFooter(t *testing.T) {
 }
 
 // parkCategoryFooter and parseParkCategory are two sides of the same
-// contract as parkFooter/parseParkFooter — ticket 1 of docs/designs/unpark.md
-// (#530): parkIssue writes the footer, unpark reads it back.
+// contract as parkFooter/parseParkFooter — issue #530: parkIssue writes the
+// footer, unpark reads it back.
 func TestParkCategoryFooterRoundTrips(t *testing.T) {
 	t.Parallel()
 	for _, category := range parkReasonOrder {

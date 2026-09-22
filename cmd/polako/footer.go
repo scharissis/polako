@@ -130,7 +130,7 @@ func parseParkFooter(body string) ([]string, bool) {
 // the thread says a budget park apart from a CI park. A contract like
 // planFooterPrefix and parkFooterPrefix: parkIssue writes it,
 // parseParkCategory reads it back, and a test holds both sides to the same
-// wording. Ticket 1 of docs/designs/unpark.md (#530).
+// wording. Issue #530.
 const parkCategoryFooterPrefix = "Park: "
 
 // parkCategoryFooter renders category as the footer parkIssue appends to

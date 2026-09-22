@@ -439,7 +439,7 @@ func parkCommentBody(issue int, reason string, entries []string, category string
 // is a permission park's own -add-tools entries — issue #432 — appended
 // as a `Refused: ...`
 // footer parseParkFooter reads back. category is the park's own identifier
-// (metrics.go) — ticket 1 of docs/designs/unpark.md (#530) — appended as a
+// (metrics.go) — issue #530 — appended as a
 // `Park: ...` footer parseParkCategory reads back.
 func parkIssue(ctx context.Context, cfg config, issue int, reason string, entries []string, category string) {
 	n := strconv.Itoa(issue)
