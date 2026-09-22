@@ -4098,7 +4098,7 @@ func TestPermissionParkAdviceNamesTheFixOrSaysWhyNot(t *testing.T) {
 // permissionParkReasonAndEntries falls back to the fixed pointer at the
 // terminal exactly when permissionParkAdviceFrom has nothing to say, and
 // otherwise uses its advice verbatim.
-func TestPermissionParkReasonForFallsBackOnlyWhenAdviceHasNothing(t *testing.T) {
+func TestPermissionParkReasonAndEntriesFallsBackOnlyWhenAdviceHasNothing(t *testing.T) {
 	t.Parallel()
 	if got, _ := permissionParkReasonAndEntries(nil, defaultTools); got != permissionParkReason {
 		t.Errorf("permissionParkReasonAndEntries(nil, ...) = %q, want the fixed fallback", got)
