@@ -1791,6 +1791,7 @@ func TestPRCommentToolsStayPinnedToOnePR(t *testing.T) {
 // remediation prompts (remediateConflicts, remediateChecks, remediateReview)
 // share this one sentence, so one assertion covers all three.
 func TestPRCommentHowSaysDescribeDontPaste(t *testing.T) {
+	t.Parallel()
 	how := prCommentHow(42)
 	for _, marker := range []string{"own words", "never paste raw git, ssh, gh or env output"} {
 		if !strings.Contains(how, marker) {

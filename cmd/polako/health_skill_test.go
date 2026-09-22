@@ -247,6 +247,7 @@ func TestHealthSkillCarriesTheHouseStyle(t *testing.T) {
 // issue #386: same gap as implement-issue and plan-backlog. Mirrors
 // TestSkillDescribesDontPaste and TestPlanSkillDescribesDontPaste.
 func TestHealthSkillDescribesDontPaste(t *testing.T) {
+	t.Parallel()
 	skill := healthSkill(t)
 
 	flat := strings.Join(strings.Fields(skill), " ")
