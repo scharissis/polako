@@ -122,12 +122,15 @@ stopping to ask.)
    cut it back to the question that actually blocks this run.
    Post it with `gh issue comment $issue --body-file
    <worktree>/.polako-scratch/QUESTION.md`, then remove the file:
-   `git -C <worktree> clean -fdq -- .polako-scratch/QUESTION.md`. Never an
-   inline `gh issue comment $issue --body "..."` — the text passes through
-   shell quoting on its way there, and a stray escape (`'\''`, `\"`, a
-   literal `\n`) lands on a public thread (issue #390). No `rm` is in this
-   run's grant; `git clean` is the same mechanism the evidence recipe's own
-   temp-worktree cleanup already uses.
+   `git -C <worktree> clean -xfdq -- .polako-scratch/QUESTION.md`. The `-x`
+   is required, not decorative: `.polako-scratch/` is itself gitignored
+   (`.gitignore`'s own `/.polako-scratch/` line), and `git clean` silently
+   skips an ignored path unless told to include it, even when it's the exact
+   pathspec given. Never an inline `gh issue comment $issue --body "..."` —
+   the text passes through shell quoting on its way there, and a stray
+   escape (`'\''`, `\"`, a literal `\n`) lands on a public thread (issue
+   #390). No `rm` is in this run's grant; `git clean` is the mechanism
+   already available for it.
 2. Flag it with exactly:
 
        gh issue edit $issue --add-label awaiting-answer
@@ -189,7 +192,7 @@ When it does qualify:
 
        gh issue comment $issue --body-file <worktree>/.polako-scratch/CLOSE_COMMENT.md
        gh issue close $issue
-       git -C <worktree> clean -fdq -- .polako-scratch/CLOSE_COMMENT.md
+       git -C <worktree> clean -xfdq -- .polako-scratch/CLOSE_COMMENT.md
 
    Issue number first, that spelling — it is the only form this run is
    granted; any other raises a permission prompt nobody is there to answer.
