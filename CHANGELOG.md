@@ -13,6 +13,30 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.31.0]
+
+### What's Changed
+* docs: retire docs/plans/visual-evidence.md — every issue it proposed is closed by @scharissis in https://github.com/scharissis/polako/pull/525 (closes #484)
+* fix: unpark prints a named issue's reason whole and says what to run next by @scharissis in https://github.com/scharissis/polako/pull/526
+* fix: unpark no longer opens with the proposed-issues notice by @scharissis in https://github.com/scharissis/polako/pull/527
+* docs: plan for unpark to cover every park, not just permission ones by @scharissis in https://github.com/scharissis/polako/pull/528
+* test: a guard so new tests can't land serial by @scharissis in https://github.com/scharissis/polako/pull/536 (closes #467)
+* fix: eval timeline truncates long paths, judge fails ordering graders on it by @scharissis in https://github.com/scharissis/polako/pull/537 (closes #469)
+* docs: retire docs/plans/setup.md — every issue it proposed is closed by @scharissis in https://github.com/scharissis/polako/pull/538 (closes #506)
+* feat: every park comment names its category in a Park: footer by @scharissis in https://github.com/scharissis/polako/pull/539 (closes #530)
+* fix: post thread comments through --body-file instead of inline text by @scharissis in https://github.com/scharissis/polako/pull/540 (closes #390)
+* feat: unpark shows each parked issue's branch, PR and CI by @scharissis in https://github.com/scharissis/polako/pull/541 (closes #531)
+* feat: unpark says what the next shift will do by @scharissis in https://github.com/scharissis/polako/pull/542 (closes #532)
+* feat: unpark prints a next step for each park category by @scharissis in https://github.com/scharissis/polako/pull/543 (closes #533)
+* docs: plan the design verb and the design-plan skill by @scharissis in https://github.com/scharissis/polako/pull/544
+* docs: two runs with disjoint labels are the operator's trade by @scharissis in https://github.com/scharissis/polako/pull/504
+* docs: retire docs/plans/permission-parks.md — every issue it proposed is closed by @scharissis in https://github.com/scharissis/polako/pull/555 (closes #522)
+* feat: unpark reports unpushed local work when -dir is a checkout by @scharissis in https://github.com/scharissis/polako/pull/556 (closes #534)
+* feat: status names each park's category from the thread by @scharissis in https://github.com/scharissis/polako/pull/557 (closes #535)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.30.0...v0.31.0
+
 ## [0.30.0]
 
 ### What's Changed
