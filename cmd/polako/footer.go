@@ -1,6 +1,9 @@
 package main
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // planFooterPrefix is the fixed leading phrase every issue `polako plan` files
 // ends its body with. It is a contract, like issue-N branch naming: the skill
@@ -121,4 +124,35 @@ func parseParkFooter(body string) ([]string, bool) {
 		return nil, false
 	}
 	return out, true
+}
+
+// parkCategoryFooterPrefix is the fixed leading phrase every park comment
+// ends with, naming which park.go category produced it — nothing else on
+// the thread says a budget park apart from a CI park. A contract like
+// planFooterPrefix and parkFooterPrefix: parkIssue writes it,
+// parseParkCategory reads it back, and a test holds both sides to the same
+// wording. Ticket 1 of docs/plans/unpark.md (#530).
+const parkCategoryFooterPrefix = "Park: "
+
+// parkCategoryFooter renders category as the footer parkIssue appends to
+// every park comment, after the Refused: footer when there is one.
+func parkCategoryFooter(category string) string {
+	return parkCategoryFooterPrefix + category
+}
+
+// parseParkCategory reads the category back out of a park comment — the
+// last matching line, the same rules parseParkFooter and parsePlanFooter
+// follow. "" for a body with no such line, or one naming something
+// parkReasonOrder (metrics.go) doesn't recognize as a category: a forged or
+// hand-edited line is not trusted to reclassify the park.
+func parseParkCategory(body string) string {
+	line := lastFooterLine(body, parkCategoryFooterPrefix)
+	if line == "" {
+		return ""
+	}
+	category := strings.TrimSpace(line[len(parkCategoryFooterPrefix):])
+	if !slices.Contains(parkReasonOrder, category) {
+		return ""
+	}
+	return category
 }
