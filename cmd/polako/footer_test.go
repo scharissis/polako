@@ -100,6 +100,17 @@ func TestParsePlanFooter(t *testing.T) {
 			body: "Proposed by polako plan from \n",
 			ok:   false,
 		},
+		{
+			name: "line-initial prose, not a path",
+			body: "Proposed by polako plan from an earlier version of this document — see the old issue for details.\n",
+			ok:   false,
+		},
+		{
+			name: "last matching line is prose despite an earlier valid one",
+			body: "Proposed by polako plan from docs/designs/foo.md @ abc1234 — edit freely\n\n" +
+				"Proposed by polako plan from an unrelated earlier attempt at this issue\n",
+			ok: false,
+		},
 	}
 
 	for _, tc := range cases {

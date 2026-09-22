@@ -56,7 +56,28 @@ func parsePlanFooter(body string) (planFooter, bool) {
 	if doc == "" {
 		return planFooter{}, false
 	}
+	// A prose sentence that happens to start with the phrase ("... from an
+	// earlier version of the plan...") still yields a non-empty first field.
+	// Require it to actually look like a plan document: either a path ending
+	// in .md, or a SHA that looks like one follows it.
+	if !strings.HasSuffix(doc, ".md") && !isHexSHA(sha) {
+		return planFooter{}, false
+	}
 	return planFooter{doc: doc, sha: sha}, true
+}
+
+// isHexSHA reports whether s looks like a git commit SHA (short or full):
+// 4 to 40 lowercase hex digits.
+func isHexSHA(s string) bool {
+	if len(s) < 4 || len(s) > 40 {
+		return false
+	}
+	for _, r := range s {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func firstField(s string) string {
