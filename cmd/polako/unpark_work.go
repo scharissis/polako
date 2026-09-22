@@ -138,11 +138,15 @@ func (w parkWork) pr() *pullRequest {
 // processIssue's own restart-safety call (waitsOnPR, issue.go) on the same
 // PR this row already read — never a second copy of that rule. With no PR,
 // it falls back to what the branch itself shows: commits already on origin
-// to resume, or nothing pushed at all, meaning a fresh run. A row that
-// couldn't be read at all (w.read false) says so, the same as
-// parkWorkSummary and renderParkWorkDetail — a failed GitHub read is unknown
-// state, not evidence nothing was pushed.
-func nextShiftLine(w parkWork) string {
+// to resume, local work on this machine that never reached origin, or
+// nothing at all, meaning a fresh run. A row that couldn't be read at all
+// (w.read false) says so, the same as parkWorkSummary and
+// renderParkWorkDetail — a failed GitHub read is unknown state, not evidence
+// nothing was pushed. local is the zero value unless readParkedIssues was
+// asked to read it (docs/plans/unpark.md ticket 5) — a zero value never
+// satisfies salvageable(), so this falls through to today's wording exactly
+// as before wherever local work wasn't read.
+func nextShiftLine(w parkWork, local leftWork) string {
 	if !w.read {
 		return "not read"
 	}
@@ -158,6 +162,9 @@ func nextShiftLine(w parkWork) string {
 	}
 	if w.onOrigin && w.ahead > 0 {
 		return fmt.Sprintf("resumes %s from its %s", w.branch, plural(w.ahead, "commit"))
+	}
+	if local.salvageable() {
+		return "resumes from the local worktree"
 	}
 	return "starts over — nothing was pushed"
 }
@@ -281,4 +288,34 @@ func renderParkWorkDetail(w io.Writer, rpt report, work parkWork) {
 	default:
 		fmt.Fprintf(w, "  %s  nothing pushed\n", rpt.dim("branch   "))
 	}
+}
+
+// renderLocalWork is the one-issue view's account of what inspectLeftWork
+// found on this machine's disk — commits or edits that never reached origin,
+// which nothing above (a GitHub read) can see. Terminal only, like the rest
+// of this view: local.path is an absolute path on the operator's own disk
+// and goes nowhere else. Nothing prints when local is the zero value —
+// -repo was given, so readParkedIssues never called inspectLeftWork — or
+// when there is nothing new to say: a fully pushed branch's commits are
+// already covered by renderParkWorkDetail above, so they're only repeated
+// here unpushed.
+func renderLocalWork(w io.Writer, rpt report, local leftWork) {
+	if !local.salvageable() {
+		return
+	}
+	var parts []string
+	if local.commits > 0 && !local.pushed {
+		parts = append(parts, plural(local.commits, "commit")+" not pushed")
+	}
+	if local.dirty > 0 {
+		parts = append(parts, plural(local.dirty, "file")+" uncommitted")
+	}
+	if len(parts) == 0 {
+		return
+	}
+	line := strings.Join(parts, ", ")
+	if local.path != "" {
+		line += ", in " + local.path
+	}
+	fmt.Fprintf(w, "  %s  %s\n", rpt.dim("local    "), line)
 }

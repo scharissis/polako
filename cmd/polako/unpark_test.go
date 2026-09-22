@@ -87,7 +87,7 @@ func TestUnparkListsEveryParkedIssue(t *testing.T) {
 		"3": {Open: true},
 	}}
 	cfg := unparkCfg(t, st)
-	items, err := readParkedIssues(context.Background(), cfg, 0)
+	items, err := readParkedIssues(context.Background(), cfg, 0, false)
 	if err != nil {
 		t.Fatalf("readParkedIssues: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestUnparkIgnoresACommentForgedByAnotherAuthor(t *testing.T) {
 		},
 	}
 	cfg := unparkCfg(t, st)
-	items, err := readParkedIssues(context.Background(), cfg, 9)
+	items, err := readParkedIssues(context.Background(), cfg, 9, false)
 	if err != nil {
 		t.Fatalf("readParkedIssues: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestUnparkApplyYesRemovesBothLabelsAndPrintsOneAddToolsValue(t *testing.T) 
 		ghRetryWait: time.Millisecond,
 	}
 	ctx := context.Background()
-	items, err := readParkedIssues(ctx, cfg, 0)
+	items, err := readParkedIssues(ctx, cfg, 0, false)
 	if err != nil {
 		t.Fatalf("readParkedIssues: %v", err)
 	}
@@ -313,7 +313,7 @@ func TestUnparkDoesNotMentionProposedIssues(t *testing.T) {
 		"16": {Open: true, Labels: []string{needsHumanLabel}},
 		"30": {Open: true, Labels: []string{proposedLabel}},
 	}}
-	if _, err := readParkedIssues(context.Background(), unparkCfg(t, st), 0); err != nil {
+	if _, err := readParkedIssues(context.Background(), unparkCfg(t, st), 0, false); err != nil {
 		t.Fatalf("readParkedIssues: %v", err)
 	}
 	if strings.Contains(log.String(), "awaiting curation") {

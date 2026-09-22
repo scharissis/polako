@@ -82,7 +82,12 @@ func runUnpark(ctx context.Context, args []string, in io.Reader, isTTY bool, out
 	if err != nil {
 		return err
 	}
-	items, err := readParkedIssues(ctx, cfg, only)
+	// Only the single-issue view and -apply's per-item printout ever render
+	// it.local (renderUnpark's table branch and printUnparkNextStep's
+	// multi-item branch don't), so a plain multi-issue listing skips the
+	// git calls inspectLeftWork would otherwise make once per parked issue
+	// for nothing.
+	items, err := readParkedIssues(ctx, cfg, only, opt.repo == "" && (only != 0 || opt.apply))
 	if err != nil {
 		return err
 	}
@@ -176,6 +181,13 @@ type parkListItem struct {
 	// shared with status.go's own needs-you line, which has no use for it.
 	// See readParkWork.
 	work parkWork
+	// local is what inspectLeftWork finds on this machine's disk — commits or
+	// edits that never reached origin, which no gh read above can see. Zero
+	// value unless readParkedIssues was asked for it (-dir is a checkout and
+	// -repo wasn't given): a read-only listing has no business assuming a
+	// checkout exists otherwise, and a repo named with -repo may not even be
+	// the one -dir holds. See docs/plans/unpark.md ticket 5.
+	local leftWork
 }
 
 // unparkReasonWidth is where the table clips a reason. The fallback permission
@@ -186,8 +198,12 @@ const unparkReasonWidth = 100
 // readParkedIssues lists every open needs-human issue — the same queue.parked
 // the drain itself excludes, containers excluded structurally — and reads
 // each one's latest park comment. only, when nonzero, narrows this to a
-// single issue.
-func readParkedIssues(ctx context.Context, cfg config, only int) ([]parkListItem, error) {
+// single issue. localWork is -dir being a checkout with no -repo given
+// (runUnpark's opt.repo == ""): true reads each issue's local disk state too
+// (inspectLeftWork), false makes no git call at all and leaves every item's
+// local field at its zero value — the same best-effort, read-only-unless-asked
+// shape as the gh reads above it.
+func readParkedIssues(ctx context.Context, cfg config, only int, localWork bool) ([]parkListItem, error) {
 	// openQueues names the proposals the curation gate is holding, for a
 	// shift's sake. They aren't this verb's subject, so the line is marked
 	// said before it can be.
@@ -226,6 +242,9 @@ func readParkedIssues(ctx context.Context, cfg config, only int) ([]parkListItem
 		def, _ := unparkDefaultBranch(ctx, cfg)
 		for i := range items {
 			items[i].work = readParkWork(ctx, cfg, items[i].issue, def)
+			if localWork {
+				items[i].local = inspectLeftWork(ctx, cfg, items[i].issue)
+			}
 		}
 	}
 	return items, nil
@@ -366,7 +385,7 @@ func applyUnpark(ctx context.Context, prompt *setupPrompt, autoApprove bool, out
 			fmt.Fprintf(out, "  could not remove %s from #%d: %v\n", needsHumanLabel, it.issue, err)
 			continue
 		}
-		fmt.Fprintf(out, "  #%d next shift: %s\n", it.issue, nextShiftLine(it.work))
+		fmt.Fprintf(out, "  #%d next shift: %s\n", it.issue, nextShiftLine(it.work, it.local))
 		if warn := staleRedCIWarning(it.category, it.work); warn != "" {
 			fmt.Fprintf(out, "  #%d warning: %s\n", it.issue, warn)
 		}
@@ -413,9 +432,10 @@ func renderUnpark(w io.Writer, rpt report, cfg config, items []parkListItem, sin
 			fmt.Fprintf(w, "  %s  https://github.com/%s/issues/%d\n", rpt.dim("thread   "), cfg.repo, it.issue)
 		}
 		renderParkWorkDetail(w, rpt, it.work)
+		renderLocalWork(w, rpt, it.local)
 		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("reason   "), it.reason)
 		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("add-tools"), renderParkEntries(it))
-		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("next shift"), nextShiftLine(it.work))
+		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("next shift"), nextShiftLine(it.work, it.local))
 		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("next step"), parkNextStep(it))
 		if warn := staleRedCIWarning(it.category, it.work); warn != "" {
 			fmt.Fprintf(w, "  %s  %s\n", rpt.dim("warning"), warn)
