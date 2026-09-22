@@ -773,27 +773,28 @@ func needsYouParts(snap statusSnapshot) []string {
 	if len(stuck) > 0 {
 		parts = append(parts, "approve the checks waiting on you on PR "+strings.Join(stuck, ", "))
 	}
-	// A parked issue whose own park comment named a category gets its own
-	// clause — a permission park with entries a rerun could grant keeps its
-	// existing "grant ..." wording, every other category gets its
-	// parkNeedsYouClause phrase. A park with no category — no comment of
-	// polako's own to read, or a hand label — keeps today's batched clause.
-	// snap.parks is nil (not just empty) when the read itself failed, and a
-	// nil map's lookups all miss the same way an empty one's would, so every
-	// parked issue falls back to the batched clause. One pass decides both
-	// lists, so the two clauses can never classify the same issue two
-	// different ways.
+	// A parked issue whose own park comment named entries a rerun could grant
+	// gets its own clause naming them, whatever its category — including a
+	// pre-#530 comment with a Refused: footer but no Park: one, category
+	// "". Otherwise, a named category gets its parkNeedsYouClause phrase. A
+	// park with no entries and no category — no comment of polako's own to
+	// read, or a hand label — keeps today's batched clause. snap.parks is
+	// nil (not just empty) when the read itself failed, and a nil map's
+	// lookups all miss the same way an empty one's would, so every parked
+	// issue falls back to the batched clause. One pass decides both lists,
+	// so the two clauses can never classify the same issue two different
+	// ways.
 	var undecided []int
 	var perIssue []string
 	for _, issue := range snap.queues.parked {
 		it, ok := snap.parks[issue]
 		switch {
-		case !ok || it.category == "":
+		case !ok:
 			undecided = append(undecided, issue)
-		case it.category == parkPermission && len(it.entries) > 0:
+		case len(it.entries) > 0:
 			perIssue = append(perIssue, fmt.Sprintf("grant %s or fix the skill, then polako unpark #%d",
 				strings.Join(it.entries, ", "), issue))
-		default:
+		case it.category != "":
 			if clause, ok := parkNeedsYouClause[it.category]; ok {
 				perIssue = append(perIssue, fmt.Sprintf("#%d %s — polako unpark %d", issue, clause, issue))
 			} else {
@@ -803,6 +804,8 @@ func needsYouParts(snap statusSnapshot) []string {
 				// first, but the batched clause is still a truthful fallback.
 				undecided = append(undecided, issue)
 			}
+		default:
+			undecided = append(undecided, issue)
 		}
 	}
 	if len(undecided) > 0 {
