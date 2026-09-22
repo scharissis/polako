@@ -252,7 +252,7 @@ type fakePR struct {
 
 // fakeReview is one entry of `pr view --json reviews`. Author is optional:
 // the tests here have a single reviewer, and the reduction to one verdict per
-// reviewer is exercised by name in main_test.go.
+// reviewer is exercised by name in pr_test.go.
 type fakeReview struct {
 	Author      string `json:"author"`
 	State       string `json:"state"`
@@ -6013,6 +6013,30 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 				t.Errorf("%d runs dispatched, want %d\ngot:\n%s", got, tc.runs, out)
 			}
 			tc.check(t, err, finalGhState(t, path), out)
+		})
+	}
+}
+
+// --- picking which issue to work next ---
+
+func TestPickLowestHonoursSkip(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		numbers []int
+		skip    map[int]bool
+		want    int
+	}{
+		{"unordered input", []int{9, 3, 17}, nil, 3},
+		{"skips the head of the line", []int{9, 3, 17}, map[int]bool{3: true}, 9},
+		{"everything skipped", []int{3}, map[int]bool{3: true}, 0},
+		{"no issues", nil, nil, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := pickLowest(c.numbers, c.skip); got != c.want {
+				t.Errorf("pickLowest(%v, %v) = %d, want %d", c.numbers, c.skip, got, c.want)
+			}
 		})
 	}
 }
