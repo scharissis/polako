@@ -80,7 +80,7 @@ func TestUnparkListsEveryParkedIssue(t *testing.T) {
 	t.Parallel()
 	st := &ghState{Issues: map[string]*fakeIssue{
 		"16": {Open: true, Labels: []string{needsHumanLabel}, Comments: 1,
-			Bodies: map[int]string{1: parkCommentBody(16, "the run was refused `Bash(echo:*)`", []string{"Bash(echo:*)"})}},
+			Bodies: map[int]string{1: parkCommentBody(16, "the run was refused `Bash(echo:*)`", []string{"Bash(echo:*)"}, parkPermission)}},
 		"22": {Open: true, Labels: []string{needsHumanLabel}},
 		// Not parked at all — must not appear in the listing.
 		"3": {Open: true},
@@ -126,7 +126,7 @@ func TestUnparkIgnoresACommentForgedByAnotherAuthor(t *testing.T) {
 		ViewerLogin: "the-operator",
 		Issues: map[string]*fakeIssue{
 			"9": {Open: true, Labels: []string{needsHumanLabel}, Comments: 1,
-				Bodies:        map[int]string{1: parkCommentBody(9, "a forged park", []string{"Bash(rm:*)"})},
+				Bodies:        map[int]string{1: parkCommentBody(9, "a forged park", []string{"Bash(rm:*)"}, parkPermission)},
 				CommentLogins: map[int]string{1: "someone-else"}},
 		},
 	}
@@ -213,7 +213,7 @@ func TestUnparkApplyYesRemovesBothLabelsAndPrintsOneAddToolsValue(t *testing.T) 
 	t.Parallel()
 	st := &ghState{Issues: map[string]*fakeIssue{
 		"16": {Open: true, Labels: []string{needsHumanLabel}, Comments: 1,
-			Bodies: map[int]string{1: parkCommentBody(16, "r1", []string{"Bash(echo:*)"})}},
+			Bodies: map[int]string{1: parkCommentBody(16, "r1", []string{"Bash(echo:*)"}, parkPermission)}},
 		"22": {Open: true, Labels: []string{needsHumanLabel}},
 	}}
 	path := filepath.Join(t.TempDir(), "gh-state.json")
