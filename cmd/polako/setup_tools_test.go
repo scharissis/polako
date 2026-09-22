@@ -1,6 +1,6 @@
 package main
 
-// docs/plans/setup.md ticket 5's allowlist half. setupBuildToolsRow is a pure
+// issue #418's allowlist half. setupBuildToolsRow is a pure
 // function over a directory, tested directly the same way setupGitignoreRow's
 // own tests are.
 

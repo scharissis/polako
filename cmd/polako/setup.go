@@ -324,7 +324,7 @@ func setupIssuesEnabledRow(result setupRepoViewResult) setupRow {
 // setupOriginHeadRow checks the one thing the skill assumes without asking:
 // that `git symbolic-ref refs/remotes/origin/HEAD` resolves. A checkout made
 // with `git init` plus `git remote add` has no such ref, and the first run
-// would find out the hard way (docs/plans/setup.md).
+// would find out the hard way (issue #413).
 //
 // -dir not being a git checkout at all is a different problem from origin/
 // HEAD merely being unset — `git remote set-head origin -a` fails with the

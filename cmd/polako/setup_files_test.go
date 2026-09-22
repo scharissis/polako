@@ -1,6 +1,6 @@
 package main
 
-// Ticket 4's own tests (docs/plans/setup.md): the .gitignore row is a pure
+// Issue #416's own tests: the .gitignore row is a pure
 // function over a directory, so it's tested directly; the write pass runs
 // real git against upstream()'s bare origin (the same fixture sync_test.go
 // uses) plus the fake gh — hermetic, no network, but a genuine push and pull

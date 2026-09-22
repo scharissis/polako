@@ -1,6 +1,6 @@
 package main
 
-// The scaffold half of ticket 4 (docs/plans/setup.md): docs/VISION.md and
+// The scaffold half of issue #417: docs/VISION.md and
 // docs/plans/README.md, the pages plan-backlog's own layout convention
 // assumes exist (skills/plan-backlog/SKILL.md, "The layout convention").
 // Offered by -apply as its own prompt, default no — unlike the .gitignore
