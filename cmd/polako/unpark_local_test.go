@@ -49,11 +49,16 @@ func TestUnparkShowsLocalUnpushedWork(t *testing.T) {
 	}
 	// git resolves symlinks in a worktree's path (macOS's /var -> /private/var
 	// among them), so `wt` itself may not be the exact string inspectLeftWork
-	// reports even though it names the same directory.
+	// reports even though it names the same directory. inspectLeftWork's path
+	// comes from `git worktree list --porcelain`, which prints forward
+	// slashes even on Windows (see
+	// TestDrainWarnsWhenTheMergedWorktreeHoldsUncommittedWork), so the
+	// comparison needs the same normalization.
 	resolved, err := filepath.EvalSymlinks(wt)
 	if err != nil {
 		t.Fatalf("resolving %s: %v", wt, err)
 	}
+	resolved = filepath.ToSlash(resolved)
 
 	got := findParkListItem(t, items, 77)
 	if got.local.commits != 3 || got.local.pushed || got.local.dirty != 2 || got.local.path != resolved {
