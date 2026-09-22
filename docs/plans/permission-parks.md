@@ -294,8 +294,8 @@ footer itself. Then a comment widens the allowlist, and a run can write
 comments. The human types the grant or confirms it; that is the design.
 
 **Persisting grants.** A `.polako` file, or writing `.claude/settings.json`.
-`setup.md` already turned the config file down, and `POLAKO_ADD_TOOLS`
-exists. `unpark` prints the line instead.
+The now-retired setup plan already turned the config file down, and
+`POLAKO_ADD_TOOLS` exists. `unpark` prints the line instead.
 
 **`unpark` reopening the old session for a human to approve the prompt.**
 The session id lives only in run data, which nothing but `stats` may read.
