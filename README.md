@@ -31,7 +31,7 @@ dependencies.
 Seven verbs. Three start Claude runs:
 
 - **`work`** — works the backlog to zero, one issue at a time, never merging.
-- **`plan`** — turns a vision document into a curated backlog of proposals.
+- **`plan`** — turns a design document into a curated backlog of proposals.
 - **`health`** — reads the repository itself and files what looks off as
   proposals.
 
