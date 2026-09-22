@@ -1,6 +1,6 @@
 package main
 
-// docs/plans/setup.md ticket 5's three advice rows: never required, so these
+// issue #418's three advice rows: never required, so these
 // tests only check status/detail, never setupFailed.
 
 import (

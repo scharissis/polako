@@ -1,6 +1,6 @@
 package main
 
-// docs/plans/setup.md ticket 5's template half: a `.github/ISSUE_TEMPLATE/*`
+// issue #418's template half: a `.github/ISSUE_TEMPLATE/*`
 // form whose `labels:` key names orchestration state hands it to whoever
 // files the issue, not just a maintainer — docs/security.md already warns
 // "keep it out of your templates" by hand. This is the row that catches it,

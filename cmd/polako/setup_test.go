@@ -352,7 +352,7 @@ func TestReadSetupIncludesPolicyLabelRowsWhenRequested(t *testing.T) {
 	}
 }
 
-// The point of ticket 3: -apply -yes creates exactly the missing required
+// The point of issue #415: -apply -yes creates exactly the missing required
 // labels, and running it again creates nothing more.
 func TestApplySetupCreatesMissingRequiredLabelsIdempotently(t *testing.T) {
 	t.Parallel()

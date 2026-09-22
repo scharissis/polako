@@ -1,6 +1,6 @@
 package main
 
-// Ticket 4's own tests (docs/plans/setup.md): the .gitignore row is a pure
+// Issues #416 and #417's own tests: the .gitignore row is a pure
 // function over a directory, so it's tested directly; the write pass runs
 // real git against upstream()'s bare origin (the same fixture sync_test.go
 // uses) plus the fake gh — hermetic, no network, but a genuine push and pull
@@ -43,7 +43,7 @@ func TestSetupGitignoreRowNamesMissingLines(t *testing.T) {
 	}
 }
 
-// The point of the whole ticket: -apply -yes on a repo missing the
+// The point of issue #416: -apply -yes on a repo missing the
 // .gitignore lines leaves one branch, one commit, one PR — and the push
 // really landed on origin, not just the local worktree.
 func TestApplySetupFilesProposesAPR(t *testing.T) {

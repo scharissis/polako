@@ -69,8 +69,9 @@ needs you: decide what to do about #77, #390 (drop needs-human to requeue); cura
   `POLAKO_LABEL`. A bare `status` reports every open issue as the queue, and
   never reads visibility, so it doesn't even say a real run would refuse.
   `setup` asks for the gate label and creates it, then remembers nothing —
-  by design, and a config file has been turned down three times
-  (`setup.md`, `permission-parks.md`, `visual-evidence.md`). It does leave
+  by design, and a config file has been turned down three times (`setup.md`
+  and `visual-evidence.md`, both since retired, and `permission-parks.md`).
+  It does leave
   one trace on GitHub: the description it creates the label with, "gate
   label for `polako work -label`". This repo's `ready` is older than `setup`
   and doesn't carry it.

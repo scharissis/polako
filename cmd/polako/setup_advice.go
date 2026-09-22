@@ -1,9 +1,9 @@
 package main
 
-// docs/plans/setup.md ticket 5's three advice rows: never required, never
-// touched by -apply (a repo setting, the owner's own call — see "Considered
-// and not proposed" in that plan). Reported so an operator sees the gap
-// without hunting for it, same spirit as the .gitignore/CLAUDE.md rows.
+// Issue #418's three advice rows: never required, never touched by -apply —
+// these are the repository owner's own settings, not polako's to touch.
+// Reported so an operator sees the gap without hunting for it, same spirit
+// as the .gitignore/CLAUDE.md rows.
 
 import (
 	"context"

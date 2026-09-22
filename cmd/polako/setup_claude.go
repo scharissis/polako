@@ -1,6 +1,6 @@
 package main
 
-// The CLAUDE.md half of ticket 4 (docs/plans/setup.md), the second half of
+// The CLAUDE.md half of issue #417, the second half of
 // what setup_files.go's own .gitignore half started: a marked block between
 // <!-- polako:begin --> and <!-- polako:end -->, replaced in place on a
 // rerun, appended when the file has no such markers, and the file created

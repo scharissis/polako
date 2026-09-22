@@ -63,7 +63,7 @@ func labelByName(name string) labelDef {
 }
 
 // labelExists reports whether the repository has defined name. `gh label
-// list` stays out of the binary (docs/plans/setup.md ticket 1); this is the
+// list` stays out of the binary (issue #412); this is the
 // one-name check the setup report and work's preflight need instead.
 // Wrapped in retryRead: a 404 answers definitively, so the closure turns it
 // into (false, nil) before retryRead ever sees it as an error to retry: only

@@ -692,7 +692,7 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 		return "", false, 1
 
 	case "pr create":
-		// setup's own write, ticket 4 (docs/plans/setup.md): one PR from
+		// setup's own write, issue #416: one PR from
 		// polako-setup. --head is the only flag every caller here needs
 		// keyed on; --base, --title and --body are accepted but not
 		// inspected, the same way real gh accepts them without echoing them

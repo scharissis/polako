@@ -1,6 +1,6 @@
 package main
 
-// Ticket 4's own half of `polako setup` (docs/plans/setup.md): the tree rows
+// Issue #416's own half of `polako setup`: the tree rows
 // that read the checkout directly rather than gh, and -apply's first write
 // beyond a label — one commit, on a `polako-setup` branch, built in a
 // worktree, pushed, behind one PR a human merges. Split out of setup.go and
@@ -36,7 +36,7 @@ var setupGitignoreLines = []string{"/.worktrees/", "/PLAN.md", "/.polako-scratch
 const setupBranch = "polako-setup"
 
 // setupFilesCommitSubject is both the commit subject and the PR title —
-// docs/plans/setup.md's own wording for ticket 4.
+// issue #416's own wording.
 const setupFilesCommitSubject = "chore: set up polako"
 
 // setupGitignoreRow reads .gitignore from the checkout directly — no git, no
@@ -209,7 +209,7 @@ func resolveSetupFileRow(name string, proposed bool, url string) setupRow {
 	return setupRow{name: name, status: setupMissing, detail: "proposed: " + url}
 }
 
-// proposeSetupFiles does the write pass ticket 4 draws: fetch, resolve
+// proposeSetupFiles does the write pass issue #416 draws: fetch, resolve
 // origin's default branch, and `worktree add` all run in the main checkout
 // (cfg); everything past that — writing the files, `add`, `commit`, `push` —
 // runs in the worktree, through a copy of cfg pointed at its path. Each
@@ -428,8 +428,8 @@ func appendGitignoreLines(dir string, lines []string) error {
 
 // setupFilesPRBody lists what the pushed branch actually carries over
 // remoteDefault — the .gitignore lines, always the same fixed set per
-// docs/plans/setup.md's "Done when" for that half of the ticket, plus the
-// CLAUDE.md block and the scaffold when either is on the branch too. Reads
+// issue #416's own "Done when", plus the CLAUDE.md block and the scaffold
+// when either is on the branch too. Reads
 // result's proposed* fields, which come from a diff against remoteDefault —
 // not "did this run's own write step add it", so an item an earlier dead
 // run already committed still gets named here.

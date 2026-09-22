@@ -1,10 +1,10 @@
 package main
 
-// docs/plans/setup.md ticket 5's allowlist half: `polako work`'s default tool
+// issue #418's allowlist half: `polako work`'s default tool
 // allowlist (defaultTools, flags.go) covers the common ecosystems, but a
 // build tool it doesn't know about is invisible until an unattended run stalls
 // on the permission prompt nobody is there to answer — "permission refused"
-// was joint first among parks in the run that motivated this plan. This row
+// was joint first among parks in the run that motivated issue #418. This row
 // spots the entry-point file a checkout for one of those tools would have and
 // prints the -add-tools value to grant it, before a run ever gets there.
 
@@ -25,8 +25,8 @@ type buildToolDef struct {
 	tool   string
 }
 
-// buildToolTable is docs/plans/setup.md ticket 5's own list: not exhaustive,
-// just the ecosystems that plan named as visible in a checkout before any run.
+// buildToolTable is issue #418's own list: not exhaustive, just the
+// ecosystems that issue named as visible in a checkout before any run.
 var buildToolTable = []buildToolDef{
 	{marker: "justfile", tool: "just"},
 	{marker: "BUILD.bazel", tool: "bazel"},

@@ -84,7 +84,7 @@ This is the part that touches CLAUDE.md's invariants, so it is argued here.
   test holds both sides to the same wording. It lands in CLAUDE.md beside
   the plan footer with ticket 3.
 - **Unattended means no prompts.** `unpark` is attended, on `setup`'s terms
-  (`docs/plans/setup.md`): stdin is read only when it is a terminal,
+  (#415): stdin is read only when it is a terminal,
   otherwise `-apply` needs `-yes`, and no terminal with no `-yes` is a
   refusal, not a hang. `work` gains no prompt.
 - **All state lives in GitHub.** `unpark` reads labels and comments. It
@@ -294,8 +294,8 @@ footer itself. Then a comment widens the allowlist, and a run can write
 comments. The human types the grant or confirms it; that is the design.
 
 **Persisting grants.** A `.polako` file, or writing `.claude/settings.json`.
-`setup.md` already turned the config file down, and `POLAKO_ADD_TOOLS`
-exists. `unpark` prints the line instead.
+The now-retired setup plan already turned the config file down, and
+`POLAKO_ADD_TOOLS` exists. `unpark` prints the line instead.
 
 **`unpark` reopening the old session for a human to approve the prompt.**
 The session id lives only in run data, which nothing but `stats` may read.
