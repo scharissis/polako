@@ -22,10 +22,10 @@
 # for judging. Needs claude, git, python3 and the network. Cases run one at a
 # time on purpose: the sessions would isolate fine, but N concurrent runs race
 # the account's rate limits and interleave the progress output this script is
-# often watched through. Results land under evals/results/ (gitignored), one
-# timestamped directory per invocation; the durable record of a run is the
-# scores quoted in a PR body or a docs/experiments.md row, per "Improving
-# polako" in the README.
+# often watched through. Results land under a temp directory outside the
+# checkout (see `results=` below — issue #459), one timestamped directory per
+# invocation; the durable record of a run is the scores quoted in a PR body or
+# a docs/experiments.md row, per "Improving polako" in the README.
 #
 # Exit: 0 green; 1 a behavioral grader failed, a case timed out, or the
 # harness itself broke (the per-case line says which); 3 nothing failed but
@@ -94,7 +94,14 @@ fi
 python3 -c 'import sys; float(sys.argv[1])' "$max_cost" 2>/dev/null || {
   echo "run.sh: --max-cost wants a number of dollars, got: $max_cost" >&2; exit 2; }
 
-results=$evals_dir/results/$(date +%Y%m%d-%H%M%S)-by-hand
+# Outside the checkout, not under evals/results/: recent claude CLI releases
+# refuse writes anywhere under the tree --plugin-dir loads as "sensitive" —
+# plugin-source protection, not a per-file check (issue #459) — and
+# evals_dir sits inside repo_root, the default plugin_dir. mktemp -d keeps
+# this true unconditionally, including under --plugin-dir <worktree>, rather
+# than relying on the worktree happening to sit outside evals_dir too.
+results_root=$(mktemp -d "${TMPDIR:-/tmp}/polako-evals.XXXXXX")
+results=$results_root/$(date +%Y%m%d-%H%M%S)-by-hand
 mkdir -p "$results"
 echo "results: $results"
 
