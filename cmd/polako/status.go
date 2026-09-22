@@ -568,6 +568,12 @@ func queuePairs(snap statusSnapshot) [][2]string {
 func containerRefs(containers []containerInfo) string {
 	refs := make([]string, len(containers))
 	for i, c := range containers {
+		if c.closed {
+			// Already closed — not a thing left for a shift or a human to
+			// close, so none of the finished/held wording below applies.
+			refs[i] = fmt.Sprintf("#%d (closed)", c.number)
+			continue
+		}
 		ref := fmt.Sprintf("#%d (%d/%d closed", c.number, c.completed, c.total)
 		switch {
 		case c.finished() && c.held:
@@ -831,6 +837,18 @@ func needsYouParts(snap statusSnapshot) []string {
 	if len(heldEpics) > 0 {
 		parts = append(parts, fmt.Sprintf("close %s (every sub-issue closed; held open by %s or %s)",
 			issueRefs(heldEpics), needsHumanLabel, proposedLabel))
+	}
+	// A done plan document is supposed to leave (docs/designs/plan-conventions.md):
+	// its durable content moves into docs/ and the file goes. The container
+	// route (retire.go) files an issue for this automatically, but only when
+	// a container closes — a document whose issues were all plain, no epic
+	// among them, has nothing filing that issue on its own, so it sits done
+	// and un-retired until a person notices. This is that notice.
+	for _, d := range snap.plans.docs {
+		if d.state == planDone {
+			parts = append(parts, fmt.Sprintf(
+				"retire %s (done — move what's still true into docs/, delete the file)", d.path))
+		}
 	}
 	return parts
 }

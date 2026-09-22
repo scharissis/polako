@@ -1655,3 +1655,136 @@ func TestRenderStatusAndJSONIncludePlanDocuments(t *testing.T) {
 		t.Errorf("doc.Plans.Docs = %+v, want backlog-fill.md active", doc.Plans.Docs)
 	}
 }
+
+// issue #510: a closed container is history, not a thing left for anyone to
+// close — containerRefs has to say so plainly rather than promising "the
+// next shift closes it" for work already done.
+func TestContainerRefsRendersClosedContainer(t *testing.T) {
+	t.Parallel()
+	got := containerRefs([]containerInfo{{number: 321, total: 3, completed: 3, closed: true}})
+	if want := "#321 (closed)"; got != want {
+		t.Errorf("containerRefs = %q, want %q", got, want)
+	}
+	// A held-open, unclosed container is unaffected: closed defaults false,
+	// so the queue's own containers row (which only ever sees open issues)
+	// renders exactly as it did before this field existed.
+	got = containerRefs([]containerInfo{{number: 12, total: 5, completed: 5}})
+	if want := "#12 (5/5 closed — the next shift closes it)"; got != want {
+		t.Errorf("containerRefs = %q, want %q", got, want)
+	}
+}
+
+// issue #510: rows sort active, proposed, draft, done, then by path within a
+// state — not the alphabetical-by-path order the local file listing hands
+// back on its own.
+func TestSortPlanDocsOrdersByStateThenPath(t *testing.T) {
+	t.Parallel()
+	docs := []planDocStatus{
+		{path: "docs/designs/z-done.md", state: planDone},
+		{path: "docs/designs/a-draft.md", state: planDraft},
+		{path: "docs/designs/b-active.md", state: planActive},
+		{path: "docs/designs/a-active.md", state: planActive},
+		{path: "docs/designs/proposed.md", state: planProposed},
+	}
+	sortPlanDocs(docs)
+	var got []string
+	for _, d := range docs {
+		got = append(got, d.path)
+	}
+	want := []string{
+		"docs/designs/a-active.md",
+		"docs/designs/b-active.md",
+		"docs/designs/proposed.md",
+		"docs/designs/a-draft.md",
+		"docs/designs/z-done.md",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("sortPlanDocs order = %v, want %v", got, want)
+	}
+}
+
+// issue #510: a done plan document is supposed to leave (move what's still
+// true into docs/, delete the file) — the container route to a retire issue
+// only fires when an epic closes, so a document whose naming issues were all
+// plain gets no automatic nudge. needsYouParts is that nudge.
+func TestNeedsYouNamesADoneDocumentStillOnDisk(t *testing.T) {
+	t.Parallel()
+	snap := statusSnapshot{plans: planDocsSnapshot{docs: []planDocStatus{
+		{path: "docs/designs/shipped.md", state: planDone},
+		{path: "docs/designs/backlog-fill.md", state: planActive},
+	}}}
+	got := needsYou(snap)
+	if want := "needs you: retire docs/designs/shipped.md (done — move what's still true into docs/, delete the file)"; got != want {
+		t.Errorf("needsYou = %q, want %q", got, want)
+	}
+}
+
+// issue #510's own acceptance scenario: a fake repo with one closed
+// container, one gone document whose every naming issue is closed, and one
+// gone document with an open issue. The text report renders the closed
+// container as "(closed)", names only the second gone document (by its open
+// issue), and folds the first into the collapsed count — never listing a
+// document with nothing left to act on by name.
+func TestPlanDocsClosedContainerAndGoneCollapse(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues: map[string]*fakeIssue{
+			// epic.md: its one naming issue is closed, with every child closed
+			// too — done, and its container renders as history, not a promise.
+			"1": {Open: false, Body: planFooterFor("docs/designs/epic.md", "aaa0000"), SubIssues: 3, SubIssuesCompleted: 3},
+			// gone-all-closed.md: deleted from disk, every naming issue closed —
+			// nothing left for anyone to act on, so it collapses into the count.
+			"2": {Open: false, Body: planFooterFor("docs/designs/gone-all-closed.md", "bbb0000")},
+			// gone-with-open.md: deleted from disk, but still named by an open
+			// issue — named individually so the operator knows which one.
+			"3": {Open: true, Body: planFooterFor("docs/designs/gone-with-open.md", "ccc0000")},
+		},
+	})
+	writeDesignDoc(t, cfg.dir, "epic.md")
+
+	snap, err := readPlanDocs(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("readPlanDocs: %v", err)
+	}
+	if len(snap.docs) != 1 || snap.docs[0].path != "docs/designs/epic.md" || snap.docs[0].state != planDone {
+		t.Fatalf("docs = %+v, want just epic.md as done", snap.docs)
+	}
+	if len(snap.gone) != 2 {
+		t.Fatalf("gone = %+v, want two deleted documents", snap.gone)
+	}
+
+	var out strings.Builder
+	printPlanDocs(&out, report{}, snap)
+	printed := out.String()
+	if !strings.Contains(printed, "#1 (closed)") {
+		t.Errorf("report missing the closed container as #1 (closed):\n%s", printed)
+	}
+	if strings.Contains(printed, "gone-all-closed.md") {
+		t.Errorf("report names gone-all-closed.md by path — it should collapse into the count instead:\n%s", printed)
+	}
+	if !strings.Contains(printed, "docs/designs/gone-with-open.md (#3)") {
+		t.Errorf("report missing gone-with-open.md named by its open issue #3:\n%s", printed)
+	}
+	if !strings.Contains(printed, "(1 deleted plan, every issue closed)") {
+		t.Errorf("report missing the collapsed count for the all-closed document:\n%s", printed)
+	}
+
+	var jsonOut strings.Builder
+	if err := renderStatusJSON(&jsonOut, cfg, statusSnapshot{plans: snap}); err != nil {
+		t.Fatalf("renderStatusJSON: %v", err)
+	}
+	var doc statusDoc
+	if err := json.Unmarshal([]byte(jsonOut.String()), &doc); err != nil {
+		t.Fatalf("output did not parse as JSON: %v\n%s", err, jsonOut.String())
+	}
+	byPath := map[string]statusDocGone{}
+	for _, g := range doc.Plans.Gone {
+		byPath[g.Path] = g
+	}
+	if g := byPath["docs/designs/gone-all-closed.md"]; !slices.Equal(g.Issues, []int{2}) || g.Open != 0 {
+		t.Errorf("gone-all-closed.md JSON = %+v, want issues [2], open 0", g)
+	}
+	if g := byPath["docs/designs/gone-with-open.md"]; !slices.Equal(g.Issues, []int{3}) || g.Open != 1 {
+		t.Errorf("gone-with-open.md JSON = %+v, want issues [3], open 1", g)
+	}
+}

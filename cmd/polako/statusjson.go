@@ -200,7 +200,7 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 	}
 	gone := make([]statusDocGone, 0, len(snap.plans.gone))
 	for _, g := range snap.plans.gone {
-		gone = append(gone, statusDocGone{Path: g.path, Issues: nonNilSlice(g.issues)})
+		gone = append(gone, statusDocGone{Path: g.path, Issues: nonNilSlice(g.issues), Open: len(g.openIssues)})
 	}
 
 	doc := statusDoc{

@@ -81,10 +81,13 @@ type planDocStatus struct {
 
 // goneDoc is a footer naming a document that no longer exists on disk, with
 // the issue numbers that name it — a deleted plan's leftovers, kept visible
-// rather than silently dropped.
+// rather than silently dropped. issues is every naming issue, open or
+// closed; openIssues is the subset still open — what the text report
+// actually names, since a closed one is nothing left for anyone to act on.
 type goneDoc struct {
-	path   string
-	issues []int
+	path       string
+	issues     []int
+	openIssues []int
 }
 
 // planDocsSnapshot is the whole plans section.
@@ -165,12 +168,16 @@ func readPlanDocs(ctx context.Context, cfg config) (planDocsSnapshot, error) {
 			if localSet[doc] || planDocArchived(cfg.dir, doc) {
 				continue
 			}
-			var numbers []int
+			var numbers, openNumbers []int
 			for _, is := range byDoc[doc] {
 				numbers = append(numbers, is.Number)
+				if strings.EqualFold(is.State, "open") {
+					openNumbers = append(openNumbers, is.Number)
+				}
 			}
 			slices.Sort(numbers)
-			snap.gone = append(snap.gone, goneDoc{path: doc, issues: numbers})
+			slices.Sort(openNumbers)
+			snap.gone = append(snap.gone, goneDoc{path: doc, issues: numbers, openIssues: openNumbers})
 		}
 	} else {
 		// No local docs/designs to check existence against — a -repo run with
@@ -180,7 +187,28 @@ func readPlanDocs(ctx context.Context, cfg config) (planDocsSnapshot, error) {
 			snap.docs = append(snap.docs, planDocStatusFrom(doc, byDoc[doc]))
 		}
 	}
+	sortPlanDocs(snap.docs)
 	return snap, nil
+}
+
+// planDocStateOrder ranks a row's state for sorting: active first (the thing
+// most worth a look), proposed next (behind the curation gate but moving),
+// draft (nothing filed yet), done last (nothing left to do) — then by path
+// within a state.
+var planDocStateOrder = map[planDocState]int{
+	planActive:   0,
+	planProposed: 1,
+	planDraft:    2,
+	planDone:     3,
+}
+
+func sortPlanDocs(docs []planDocStatus) {
+	slices.SortFunc(docs, func(a, b planDocStatus) int {
+		if r := planDocStateOrder[a.state] - planDocStateOrder[b.state]; r != 0 {
+			return r
+		}
+		return strings.Compare(a.path, b.path)
+	})
 }
 
 // canonicalPlanDocPath resolves the docs/plans → docs/designs alias: a
@@ -280,6 +308,7 @@ func planDocStatusFrom(path string, issues []ghPlanIssue) planDocStatus {
 			total:     is.SubIssues.Total,
 			completed: is.SubIssues.Completed,
 			held:      hasLabel(is.Labels, needsHumanLabel) || hasLabel(is.Labels, proposedLabel),
+			closed:    !strings.EqualFold(is.State, "open"),
 		})
 		openChildren += is.SubIssues.Total - is.SubIssues.Completed
 	}
@@ -310,11 +339,19 @@ func printPlanDocs(w io.Writer, rpt report, plans planDocsSnapshot) {
 		fmt.Fprintf(w, "\n%s\n", rpt.bold("plan documents"))
 	}
 	if len(plans.gone) > 0 {
-		refs := make([]string, len(plans.gone))
-		for i, g := range plans.gone {
-			refs[i] = fmt.Sprintf("%s (%s)", g.path, issueRefs(g.issues))
+		var items []string
+		allClosed := 0
+		for _, g := range plans.gone {
+			if len(g.openIssues) == 0 {
+				allClosed++
+				continue
+			}
+			items = append(items, fmt.Sprintf("%s (%s)", g.path, issueRefs(g.openIssues)))
 		}
-		fmt.Fprintf(w, "  (gone — footer names a document no longer on disk: %s)\n", strings.Join(refs, ", "))
+		if allClosed > 0 {
+			items = append(items, fmt.Sprintf("(%s, every issue closed)", plural(allClosed, "deleted plan")))
+		}
+		fmt.Fprintf(w, "  (gone — footer names a document no longer on disk: %s)\n", strings.Join(items, ", "))
 	}
 	if plans.truncated {
 		fmt.Fprintf(w, "  (past the first %d issues carrying the plan footer — state above may be incomplete)\n",
@@ -360,8 +397,12 @@ type statusDocPlan struct {
 }
 
 // statusDocGone is a footer naming a document with no matching file on disk,
-// and the issue numbers whose footer names it.
+// and the issue numbers whose footer names it — the full list, open or
+// closed, unlike the text report's own line, which only names the open
+// ones. Open is that count, so a caller can tell "nothing left to act on"
+// without re-deriving it from Issues and a second call for each state.
 type statusDocGone struct {
 	Path   string `json:"path"`
 	Issues []int  `json:"issues"`
+	Open   int    `json:"open"`
 }
