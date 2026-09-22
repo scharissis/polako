@@ -125,8 +125,8 @@ func limitRefusal(result string) bool {
 // at all (the #138 shape, where the ask was only the run's own final words)
 // or one whose tool_use never correlated to a command. permissionParkFor and
 // permissionParkReasonWorkedAround both fall back to this; see them for the
-// derived reason (issue #432) prefers
-// when a refusal actually says what to grant.
+// derived reason — preferred, per issue #432, when a refusal actually says
+// what to grant.
 const permissionParkReason = "the run stopped to ask for a permission this " +
 	"allowlist does not grant. To fix it: find the tool it reached for — " +
 	"named in the terminal right after this park, and saved in the shift " +
