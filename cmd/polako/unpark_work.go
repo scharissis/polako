@@ -122,6 +122,57 @@ func unparkDefaultBranch(ctx context.Context, cfg config) (string, error) {
 	})
 }
 
+// --- next shift ---
+
+// pr reconstructs the *pullRequest waitsOnPR expects from parkWork's own
+// fields — nil when there is none, the same shape prForBranch itself
+// returns.
+func (w parkWork) pr() *pullRequest {
+	if w.prNumber == 0 {
+		return nil
+	}
+	return &pullRequest{Number: w.prNumber, State: w.prState, URL: w.prURL}
+}
+
+// nextShiftLine describes what clearing needs-human actually does, using
+// processIssue's own restart-safety call (waitsOnPR, issue.go) on the same
+// PR this row already read — never a second copy of that rule. With no PR,
+// it falls back to what the branch itself shows: commits already on origin
+// to resume, or nothing pushed at all, meaning a fresh run. A row that
+// couldn't be read at all (w.read false) says so, the same as
+// parkWorkSummary and renderParkWorkDetail — a failed GitHub read is unknown
+// state, not evidence nothing was pushed.
+func nextShiftLine(w parkWork) string {
+	if !w.read {
+		return "not read"
+	}
+	if pr := w.pr(); waitsOnPR(pr) {
+		line := fmt.Sprintf("waits on PR #%d", pr.Number)
+		if w.checks == checksFailing {
+			// readParkWork only ever sets w.checks once it has confirmed the
+			// PR is OPEN (it returns early otherwise), so this already implies
+			// pr.State == "OPEN" without saying so again.
+			line += " and remediates its red CI"
+		}
+		return line
+	}
+	if w.onOrigin && w.ahead > 0 {
+		return fmt.Sprintf("resumes %s from its %s", w.branch, plural(w.ahead, "commit"))
+	}
+	return "starts over — nothing was pushed"
+}
+
+// staleRedCIWarning flags a checks-remediation park (parkChecks) whose CI is
+// still failing right now: the branch hasn't moved since it parked, so
+// clearing needs-human without touching it sends the next shift straight
+// back into the same remediation loop that just gave up.
+func staleRedCIWarning(category string, w parkWork) string {
+	if category == parkChecks && w.checks == checksFailing {
+		return "the next shift will remediate the same red and likely park again — fix the branch first"
+	}
+	return ""
+}
+
 // --- rendering work ---
 
 // parkWorkSummary is the table's clipped work cell: whether there's a PR and
