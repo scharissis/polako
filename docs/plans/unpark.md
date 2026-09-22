@@ -28,7 +28,7 @@ Every park comment on `scharissis/polako`, counted 2026-09-22 — 23 comments:
 - **The one park it serves hasn't happened yet.** The footer shipped
   2026-09-21 (#518). No permission park since. Zero of 23.
 - **The permission parks weren't permission problems.** #390's real blocker
-  was an unreachable SSH agent (docs/behaviour.md says so). #318, #372,
+  was an unreachable SSH agent. #318, #372,
   #404, #417 and #420 ended mid-review-gate with the ask in prose — the #461
   and #472 shapes, both since closed. No grant clears any of them.
 - **What clearing one actually took.** Each time, by hand: is `issue-N` on
