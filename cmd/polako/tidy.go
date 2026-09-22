@@ -20,7 +20,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -89,31 +88,7 @@ func tidyConfig(ctx context.Context, opt tidyOptions) (config, error) {
 		ghRetryWait:  ghRetryDelay,
 		branchPrefix: opt.branchPrefix,
 	}
-	if _, err := exec.LookPath(cfg.ghBin); err != nil {
-		return cfg, fmt.Errorf("%q not found on PATH (%w) — tidy reads GitHub through it", cfg.ghBin, err)
-	}
-	abs, err := filepath.Abs(opt.dir)
-	if err != nil {
-		return cfg, fmt.Errorf("resolving -dir: %w", err)
-	}
-	cfg.dir = abs
-
-	repo, err := parseRepoFlag(opt.repo)
-	if err != nil {
-		return cfg, err
-	}
-	if repo != "" {
-		cfg.repo, cfg.ghRepo = repo, repo
-		return cfg, nil
-	}
-	out, err := gh(ctx, cfg, "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
-	if err != nil {
-		return cfg, fmt.Errorf("no GitHub repository reachable from %s (is gh authenticated?): %w — "+
-			"or name one with -repo owner/name", cfg.dir, err)
-	}
-	cfg.repo = strings.TrimSpace(string(out))
-	cfg.ghRepo = cfg.repo
-	return cfg, nil
+	return resolveRepoConfig(ctx, cfg, opt.dir, opt.repo, "tidy reads GitHub")
 }
 
 // tidyResult is one candidate branch's verdict: reclaimed (or, under
