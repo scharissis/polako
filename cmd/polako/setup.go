@@ -3,9 +3,9 @@ package main
 // `polako setup` is a read-only readiness report: what a repository has for
 // polako and what it is missing, one row per check, ending with the
 // `polako work` line to run once it looks ready. `-apply` is the one thing
-// that writes: it creates the labels the report found missing (ticket 3),
+// that writes: it creates the labels the report found missing (issue #415),
 // asking `[Y/n]` per step on a terminal (or `-yes`, for a script), and
-// proposes the repo files it found missing through one PR (ticket 4,
+// proposes the repo files it found missing through one PR (issue #416,
 // setup_files.go). Still no issue is ever touched, and no repo setting is
 // changed.
 //
@@ -184,7 +184,7 @@ func setupFailed(rows []setupRow) bool {
 // binaries first, since nothing past them can run without one; then what gh
 // can say about the repository and whether Issues are on; then the
 // independent git and claude checks; then sub-issue support, the tree checks
-// ticket 5 added (build tools, issue templates, CI workflow, branch
+// issue #418 added (build tools, issue templates, CI workflow, branch
 // protection, delete-branch-on-merge), and the labels, the last two of which
 // need gh and the repository resolved. It hands back cfg too,
 // with cfg.repo/cfg.ghRepo filled in when -repo was not given — the caller's
