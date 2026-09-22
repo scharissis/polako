@@ -171,14 +171,12 @@ func syncDefaultBranch(ctx context.Context, cfg config, st *issueState) error {
 			"and could not push its work — check the network and git's credentials (is the ssh-agent "+
 			"unlocked? does `git -C %s fetch origin` work?), then start the drain again: %w", cfg.dir, err)
 	}
-	head, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short")
+	remote, local, err := originHead(ctx, cfg)
 	if err != nil {
 		cfg.narrate(sevWarning, "could not resolve origin's default branch, so %s is left as it is "+
 			"— run `git remote set-head origin -a` there if reviews look mis-scoped: %v", cfg.dir, err)
 		return nil
 	}
-	remote := strings.TrimSpace(string(head))
-	local := strings.TrimPrefix(remote, "origin/")
 	on, err := git(ctx, cfg, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return nil

@@ -161,6 +161,21 @@ func git(ctx context.Context, cfg config, args ...string) ([]byte, error) {
 	return capture(ctx, cfg.dir, cfg.env, "git", args...)
 }
 
+// originHead resolves origin's default branch, in both forms callers have
+// wanted: remote ("origin/main") and local, its "origin/" prefix stripped
+// ("main"). The only non-test code that runs
+// `git symbolic-ref refs/remotes/origin/HEAD` — syncDefaultBranch,
+// inspectLeftWork, proposeSetupFiles and originDefaultBranch all go through
+// this instead of running and trimming it themselves.
+func originHead(ctx context.Context, cfg config) (remote, local string, err error) {
+	out, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short")
+	if err != nil {
+		return "", "", err
+	}
+	remote = strings.TrimSpace(string(out))
+	return remote, strings.TrimPrefix(remote, "origin/"), nil
+}
+
 // childEnv is the environment for a child process: nil when extra is empty —
 // production, always — so os/exec passes the parent's environment through
 // untouched, which docs/hardening.md's egress-proxy flow relies on; the
