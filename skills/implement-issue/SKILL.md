@@ -110,8 +110,9 @@ exception with its own fallback already defined for one specific tool being
 unavailable, spelled out there: substitute a manual review pass rather than
 stopping to ask.)
 
-1. Post it with `gh issue comment $issue`, in the "House style" English above,
-   shaped in three parts and in this order:
+1. Write the question to `<worktree>/.polako-scratch/QUESTION.md` (Write
+   tool, absolute path), in the "House style" English above, shaped in three
+   parts and in this order:
    - **what is blocked** — the one thing you cannot proceed without;
    - **what you need to know** — the specific question, answerable in a
      sentence or two, not "please advise";
@@ -119,6 +120,17 @@ stopping to ask.)
      what the plan does with each, so a one-word reply is enough to unblock.
    Cap it at one screen. If it runs longer you are asking more than one thing;
    cut it back to the question that actually blocks this run.
+   Post it with `gh issue comment $issue --body-file
+   <worktree>/.polako-scratch/QUESTION.md`, then remove the file:
+   `git -C <worktree> clean -xfdq -- .polako-scratch/QUESTION.md`. The `-x`
+   is required, not decorative: `.polako-scratch/` is itself gitignored
+   (`.gitignore`'s own `/.polako-scratch/` line), and `git clean` silently
+   skips an ignored path unless told to include it, even when it's the exact
+   pathspec given. Never an inline `gh issue comment $issue --body "..."` —
+   the text passes through shell quoting on its way there, and a stray
+   escape (`'\''`, `\"`, a literal `\n`) lands on a public thread (issue
+   #390). No `rm` is in this run's grant; `git clean` is the mechanism
+   already available for it.
 2. Flag it with exactly:
 
        gh issue edit $issue --add-label awaiting-answer
@@ -174,18 +186,33 @@ doubt.
 
 When it does qualify:
 
-1. Comment on the thread naming the PR or commit you verified against, then
-   close, in that order:
+1. Check Phase 0's own read of the issue's comments first: if one of them,
+   posted by this account, already names the same PR or commit you just
+   verified against, a previous attempt already posted it — skip straight to
+   `gh issue close $issue` below rather than posting a second copy, since
+   posting and closing are now two commands and a run that died between them
+   has already left the comment behind. Otherwise, write a comment naming the
+   PR or commit you verified against to
+   `<worktree>/.polako-scratch/CLOSE_COMMENT.md` (Write tool, absolute
+   path). Post it, then close, then remove the file, in that order:
 
-       gh issue close $issue --comment "..."
+       gh issue comment $issue --body-file <worktree>/.polako-scratch/CLOSE_COMMENT.md
+       gh issue close $issue
+       git -C <worktree> clean -xfdq -- .polako-scratch/CLOSE_COMMENT.md
 
    Issue number first, that spelling — it is the only form this run is
    granted; any other raises a permission prompt nobody is there to answer.
-   `gh issue edit` is not granted for this — only the label commands above
-   are — so there is no fallback command to reach for if this one is wrong.
-2. If the command fails, say so in your final message and stop anyway — do
-   not retry it a different way and do not fall back to asking a question
-   about it; the run already has its answer, only the write failed.
+   `gh issue close` has no `--body-file` of its own, only an inline
+   `--comment`, so the comment is posted separately first — an inline
+   `gh issue close $issue --comment "..."` would carry the same
+   shell-quoting risk onto this comment that issue #390 found in the
+   question path above. `gh issue edit` is not granted for this — only the
+   label commands above are — so there is no fallback command to reach for
+   if either of these is wrong.
+2. If either command fails, say so in your final message and stop anyway —
+   do not retry the comment (that would double-post it), do not retry the
+   close a different way, and do not fall back to asking a question about
+   it; the run already has its answer, only the write failed.
 3. Report what you verified and the close in your final message, and stop.
    No worktree, branch or PR is needed for this ending — if Phase 1 already
    created a worktree before this became clear, leave it; it is simply
@@ -286,8 +313,13 @@ URL, and never a reason to stop or ask.
    the set can change between runs.
    - An open blocker not yet raised: ask about it the way "Asking a question"
      above describes — name every open blocker's issue number and say this run
-     is waiting on it — and stop. Do not create the worktree or the branch.
-     This is the existing stop shape, not a fourth one.
+     is waiting on it — and stop. Do not create the worktree or the branch:
+     that recipe's scratch file goes under `<main-checkout>/.polako-scratch/`
+     instead of `<worktree>/.polako-scratch/` for this one call, since no
+     issue worktree exists yet — `<main-checkout>` is the first line of `git
+     worktree list`, and Write creates the directory the same way it does
+     under an issue's own worktree. This is the existing stop shape, not a
+     fourth one.
    - An open blocker already raised — `awaiting-answer` is already on this
      issue, the thread's question names this same blocker, and nothing else
      on the thread is outstanding: leave the label alone, don't post again,

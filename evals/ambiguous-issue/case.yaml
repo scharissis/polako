@@ -48,5 +48,15 @@ graders:
       it restates the issue without asking anything, or if it proposes an
       implementation and asks only for approval.
 
+  - type: llm
+    name: comment_has_no_stray_shell_escapes
+    focus: the comment the run posted, at .eval/comments/0.md
+    criteria: >
+      The text reads as plain English with no stray shell-escape artifacts —
+      no `'\''`, no backslash-escaped quotes (`\"`), no literal two-character
+      `\n` sequences standing in for a line break. Issue #390: a comment
+      posted with its text inline on the command line lets shell quoting leak
+      into what a human reads.
+
   - type: tool_used
     tool: Skill
