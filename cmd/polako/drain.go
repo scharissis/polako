@@ -436,8 +436,8 @@ func parkCommentBody(issue int, reason string, entries []string, category string
 // GitHub call that fails must not end a drain that is otherwise healthy — but
 // a label that did not take means the next drain retries this issue, so that
 // one says so out loud rather than failing quietly. entries, when non-empty,
-// is a permission park's own -add-tools entries — ticket 3 of
-// docs/plans/permission-parks.md (#432) — appended as a `Refused: ...`
+// is a permission park's own -add-tools entries — issue #432 — appended
+// as a `Refused: ...`
 // footer parseParkFooter reads back. category is the park's own identifier
 // (metrics.go) — ticket 1 of docs/plans/unpark.md (#530) — appended as a
 // `Park: ...` footer parseParkCategory reads back.

@@ -4,7 +4,7 @@ package main
 // today, clearing one is two steps in two places, by hand — edit the launch
 // line, then remove the label. This lists every parked issue with the reason
 // and the -add-tools entries its own park comment named (see parkIssue,
-// drain.go, and docs/plans/permission-parks.md ticket 3), asks before
+// drain.go, and issue #432), asks before
 // clearing each one, then prints the exact `polako work … -add-tools "…"`
 // line to rerun with. It never grants anything, starts a drain, or stores
 // anything — the label, read back and (with -apply) removed, is the whole of

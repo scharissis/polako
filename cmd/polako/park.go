@@ -60,8 +60,7 @@ type parkedError struct {
 	// entries are the thread-safe -add-tools entries a permission park could
 	// derive from its refusals, nil for every other park. parkIssue appends
 	// them as their own `Refused: ...` footer, a contract like the plan
-	// footer — see parseParkFooter. Ticket 3 of
-	// docs/plans/permission-parks.md, #432.
+	// footer — see parseParkFooter. Issue #432.
 	entries []string
 }
 

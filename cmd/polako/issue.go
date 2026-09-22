@@ -98,7 +98,7 @@ type resumeLedger struct {
 // refusal (issue #461) lets a resume try to finish the job — the raw
 // refusals themselves, not a rendering of them, so a later run on this same
 // issue (recovered or not) always has the full history to report from,
-// never only its own. Ticket 3 of docs/plans/permission-parks.md (#432):
+// never only its own. Issue #432:
 // keeping only rendered text here is what let an early draft of this ticket
 // drop a deferred refusal's history the moment a later resume hit a fresh
 // refusal it did *not* recover from — exactly the "#390 drew five, only one
@@ -896,7 +896,7 @@ func (r *issueLoop) budgetPark(cause string) error {
 // thread verbatim. entries are the thread-safe -add-tools entries a
 // permission park's reason could derive, if any — carried on the
 // parkedError so parkIssue can add its own Refused: footer to the same
-// comment (ticket 3 of docs/plans/permission-parks.md, #432).
+// comment (issue #432).
 func (a *runAttempt) parkCleanExit(category, reason, extraAside string, entries []string, left leftWork) error {
 	if a.st.fetchAuthFailed {
 		reason = fetchAuthParkReason + "; " + reason

@@ -1,7 +1,7 @@
 package main
 
 // `unpark` is the attended morning-after step for a permission park
-// (docs/plans/permission-parks.md ticket 5, issue #434) — these tests run
+// (issue #434) — these tests run
 // against the same fake gh drain_test.go's fixture drives, so a fake park
 // comment is built the exact way a real one would be: parkCommentBody
 // (drain.go), never a second hand-typed copy of the template.

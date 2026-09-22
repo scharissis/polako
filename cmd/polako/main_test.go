@@ -3720,7 +3720,7 @@ func TestRefusalWorkedAround(t *testing.T) {
 // permissionRefusedDetail kept only the first, as the whole compound
 // command even where the CLI had already named the one part it refused.
 // observe now keeps all five, classified by the CLI's own words — the table
-// in docs/plans/permission-parks.md, ticket 1, fed verbatim.
+// from issue #430, fed verbatim.
 func TestObserveKeepsEveryRefusalFromTheCLIsOwnWords(t *testing.T) {
 	t.Parallel()
 	pairs := []struct {
@@ -4006,7 +4006,7 @@ func TestAddToolsEntryThreadSafe(t *testing.T) {
 	}
 }
 
-// Ticket 3 of docs/plans/permission-parks.md (#432): permissionParkAdvice's
+// Issue #432: permissionParkAdvice's
 // four cases, over addToolsEntry's own already-tested classifications.
 func TestPermissionParkAdviceNamesTheFixOrSaysWhyNot(t *testing.T) {
 	t.Parallel()

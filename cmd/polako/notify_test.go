@@ -100,7 +100,7 @@ func TestNotifyHandsTheHookItsContext(t *testing.T) {
 	}
 }
 
-// docs/plans/permission-parks.md ticket 4 (#433): a notify command often
+// Issue #433: a notify command often
 // posts what it is told somewhere, so a permission park's thread-safe
 // entries travel with it too — always set, empty when there are none, the
 // same rule every other notify variable follows.
@@ -275,7 +275,7 @@ func TestNotifyFiresWhenAnIssueParksAndThenNothingIsLeftToWork(t *testing.T) {
 	}
 }
 
-// docs/plans/permission-parks.md ticket 4 (#433), end to end: a permission
+// Issue #433, end to end: a permission
 // park's own -notify event carries the same thread-safe entries the exit
 // summary and the issue thread's footer do.
 func TestNotifyCarriesAPermissionParksEntries(t *testing.T) {

@@ -116,9 +116,8 @@ func TestParsePlanFooter(t *testing.T) {
 }
 
 // parkFooter and parseParkFooter are two sides of the same contract as
-// planFooter/parsePlanFooter — ticket 3 of docs/plans/permission-parks.md
-// (#432): parkIssue writes the footer, unpark and status (not yet built)
-// read it back.
+// planFooter/parsePlanFooter — issue #432: parkIssue writes the footer,
+// unpark and status (not yet built) read it back.
 func TestParkFooterRoundTrips(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
