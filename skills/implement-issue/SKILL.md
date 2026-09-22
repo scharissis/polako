@@ -872,13 +872,18 @@ don't post again, and stop.
        ## Evidence — add only when the change alters something a human looks
          at: printed CLI output, a generated file, a rendered doc, an error
          message, a report layout. Capture it when you run the manual check
-         in step 1 and reuse it here rather than reproducing it later — a
-         fenced block of the real output (before/after when you can still
-         reproduce both, after alone otherwise), a link to an image already
-         committed on the branch, or an image pushed to the evidence ref
-         (see "Evidence ref" above) and embedded by its commit sha. A route
-         with both a `before-<slug>.png` and an `after-<slug>.png` on the
-         evidence ref gets a two-column table instead of one image line:
+         in step 1 and reuse it here rather than reproducing it later. Check
+         now, before writing this section: if the change alters what a
+         command prints and step 1's manual check hasn't actually run yet —
+         the test suite passing is not that check, even when one of its
+         cases exercises the same code path — run the command by hand
+         against `<worktree>` now and use its real output. A fenced block of
+         the real output (before/after when you can still reproduce both,
+         after alone otherwise), a link to an image already committed on the
+         branch, or an image pushed to the evidence ref (see "Evidence ref"
+         above) and embedded by its commit sha. A route with both a
+         `before-<slug>.png` and an `after-<slug>.png` on the evidence ref
+         gets a two-column table instead of one image line:
 
              `/settings` at 1280x800.
 
