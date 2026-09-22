@@ -13,6 +13,25 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.32.0]
+
+### What's Changed
+* refactor: rename docs/plans to docs/designs and -vision to -design by @scharissis in https://github.com/scharissis/polako/pull/561 (closes #554)
+* fix: implement-issue omits ## Evidence for visible CLI output, grader over-asks by @scharissis in https://github.com/scharissis/polako/pull/568 (closes #460)
+* fix: evals/run.sh can't write to its workspace when it sits inside --plugin-dir by @scharissis in https://github.com/scharissis/polako/pull/569 (closes #459)
+* docs: retire docs/designs/unpark.md — every issue it proposed is closed by @scharissis in https://github.com/scharissis/polako/pull/570 (closes #559)
+* refactor: one repo resolver for tidy, unpark and status configs by @scharissis in https://github.com/scharissis/polako/pull/571 (closes #562)
+* refactor: one helper for origin's default branch, used at all four sites by @scharissis in https://github.com/scharissis/polako/pull/572 (closes #563)
+* refactor: split drain's loop body and retire its funcDebt entry by @scharissis in https://github.com/scharissis/polako/pull/573 (closes #564)
+* refactor: move runAttempt's outcome helpers out of issue.go by @scharissis in https://github.com/scharissis/polako/pull/574 (closes #565)
+* refactor: drop the test-only permission-park reason wrappers by @scharissis in https://github.com/scharissis/polako/pull/575 (closes #566)
+* test: move main_test.go's per-file unit tests into their own files by @scharissis in https://github.com/scharissis/polako/pull/576 (closes #567)
+* fix: status prints one report on stdout, notes under the header by @scharissis in https://github.com/scharissis/polako/pull/577 (closes #508)
+* fix: the plan footer parser accepts only a document path by @scharissis in https://github.com/scharissis/polako/pull/578 (closes #509)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.31.0...v0.32.0
+
 ## [0.31.0]
 
 ### What's Changed
