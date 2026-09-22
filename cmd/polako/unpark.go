@@ -82,7 +82,12 @@ func runUnpark(ctx context.Context, args []string, in io.Reader, isTTY bool, out
 	if err != nil {
 		return err
 	}
-	items, err := readParkedIssues(ctx, cfg, only, opt.repo == "")
+	// Only the single-issue view and -apply's per-item printout ever render
+	// it.local (renderUnpark's table branch and printUnparkNextStep's
+	// multi-item branch don't), so a plain multi-issue listing skips the
+	// git calls inspectLeftWork would otherwise make once per parked issue
+	// for nothing.
+	items, err := readParkedIssues(ctx, cfg, only, opt.repo == "" && (only != 0 || opt.apply))
 	if err != nil {
 		return err
 	}
