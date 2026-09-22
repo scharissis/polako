@@ -188,7 +188,14 @@ var parkNextStepTable = map[string]string{
 // parkNextStepNoEntries is parkPermission's sentence when its park comment
 // named no -add-tools entries — the fallback reason ran, or the ask was
 // prose (the #461/#472 shapes), so there is nothing to grant.
-const parkNextStepNoEntries = "the refused tool is in that shift's log; or the ask was prose — read the run's last comment"
+const parkNextStepNoEntries = "check that shift's log or the thread for what it refused"
+
+// parkNextStepUngrantable is parkPermission's sentence when the comment
+// named an entry, but validParkEntry rejected it (it.ignored, not
+// it.entries) — a malformed shape, or a never-grant command entry's own
+// producer already refused. Distinct from parkNextStepNoEntries: something
+// was named, it just isn't something -add-tools can grant.
+const parkNextStepUngrantable = "the named entry can't be granted automatically — read the thread"
 
 // parkNextStepUnlabeled is what an issue with no category at all gets: a
 // hand-applied label, or a comment readParkListItem could not parse as
@@ -198,19 +205,24 @@ const parkNextStepUnlabeled = "read the thread"
 
 // parkNextStep is the sentence unpark prints for a parked issue: what a
 // human should do about it, in one short sentence. permission_refused is the
-// one category that reads its second argument — with named entries it
-// points at the rerun line unpark already prints; without any, there is
-// nothing to grant, so it falls back to parkNextStepNoEntries. No category —
-// a hand label, or an unparsed comment — falls back to
-// parkNextStepUnlabeled.
-func parkNextStep(category string, hasEntries bool) string {
-	if category == parkPermission {
-		if hasEntries {
-			return "grant them — the rerun line below"
+// one category that reads more than its own category — a granted, valid
+// entry (it.entries) means rerunning with -add-tools; an entry the comment
+// named but validParkEntry rejected (it.ignored) can never be granted, so it
+// says so instead of claiming there's nothing named at all; no entry either
+// way falls back to parkNextStepNoEntries. No category — a hand label, or an
+// unparsed comment — falls back to parkNextStepUnlabeled.
+func parkNextStep(it parkListItem) string {
+	if it.category == parkPermission {
+		switch {
+		case len(it.entries) > 0:
+			return "grant them, then rerun with -add-tools"
+		case len(it.ignored) > 0:
+			return parkNextStepUngrantable
+		default:
+			return parkNextStepNoEntries
 		}
-		return parkNextStepNoEntries
 	}
-	if s, ok := parkNextStepTable[category]; ok {
+	if s, ok := parkNextStepTable[it.category]; ok {
 		return s
 	}
 	return parkNextStepUnlabeled

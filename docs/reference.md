@@ -524,7 +524,7 @@ scharissis/polako
 parked
   issue  work                        reason                              add-tools
   #16    PR #84, CI red              the run was refused Bash(echo:*)    Bash(echo:*)
-remove needs-human from #16? (grant them — the rerun line below) [y/N] y
+remove needs-human from #16? (grant them, then rerun with -add-tools) [y/N] y
   #16 next shift: waits on PR #84 and remediates its red CI
 
 polako work -dir . -add-tools "Bash(echo:*)"
@@ -539,15 +539,7 @@ issue-390 from its 4 commits` with a pushed branch and no PR yet, or `starts
 over — nothing was pushed`. A `checks_remediation` park whose CI is still
 red gets one more line: a warning that the next shift will remediate the
 same red and likely park again, so fix the branch before clearing the
-label.
-
-The one-issue view and each `-apply` question also carry a next step: one
-short sentence, keyed on the park's own category, saying what a human should
-do about it — `grant them — the rerun line below` for a permission park with
-a named entry, `fix the failing check on the PR, then unpark` for a
-checks_remediation park, and so on for every category `metrics.go` knows.
-A park with no category at all — a hand-applied label, or a comment that
-isn't polako's own — falls back to `read the thread`.
+label. Both also name a next step per category, `read the thread` with none.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
