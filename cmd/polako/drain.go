@@ -146,180 +146,255 @@ func resumeHint(cfg config, issue int, st *issueState) {
 	}
 }
 
-// drain works the queue until it empties, an issue proves fatal, or -once says
-// stop. An issue that cannot be finished is parked rather than fatal, and an
-// issue waiting on a human answer is put down rather than waited on, so neither
-// one stops a backlog draining overnight.
-func drain(ctx context.Context, cfg config) error {
-	started := time.Now()
+// shift is what one drain call carries between the issues it works: the
+// memos that make its own loop terminate within one process, and the results
+// it accumulates for the exit summary. Like issueState, it is not state:
+// nothing reads it after the process ends, and a restart re-derives the
+// queue, and every container's finished state, from GitHub alone.
+type shift struct {
+	cfg     config
+	started time.Time
 
-	// Parked issues leave the queue by their label, but labelling is a network
-	// call that can fail, and a park the label did not take would put this loop
-	// straight back on the same issue. Remembering them here is what guarantees
-	// it terminates. It is not state: nothing reads it after the process ends,
-	// and a restart re-derives the queue from GitHub alone.
+	// Parked issues leave the queue by their label, but labelling is a
+	// network call that can fail, and a park the label did not take would put
+	// this loop straight back on the same issue. Remembering them here is
+	// what guarantees it terminates.
+	skip   map[int]bool
+	states map[int]*issueState
+	// commentedContainers is the same shape as skip, for the same reason: not
+	// state a restart needs, only a memo so this shift does not re-read a
+	// finished container's thread on every pass once it already knows the
+	// marker is there.
+	commentedContainers map[int]bool
+	// closedContainers is the same shape again: the containers this shift has
+	// already tried to close, so a stale post-close listing does not re-fire
+	// epic-done and a failing close warns once a shift rather than once a
+	// pass.
+	closedContainers map[int]bool
+
+	results []issueResult
+	// closedEpics accumulates across passes for the exit summary: a container
+	// closed mid-shift is gone from the next listing, so lastContainers can
+	// no longer speak for it. Not state either — a restart re-derives an
+	// epic's closed state from GitHub like everything else.
+	closedEpics []containerInfo
+	// retiredDocs is the same shape and reasoning as closedEpics: the retire
+	// issues this shift filed off a container close, accumulated across
+	// passes for the exit summary. Not state — a restart re-derives whether a
+	// retire issue is needed from GitHub alone, same as everything else here.
+	retiredDocs []retiredDoc
+	// lastContainers is the containers the most recent successful listing
+	// found — carried across passes so the exit summary can name one that
+	// finished mid-shift without an extra `gh` call or a merge-moment hook:
+	// the next pass to run one already reflects an epic's last child
+	// merging. A shift that stops without a next pass — -once after one
+	// issue, -max-session-cost, a fatal error — reports what this listing
+	// knew and no more, same as any other "ends before it re-lists" exit;
+	// the next shift's own first pass says the rest.
+	lastContainers []containerInfo
+}
+
+func newShift(cfg config) *shift {
 	skip := maps.Clone(cfg.skip)
 	if skip == nil {
 		skip = map[int]bool{}
 	}
 	cfg.skip = skip
-	states := map[int]*issueState{}
-	// Same shape as skip, for the same reason: not state a restart needs, only
-	// a memo so this shift does not re-read a finished container's thread on
-	// every pass once it already knows the marker is there.
-	commentedContainers := map[int]bool{}
-	// Same shape again: the containers this shift has already tried to close, so
-	// a stale post-close listing does not re-fire epic-done and a failing close
-	// warns once a shift rather than once a pass.
-	closedContainers := map[int]bool{}
-	// The containers this shift closed, accumulated across passes for the exit
-	// summary: a container closed mid-shift is gone from the next listing, so
-	// lastContainers can no longer speak for it. Not state either — a restart
-	// re-derives an epic's closed state from GitHub like everything else.
-	var closedEpics []containerInfo
-	// Same shape and reasoning as closedEpics: the retire issues this shift
-	// filed off a container close, accumulated across passes for the exit
-	// summary. Not state — a restart re-derives whether a retire issue is
-	// needed from GitHub alone, same as everything else here.
-	var retiredDocs []retiredDoc
-
-	var results []issueResult
-	// The containers the most recent successful listing found — carried across
-	// passes so the exit summary can name one that finished mid-shift without
-	// an extra `gh` call or a merge-moment hook: the next pass to run one
-	// already reflects an epic's last child merging. A shift that stops
-	// without a next pass — -once after one issue, -max-session-cost, a fatal
-	// error — reports what this listing knew and no more, same as any other
-	// "ends before it re-lists" exit; the next shift's own first pass says
-	// the rest.
-	var lastContainers []containerInfo
-	// Every exit goes through finish, fatal ones included: a session that died
-	// on issue nine should still account for the eight before it. The issue it
-	// died on is not among them — unfinished is not an outcome — so a run that
-	// dies on its first issue has nothing to summarize and says nothing.
-	finish := func(err error) error {
-		if lines := drainSummary(append(results, stillWaiting(states)...), lastContainers, closedEpics, retiredDocs, time.Since(started)); len(lines) > 0 {
-			cfg.narrate(sevSection, "%s", lines[0]) // the shift's own closing heading
-			for _, line := range lines[1:] {
-				cfg.logf("%s", line)
-			}
-		}
-		// A drain that ended before the backlog did needs somebody. Ctrl+C is
-		// the exception rather than an oversight: whoever pressed it is at the
-		// keyboard already.
-		if err != nil && !errors.Is(err, context.Canceled) {
-			notify(ctx, cfg, notification{event: notifyStopped, reason: err.Error()})
-		}
-		return err
+	return &shift{
+		cfg:                 cfg,
+		started:             time.Now(),
+		skip:                skip,
+		states:              map[int]*issueState{},
+		commentedContainers: map[int]bool{},
+		closedContainers:    map[int]bool{},
 	}
+}
+
+// finish runs on every exit from drain, fatal ones included: a session that
+// died on issue nine should still account for the eight before it. The issue
+// it died on is not among them — unfinished is not an outcome — so a run
+// that dies on its first issue has nothing to summarize and says nothing.
+func (s *shift) finish(ctx context.Context, err error) error {
+	if lines := drainSummary(append(s.results, stillWaiting(s.states)...),
+		s.lastContainers, s.closedEpics, s.retiredDocs, time.Since(s.started)); len(lines) > 0 {
+		s.cfg.narrate(sevSection, "%s", lines[0]) // the shift's own closing heading
+		for _, line := range lines[1:] {
+			s.cfg.logf("%s", line)
+		}
+	}
+	// A drain that ended before the backlog did needs somebody. Ctrl+C is
+	// the exception rather than an oversight: whoever pressed it is at the
+	// keyboard already.
+	if err != nil && !errors.Is(err, context.Canceled) {
+		notify(ctx, s.cfg, notification{event: notifyStopped, reason: err.Error()})
+	}
+	return err
+}
+
+// costGate reports whether this shift has spent enough to stop, narrating
+// and notifying if so. Read between issues and never inside one: ending a
+// drain cleanly means declining to take on more work, not killing a run
+// part-way through an issue that would then have to be parked. One issue can
+// therefore carry the total past the budget by whatever that issue costs —
+// and -max-cost does not bound that to itself, since it gates the next run
+// rather than the one in flight.
+func (s *shift) costGate(ctx context.Context) bool {
+	spent := sessionSpend(s.results, s.states)
+	if s.cfg.maxSessionCost <= 0 || spent < s.cfg.maxSessionCost {
+		return false
+	}
+	reason := fmt.Sprintf("this shift has spent %s of its -max-session-cost of %s — stopping here; "+
+		"everything is on GitHub, so raise the budget and start it again to carry on",
+		usd(spent), usd(s.cfg.maxSessionCost))
+	s.cfg.logf("%s", reason)
+	// A clean exit, but the backlog is not drained and only a person can
+	// decide to raise the budget — which is what notifyStopped is for.
+	notify(ctx, s.cfg, notification{event: notifyStopped, reason: reason})
+	return true
+}
+
+// usageGate waits out a tripped plan-usage limit. wait reports whether this
+// pass should loop back to the top rather than pick an issue; a non-nil err
+// means the wait itself was interrupted (Ctrl+C), which finish prints a
+// summary for and reports without a notify.
+//
+// Same placement and reasoning as costGate: read between issues and never
+// inside one, and never a park — the plan's own limit is a fact about the
+// account, not about this issue. Unlike the cost budget it does not stop the
+// shift: the pool resets on its own, so the gate waits it out and loops back
+// to probe again, the fence matching the wall a mid-run refusal hits
+// (behaviour.md).
+func (s *shift) usageGate(ctx context.Context) (wait bool, err error) {
+	waitFor, reason, tripped := usageGateReason(ctx, s.cfg)
+	if !tripped {
+		return false, nil
+	}
+	s.cfg.logf("%s", reason)
+	if err := sleep(ctx, waitFor); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// pick advances the queue by one step: refreshing the container listing,
+// closing any container whose children all closed, and returning the next
+// issue to work. done is true when the backlog is empty — already reported
+// via reportNothingLeftToWork/notify — in which case issue is always 0.
+// issue is also 0, with done false, when the queue moved while this pass
+// was waiting on an answer; the caller re-derives the queue rather than
+// working a stale pick.
+func (s *shift) pick(ctx context.Context) (issue int, done bool, err error) {
+	ready, blocked, parkedIssues, heldBack, containers, err := openIssues(ctx, s.cfg)
+	if err != nil {
+		return 0, false, err
+	}
+	s.lastContainers = containers
+	logHeldBack(s.cfg, heldBack, s.skip)
+	closedNow, retiredNow, err := closeFinishedContainers(ctx, s.cfg, containers, s.commentedContainers, s.closedContainers)
+	s.closedEpics = append(s.closedEpics, closedNow...)
+	s.retiredDocs = append(s.retiredDocs, retiredNow...)
+	if err != nil {
+		return 0, false, err
+	}
+	if issue = pickLowest(ready, s.skip); issue != 0 {
+		return issue, false, nil
+	}
+	blocked = slices.DeleteFunc(blocked, func(n int) bool { return s.skip[n] })
+	if len(blocked) == 0 {
+		clear(s.states)
+		reportNothingLeftToWork(ctx, s.cfg, parkedIssues)
+		return 0, true, nil
+	}
+	// Nothing else is workable, so the only way forward is an issue somebody
+	// owes an answer on.
+	issue, err = awaitAnswer(ctx, s.cfg, blocked, s.states)
+	return issue, false, err
+}
+
+// handleOutcome classifies processIssue's return and files this issue under
+// its ending: deferred to a human reply, parked for a decision, fatal, or
+// finished (merged, or closed with no change needed). Only the fatal case
+// returns a non-nil error; every other ending leaves the queue for the next
+// pass.
+func (s *shift) handleOutcome(ctx context.Context, issue int, st *issueState, err error) error {
+	reason, parked := parkReason(err)
+	switch deferred, isDeferred := deferReason(err); {
+	case isDeferred:
+		st.awaiting, st.baseline = true, deferred.baseline
+		s.cfg.logf("issue #%d is labelled %q — leaving it for a human and working the queue behind it",
+			issue, awaitingAnswerLabel)
+	case parked:
+		s.skip[issue] = true
+		s.results = append(s.results, spend(st, issueResult{
+			issue: issue, parked: true, reason: reason, parkEntries: parkEntriesOf(err),
+		}))
+		delete(s.states, issue)
+		parkAndMoveOn(ctx, s.cfg, issue, st, reason, err)
+	case err != nil:
+		// Ctrl+C mid-issue, or a fatal error: neither prints the park's
+		// resume hint, yet both leave a run's transcript on disk that
+		// somebody will want to reopen — and the id is dropped on exit
+		// otherwise (#218).
+		resumeHint(s.cfg, issue, st)
+		return fmt.Errorf("issue #%d: %w", issue, err)
+	default:
+		s.results = append(s.results, spend(st, issueResult{issue: issue, closedNoChange: st.closedNoChange}))
+		delete(s.states, issue)
+	}
+	return nil
+}
+
+// drain works the queue until it empties, an issue proves fatal, or -once says
+// stop. An issue that cannot be finished is parked rather than fatal, and an
+// issue waiting on a human answer is put down rather than waited on, so neither
+// one stops a backlog draining overnight.
+func drain(ctx context.Context, cfg config) error {
+	s := newShift(cfg)
 
 	// Once, before the first issue is picked up: between two shifts a human
 	// merges PRs by hand, and every one of those leaves a worktree and branch no
 	// merge-moment cleanup will ever revisit. The per-merge sweep below keeps it
 	// from accumulating again.
-	tidySweep(ctx, cfg, 0)
+	tidySweep(ctx, s.cfg, 0)
 
 	for {
-		// Read between issues and never inside one: ending a drain cleanly means
-		// declining to take on more work, not killing a run part-way through an
-		// issue that would then have to be parked. One issue can therefore carry
-		// the total past the budget by whatever that issue costs — and -max-cost
-		// does not bound that to itself, since it gates the next run rather than
-		// the one in flight.
-		if spent := sessionSpend(results, states); cfg.maxSessionCost > 0 && spent >= cfg.maxSessionCost {
-			reason := fmt.Sprintf("this shift has spent %s of its -max-session-cost of %s — stopping here; "+
-				"everything is on GitHub, so raise the budget and start it again to carry on",
-				usd(spent), usd(cfg.maxSessionCost))
-			cfg.logf("%s", reason)
-			// A clean exit, but the backlog is not drained and only a person can
-			// decide to raise the budget — which is what notifyStopped is for.
-			notify(ctx, cfg, notification{event: notifyStopped, reason: reason})
-			return finish(nil)
+		if s.costGate(ctx) {
+			return s.finish(ctx, nil)
 		}
-		// Same placement and the same reasoning as the cost budget above: read
-		// between issues and never inside one, and never a park — the plan's own
-		// limit is a fact about the account, not about this issue. Unlike the
-		// cost budget it does not stop the shift: the pool resets on its own, so
-		// the gate waits it out and loops back to probe again, the fence
-		// matching the wall a mid-run refusal hits (behaviour.md). A Ctrl+C
-		// during the wait returns context.Canceled from sleep, which finish
-		// prints a summary for and reports without a notify.
-		if wait, reason, tripped := usageGateReason(ctx, cfg); tripped {
-			cfg.logf("%s", reason)
-			if err := sleep(ctx, wait); err != nil {
-				return finish(err)
-			}
+		if wait, err := s.usageGate(ctx); err != nil {
+			return s.finish(ctx, err)
+		} else if wait {
 			continue
 		}
-		ready, blocked, parkedIssues, heldBack, containers, err := openIssues(ctx, cfg)
-		if err != nil {
-			return finish(err)
-		}
-		lastContainers = containers
-		logHeldBack(cfg, heldBack, skip)
-		closedNow, retiredNow, err := closeFinishedContainers(ctx, cfg, containers, commentedContainers, closedContainers)
-		closedEpics = append(closedEpics, closedNow...)
-		retiredDocs = append(retiredDocs, retiredNow...)
-		if err != nil {
-			return finish(err)
-		}
-		issue := pickLowest(ready, skip)
-		if issue == 0 {
-			blocked = slices.DeleteFunc(blocked, func(n int) bool { return skip[n] })
-			if len(blocked) == 0 {
-				clear(states)
-				reportNothingLeftToWork(ctx, cfg, parkedIssues)
-				return finish(nil)
-			}
-			// Nothing else is workable, so the only way forward is an issue
-			// somebody owes an answer on.
-			if issue, err = awaitAnswer(ctx, cfg, blocked, states); err != nil {
-				return finish(err)
-			}
-			if issue == 0 {
-				continue // the queue moved while waiting — ask GitHub again
-			}
-		}
-		cfg.narrate(sevSection, "=== issue #%d ===", issue)
 
-		st := states[issue]
+		issue, done, err := s.pick(ctx)
+		if err != nil {
+			return s.finish(ctx, err)
+		}
+		if done {
+			return s.finish(ctx, nil)
+		}
+		if issue == 0 {
+			continue // the queue moved while waiting — ask GitHub again
+		}
+		s.cfg.narrate(sevSection, "=== issue #%d ===", issue)
+
+		st := s.states[issue]
 		if st == nil {
 			st = &issueState{}
-			states[issue] = st
+			s.states[issue] = st
 		}
 		// Working it is the end of waiting on it. Left standing, the flag would
 		// have every exit from here that is neither a merge nor a park — Ctrl+C
 		// while its PR is open, a fatal error — end by telling the operator to
 		// reply on a thread nobody is waiting on any more.
 		st.awaiting = false
-		err = processIssue(ctx, cfg, issue, st)
-		reason, parked := parkReason(err)
-		switch deferred, isDeferred := deferReason(err); {
-		case isDeferred:
-			st.awaiting, st.baseline = true, deferred.baseline
-			cfg.logf("issue #%d is labelled %q — leaving it for a human and working the queue behind it",
-				issue, awaitingAnswerLabel)
-		case parked:
-			skip[issue] = true
-			results = append(results, spend(st, issueResult{
-				issue: issue, parked: true, reason: reason, parkEntries: parkEntriesOf(err),
-			}))
-			delete(states, issue)
-			parkAndMoveOn(ctx, cfg, issue, st, reason, err)
-		case err != nil:
-			// Ctrl+C mid-issue, or a fatal error: neither prints the park's
-			// resume hint, yet both leave a run's transcript on disk that
-			// somebody will want to reopen — and the id is dropped on exit
-			// otherwise (#218).
-			resumeHint(cfg, issue, st)
-			return finish(fmt.Errorf("issue #%d: %w", issue, err))
-		default:
-			results = append(results, spend(st, issueResult{issue: issue, closedNoChange: st.closedNoChange}))
-			delete(states, issue)
+		if err := s.handleOutcome(ctx, issue, st, processIssue(ctx, s.cfg, issue, st)); err != nil {
+			return s.finish(ctx, err)
 		}
-		if cfg.once {
-			cfg.logf("-once set — exiting after one issue")
-			return finish(nil)
+		if s.cfg.once {
+			s.cfg.logf("-once set — exiting after one issue")
+			return s.finish(ctx, nil)
 		}
 	}
 }

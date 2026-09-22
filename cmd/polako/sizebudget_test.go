@@ -42,9 +42,10 @@ import (
 //     new entry would mean a real regression, not the accretion epic's
 //     leftovers (stats.go, the last of those, was split up by issue #344).
 //   - funcBudget: just over two of the health report's 60-line call-out
-//     screens, plus a signature and braces. One function exceeds it today
-//     (drain.go:drain, listed below); main.go:main is next at a line under, so
-//     a change that grows it is expected to split it, not raise the budget.
+//     screens, plus a signature and braces — chosen the same way, so funcDebt
+//     is empty too. drain.go:drain was the one function over it until issue
+//     #564 split its loop body out; a change that grows a function past the
+//     budget again is expected to split it, not raise the budget.
 const (
 	fileBudget = 1000
 	funcBudget = 130
@@ -65,9 +66,7 @@ const (
 // receiver-qualified name for methods, as scripts/health prints it).
 var fileDebt = map[string]int{}
 
-var funcDebt = map[string]int{
-	"drain.go:drain": 179, // the per-issue loop body wants to be its own function
-}
+var funcDebt = map[string]int{}
 
 // splitFileHint and splitFuncHint turn a budget failure into an instruction,
 // per the errors convention — what to do about it, not just what tripped.
