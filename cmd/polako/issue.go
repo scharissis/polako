@@ -452,11 +452,6 @@ func (r *issueLoop) dispatchRun() (*pullRequest, error) {
 // merge, because there is nothing left for a human to do.
 var errIssueClosedNoChange = errors.New("issue closed with no code change needed")
 
-// afterCleanExit handles a clean exit that opened no PR and flagged no
-// question through the proper channel. Four different runs end this way and
-// only one of them is the "Claude decided nothing" this used to assume: two
-// believed they had paused for something that will never come back, or ran out
-// of road mid-task, and both have the change sitting on disk, finished or
 // fetchAuthParkReason leads a clean-exit park's reason when this leg's own
 // pickup fetch couldn't authenticate (issue #425): polako's own words, no raw
 // git stderr, since this reaches the issue thread verbatim. It doesn't say
