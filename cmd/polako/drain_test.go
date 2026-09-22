@@ -1656,7 +1656,7 @@ func TestDrainParksARefusedToolResultWithoutResuming(t *testing.T) {
 	}
 }
 
-// docs/plans/permission-parks.md ticket 4 (#433), end to end: a drain that
+// Issue #433, end to end: a drain that
 // parks two issues on the same derivable entry ends with one grants block,
 // the union deduplicated, one `polako unpark -apply` line to clear either.
 func TestDrainEndsWithAGrantsBlockAfterTwoPermissionParks(t *testing.T) {
@@ -5152,7 +5152,7 @@ func TestDrainSummaryReportsAClosedContainerEvenWithNoIssueResults(t *testing.T)
 	}
 }
 
-// docs/plans/permission-parks.md ticket 4 (#433): a permission park's own
+// Issue #433: a permission park's own
 // paragraph already ran once, narrated when it happened and posted to the
 // thread — so the exit summary's per-issue line shortens to the entries
 // rather than repeating it.
@@ -5186,7 +5186,7 @@ func TestDrainSummaryKeepsTheFullReasonWithNoEntries(t *testing.T) {
 	}
 }
 
-// docs/plans/permission-parks.md ticket 4 (#433): one paste-ready block, the
+// Issue #433: one paste-ready block, the
 // union of every park's entries with no duplicates, plus `polako unpark
 // -apply` to clear whichever of them the operator approves (ticket 5, #434).
 func TestDrainSummaryEndsWithAGrantsBlockUnioningEntries(t *testing.T) {

@@ -204,7 +204,7 @@ type runReport struct {
 	lastResultIsAsk bool
 	// lastResultText is the most recent result event's own text, kept so a
 	// park that blames a worked-around refusal (issue #461, and the eventual
-	// wording ticket 3 of docs/plans/permission-parks.md gives it — #432)
+	// wording issue #432 gives it)
 	// can still show the run's own last words: #390's carried the real tell
 	// (an unreachable SSH agent) that the generic permission wording hid.
 	lastResultText string

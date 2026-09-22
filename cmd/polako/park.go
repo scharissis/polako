@@ -61,7 +61,7 @@ type parkedError struct {
 	// derive from its refusals, nil for every other park. parkIssue appends
 	// them as their own `Refused: ...` footer, a contract like the plan
 	// footer — see parseParkFooter. Ticket 3 of
-	// docs/plans/permission-parks.md, #432.
+	// issue #432.
 	entries []string
 }
 

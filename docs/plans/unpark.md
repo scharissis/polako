@@ -5,7 +5,7 @@ change: every park comment gains one `Park: <category>` line; `unpark`'s
 listing gains columns and makes more `gh` reads; nothing else changes
 
 `polako unpark` was built for one park: a permission park whose refused tool
-polako could name (`docs/plans/permission-parks.md`, epic #429). For that park
+polako could name (epic #429). For that park
 it prints the `-add-tools` line to rerun with. For every other park it's
 `gh issue edit N --remove-label needs-human` with a `[y/N]` in front.
 
@@ -28,7 +28,7 @@ Every park comment on `scharissis/polako`, counted 2026-09-22 — 23 comments:
 - **The one park it serves hasn't happened yet.** The footer shipped
   2026-09-21 (#518). No permission park since. Zero of 23.
 - **The permission parks weren't permission problems.** #390's real blocker
-  was an unreachable SSH agent (`permission-parks.md` says so). #318, #372,
+  was an unreachable SSH agent (docs/behaviour.md says so). #318, #372,
   #404, #417 and #420 ended mid-review-gate with the ask in prose — the #461
   and #472 shapes, both since closed. No grant clears any of them.
 - **What clearing one actually took.** Each time, by hand: is `issue-N` on
@@ -251,8 +251,8 @@ That's a dozen more for `setup` to create, and a human can strip one and leave
 a raised cap. Each is a judgment a human made differently every time in the
 23 parks above. The verb lists, asks, and removes a label.
 
-**`unpark -apply` starting the drain.** `permission-parks.md` already turned
-this down: it prints the line, the human runs it.
+**`unpark -apply` starting the drain.** Issue #429 already turned this down:
+it prints the line, the human runs it.
 
 **More work on the `-add-tools` half.** No `Refused:` park has happened.
 Wait for one before tuning it.

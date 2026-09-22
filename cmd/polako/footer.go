@@ -85,7 +85,7 @@ func lastFooterLine(body, prefix string) string {
 // ends with when it has -add-tools entries to name. A contract like
 // planFooterPrefix: parkIssue writes it, parseParkFooter reads it back, and
 // a test holds both to the same wording. Ticket 3 of
-// docs/plans/permission-parks.md (#432).
+// issue #432.
 const parkFooterPrefix = "Refused: "
 
 // parkFooter renders entries as the footer parkIssue appends to a permission
