@@ -356,7 +356,8 @@ func applyUnpark(ctx context.Context, prompt *setupPrompt, autoApprove bool, out
 	for _, it := range items {
 		approved := autoApprove
 		if !autoApprove {
-			approved = prompt.confirmDefault(fmt.Sprintf("remove %s from #%d?", needsHumanLabel, it.issue), false)
+			approved = prompt.confirmDefault(fmt.Sprintf("remove %s from #%d? (%s)",
+				needsHumanLabel, it.issue, parkNextStep(it)), false)
 		}
 		if !approved {
 			continue
@@ -415,6 +416,7 @@ func renderUnpark(w io.Writer, rpt report, cfg config, items []parkListItem, sin
 		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("reason   "), it.reason)
 		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("add-tools"), renderParkEntries(it))
 		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("next shift"), nextShiftLine(it.work))
+		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("next step"), parkNextStep(it))
 		if warn := staleRedCIWarning(it.category, it.work); warn != "" {
 			fmt.Fprintf(w, "  %s  %s\n", rpt.dim("warning"), warn)
 		}
@@ -436,7 +438,8 @@ func printUnparkNextStep(w io.Writer, items []parkListItem, single bool) {
 	}
 	fmt.Fprintln(w)
 	if single {
-		fmt.Fprintf(w, "fix what it names, then: polako unpark -apply %d\n", items[0].issue)
+		it := items[0]
+		fmt.Fprintf(w, "%s, then: polako unpark -apply %d\n", parkNextStep(it), it.issue)
 		return
 	}
 	fmt.Fprintln(w, "polako unpark <issue> prints one reason in full; polako unpark -apply asks before clearing each")
