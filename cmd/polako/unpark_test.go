@@ -27,13 +27,14 @@ func unparkCfg(t *testing.T, st *ghState) config {
 		t.Fatalf("writing fake gh state: %v", err)
 	}
 	return config{
-		dir:         t.TempDir(),
-		env:         fakeEnv(fakeGhEnv, path),
-		ui:          testUI(t),
-		ghBin:       fakeCLI(t),
-		repo:        "example/repo",
-		ghRepo:      "example/repo",
-		ghRetryWait: time.Millisecond,
+		dir:          t.TempDir(),
+		env:          fakeEnv(fakeGhEnv, path),
+		ui:           testUI(t),
+		ghBin:        fakeCLI(t),
+		repo:         "example/repo",
+		ghRepo:       "example/repo",
+		ghRetryWait:  time.Millisecond,
+		branchPrefix: "issue-",
 	}
 }
 
@@ -319,3 +320,7 @@ func TestUnparkDoesNotMentionProposedIssues(t *testing.T) {
 		t.Errorf("unpark named the proposed issues:\n%s", log.String())
 	}
 }
+
+// TestUnparkReadsEachParkedIssuesWork, TestUnparkWorkNotReadWhenPRChecksFail
+// and TestUnparkWorkNotReadWhenDefaultBranchFails live in
+// unpark_work_test.go, alongside the readParkWork code they exercise.

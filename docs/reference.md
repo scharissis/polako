@@ -522,8 +522,8 @@ before clearing each, then prints the rerun line.
 $ polako unpark -apply
 scharissis/polako
 parked
-  issue  reason                              add-tools
-  #16    the run was refused Bash(echo:*)    Bash(echo:*)
+  issue  work                        reason                              add-tools
+  #16    PR #84, CI red              the run was refused Bash(echo:*)    Bash(echo:*)
 remove needs-human from #16? [y/N] y
 
 polako work -dir . -add-tools "Bash(echo:*)"
@@ -536,13 +536,13 @@ POLAKO_ADD_TOOLS=Bash(echo:*)
 | `-dir` | `.` | Path to the repository's main checkout, used to resolve the repository when `-repo` is not given. |
 | `-apply` | `false` | Ask about each listed issue and remove `needs-human` from the ones you approve — the one write this verb makes. Needs a terminal, or `-yes`. Cannot be set from the environment, like `tidy`'s `-apply`. |
 | `-yes` | `false` | With `-apply`, clear every listed issue without asking — the one flag that turns this into a script-safe batch clear. |
+| `-branch-prefix` | `issue-` | Branch name prefix the skill uses — same meaning as `work`'s and `status`'s own, needed here to find each parked issue's branch and PR. |
 
 A trailing issue number limits this to one issue, flags first: `polako
 unpark -apply -yes 16`. The table clips a reason; `polako unpark 16` prints
-it whole. Reason and entries come from polako's own latest comment on the
-thread — authored by the `gh` account this runs as, shaped like
-`parkIssue`'s own write, nothing from anyone else, forged footer included.
-An entry `-add-tools` would never propose, or naming a never-grant command,
-renders `(ignored)`. A park that named no tool, or a hand-applied label,
-lists `(none named)`: clearing it is just removing the label. Every run
-re-lists straight off GitHub — no drain, no grant, nothing stored.
+it whole, sourced from polako's own latest comment — authored by the `gh`
+account this runs as, a forged footer contributing nothing. An entry
+`-add-tools` would never propose, or naming a never-grant command, renders
+`(ignored)`; one with no tool named, or a hand-applied label, lists
+`(none named)` — clearing it just removes the label. Every run re-lists
+straight off GitHub: no drain, no grant, nothing stored.

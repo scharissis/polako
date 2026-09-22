@@ -25,10 +25,11 @@ import (
 )
 
 type unparkOptions struct {
-	dir   string
-	repo  string
-	apply bool
-	yes   bool
+	dir          string
+	repo         string
+	apply        bool
+	yes          bool
+	branchPrefix string
 }
 
 // runUnpark is the `unpark` subcommand: parse its own flags, list the parked
@@ -46,6 +47,7 @@ func runUnpark(ctx context.Context, args []string, in io.Reader, isTTY bool, out
 		"remove needs-human from the issues you approve, asking [y/N] first — needs a terminal, or -yes")
 	fs.BoolVar(&opt.yes, "yes", false,
 		"with -apply, clear every listed issue without asking — required when stdin isn't a terminal")
+	fs.StringVar(&opt.branchPrefix, "branch-prefix", "issue-", "branch name prefix the skill uses")
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako unpark [flags] [issue]\n\n"+
 			"Lists every issue labelled needs-human, with the reason and any -add-tools\n"+
@@ -124,8 +126,9 @@ func unparkIssueArg(rest []string) (int, error) {
 // from -dir.
 func unparkConfig(ctx context.Context, opt unparkOptions) (config, error) {
 	cfg := config{
-		ghBin:       "gh",
-		ghRetryWait: ghRetryDelay,
+		ghBin:        "gh",
+		ghRetryWait:  ghRetryDelay,
+		branchPrefix: opt.branchPrefix,
 	}
 	if _, err := exec.LookPath(cfg.ghBin); err != nil {
 		return cfg, fmt.Errorf("%q not found on PATH (%w) — unpark reads and writes GitHub through it", cfg.ghBin, err)
@@ -168,6 +171,11 @@ type parkListItem struct {
 	entries  []string
 	ignored  []string
 	category string
+	// work is read separately from the rest of this struct — it needs
+	// gh calls readParkListItem doesn't make, and readParkListItems is
+	// shared with status.go's own needs-you line, which has no use for it.
+	// See readParkWork.
+	work parkWork
 }
 
 // unparkReasonWidth is where the table clips a reason. The fallback permission
@@ -210,6 +218,15 @@ func readParkedIssues(ctx context.Context, cfg config, only int) ([]parkListItem
 	items := make([]parkListItem, len(parked))
 	for i, issue := range parked {
 		items[i] = byIssue[issue]
+	}
+	if len(items) > 0 {
+		// Resolved once for the whole listing, not per issue — only the
+		// no-PR/compare path below needs it, and a failure here still lets
+		// every issue with an open PR render normally.
+		def, _ := unparkDefaultBranch(ctx, cfg)
+		for i := range items {
+			items[i].work = readParkWork(ctx, cfg, items[i].issue, def)
+		}
 	}
 	return items, nil
 }
@@ -390,15 +407,17 @@ func renderUnpark(w io.Writer, rpt report, cfg config, items []parkListItem, sin
 		if cfg.repo != "" {
 			fmt.Fprintf(w, "  %s  https://github.com/%s/issues/%d\n", rpt.dim("thread   "), cfg.repo, it.issue)
 		}
+		renderParkWorkDetail(w, rpt, it.work)
 		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("reason   "), it.reason)
 		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("add-tools"), renderParkEntries(it))
 		return
 	}
 	rows := make([][]string, len(items))
 	for i, it := range items {
-		rows[i] = []string{"#" + strconv.Itoa(it.issue), clip(it.reason, unparkReasonWidth), renderParkEntries(it)}
+		rows[i] = []string{"#" + strconv.Itoa(it.issue), parkWorkSummary(it.work),
+			clip(it.reason, unparkReasonWidth), renderParkEntries(it)}
 	}
-	printTable(w, rpt, "parked", []string{"issue", "reason", "add-tools"}, rows, 3)
+	printTable(w, rpt, "parked", []string{"issue", "work", "reason", "add-tools"}, rows, 4)
 }
 
 // printUnparkNextStep closes a listing that changed nothing with what to run
