@@ -205,7 +205,7 @@ func planDocArchived(dir, doc string) bool {
 	if !ok {
 		return false
 	}
-	_, err := os.Stat(filepath.Join(dir, "docs", "designs", "done", rest))
+	_, err := os.Stat(filepath.Join(dir, filepath.FromSlash(planDocsDir), "done", rest))
 	return err == nil
 }
 
