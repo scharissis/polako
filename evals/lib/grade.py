@@ -194,7 +194,15 @@ def content(ev):
     return (msg.get("content") or []) if isinstance(msg, dict) else []
 
 
-def timeline(events):
+def relative_to_ws(s, ws):
+    """Strip the workspace's absolute path out of `s`, wherever it appears —
+    a leading `file_path`, or a `command` that names the workspace mid-string
+    (`git -C <ws>/repo status`). A plain replace, not an anchored prefix
+    check, so both land relative."""
+    return s.replace(ws.rstrip(os.sep) + os.sep, "")
+
+
+def timeline(events, ws):
     """One line per tool call, with a head of its result — enough for the
     ordering and did-it-block criteria without shipping the whole transcript."""
     lines, results, tools = [], {}, set()
@@ -217,8 +225,10 @@ def timeline(events):
                 # once made a judge fail a review for being aimed at nothing.
                 skill = " ".join(filter(None, [inp.get("skill"),
                                                inp.get("args")]))
-                what = str(inp.get("file_path") or inp.get("command")
-                           or inp.get("prompt") or skill)[:120]
+                what = relative_to_ws(str(inp.get("file_path")
+                                          or inp.get("command")
+                                          or inp.get("prompt") or skill), ws)
+                what = what[-120:]
                 bg = " [background]" if inp.get("run_in_background") else ""
                 head = results.get(c.get("id"), "").replace("\n", " ")
                 lines.append(f"{n:3d} {c['name']}{bg}: {what}\n"
@@ -294,7 +304,7 @@ def build_evidence(ws, case):
                      f"status: {git(ws, sub, 'status', '--porcelain') or '(clean)'}\n"
                      f"branches: {git(ws, sub, 'branch', '-a')}\n"
                      + origin_state(ws, sub))
-    tl, tools = timeline(events)
+    tl, tools = timeline(events, ws)
     parts.append("## Tool timeline (call order, with result heads)\n"
                  + stream_note + "\n" + tl)
     parts.append("## Final message\n" + final_message(events))
