@@ -21,7 +21,11 @@ in the PR body rather than doing it quietly.
 - **One issue in flight at a time.** Every run branches from a default branch
   that already contains the previous merge — that's the no-conflict guarantee.
   Parking an issue and working a later one preserves it; running two at once
-  breaks it.
+  breaks it. The guarantee is per run, not per repo: an operator who starts a
+  second `work` with a disjoint `-label` is trading it, on purpose, for
+  priority or throughput, and pays at most a remediation run — so nothing in
+  the binary locks, refuses or waits on another run's PR. Keep the labels
+  disjoint; that is the one rule.
 - **All orchestration state lives in GitHub** — issues, comments, labels, PRs,
   branches. Nothing durable is read back: kill the process anywhere, rerun it
   later, and it re-derives state from GitHub alone. Anything wanting a local
