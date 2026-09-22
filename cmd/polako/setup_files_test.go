@@ -1,6 +1,6 @@
 package main
 
-// Issue #416's own tests: the .gitignore row is a pure
+// Issues #416 and #417's own tests: the .gitignore row is a pure
 // function over a directory, so it's tested directly; the write pass runs
 // real git against upstream()'s bare origin (the same fixture sync_test.go
 // uses) plus the fake gh — hermetic, no network, but a genuine push and pull
