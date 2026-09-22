@@ -416,15 +416,18 @@ const parkCommentPrefix = "**polako parked this issue.** "
 
 // parkCommentBody is the comment parkIssue posts — pulled out so unpark_test.go
 // can build the exact same shape a real park would have left, rather than a
-// second, driftable copy of the template.
-func parkCommentBody(issue int, reason string, entries []string) string {
+// second, driftable copy of the template. category always gets its own
+// `Park: <category>` line, after the `Refused:` one when entries names any.
+func parkCommentBody(issue int, reason string, entries []string, category string) string {
 	n := strconv.Itoa(issue)
 	body := fmt.Sprintf(parkCommentPrefix+"%s\n\n"+
 		"Nothing will run on it again until the `%s` label is removed — "+
 		"`gh issue edit %s --remove-label %s`.", reason, needsHumanLabel, n, needsHumanLabel)
-	if footer := parkFooter(entries); footer != "" {
-		body += "\n\n" + footer
+	footer := parkCategoryFooter(category)
+	if refused := parkFooter(entries); refused != "" {
+		footer = refused + "\n" + footer
 	}
+	body += "\n\n" + footer
 	return body
 }
 
@@ -435,8 +438,10 @@ func parkCommentBody(issue int, reason string, entries []string) string {
 // one says so out loud rather than failing quietly. entries, when non-empty,
 // is a permission park's own -add-tools entries — ticket 3 of
 // docs/plans/permission-parks.md (#432) — appended as a `Refused: ...`
-// footer parseParkFooter reads back.
-func parkIssue(ctx context.Context, cfg config, issue int, reason string, entries []string) {
+// footer parseParkFooter reads back. category is the park's own identifier
+// (metrics.go) — ticket 1 of docs/plans/unpark.md (#530) — appended as a
+// `Park: ...` footer parseParkCategory reads back.
+func parkIssue(ctx context.Context, cfg config, issue int, reason string, entries []string, category string) {
 	n := strconv.Itoa(issue)
 	_, err := gh(ctx, cfg, "issue", "edit", n, "--add-label", needsHumanLabel)
 	if err != nil {
@@ -459,7 +464,7 @@ func parkIssue(ctx context.Context, cfg config, issue int, reason string, entrie
 	// read it as a question of its own and sit waiting for a comment nobody
 	// owes it. Best-effort and silent: the issue is already parked either way.
 	_, _ = gh(ctx, cfg, "issue", "edit", n, "--remove-label", awaitingAnswerLabel)
-	body := parkCommentBody(issue, reason, entries)
+	body := parkCommentBody(issue, reason, entries, category)
 	if _, cerr := gh(ctx, cfg, "issue", "comment", n, "--body", body); cerr != nil {
 		cfg.narrate(sevWarning, "could not comment on issue #%d (%v) — the reason is in this log and in the exit summary",
 			issue, cerr)
@@ -481,7 +486,7 @@ func parkAndMoveOn(ctx context.Context, cfg config, issue int, st *issueState, r
 	// and the session is the whole transcript of it.
 	resumeHint(cfg, issue, st)
 	entries := parkEntriesOf(err)
-	parkIssue(ctx, cfg, issue, reason, entries)
+	parkIssue(ctx, cfg, issue, reason, entries, parkCategoryOf(err))
 	// After the park, not before: by now the label and the comment saying why
 	// are on the issue, so somebody following the notification finds the whole
 	// story there.

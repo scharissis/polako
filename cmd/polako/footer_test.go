@@ -2,6 +2,7 @@ package main
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -180,6 +181,12 @@ func TestParseParkFooter(t *testing.T) {
 			body: "The comment ends `Refused: <entry>` when polako can derive one.\n",
 			ok:   false,
 		},
+		{
+			name: "Refused still found with a Park: category line after it",
+			body: "**polako parked this issue.** ...\n\nRefused: Bash(echo:*)\nPark: permission_refused\n",
+			want: []string{"Bash(echo:*)"},
+			ok:   true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -190,6 +197,103 @@ func TestParseParkFooter(t *testing.T) {
 			}
 			if ok && !slices.Equal(got, tc.want) {
 				t.Errorf("parseParkFooter() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// parkCategoryFooter and parseParkCategory are two sides of the same
+// contract as parkFooter/parseParkFooter — ticket 1 of docs/plans/unpark.md
+// (#530): parkIssue writes the footer, unpark reads it back.
+func TestParkCategoryFooterRoundTrips(t *testing.T) {
+	t.Parallel()
+	for _, category := range parkReasonOrder {
+		category := category
+		t.Run(category, func(t *testing.T) {
+			t.Parallel()
+			got := parkCategoryFooter(category)
+			want := "Park: " + category
+			if got != want {
+				t.Errorf("parkCategoryFooter(%q) = %q, want %q", category, got, want)
+			}
+			body := "**polako parked this issue.** some reason.\n\n" + got
+			if gotCategory := parseParkCategory(body); gotCategory != category {
+				t.Errorf("parseParkCategory(%q) = %q, want %q", body, gotCategory, category)
+			}
+		})
+	}
+}
+
+func TestParseParkCategory(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "no footer", body: "**polako parked this issue.** the run completed without opening a PR.", want: ""},
+		{name: "empty body", body: "", want: ""},
+		{name: "known category", body: "**polako parked this issue.** ...\n\nPark: budget\n", want: "budget"},
+		{name: "unknown round-trips as itself", body: "Park: unknown\n", want: "unknown"},
+		{
+			name: "forged category not in parkReasonOrder parses as none",
+			body: "**polako parked this issue.** ...\n\nPark: opus\n",
+			want: "",
+		},
+		{
+			name: "after a Refused: entries line",
+			body: "**polako parked this issue.** ...\n\nRefused: Bash(echo:*)\nPark: permission_refused\n",
+			want: "permission_refused",
+		},
+		{
+			name: "quoted earlier footer then the real one",
+			body: "> Park: budget\n\nThis supersedes it.\n\nPark: auth\n",
+			want: "auth",
+		},
+		{
+			name: "prose mention mid-sentence does not parse",
+			body: "The comment ends `Park: <category>` when polako can classify it.\n",
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := parseParkCategory(tc.body); got != tc.want {
+				t.Errorf("parseParkCategory(%q) = %q, want %q", tc.body, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestParkCommentBodyCategoryFooter pins parkCommentBody's placement of the
+// Park: line — on its own for a budget park (no -add-tools entries), after
+// Refused: for a permission park.
+func TestParkCommentBodyCategoryFooter(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		entries  []string
+		category string
+		want     string
+	}{
+		{name: "budget park, no entries", entries: nil, category: parkBudget, want: "Park: budget"},
+		{
+			name:     "permission park, entries after Refused:",
+			entries:  []string{"Bash(echo:*)"},
+			category: parkPermission,
+			want:     "Refused: Bash(echo:*)\nPark: permission_refused",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			body := parkCommentBody(16, "some reason", tc.entries, tc.category)
+			if !strings.HasSuffix(body, tc.want) {
+				t.Errorf("parkCommentBody(...) = %q, want suffix %q", body, tc.want)
+			}
+			if gotCategory := parseParkCategory(body); gotCategory != tc.category {
+				t.Errorf("parseParkCategory(parkCommentBody(...)) = %q, want %q", gotCategory, tc.category)
 			}
 		})
 	}

@@ -160,11 +160,14 @@ func unparkConfig(ctx context.Context, opt unparkOptions) (config, error) {
 // reason flattened to one line — the table clips it, the one-issue view
 // doesn't — its entries split into ones a rerun could actually use and ones
 // ignored because they don't match anything parkIssue itself ever writes.
+// category is the park's own identifier (metrics.go), "" when the comment
+// carries none parseParkCategory recognizes.
 type parkListItem struct {
-	issue   int
-	reason  string
-	entries []string
-	ignored []string
+	issue    int
+	reason   string
+	entries  []string
+	ignored  []string
+	category string
 }
 
 // unparkReasonWidth is where the table clips a reason. The fallback permission
@@ -267,6 +270,7 @@ func readParkListItem(ctx context.Context, cfg config, issue int, viewer string)
 			continue
 		}
 		item.reason = strings.Join(strings.Fields(parkCommentReason(c.Body)), " ")
+		item.category = parseParkCategory(c.Body)
 		if entries, ok := parseParkFooter(c.Body); ok {
 			for _, e := range entries {
 				if validParkEntry(e) {

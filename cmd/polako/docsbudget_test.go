@@ -75,9 +75,14 @@ const docsBudget = 500
 // included) the way every other verb's does — there was no existing
 // paragraph to cut in its place, the way a one-row addition can trim its
 // way in instead.
+//
+// behaviour.md's ceiling moved again in issue #530, ticket 1 of
+// docs/plans/unpark.md: it was already at 530 with no slack, and naming the
+// new `Park: <category>` footer every park comment now carries needed one
+// more line than the existing sentence had room for.
 var docsDebt = map[string]int{
 	"reference.md": 548,
-	"behaviour.md": 530,
+	"behaviour.md": 531,
 }
 
 func TestDocsStayWithinLineBudget(t *testing.T) {

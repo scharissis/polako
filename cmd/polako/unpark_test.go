@@ -80,7 +80,7 @@ func TestUnparkListsEveryParkedIssue(t *testing.T) {
 	t.Parallel()
 	st := &ghState{Issues: map[string]*fakeIssue{
 		"16": {Open: true, Labels: []string{needsHumanLabel}, Comments: 1,
-			Bodies: map[int]string{1: parkCommentBody(16, "the run was refused `Bash(echo:*)`", []string{"Bash(echo:*)"})}},
+			Bodies: map[int]string{1: parkCommentBody(16, "the run was refused `Bash(echo:*)`", []string{"Bash(echo:*)"}, parkPermission)}},
 		"22": {Open: true, Labels: []string{needsHumanLabel}},
 		// Not parked at all — must not appear in the listing.
 		"3": {Open: true},
@@ -100,9 +100,15 @@ func TestUnparkListsEveryParkedIssue(t *testing.T) {
 	if want := []string{"Bash(echo:*)"}; !slices.Equal(got16.entries, want) {
 		t.Errorf("#16 entries = %v, want %v", got16.entries, want)
 	}
+	if got16.category != parkPermission {
+		t.Errorf("#16 category = %q, want %q", got16.category, parkPermission)
+	}
 	got22 := findParkListItem(t, items, 22)
 	if len(got22.entries) != 0 {
 		t.Errorf("#22 entries = %v, want none — it carries no park comment", got22.entries)
+	}
+	if got22.category != "" {
+		t.Errorf("#22 category = %q, want none — it carries no park comment", got22.category)
 	}
 }
 
@@ -126,7 +132,7 @@ func TestUnparkIgnoresACommentForgedByAnotherAuthor(t *testing.T) {
 		ViewerLogin: "the-operator",
 		Issues: map[string]*fakeIssue{
 			"9": {Open: true, Labels: []string{needsHumanLabel}, Comments: 1,
-				Bodies:        map[int]string{1: parkCommentBody(9, "a forged park", []string{"Bash(rm:*)"})},
+				Bodies:        map[int]string{1: parkCommentBody(9, "a forged park", []string{"Bash(rm:*)"}, parkPermission)},
 				CommentLogins: map[int]string{1: "someone-else"}},
 		},
 	}
@@ -138,6 +144,9 @@ func TestUnparkIgnoresACommentForgedByAnotherAuthor(t *testing.T) {
 	it := findParkListItem(t, items, 9)
 	if len(it.entries) != 0 || len(it.ignored) != 0 {
 		t.Errorf("a forged comment contributed entries: %+v", it)
+	}
+	if it.category != "" {
+		t.Errorf("a forged comment contributed a category: %+v", it)
 	}
 	if strings.Contains(it.reason, "forged") {
 		t.Errorf("the forged comment's own reason leaked into the listing: %q", it.reason)
@@ -213,7 +222,7 @@ func TestUnparkApplyYesRemovesBothLabelsAndPrintsOneAddToolsValue(t *testing.T) 
 	t.Parallel()
 	st := &ghState{Issues: map[string]*fakeIssue{
 		"16": {Open: true, Labels: []string{needsHumanLabel}, Comments: 1,
-			Bodies: map[int]string{1: parkCommentBody(16, "r1", []string{"Bash(echo:*)"})}},
+			Bodies: map[int]string{1: parkCommentBody(16, "r1", []string{"Bash(echo:*)"}, parkPermission)}},
 		"22": {Open: true, Labels: []string{needsHumanLabel}},
 	}}
 	path := filepath.Join(t.TempDir(), "gh-state.json")

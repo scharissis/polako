@@ -228,7 +228,7 @@ func TestStatusNamesTheGrantAParkedIssueIsWaitingOn(t *testing.T) {
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			"16": {Open: true, Labels: []string{needsHumanLabel}, Comments: 1,
-				Bodies: map[int]string{1: parkCommentBody(16, "the run was refused `Bash(echo:*)`", []string{"Bash(echo:*)"})}},
+				Bodies: map[int]string{1: parkCommentBody(16, "the run was refused `Bash(echo:*)`", []string{"Bash(echo:*)"}, parkPermission)}},
 			"22": {Open: true, Labels: []string{needsHumanLabel}},
 		},
 	})
