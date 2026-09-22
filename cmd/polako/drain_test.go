@@ -6017,6 +6017,8 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 	}
 }
 
+// --- picking which issue to work next ---
+
 func TestPickLowestHonoursSkip(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
