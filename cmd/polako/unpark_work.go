@@ -138,8 +138,14 @@ func (w parkWork) pr() *pullRequest {
 // processIssue's own restart-safety call (waitsOnPR, issue.go) on the same
 // PR this row already read — never a second copy of that rule. With no PR,
 // it falls back to what the branch itself shows: commits already on origin
-// to resume, or nothing pushed at all, meaning a fresh run.
+// to resume, or nothing pushed at all, meaning a fresh run. A row that
+// couldn't be read at all (w.read false) says so, the same as
+// parkWorkSummary and renderParkWorkDetail — a failed GitHub read is unknown
+// state, not evidence nothing was pushed.
 func nextShiftLine(w parkWork) string {
+	if !w.read {
+		return "not read"
+	}
 	if pr := w.pr(); waitsOnPR(pr) {
 		line := fmt.Sprintf("waits on PR #%d", pr.Number)
 		if pr.State == "OPEN" && w.checks == checksFailing {

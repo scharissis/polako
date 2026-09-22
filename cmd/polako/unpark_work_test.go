@@ -135,14 +135,15 @@ func TestNextShiftLine(t *testing.T) {
 		work parkWork
 		want string
 	}{
-		{"open PR, red CI", parkWork{prNumber: 84, prState: "OPEN", checks: checksFailing},
+		{"open PR, red CI", parkWork{read: true, prNumber: 84, prState: "OPEN", checks: checksFailing},
 			"waits on PR #84 and remediates its red CI"},
-		{"open PR, green", parkWork{prNumber: 84, prState: "OPEN", checks: checksPassing},
+		{"open PR, green", parkWork{read: true, prNumber: 84, prState: "OPEN", checks: checksPassing},
 			"waits on PR #84"},
-		{"closed PR", parkWork{prNumber: 90, prState: "CLOSED"}, "waits on PR #90"},
-		{"pushed branch, no PR", parkWork{branch: "issue-22", onOrigin: true, ahead: 4},
+		{"closed PR", parkWork{read: true, prNumber: 90, prState: "CLOSED"}, "waits on PR #90"},
+		{"pushed branch, no PR", parkWork{read: true, branch: "issue-22", onOrigin: true, ahead: 4},
 			"resumes issue-22 from its 4 commits"},
-		{"nothing pushed", parkWork{branch: "issue-30"}, "starts over — nothing was pushed"},
+		{"nothing pushed", parkWork{read: true, branch: "issue-30"}, "starts over — nothing was pushed"},
+		{"not read", parkWork{read: false, branch: "issue-40"}, "not read"},
 	} {
 		if got := nextShiftLine(tc.work); got != tc.want {
 			t.Errorf("%s: nextShiftLine = %q, want %q", tc.name, got, tc.want)
