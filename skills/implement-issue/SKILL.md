@@ -881,7 +881,11 @@ don't post again, and stop.
          does alter what a command prints, that step got skipped — go run
          the command by hand against `<worktree>` now, Write its output to
          that path, and quote it here rather than writing this section
-         first. Otherwise: a fenced block of the real output (before/after
+         first. If step 2's review found something that changed this same
+         command's output after step 1 captured it, that capture is stale:
+         re-run the command now and overwrite the file before quoting it —
+         never quote a transcript older than the branch's current HEAD.
+         Otherwise: a fenced block of the real output (before/after
          when you can still reproduce both, after alone otherwise), a link
          to an image already committed on the branch, or an image pushed to
          the evidence ref (see "Evidence ref" above) and embedded by its
