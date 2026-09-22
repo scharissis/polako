@@ -209,7 +209,7 @@ func resolveSetupFileRow(name string, proposed bool, url string) setupRow {
 	return setupRow{name: name, status: setupMissing, detail: "proposed: " + url}
 }
 
-// proposeSetupFiles does the write pass ticket 4 draws: fetch, resolve
+// proposeSetupFiles does the write pass issue #416 draws: fetch, resolve
 // origin's default branch, and `worktree add` all run in the main checkout
 // (cfg); everything past that — writing the files, `add`, `commit`, `push` —
 // runs in the worktree, through a copy of cfg pointed at its path. Each
