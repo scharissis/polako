@@ -4349,6 +4349,34 @@ func TestDrainFilesNoRetireIssueWhileAnotherOpenIssueNamesTheDoc(t *testing.T) {
 	}
 }
 
+// issue #554: a container closing with a pre-rename docs/plans/<x>.md footer
+// must resolve that alias before searching for other open issues naming the
+// same document — otherwise a still-open, still-unapproved proposal filed
+// after the rename (docs/designs/<x>.md) goes unseen and a spurious retire
+// issue gets filed for a document that is not actually orphaned.
+func TestDrainFilesNoRetireIssueWhenAnotherOpenIssueNamesTheDocByItsPreRenamePath(t *testing.T) {
+	t.Parallel()
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/plans/foo.md")},
+			"50":  {Open: true, Labels: []string{proposedLabel}, Body: planFooterLine("docs/designs/foo.md")},
+		},
+		Labels: []string{proposedLabel},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if st.Issues["113"].Open {
+		t.Error("the finished container should still have closed")
+	}
+	if len(st.Issues) != 2 {
+		t.Errorf("issues = %v, want no retire issue filed for a document still named by #50", st.Issues)
+	}
+}
+
 // A container whose body carries no plan footer at all — a hand-made epic,
 // most likely — is invisible to the derivation: nothing names a document, so
 // nothing can say one is done.

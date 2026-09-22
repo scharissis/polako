@@ -57,6 +57,11 @@ func retireOrphanedDoc(ctx context.Context, cfg config, c containerInfo, filedTh
 	if !ok {
 		return retiredDoc{}, false, nil
 	}
+	// A container closed long after it was filed can still carry a
+	// docs/plans/<x>.md footer from before issue #554's rename — canonicalize
+	// it the same way readPlanDocs (plans.go) does, so this step's own search
+	// and its retire issue both name today's docs/designs/<x>.md.
+	footer.doc = canonicalPlanDocPath(footer.doc)
 	if filedThisCall[footer.doc] {
 		return retiredDoc{}, false, nil
 	}
@@ -147,7 +152,11 @@ func anyOtherOpenIssueNamesDoc(ctx context.Context, cfg config, doc string) (boo
 		if !strings.EqualFold(is.State, "open") {
 			continue
 		}
-		if footer, ok := parsePlanFooter(is.Body); ok && footer.doc == doc {
+		// doc is already canonical (retireOrphanedDoc resolves it before
+		// calling in); a candidate issue may still carry a pre-#554
+		// docs/plans/<x>.md footer, so it gets the same resolution before
+		// the comparison.
+		if footer, ok := parsePlanFooter(is.Body); ok && canonicalPlanDocPath(footer.doc) == doc {
 			return true, nil
 		}
 	}
