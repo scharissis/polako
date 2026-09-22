@@ -186,7 +186,13 @@ doubt.
 
 When it does qualify:
 
-1. Write a comment naming the PR or commit you verified against to
+1. Check Phase 0's own read of the issue's comments first: if one of them,
+   posted by this account, already names the same PR or commit you just
+   verified against, a previous attempt already posted it — skip straight to
+   `gh issue close $issue` below rather than posting a second copy, since
+   posting and closing are now two commands and a run that died between them
+   has already left the comment behind. Otherwise, write a comment naming the
+   PR or commit you verified against to
    `<worktree>/.polako-scratch/CLOSE_COMMENT.md` (Write tool, absolute
    path). Post it, then close, then remove the file, in that order:
 
