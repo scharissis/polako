@@ -365,6 +365,10 @@ func applyUnpark(ctx context.Context, prompt *setupPrompt, autoApprove bool, out
 			fmt.Fprintf(out, "  could not remove %s from #%d: %v\n", needsHumanLabel, it.issue, err)
 			continue
 		}
+		fmt.Fprintf(out, "  #%d next shift: %s\n", it.issue, nextShiftLine(it.work))
+		if warn := staleRedCIWarning(it.category, it.work); warn != "" {
+			fmt.Fprintf(out, "  #%d warning: %s\n", it.issue, warn)
+		}
 		for _, e := range it.entries {
 			if !seen[e] {
 				seen[e] = true
@@ -410,6 +414,10 @@ func renderUnpark(w io.Writer, rpt report, cfg config, items []parkListItem, sin
 		renderParkWorkDetail(w, rpt, it.work)
 		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("reason   "), it.reason)
 		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("add-tools"), renderParkEntries(it))
+		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("next shift"), nextShiftLine(it.work))
+		if warn := staleRedCIWarning(it.category, it.work); warn != "" {
+			fmt.Fprintf(w, "  %s  %s\n", rpt.dim("warning"), warn)
+		}
 		return
 	}
 	rows := make([][]string, len(items))

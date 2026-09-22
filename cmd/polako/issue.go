@@ -235,6 +235,16 @@ func (a *runAttempt) record(prNumber int, outcome string) {
 	a.tally.add(a.cfg.rec.recordRun(a.cfg, a.rc, a.rep))
 }
 
+// waitsOnPR reports whether an issue's branch already has a PR — restart
+// safety (CLAUDE.md): once one exists, the skill is never re-run for this
+// issue, whatever the PR's own state; the loop goes straight to waiting on
+// it instead. unpark's own next-shift line (unpark_work.go) makes this exact
+// call too, off a PR it read the same way, so a test holds the two to one
+// function rather than two copies that can drift.
+func waitsOnPR(pr *pullRequest) bool {
+	return pr != nil
+}
+
 // processIssue advances one issue as far as it will go: to merged, to a park,
 // or — the one way back out that is neither — to a question a human owes an
 // answer to, returned as a *deferredError for the caller to put down.
@@ -287,13 +297,11 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 	}
 
 	for {
-		// Restart safety: if a PR already exists for this branch, never
-		// re-run Claude — go straight to waiting on it.
 		pr, err := prForBranch(ctx, cfg, r.branch)
 		if err != nil {
 			return err
 		}
-		if pr == nil {
+		if !waitsOnPR(pr) {
 			// dispatchRun's return shapes are the loop's verdict: (nil, err)
 			// is a terminal exit with that error, (nil, nil) means go round
 			// again, and (pr, nil) means a PR is open now and superviseToClose
