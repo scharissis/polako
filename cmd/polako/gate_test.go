@@ -521,6 +521,8 @@ func TestReleaseVersionRejectsAPseudoVersion(t *testing.T) {
 	}
 }
 
+// --- CLI capability gating (-effort) ---
+
 // effortFlagGate fails the run before it starts when -effort is set and the
 // installed CLI has no --effort — otherwise the usage error lands an hour in,
 // looks like a crash, and burns every resume. The message names the CLI
