@@ -70,7 +70,7 @@ func TestUnparkOneIssueViewPrintsBudgetNextStep(t *testing.T) {
 		},
 	}
 	cfg := unparkCfg(t, st)
-	items, err := readParkedIssues(context.Background(), cfg, 413)
+	items, err := readParkedIssues(context.Background(), cfg, 413, false)
 	if err != nil {
 		t.Fatalf("readParkedIssues: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestUnparkPermissionWithEntriesPointsAtAddTools(t *testing.T) {
 		},
 	}
 	cfg := unparkCfg(t, st)
-	items, err := readParkedIssues(context.Background(), cfg, 16)
+	items, err := readParkedIssues(context.Background(), cfg, 16, false)
 	if err != nil {
 		t.Fatalf("readParkedIssues: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestUnparkPermissionWithOnlyIgnoredEntry(t *testing.T) {
 		},
 	}
 	cfg := unparkCfg(t, st)
-	items, err := readParkedIssues(context.Background(), cfg, 16)
+	items, err := readParkedIssues(context.Background(), cfg, 16, false)
 	if err != nil {
 		t.Fatalf("readParkedIssues: %v", err)
 	}

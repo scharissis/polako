@@ -34,7 +34,7 @@ func TestUnparkReadsEachParkedIssuesWork(t *testing.T) {
 		CompareAhead: map[string]int{"issue-22": 4},
 	}
 	cfg := unparkCfg(t, st)
-	items, err := readParkedIssues(context.Background(), cfg, 0)
+	items, err := readParkedIssues(context.Background(), cfg, 0, false)
 	if err != nil {
 		t.Fatalf("readParkedIssues: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestUnparkWorkNotReadWhenPRChecksFail(t *testing.T) {
 		FailReads: map[string]int{"pr view": 10},
 	}
 	cfg := unparkCfg(t, st)
-	items, err := readParkedIssues(context.Background(), cfg, 0)
+	items, err := readParkedIssues(context.Background(), cfg, 0, false)
 	if err != nil {
 		t.Fatalf("readParkedIssues: %v", err)
 	}
@@ -125,27 +125,34 @@ func TestUnparkWorkNotReadWhenPRChecksFail(t *testing.T) {
 	}
 }
 
-// nextShiftLine's three shapes, off parkWork directly rather than a full gh
-// fixture — readParkWork's own read is TestUnparkReadsEachParkedIssuesWork's
-// job, this is the wording that comes out of what it read.
+// nextShiftLine's shapes, off parkWork (and, for the local-worktree case,
+// leftWork) directly rather than a full gh fixture — readParkWork's own read
+// is TestUnparkReadsEachParkedIssuesWork's job, this is the wording that
+// comes out of what it read. local is the zero value throughout except the
+// one case naming it: that's what every caller passes when -repo was given,
+// or -dir wasn't a checkout, and it must fall through to today's wording
+// exactly as before readParkedIssues could ever read local disk state.
 func TestNextShiftLine(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name string
-		work parkWork
-		want string
+		name  string
+		work  parkWork
+		local leftWork
+		want  string
 	}{
 		{"open PR, red CI", parkWork{read: true, prNumber: 84, prState: "OPEN", checks: checksFailing},
-			"waits on PR #84 and remediates its red CI"},
+			leftWork{}, "waits on PR #84 and remediates its red CI"},
 		{"open PR, green", parkWork{read: true, prNumber: 84, prState: "OPEN", checks: checksPassing},
-			"waits on PR #84"},
-		{"closed PR", parkWork{read: true, prNumber: 90, prState: "CLOSED"}, "waits on PR #90"},
+			leftWork{}, "waits on PR #84"},
+		{"closed PR", parkWork{read: true, prNumber: 90, prState: "CLOSED"}, leftWork{}, "waits on PR #90"},
 		{"pushed branch, no PR", parkWork{read: true, branch: "issue-22", onOrigin: true, ahead: 4},
-			"resumes issue-22 from its 4 commits"},
-		{"nothing pushed", parkWork{read: true, branch: "issue-30"}, "starts over — nothing was pushed"},
-		{"not read", parkWork{read: false, branch: "issue-40"}, "not read"},
+			leftWork{}, "resumes issue-22 from its 4 commits"},
+		{"nothing pushed", parkWork{read: true, branch: "issue-30"}, leftWork{}, "starts over — nothing was pushed"},
+		{"not read", parkWork{read: false, branch: "issue-40"}, leftWork{}, "not read"},
+		{"nothing pushed to origin, but local commits", parkWork{read: true, branch: "issue-50"},
+			leftWork{branch: "issue-50", commits: 2}, "resumes from the local worktree"},
 	} {
-		if got := nextShiftLine(tc.work); got != tc.want {
+		if got := nextShiftLine(tc.work, tc.local); got != tc.want {
 			t.Errorf("%s: nextShiftLine = %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -190,7 +197,7 @@ func TestUnparkPrintsNextShiftLine(t *testing.T) {
 		CompareAhead: map[string]int{"issue-22": 4},
 	}
 	cfg := unparkCfg(t, st)
-	items, err := readParkedIssues(context.Background(), cfg, 0)
+	items, err := readParkedIssues(context.Background(), cfg, 0, false)
 	if err != nil {
 		t.Fatalf("readParkedIssues: %v", err)
 	}
@@ -249,7 +256,7 @@ func TestUnparkWorkNotReadWhenDefaultBranchFails(t *testing.T) {
 		FailReads: map[string]int{"api repo": 10},
 	}
 	cfg := unparkCfg(t, st)
-	items, err := readParkedIssues(context.Background(), cfg, 0)
+	items, err := readParkedIssues(context.Background(), cfg, 0, false)
 	if err != nil {
 		t.Fatalf("readParkedIssues: %v", err)
 	}
