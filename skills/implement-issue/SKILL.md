@@ -510,11 +510,13 @@ don't post again, and stop.
    /commit`, `go -C <worktree> test/vet/build`, or the ecosystem's own
    equivalent — the same rule Phase 1 set: nothing here moves the session's
    cwd there for you.
-   If the change alters what a command prints — a new or changed flag, a
-   usage line, an error message — run that command yourself now, by hand,
-   against `<worktree>`, and capture the real output. This is the manual
-   check the PR body's `## Evidence` section below reuses; skip it when the
-   change touches nothing a human sees on a command line.
+   The test suite passing doesn't cover this next part, even when one of its
+   cases happens to exercise the same code path: if the change alters what a
+   command prints — a new or changed flag, a usage line, an error message —
+   separately run that exact command yourself now, by hand, against
+   `<worktree>`, and capture its real output verbatim. This is the manual
+   check the PR body's `## Evidence` section below reuses; skip it only when
+   the change touches nothing a human sees on a command line.
    If this run's own commits changed a shipped skill file
    (`skills/*/SKILL.md`) and the repo has an `evals/run.sh`, run the eval
    cases that change touches:
