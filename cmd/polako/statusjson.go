@@ -95,6 +95,13 @@ type statusDocContainer struct {
 	// finished. Without this a caller cannot tell a finished container that is
 	// about to be closed from one it must close itself.
 	Held bool `json:"held"`
+	// Closed is containerInfo.closed: the container issue itself is closed.
+	// Only plans.docs[].containers ever carries true — queue.containers is
+	// open issues alone. Without this a closed container and an open,
+	// finished one both read as finished:true, held:false, and a caller
+	// cannot tell "already closed" from "the next shift is about to close
+	// it".
+	Closed bool `json:"closed"`
 }
 
 // toStatusDocContainer is the one place containerInfo becomes a
@@ -104,6 +111,7 @@ type statusDocContainer struct {
 func toStatusDocContainer(c containerInfo) statusDocContainer {
 	return statusDocContainer{
 		Issue: c.number, Total: c.total, Completed: c.completed, Finished: c.finished(), Held: c.held,
+		Closed: c.closed,
 	}
 }
 

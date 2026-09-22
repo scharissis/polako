@@ -416,7 +416,7 @@ polako status -json | jq .
     "blocked": [{ "issue": 9, "quiet_seconds": 93600 }],
     "parked": [{ "issue": 5, "entries": ["Bash(echo:*)"], "category": "permission_refused" }],
     "proposed": [27, 28],
-    "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false, "held": false }]
+    "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false, "held": false, "closed": false }]
   },
   "next": {
     "issue": 14,
@@ -436,7 +436,7 @@ polako status -json | jq .
     "grant Bash(echo:*) or fix the skill, then polako unpark #5",
     "curate #27, #28 (drop proposed to queue them)"
   ], "notes": [],
-  "plans": { "docs": [{ "path": "docs/designs/backlog-fill.md", "state": "active", "open_children": 4, "containers": [{ "issue": 101, "total": 6, "completed": 2, "finished": false, "held": false }] }], "gone": [{ "path": "docs/designs/dropped.md", "issues": [88, 91], "open": 1 }], "truncated": false },
+  "plans": { "docs": [{ "path": "docs/designs/backlog-fill.md", "state": "active", "open_children": 4, "containers": [{ "issue": 101, "total": 6, "completed": 2, "finished": false, "held": false, "closed": false }] }, { "path": "docs/designs/epic.md", "state": "done", "open_children": 0, "containers": [{ "issue": 202, "total": 3, "completed": 3, "finished": true, "held": false, "closed": true }] }], "gone": [{ "path": "docs/designs/dropped.md", "issues": [88, 91], "open": 1 }], "truncated": false },
   "plan": "plan: session 42%, week 52% (resets Sep 2, 6pm) — polako was 29% of the last 24h", "published": "0.24.0"
 }
 ```
@@ -453,10 +453,13 @@ plan documents table row for row; its `gone` is `{ "path", "issues", "open"
 report's own `gone` line, which only names the open ones; `open` is that count.
 
 `queue.containers`, and `plans.docs[].containers` the same way, is objects,
-not bare numbers — `{ "issue", "total", "completed", "finished", "held" }` —
-so a caller can tell a finished container from one in progress without a
-second call. For a finished one, `held: false` means the next shift is about
-to close it, `held: true` means it's the caller's. `queue.parked` is `{ "issue", "entries", "category" }` the same way — `polako unpark`'s own read; `category` is one of the fixed identifiers in `metrics.go`, or `""` for a hand-labelled park.
+not bare numbers — `{ "issue", "total", "completed", "finished", "held",
+"closed" }` — so a caller can tell a finished container from one in
+progress without a second call. For a finished, unclosed one, `held: false`
+means the next shift is about to close it, `held: true` means it's the
+caller's. `closed` is only ever true under `plans.docs[]` — `queue.containers`
+is open issues alone — and means exactly that: already closed, nothing left
+for anyone to do. `queue.parked` is `{ "issue", "entries", "category" }` the same way — `polako unpark`'s own read; `category` is one of the fixed identifiers in `metrics.go`, or `""` for a hand-labelled park.
 Every array field is always `[]`, never `null`; `quiet_seconds`, `plan` and
 `published` can be *absent* instead of a fake zero or empty string. Same
 rule as the text report: no issue, PR or comment text, only numbers,

@@ -1787,4 +1787,7 @@ func TestPlanDocsClosedContainerAndGoneCollapse(t *testing.T) {
 	if g := byPath["docs/designs/gone-with-open.md"]; !slices.Equal(g.Issues, []int{3}) || g.Open != 1 {
 		t.Errorf("gone-with-open.md JSON = %+v, want issues [3], open 1", g)
 	}
+	if len(doc.Plans.Docs) != 1 || len(doc.Plans.Docs[0].Containers) != 1 || !doc.Plans.Docs[0].Containers[0].Closed {
+		t.Errorf("epic.md JSON containers = %+v, want #1 marked closed", doc.Plans.Docs)
+	}
 }
