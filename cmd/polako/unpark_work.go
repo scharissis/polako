@@ -148,7 +148,10 @@ func nextShiftLine(w parkWork) string {
 	}
 	if pr := w.pr(); waitsOnPR(pr) {
 		line := fmt.Sprintf("waits on PR #%d", pr.Number)
-		if pr.State == "OPEN" && w.checks == checksFailing {
+		if w.checks == checksFailing {
+			// readParkWork only ever sets w.checks once it has confirmed the
+			// PR is OPEN (it returns early otherwise), so this already implies
+			// pr.State == "OPEN" without saying so again.
 			line += " and remediates its red CI"
 		}
 		return line
