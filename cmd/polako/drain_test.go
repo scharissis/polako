@@ -4175,7 +4175,7 @@ func planFooterLine(doc string) string {
 
 // A container whose body carries a plan footer, closing with no other open
 // issue naming that document, gets a retire issue filed for it — the
-// "Retire on close" step (docs/plans/plan-conventions.md). The retire
+// "Retire on close" step (docs/designs/plan-conventions.md). The retire
 // issue's own body carries the same footer, which is what a later close on
 // the same document finds (see the "already filed" case below).
 func TestDrainFilesARetireIssueWhenAContainerCloses(t *testing.T) {
@@ -4183,7 +4183,7 @@ func TestDrainFilesARetireIssueWhenAContainerCloses(t *testing.T) {
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
-			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/plans/foo.md")},
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/designs/foo.md")},
 		},
 		Labels: []string{proposedLabel},
 	})
@@ -4205,17 +4205,17 @@ func TestDrainFilesARetireIssueWhenAContainerCloses(t *testing.T) {
 	if !slices.Contains(retired.Labels, proposedLabel) {
 		t.Errorf("retire issue labels = %v, want it to carry %q", retired.Labels, proposedLabel)
 	}
-	if !strings.Contains(retired.Body, planFooterPrefix+"docs/plans/foo.md") {
+	if !strings.Contains(retired.Body, planFooterPrefix+"docs/designs/foo.md") {
 		t.Errorf("retire issue body = %q, want it to carry the same footer", retired.Body)
 	}
 	argv, err := os.ReadFile(calls)
 	if err != nil {
 		t.Fatalf("reading the gh call log: %v", err)
 	}
-	if !strings.Contains(string(argv), "docs: retire docs/plans/foo.md — every issue it proposed is closed") {
+	if !strings.Contains(string(argv), "docs: retire docs/designs/foo.md — every issue it proposed is closed") {
 		t.Errorf("no call carried the expected title\ngot:\n%s", argv)
 	}
-	want := "retire  #114: docs/plans/foo.md — every issue it proposed is closed"
+	want := "retire  #114: docs/designs/foo.md — every issue it proposed is closed"
 	if !strings.Contains(buf.String(), want) {
 		t.Errorf("summary is missing %q\ngot:\n%s", want, buf.String())
 	}
@@ -4229,11 +4229,11 @@ func TestDrainFilesNoSecondRetireIssueForTheSameDocument(t *testing.T) {
 	t.Parallel()
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
-			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/plans/foo.md")},
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/designs/foo.md")},
 			// The retire issue an earlier shift already filed for this same
 			// document — still open, nobody has approved the cleanup yet.
-			"50": {Open: true, Labels: []string{proposedLabel}, Body: "Every issue proposed from docs/plans/foo.md " +
-				"is closed. Retire the document.\n\n" + planFooterLine("docs/plans/foo.md")},
+			"50": {Open: true, Labels: []string{proposedLabel}, Body: "Every issue proposed from docs/designs/foo.md " +
+				"is closed. Retire the document.\n\n" + planFooterLine("docs/designs/foo.md")},
 		},
 		Labels: []string{proposedLabel},
 	})
@@ -4255,13 +4255,13 @@ func TestDrainFilesNoSecondRetireIssueForTheSameDocument(t *testing.T) {
 // must still file exactly one retire issue between them — closeFinishedContainers
 // closes both in the same call, and the second must not rely on a GitHub
 // search seeing the first container's create in time (its index lags a write
-// by seconds to a minute, per docs/plans/plan-conventions.md).
+// by seconds to a minute, per docs/designs/plan-conventions.md).
 func TestDrainFilesOnlyOneRetireIssueForTwoContainersClosingTogether(t *testing.T) {
 	t.Parallel()
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
-			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/plans/foo.md")},
-			"200": {Open: true, SubIssues: 3, SubIssuesCompleted: 3, Body: planFooterLine("docs/plans/foo.md")},
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/designs/foo.md")},
+			"200": {Open: true, SubIssues: 3, SubIssuesCompleted: 3, Body: planFooterLine("docs/designs/foo.md")},
 		},
 		Labels: []string{proposedLabel},
 	})
@@ -4295,13 +4295,13 @@ func TestRetireOrphanedDocSkipsADocumentAlreadyRetiredThisCall(t *testing.T) {
 	t.Parallel()
 	cfg, _ := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
-			"200": {Open: true, Body: planFooterLine("docs/plans/foo.md")},
+			"200": {Open: true, Body: planFooterLine("docs/designs/foo.md")},
 		},
 	})
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
 	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 
-	filedThisCall := map[string]bool{"docs/plans/foo.md": true}
+	filedThisCall := map[string]bool{"docs/designs/foo.md": true}
 	_, ok, err := retireOrphanedDoc(context.Background(), cfg,
 		containerInfo{number: 200, total: 3, completed: 3}, filedThisCall)
 	if err != nil {
@@ -4326,12 +4326,12 @@ func TestDrainFilesNoRetireIssueWhileAnotherOpenIssueNamesTheDoc(t *testing.T) {
 	t.Parallel()
 	cfg, path := drainConfig(t, "stream", &ghState{
 		Issues: map[string]*fakeIssue{
-			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/plans/foo.md")},
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/designs/foo.md")},
 			// Still open and unapproved — the plan this container tracked
 			// also proposed this one, and a human has not queued it yet.
 			// Labelled proposed so the drain leaves it alone rather than
 			// trying to work it, the same as any other unapproved proposal.
-			"50": {Open: true, Labels: []string{proposedLabel}, Body: planFooterLine("docs/plans/foo.md")},
+			"50": {Open: true, Labels: []string{proposedLabel}, Body: planFooterLine("docs/designs/foo.md")},
 		},
 		Labels: []string{proposedLabel},
 	})
@@ -4346,6 +4346,34 @@ func TestDrainFilesNoRetireIssueWhileAnotherOpenIssueNamesTheDoc(t *testing.T) {
 	}
 	if len(st.Issues) != 2 {
 		t.Errorf("issues = %v, want no third issue filed", st.Issues)
+	}
+}
+
+// issue #554: a container closing with a pre-rename docs/plans/<x>.md footer
+// must resolve that alias before searching for other open issues naming the
+// same document — otherwise a still-open, still-unapproved proposal filed
+// after the rename (docs/designs/<x>.md) goes unseen and a spurious retire
+// issue gets filed for a document that is not actually orphaned.
+func TestDrainFilesNoRetireIssueWhenAnotherOpenIssueNamesTheDocByItsPreRenamePath(t *testing.T) {
+	t.Parallel()
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/plans/foo.md")},
+			"50":  {Open: true, Labels: []string{proposedLabel}, Body: planFooterLine("docs/designs/foo.md")},
+		},
+		Labels: []string{proposedLabel},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if st.Issues["113"].Open {
+		t.Error("the finished container should still have closed")
+	}
+	if len(st.Issues) != 2 {
+		t.Errorf("issues = %v, want no retire issue filed for a document still named by #50", st.Issues)
 	}
 }
 

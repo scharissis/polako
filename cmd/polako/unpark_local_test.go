@@ -1,7 +1,7 @@
 package main
 
 // Tests for the local-work half of unpark (unpark_work.go's renderLocalWork,
-// and readParkedIssues' localWork param) — docs/plans/unpark.md ticket 5.
+// and readParkedIssues' localWork param) — docs/designs/unpark.md ticket 5.
 // Unlike the rest of unpark's tests, these need a real checkout: local,
 // unpushed work is exactly what a gh fixture can't represent, since GitHub
 // never sees it either.

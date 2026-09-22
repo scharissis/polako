@@ -320,7 +320,7 @@ func verbUsage(w io.Writer) {
 			"one issue at a time, with a human at every gate.\n\n"+
 			"Usage: polako <verb> [flags]\n\n"+
 			"  work    work the backlog: run the skill per issue, wait for each merge, unattended\n"+
-			"  plan    propose a backlog from a vision document, behind the `proposed` label, unattended\n"+
+			"  plan    propose a backlog from a design document, behind the `proposed` label, unattended\n"+
 			"  health  propose a backlog from the repository's own shape, behind the `proposed` label, unattended\n"+
 			"  status  print where the backlog stands, from GitHub (read-only)\n"+
 			"  stats   report on the run data already recorded (local, read-only)\n"+

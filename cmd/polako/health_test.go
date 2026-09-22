@@ -56,7 +56,7 @@ func TestVerbUsageListsHealth(t *testing.T) {
 }
 
 // healthConfig needs nothing but a sane -max-issues: unlike plan there is no
-// vision/brief pair to require.
+// design/brief pair to require.
 func TestHealthConfigRequiresAtLeastOneIssue(t *testing.T) {
 	t.Parallel()
 	if _, err := healthConfig(&healthOptions{maxIssues: 0}); err == nil {
@@ -287,8 +287,8 @@ func TestHealthRunRecordsAndNotifies(t *testing.T) {
 			t.Errorf("record[%q] = %v, want %v", key, rec[key], want)
 		}
 	}
-	if _, present := rec["vision"]; present {
-		t.Error("a health record carries a vision field, which only plan's has")
+	if _, present := rec["design"]; present {
+		t.Error("a health record carries a design field, which only plan's has")
 	}
 
 	got := told()

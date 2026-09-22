@@ -317,7 +317,7 @@ type issueRecord struct {
 	// Size is the issue body's Estimate: letter (S/M/L), on drain records where
 	// -effort-by-size or -model-by-size armed the pickup body read and the
 	// body carried a line. Absent otherwise — the per-size pricing
-	// docs/plans/backlog-fill.md deferred reads it, and no line means no
+	// docs/designs/backlog-fill.md deferred reads it, and no line means no
 	// size, not a zero.
 	Size string `json:"size,omitempty"`
 
@@ -519,11 +519,11 @@ type proposalFacts struct {
 
 // planFacts is what `polako plan` knows about a run that the event stream
 // cannot: on top of proposalFacts, what it was planning from and the batch
-// milestone. `vision` is the -vision path or the literal "(brief)": a path the
+// milestone. `design` is the -design path or the literal "(brief)": a path the
 // operator typed is fine, the brief's own text is not.
 type planFacts struct {
 	proposalFacts
-	vision    string
+	design    string
 	milestone string
 }
 
@@ -537,7 +537,7 @@ type planFacts struct {
 // or config field is added here once.
 //
 // It is split from proposalRunTail rather than being one embed because a plan
-// record slots vision and milestone between the two — health adds nothing
+// record slots design and milestone between the two — health adds nothing
 // there. Go inlines an embedded struct's fields into the JSON object at the
 // embed's position, so both records still marshal byte-for-byte identical to
 // their old flat form: that identity is the whole reason this is safe, and
@@ -593,13 +593,13 @@ type proposalRunTail struct {
 type planRecord struct {
 	proposalRunHead
 	// What the run planned from — plan's alone; health has no document.
-	Vision    string `json:"vision"`
+	Design    string `json:"design"`
 	Milestone string `json:"milestone"`
 	proposalRunTail
 }
 
 // healthRecord is one `polako health` run, written when it ends whatever its
-// status. planRecord's twin, minus Vision/Milestone.
+// status. planRecord's twin, minus Design/Milestone.
 type healthRecord struct {
 	proposalRunHead
 	proposalRunTail
@@ -671,13 +671,13 @@ func newPlanRecord(cfg config, rep runReport, pf planFacts) planRecord {
 	}, rep)
 	return planRecord{
 		proposalRunHead: proposalHead(base, "plan"),
-		Vision:          pf.vision,
+		Design:          pf.design,
 		Milestone:       pf.milestone,
 		proposalRunTail: proposalTail(base, pf.proposalFacts),
 	}
 }
 
-// healthFacts is planFacts' twin for `polako health`: no vision or milestone —
+// healthFacts is planFacts' twin for `polako health`: no design or milestone —
 // review-health plans from the repository itself, not a document, and attaches
 // no milestone — and, like planFacts omits the brief's text, this omits
 // -focus's: never document content, the standing recorder rule.

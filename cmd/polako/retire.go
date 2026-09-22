@@ -4,7 +4,7 @@ package main
 // once a container's own close has actually succeeded. If the container's
 // body carries a plan footer (footer.go) and no other open issue names the
 // same document, file one `proposed` issue asking a human to retire it — the
-// "Retire on close" step in docs/plans/plan-conventions.md.
+// "Retire on close" step in docs/designs/plan-conventions.md.
 //
 // Best-effort like the close's own comment: nothing here can turn a
 // container close into a drain failure. A read, a search or a create that
@@ -38,7 +38,7 @@ type retiredDoc struct {
 // same document can both be finished in the same pass, and the search alone
 // cannot be trusted to see the first container's create in time for the
 // second — GitHub's search index lags a write by seconds to a minute (the
-// same lag docs/plans/plan-conventions.md already accepts across shifts),
+// same lag docs/designs/plan-conventions.md already accepts across shifts),
 // which is far longer than the gap between two loop iterations in one call.
 // This local set closes that gap for free — it costs no extra call, since
 // closeFinishedContainers already holds the equivalent information in the
@@ -57,6 +57,11 @@ func retireOrphanedDoc(ctx context.Context, cfg config, c containerInfo, filedTh
 	if !ok {
 		return retiredDoc{}, false, nil
 	}
+	// A container closed long after it was filed can still carry a
+	// docs/plans/<x>.md footer from before issue #554's rename — canonicalize
+	// it the same way readPlanDocs (plans.go) does, so this step's own search
+	// and its retire issue both name today's docs/designs/<x>.md.
+	footer.doc = canonicalPlanDocPath(footer.doc)
 	if filedThisCall[footer.doc] {
 		return retiredDoc{}, false, nil
 	}
@@ -147,7 +152,11 @@ func anyOtherOpenIssueNamesDoc(ctx context.Context, cfg config, doc string) (boo
 		if !strings.EqualFold(is.State, "open") {
 			continue
 		}
-		if footer, ok := parsePlanFooter(is.Body); ok && footer.doc == doc {
+		// doc is already canonical (retireOrphanedDoc resolves it before
+		// calling in); a candidate issue may still carry a pre-#554
+		// docs/plans/<x>.md footer, so it gets the same resolution before
+		// the comparison.
+		if footer, ok := parsePlanFooter(is.Body); ok && canonicalPlanDocPath(footer.doc) == doc {
 			return true, nil
 		}
 	}
@@ -192,7 +201,7 @@ func issueNumberFromCreateOutput(raw []byte) (int, error) {
 }
 
 // retireIssueBody names the container that closed, the document, and the
-// rule from docs/plans/plan-conventions.md's "Retire on close" section — then
+// rule from docs/designs/plan-conventions.md's "Retire on close" section — then
 // ends with the same footer the document's own proposals carry, so a later
 // container closing for this document finds this issue in the search above
 // and files nothing.

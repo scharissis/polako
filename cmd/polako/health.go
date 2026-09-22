@@ -5,7 +5,7 @@ package main
 // other verb) and it measures that repo's own shape — file and function
 // sizes, duplicated helpers, abstractions nothing uses — and files what it
 // finds as `proposed` issues, the same curation gate and sizing contract
-// plan-backlog uses. Where plan-backlog needs a vision document to plan
+// plan-backlog uses. Where plan-backlog needs a design document to plan
 // from, review-health needs nothing but the repository in front of it — so
 // this verb differs from `plan` only in which skill it runs, what it passes
 // that skill, and that it attaches no milestone.
@@ -124,14 +124,14 @@ func healthRun(ctx context.Context, cfg config, opt healthOptions, _ io.Writer) 
 }
 
 // healthConfig is a thin call to intakeConfig: unlike planConfig there is no
-// vision/brief pair to validate first, since review-health takes only -dir
+// design/brief pair to validate first, since review-health takes only -dir
 // (already required by every verb) and an optional -focus.
 func healthConfig(opt *healthOptions) (config, error) {
 	return intakeConfig(opt)
 }
 
 // healthPreflight is a thin call to intakePreflight: unlike planPreflight there
-// is no vision-file check and no milestone half — review-health plans from the
+// is no design-file check and no milestone half — review-health plans from the
 // repository in front of it and attaches nothing.
 func healthPreflight(ctx context.Context, cfg *config, opt *healthOptions) (hierarchical bool, err error) {
 	return intakePreflight(ctx, cfg, opt, "health")

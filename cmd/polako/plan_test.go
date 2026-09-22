@@ -1,6 +1,6 @@
 package main
 
-// `polako plan` resolves a vision document, runs its preflight probes, then
+// `polako plan` resolves a design document, runs its preflight probes, then
 // either prints the invocation a run would make (-dry-run) or makes it: spawn
 // the skill, cap it at -max-issues, and normalise every issue it created to
 // carry exactly the `proposed` label. Every case here runs on the same fake
@@ -44,7 +44,7 @@ func planTestConfig(t *testing.T, st *ghState) (cfg config, statePath, checkout 
 	return cfg, statePath, checkout
 }
 
-func writeVision(t *testing.T, checkout, rel string) {
+func writeDesignFile(t *testing.T, checkout, rel string) {
 	t.Helper()
 	full := filepath.Join(checkout, filepath.FromSlash(rel))
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -66,19 +66,19 @@ func TestVerbUsageListsPlan(t *testing.T) {
 	}
 }
 
-// Exactly one of -vision / -brief, and never a does-the-file-exist heuristic on
-// -vision: a typo'd path has to fail loudly rather than become "no document".
+// Exactly one of -design / -brief, and never a does-the-file-exist heuristic on
+// -design: a typo'd path has to fail loudly rather than become "no document".
 func TestPlanConfigRequiresExactlyOneSource(t *testing.T) {
 	t.Parallel()
 	sane := intakeOptions{maxIssues: 10}
 	if _, err := planConfig(&planOptions{intakeOptions: sane}); err == nil {
-		t.Error("planConfig accepted neither -vision nor -brief")
+		t.Error("planConfig accepted neither -design nor -brief")
 	}
-	if _, err := planConfig(&planOptions{intakeOptions: sane, vision: "V.md", brief: "a horse app"}); err == nil {
-		t.Error("planConfig accepted both -vision and -brief")
+	if _, err := planConfig(&planOptions{intakeOptions: sane, design: "V.md", brief: "a horse app"}); err == nil {
+		t.Error("planConfig accepted both -design and -brief")
 	}
-	if _, err := planConfig(&planOptions{intakeOptions: sane, vision: "docs/V.md"}); err != nil {
-		t.Errorf("planConfig rejected -vision alone: %v", err)
+	if _, err := planConfig(&planOptions{intakeOptions: sane, design: "docs/V.md"}); err != nil {
+		t.Errorf("planConfig rejected -design alone: %v", err)
 	}
 	if _, err := planConfig(&planOptions{intakeOptions: sane, brief: "a dating app for horses"}); err != nil {
 		t.Errorf("planConfig rejected -brief alone: %v", err)
@@ -98,8 +98,8 @@ func TestPlanMilestoneTitle(t *testing.T) {
 		want string
 	}{
 		{planOptions{milestone: "Batch 3"}, "Batch 3"},
-		{planOptions{milestone: "off", vision: "docs/VISION.md"}, ""},
-		{planOptions{vision: "docs/roadmap-2026.md"}, "roadmap-2026"},
+		{planOptions{milestone: "off", design: "docs/VISION.md"}, ""},
+		{planOptions{design: "docs/roadmap-2026.md"}, "roadmap-2026"},
 		// Over the cap: cut at the last whole word inside it, then the
 		// trailing "and" — a dangling connective — is trimmed off too.
 		{planOptions{brief: "a dating app for horses, with barn matching and hay reviews"}, "a dating app for horses, with barn matching"},
@@ -125,10 +125,10 @@ func TestPlanPreflightProbesParentSupport(t *testing.T) {
 	t.Parallel()
 	newGh := func(st *ghState) (config, *planOptions, string) {
 		cfg, _, checkout := planTestConfig(t, st)
-		writeVision(t, checkout, "VISION.md")
+		writeDesignFile(t, checkout, "VISION.md")
 		return cfg, &planOptions{
 			intakeOptions: intakeOptions{maxIssues: 10, dryRun: true},
-			vision:        "VISION.md", milestone: "off",
+			design:        "VISION.md", milestone: "off",
 		}, checkout
 	}
 
@@ -154,10 +154,10 @@ func TestPlanPreflightFailsWithAdvice(t *testing.T) {
 	_, _, err := planPreflight(context.Background(), &cfg,
 		&planOptions{
 			intakeOptions: intakeOptions{maxIssues: 10, dryRun: true},
-			vision:        "docs/not-here.md", milestone: "off",
+			design:        "docs/not-here.md", milestone: "off",
 		})
 	if err == nil {
-		t.Fatal("planPreflight accepted a -vision path with no file behind it")
+		t.Fatal("planPreflight accepted a -design path with no file behind it")
 	}
 	for _, want := range []string{"not-here.md", "-brief"} {
 		if !strings.Contains(err.Error(), want) {
@@ -198,10 +198,10 @@ func TestEnsureMilestoneIsIdempotent(t *testing.T) {
 func TestPlanPreflightDeclaresTheGateForARealRun(t *testing.T) {
 	t.Parallel()
 	cfg, statePath, checkout := planTestConfig(t, &ghState{})
-	writeVision(t, checkout, "VISION.md")
+	writeDesignFile(t, checkout, "VISION.md")
 
 	if _, _, err := planPreflight(context.Background(), &cfg,
-		&planOptions{intakeOptions: intakeOptions{maxIssues: 10}, vision: "VISION.md"}); err != nil {
+		&planOptions{intakeOptions: intakeOptions{maxIssues: 10}, design: "VISION.md"}); err != nil {
 		t.Fatalf("planPreflight: %v", err)
 	}
 	st, err := readGhState(statePath)
@@ -216,11 +216,11 @@ func TestPlanPreflightDeclaresTheGateForARealRun(t *testing.T) {
 	}
 
 	offCfg, offState, offCheckout := planTestConfig(t, &ghState{})
-	writeVision(t, offCheckout, "VISION.md")
+	writeDesignFile(t, offCheckout, "VISION.md")
 	if _, _, err := planPreflight(context.Background(), &offCfg,
 		&planOptions{
 			intakeOptions: intakeOptions{maxIssues: 10},
-			vision:        "VISION.md", milestone: "off",
+			design:        "VISION.md", milestone: "off",
 		}); err != nil {
 		t.Fatalf("planPreflight -milestone off: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestPlanPreflightDeclaresTheGateForARealRun(t *testing.T) {
 func TestPlanDryRunWritesNothingAndPrintsTheInvocation(t *testing.T) {
 	t.Parallel()
 	cfg, statePath, checkout := planTestConfig(t, &ghState{})
-	writeVision(t, checkout, "docs/VISION.md")
+	writeDesignFile(t, checkout, "docs/VISION.md")
 	before, err := os.ReadFile(statePath)
 	if err != nil {
 		t.Fatal(err)
@@ -251,7 +251,7 @@ func TestPlanDryRunWritesNothingAndPrintsTheInvocation(t *testing.T) {
 
 	opt := planOptions{
 		intakeOptions: intakeOptions{focus: "the observability section", maxIssues: 7, dryRun: true},
-		vision:        "docs/VISION.md",
+		design:        "docs/VISION.md",
 	}
 	buf := captureLog(t)
 	milestone, hierarchical, err := planPreflight(context.Background(), &cfg, &opt)
@@ -328,7 +328,7 @@ func planRunConfig(t *testing.T, st *ghState, claudeMode string) (config, string
 	cfg, statePath, checkout := planTestConfig(t, st)
 	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
 	setFakeEnv(&cfg, fakeClaudeEnv, claudeMode)
-	writeVision(t, checkout, "VISION.md")
+	writeDesignFile(t, checkout, "VISION.md")
 	return cfg, statePath
 }
 
@@ -500,7 +500,7 @@ func TestPlanRunSpawnsTheSkillAndNormalisesWhatItCreated(t *testing.T) {
 	captureUI(t, &ui{terminal: &term, file: &buf})
 	cfg, statePath := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plan")
 
-	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10}, vision: "VISION.md"}
+	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10}, design: "VISION.md"}
 	cfg.maxIssues = opt.maxIssues
 	if err := planRun(context.Background(), cfg, opt, "VISION", io.Discard); err != nil {
 		t.Fatalf("planRun: %v", err)
@@ -557,7 +557,7 @@ func TestPlanRunRecordsAndNotifies(t *testing.T) {
 	cfg.tag = "terse"
 	told := notifyLog(t, &cfg)
 
-	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10}, vision: "VISION.md"}
+	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10}, design: "VISION.md"}
 	cfg.maxIssues = opt.maxIssues
 	if err := planRun(context.Background(), cfg, opt, "VISION", io.Discard); err != nil {
 		t.Fatalf("planRun: %v", err)
@@ -573,7 +573,7 @@ func TestPlanRunRecordsAndNotifies(t *testing.T) {
 	}
 	for key, want := range map[string]any{
 		"kind": "plan", "shift": "planshift", "repo": "example/repo",
-		"status": "ok", "tag": "terse", "vision": "VISION.md", "milestone": "VISION",
+		"status": "ok", "tag": "terse", "design": "VISION.md", "milestone": "VISION",
 		"issues_created": float64(3), "epics_created": float64(0),
 		"cap": float64(10), "labels_enforced": float64(2),
 	} {
@@ -609,7 +609,7 @@ func TestPlanRunWithNoProposalsRecordsButDoesNotNotify(t *testing.T) {
 	cfg.shiftID = "planshift"
 	told := notifyLog(t, &cfg)
 
-	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10}, vision: "VISION.md"}
+	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10}, design: "VISION.md"}
 	cfg.maxIssues = opt.maxIssues
 	if err := planRun(context.Background(), cfg, opt, "VISION", io.Discard); err != nil {
 		t.Fatalf("planRun: %v", err)
@@ -635,7 +635,7 @@ func TestPlanRunCapsIssueCreationAndStillNormalises(t *testing.T) {
 	buf := captureLog(t)
 	cfg, statePath := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plancap")
 
-	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 3}, vision: "VISION.md"}
+	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 3}, design: "VISION.md"}
 	cfg.maxIssues = opt.maxIssues
 	if err := planRun(context.Background(), cfg, opt, "", io.Discard); err != nil {
 		t.Fatalf("a cap hit is reported, not raised: %v", err)
@@ -681,7 +681,7 @@ func TestPlanRunInterruptReportsAsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { time.Sleep(100 * time.Millisecond); cancel() }()
 
-	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10}, vision: "VISION.md"}
+	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10}, design: "VISION.md"}
 	cfg.maxIssues = opt.maxIssues
 	err := planRun(ctx, cfg, opt, "VISION", io.Discard)
 	if !errors.Is(err, context.Canceled) {

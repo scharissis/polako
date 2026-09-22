@@ -8,7 +8,7 @@ package main
 //
 // Scope: every .md file directly under docs/ (os.ReadDir, not recursive —
 // same walk TestDocsDocumentEveryFlag uses) plus README.md at the repo root.
-// That non-recursive walk already excludes docs/plans/: those are plan
+// That non-recursive walk already excludes docs/designs/: those are plan
 // documents, not doc pages, and this test does not descend into them.
 // CLAUDE.md, CONTRIBUTING.md, SECURITY.md, CODE_OF_CONDUCT.md, CHANGELOG.md and
 // skill SKILL.md files are out of scope the same way — nothing here ever looks

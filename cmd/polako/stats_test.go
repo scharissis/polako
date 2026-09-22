@@ -584,7 +584,7 @@ func TestStatsSkipsAPlanRecordCleanly(t *testing.T) {
 	dir := t.TempDir()
 	body := `{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T09:10:00Z","repo":"r/r","issue":1,"reason":"implement","status":"ok","outcome":"opened_pr","pr":2,"cost_usd":1.5,"turns":9}
 {"v":1,"kind":"issue","ts":"2026-08-20T11:00:00Z","repo":"r/r","issue":1,"pr":2,"outcome":"merged"}
-{"v":1,"kind":"plan","ts":"2026-08-20T08:00:00Z","ended":"2026-08-20T08:07:00Z","repo":"r/r","status":"ok","turns":41,"tool_uses":28,"cost_usd":2.1,"vision":"docs/VISION.md","milestone":"VISION","issues_created":7,"epics_created":1,"cap":10,"labels_enforced":0}
+{"v":1,"kind":"plan","ts":"2026-08-20T08:00:00Z","ended":"2026-08-20T08:07:00Z","repo":"r/r","status":"ok","turns":41,"tool_uses":28,"cost_usd":2.1,"design":"docs/VISION.md","milestone":"VISION","issues_created":7,"epics_created":1,"cap":10,"labels_enforced":0}
 `
 	if err := os.WriteFile(filepath.Join(dir, "r--r.jsonl"), []byte(body), 0o600); err != nil {
 		t.Fatalf("writing fixture: %v", err)

@@ -31,7 +31,7 @@ dependencies.
 Seven verbs. Three start Claude runs:
 
 - **`work`** — works the backlog to zero, one issue at a time, never merging.
-- **`plan`** — turns a vision document into a curated backlog of proposals.
+- **`plan`** — turns a design document into a curated backlog of proposals.
 - **`health`** — reads the repository itself and files what looks off as
   proposals.
 
@@ -178,7 +178,7 @@ open prs on issue branches
 needs you: reply on #9; review and merge PR #61; decide what to do about #5 (drop needs-human to requeue); curate #27, #28 (drop proposed to queue them)
 ```
 
-On a repository with plans under `docs/plans/`, a `plan documents` table sits
+On a repository with plans under `docs/designs/`, a `plan documents` table sits
 above the `needs you:` line: one row per plan, and how far along its issues
 are. A shift ends the same way — merged, parked and why, dollars spent — see
 [docs/behaviour.md](docs/behaviour.md) for a worked example.

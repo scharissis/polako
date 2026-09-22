@@ -85,7 +85,7 @@ func sampleProposalFacts() proposalFacts {
 func samplePlanFacts() planFacts {
 	return planFacts{
 		proposalFacts: sampleProposalFacts(),
-		vision:        "docs/VISION.md",
+		design:        "docs/VISION.md",
 		milestone:     "VISION 2026-08",
 	}
 }
@@ -121,7 +121,7 @@ func TestPlanRecordIsSelfDescribing(t *testing.T) {
 		"tag":              "baseline",
 		"claude_version":   "2.1.34",
 		"plugin_version":   "0.3.0",
-		"vision":           "docs/VISION.md",
+		"design":           "docs/VISION.md",
 		"milestone":        "VISION 2026-08",
 		"issues_created":   float64(7),
 		"epics_created":    float64(1),
@@ -181,15 +181,14 @@ func TestPlanRecordFallsBackToObservedUsage(t *testing.T) {
 // embed position, so both records marshal to one flat object with the keys in
 // struct order — no nesting, no reordering. Golden strings captured from that
 // form; regenerate them only for a deliberate change to what these records
-// emit, never to make an accidental one pass. Last regenerated for issue #361,
-// which added requested_model and requested_effort to the shared head now that
-// plan and health take a real -model/-effort.
+// emit, never to make an accidental one pass. Last regenerated for issue #554,
+// which renamed the plan record's `vision` field to `design`.
 func TestPlanAndHealthRecordsMarshalUnchanged(t *testing.T) {
 	t.Parallel()
 	cfg := metricsConfig(t, metricsOff)
 	cfg.skill = "skill-x"
 
-	const wantPlan = `{"v":1,"kind":"plan","ts":"2026-08-24T10:15:00Z","ended":"2026-08-24T10:22:02Z","shift":"d1d2d3d4","repo":"scharissis/polako","status":"ok","exit_code":0,"turns":74,"tool_uses":63,"wall_ms":1141000,"api_ms":812000,"cost_usd":4.12,"usage_source":"result","tokens":{"in":2143,"out":48210,"cache_read":8123400,"cache_write":401200},"model_usage":{"claude-opus-5":{"in":2143,"out":47000,"cache_read":0,"cache_write":0,"cost_usd":4.01}},"model":"claude-opus-5","requested_model":"claude-opus-5","requested_effort":"","skill":"skill-x","permission_mode":"acceptEdits","tag":"baseline","tools_hash":"68b396fe","vision":"docs/VISION.md","milestone":"VISION 2026-08","issues_created":7,"epics_created":1,"cap":10,"labels_enforced":2,"polako_version":"","claude_version":"2.1.34","plugin_version":"0.3.0"}`
+	const wantPlan = `{"v":1,"kind":"plan","ts":"2026-08-24T10:15:00Z","ended":"2026-08-24T10:22:02Z","shift":"d1d2d3d4","repo":"scharissis/polako","status":"ok","exit_code":0,"turns":74,"tool_uses":63,"wall_ms":1141000,"api_ms":812000,"cost_usd":4.12,"usage_source":"result","tokens":{"in":2143,"out":48210,"cache_read":8123400,"cache_write":401200},"model_usage":{"claude-opus-5":{"in":2143,"out":47000,"cache_read":0,"cache_write":0,"cost_usd":4.01}},"model":"claude-opus-5","requested_model":"claude-opus-5","requested_effort":"","skill":"skill-x","permission_mode":"acceptEdits","tag":"baseline","tools_hash":"68b396fe","design":"docs/VISION.md","milestone":"VISION 2026-08","issues_created":7,"epics_created":1,"cap":10,"labels_enforced":2,"polako_version":"","claude_version":"2.1.34","plugin_version":"0.3.0"}`
 	const wantHealth = `{"v":1,"kind":"health","ts":"2026-08-24T10:15:00Z","ended":"2026-08-24T10:22:02Z","shift":"d1d2d3d4","repo":"scharissis/polako","status":"ok","exit_code":0,"turns":74,"tool_uses":63,"wall_ms":1141000,"api_ms":812000,"cost_usd":4.12,"usage_source":"result","tokens":{"in":2143,"out":48210,"cache_read":8123400,"cache_write":401200},"model_usage":{"claude-opus-5":{"in":2143,"out":47000,"cache_read":0,"cache_write":0,"cost_usd":4.01}},"model":"claude-opus-5","requested_model":"claude-opus-5","requested_effort":"","skill":"skill-x","permission_mode":"acceptEdits","tag":"baseline","tools_hash":"68b396fe","issues_created":7,"epics_created":1,"cap":10,"labels_enforced":2,"polako_version":"","claude_version":"2.1.34","plugin_version":"0.3.0"}`
 
 	plan, err := json.Marshal(newPlanRecord(cfg, sampleReport(), samplePlanFacts()))
@@ -210,7 +209,7 @@ func TestPlanAndHealthRecordsMarshalUnchanged(t *testing.T) {
 }
 
 // The health record carries the same shared base a plan record does, minus
-// vision/milestone, and none of the per-issue fields — the first coverage
+// design/milestone, and none of the per-issue fields — the first coverage
 // newHealthRecord has had.
 func TestHealthRecordIsSelfDescribing(t *testing.T) {
 	t.Parallel()
@@ -255,9 +254,9 @@ func TestHealthRecordIsSelfDescribing(t *testing.T) {
 	if models, ok := got["model_usage"].(map[string]any); !ok || len(models) != 1 {
 		t.Errorf("model_usage = %v, want the per-model split carried through", got["model_usage"])
 	}
-	// review-health plans from the repo, not a document: no vision, no
+	// review-health plans from the repo, not a document: no design, no
 	// milestone. And a health run works no issue, same as a plan run.
-	for _, forbidden := range []string{"vision", "milestone", "issue", "pr", "reason", "attempt", "session", "outcome", "poll_s"} {
+	for _, forbidden := range []string{"design", "milestone", "issue", "pr", "reason", "attempt", "session", "outcome", "poll_s"} {
 		if _, ok := got[forbidden]; ok {
 			t.Errorf("health record carries %q — it should not", forbidden)
 		}

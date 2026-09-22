@@ -143,7 +143,7 @@ func (w parkWork) pr() *pullRequest {
 // (w.read false) says so, the same as parkWorkSummary and
 // renderParkWorkDetail — a failed GitHub read is unknown state, not evidence
 // nothing was pushed. local is the zero value unless readParkedIssues was
-// asked to read it (docs/plans/unpark.md ticket 5) — a zero value never
+// asked to read it (docs/designs/unpark.md ticket 5) — a zero value never
 // satisfies salvageable(), so this falls through to today's wording exactly
 // as before wherever local work wasn't read.
 func nextShiftLine(w parkWork, local leftWork) string {
@@ -172,7 +172,7 @@ func nextShiftLine(w parkWork, local leftWork) string {
 // --- next step ---
 
 // parkNextStepTable maps each park category (metrics.go) to the one-sentence
-// next step docs/plans/unpark.md ticket 4 calls for — what a human should do
+// next step docs/designs/unpark.md ticket 4 calls for — what a human should do
 // about this park, replacing the generic "fix what it names" that only ever
 // made sense for a permission park with named entries. A category missing
 // here is a bug: TestParkNextStepCoversEveryCategory walks parkReasonOrder

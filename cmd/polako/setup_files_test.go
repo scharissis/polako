@@ -133,7 +133,7 @@ func TestProposeSetupFilesReportsAnItemADeadRunAlreadyPushed(t *testing.T) {
 
 // -yes takes each step's own default: yes for .gitignore and the CLAUDE.md
 // block, no for the scaffold — so a plain -yes run proposes the first two
-// and leaves docs/VISION.md and docs/plans/README.md alone.
+// and leaves docs/VISION.md and docs/designs/README.md alone.
 func TestApplySetupFilesProposesTheClaudeMdBlockButNotTheScaffoldUnderYes(t *testing.T) {
 	t.Parallel()
 	work, checkout := upstream(t)
@@ -192,7 +192,7 @@ func TestApplySetupFilesScaffoldWhenAcceptedExplicitly(t *testing.T) {
 
 	gitAt(t, work, "fetch", "origin", "polako-setup")
 	tree := gitAt(t, work, "ls-tree", "-r", "--name-only", "FETCH_HEAD")
-	for _, want := range []string{"docs/VISION.md", "docs/plans/README.md"} {
+	for _, want := range []string{"docs/VISION.md", "docs/designs/README.md"} {
 		if !strings.Contains(tree, want) {
 			t.Errorf("pushed tree = %q, missing %q", tree, want)
 		}
@@ -324,7 +324,7 @@ func TestApplySetupFilesNothingLeftToAddAfterAMerge(t *testing.T) {
 	if err := writeScaffold(work); err != nil {
 		t.Fatalf("writing the scaffold in work: %v", err)
 	}
-	gitAt(t, work, "add", ".gitignore", "CLAUDE.md", visionMdPath, plansReadmePath)
+	gitAt(t, work, "add", ".gitignore", "CLAUDE.md", visionMdPath, designsReadmePath)
 	gitAt(t, work, "commit", "-m", setupFilesCommitSubject)
 	gitAt(t, work, "push", "origin", "main")
 
