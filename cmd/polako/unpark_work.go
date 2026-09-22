@@ -162,6 +162,60 @@ func nextShiftLine(w parkWork) string {
 	return "starts over — nothing was pushed"
 }
 
+// --- next step ---
+
+// parkNextStepTable maps each park category (metrics.go) to the one-sentence
+// next step docs/plans/unpark.md ticket 4 calls for — what a human should do
+// about this park, replacing the generic "fix what it names" that only ever
+// made sense for a permission park with named entries. A category missing
+// here is a bug: TestParkNextStepCoversEveryCategory walks parkReasonOrder
+// and fails if any of them turns up without a sentence, so a new category
+// can't ship without one.
+var parkNextStepTable = map[string]string{
+	parkBudget:    "the work is on the branch — finish it by hand, or rerun with a higher -max-issue-time or -max-cost",
+	parkChecks:    "fix the failing check on the PR, then unpark",
+	parkConflicts: "resolve the conflict on the PR, then unpark",
+	parkReview:    "resolve the review on the PR, then unpark",
+	parkNothing:   "check the issue says what to change, then unpark to retry",
+	parkRetries:   "check claude runs at all on this machine, then unpark to retry",
+	parkPRClosed:  "reopen or delete the PR, then unpark",
+	parkPRState:   "reopen or delete the PR, then unpark",
+	parkNoSkill:   "read the thread — these end a shift, they rarely park",
+	parkAuth:      "read the thread — these end a shift, they rarely park",
+	parkUnknown:   "read the thread — these end a shift, they rarely park",
+}
+
+// parkNextStepNoEntries is parkPermission's sentence when its park comment
+// named no -add-tools entries — the fallback reason ran, or the ask was
+// prose (the #461/#472 shapes), so there is nothing to grant.
+const parkNextStepNoEntries = "the refused tool is in that shift's log; or the ask was prose — read the run's last comment"
+
+// parkNextStepUnlabeled is what an issue with no category at all gets: a
+// hand-applied label, or a comment readParkListItem could not parse as
+// polako's own. Shorter than the table's "these end a shift" framing, since
+// there is no run behind this one to point at.
+const parkNextStepUnlabeled = "read the thread"
+
+// parkNextStep is the sentence unpark prints for a parked issue: what a
+// human should do about it, in one short sentence. permission_refused is the
+// one category that reads its second argument — with named entries it
+// points at the rerun line unpark already prints; without any, there is
+// nothing to grant, so it falls back to parkNextStepNoEntries. No category —
+// a hand label, or an unparsed comment — falls back to
+// parkNextStepUnlabeled.
+func parkNextStep(category string, hasEntries bool) string {
+	if category == parkPermission {
+		if hasEntries {
+			return "grant them — the rerun line below"
+		}
+		return parkNextStepNoEntries
+	}
+	if s, ok := parkNextStepTable[category]; ok {
+		return s
+	}
+	return parkNextStepUnlabeled
+}
+
 // staleRedCIWarning flags a checks-remediation park (parkChecks) whose CI is
 // still failing right now: the branch hasn't moved since it parked, so
 // clearing needs-human without touching it sends the next shift straight
