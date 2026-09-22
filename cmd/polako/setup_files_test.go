@@ -43,7 +43,7 @@ func TestSetupGitignoreRowNamesMissingLines(t *testing.T) {
 	}
 }
 
-// The point of the whole ticket: -apply -yes on a repo missing the
+// The point of issue #416: -apply -yes on a repo missing the
 // .gitignore lines leaves one branch, one commit, one PR — and the push
 // really landed on origin, not just the local worktree.
 func TestApplySetupFilesProposesAPR(t *testing.T) {
