@@ -63,9 +63,10 @@ with it**, worktree admin records included.
 nothing, ran out of retries, had its PR closed unmerged, couldn't rebase
 away a conflict, stayed red on CI, or ran past a cap you set — see
 [Capping what a shift spends](run-data.md#capping-what-a-shift-spends) —
-gets *parked*: `needs-human` goes on, a comment explains why, and the drain
-moves on. The label takes it out of the queue; remove it to put the issue
-back. The process exits 0 and summarizes what merged, what parked, and why:
+gets *parked*: `needs-human` goes on, a comment explains why and ends with a
+`Park: <category>` line, and the drain moves on. The label takes it out of
+the queue; remove it to put the issue back. The process exits 0 and
+summarizes what merged, what parked, and why:
 
 ```
 summary: 3 issues merged, 1 issue parked, $18.40 spent, 6h12m of wall clock

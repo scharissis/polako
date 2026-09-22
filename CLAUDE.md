@@ -157,11 +157,13 @@ in the PR body rather than doing it quietly.
   the binary parses it (`parsePlanFooter`), `repo_test.go` asserts
   `plan-backlog/SKILL.md` still writes the wording the parser expects, and
   changing either side means changing both.
-- **The park footer is a contract too.** A permission park whose reason names
-  `-add-tools` entries ends its comment with `Refused: <entry>, <entry>` —
-  thread-safe entries only, written by `parkIssue` and read back by
-  `parseParkFooter` (`footer.go`), the same shape as the plan footer. A test
-  holds both sides to the same wording.
+- **The park footer is a contract too.** Every park comment ends with a
+  `Park: <category>` line — the same category identifier the terminal record
+  uses (`metrics.go`) — written by `parkIssue` and read back by
+  `parseParkCategory` (`footer.go`), the same shape as the plan footer. A
+  permission park whose reason names `-add-tools` entries adds a second line
+  before it, `Refused: <entry>, <entry>` — thread-safe entries only, read
+  back by `parseParkFooter`. A test holds both lines to the same wording.
 - **Nothing merges itself.** The supervisor may open, update and repair PRs,
   but never merge one or commit to the default branch. Merging is one of the
   two deliberate human touchpoints; answering questions on an issue thread is
