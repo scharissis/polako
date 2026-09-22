@@ -4006,7 +4006,7 @@ func TestAddToolsEntryThreadSafe(t *testing.T) {
 	}
 }
 
-// Issue #432: permissionParkAdvice's
+// Issue #432: permissionParkAdviceFrom's
 // four cases, over addToolsEntry's own already-tested classifications.
 func TestPermissionParkAdviceNamesTheFixOrSaysWhyNot(t *testing.T) {
 	t.Parallel()
@@ -4081,9 +4081,10 @@ func TestPermissionParkAdviceNamesTheFixOrSaysWhyNot(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			advice, ok := permissionParkAdvice(tt.refusals, defaultTools)
+			entries, ungrantable, never := permissionParkEntries(tt.refusals, defaultTools)
+			advice, ok := permissionParkAdviceFrom(entries, ungrantable, never)
 			if ok != tt.wantOK {
-				t.Fatalf("permissionParkAdvice() ok = %v, want %v (advice %q)", ok, tt.wantOK, advice)
+				t.Fatalf("permissionParkAdviceFrom() ok = %v, want %v (advice %q)", ok, tt.wantOK, advice)
 			}
 			for _, part := range tt.wantParts {
 				if !strings.Contains(advice, part) {
@@ -4094,17 +4095,17 @@ func TestPermissionParkAdviceNamesTheFixOrSaysWhyNot(t *testing.T) {
 	}
 }
 
-// permissionParkReasonFor falls back to the fixed pointer at the terminal
-// exactly when permissionParkAdvice has nothing to say, and otherwise uses
-// its advice verbatim.
+// permissionParkReasonAndEntries falls back to the fixed pointer at the
+// terminal exactly when permissionParkAdviceFrom has nothing to say, and
+// otherwise uses its advice verbatim.
 func TestPermissionParkReasonForFallsBackOnlyWhenAdviceHasNothing(t *testing.T) {
 	t.Parallel()
-	if got := permissionParkReasonFor(nil, defaultTools); got != permissionParkReason {
-		t.Errorf("permissionParkReasonFor(nil, ...) = %q, want the fixed fallback", got)
+	if got, _ := permissionParkReasonAndEntries(nil, defaultTools); got != permissionParkReason {
+		t.Errorf("permissionParkReasonAndEntries(nil, ...) = %q, want the fixed fallback", got)
 	}
 	refusals := []refusal{{tool: "Bash", command: "ssh -T git@github.com", kind: refusalPlain}}
-	if got := permissionParkReasonFor(refusals, defaultTools); got == permissionParkReason {
-		t.Errorf("permissionParkReasonFor(%+v, ...) should not fall back — an entry was derivable", refusals)
+	if got, _ := permissionParkReasonAndEntries(refusals, defaultTools); got == permissionParkReason {
+		t.Errorf("permissionParkReasonAndEntries(%+v, ...) should not fall back — an entry was derivable", refusals)
 	}
 }
 
@@ -4117,19 +4118,19 @@ func TestPermissionParkReasonWorkedAroundLeadsWithTheCountAndHedge(t *testing.T)
 		{tool: "Bash", command: "ssh -T git@github.com", kind: refusalPlain},
 		{tool: "Bash", command: "git fetch origin 2>&1; echo RC=$?", kind: refusalUngrantable},
 	}
-	got := permissionParkReasonWorkedAround(refusals, defaultTools)
+	got, _ := permissionParkReasonWorkedAroundAndEntries(refusals, defaultTools)
 	for _, want := range []string{
 		"the run opened no PR, and was refused 2 calls along the way",
 		"a wider grant may not be the blocker",
 		"but if it is: the run was refused `Bash(ssh:*)`",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("permissionParkReasonWorkedAround(...) = %q, missing %q", got, want)
+			t.Errorf("permissionParkReasonWorkedAroundAndEntries(...) = %q, missing %q", got, want)
 		}
 	}
-	if got := permissionParkReasonWorkedAround(nil, defaultTools); !strings.Contains(got, "0 calls") ||
+	if got, _ := permissionParkReasonWorkedAroundAndEntries(nil, defaultTools); !strings.Contains(got, "0 calls") ||
 		!strings.Contains(got, permissionParkReason) {
-		t.Errorf("permissionParkReasonWorkedAround(nil, ...) = %q, want the count and the fixed fallback", got)
+		t.Errorf("permissionParkReasonWorkedAroundAndEntries(nil, ...) = %q, want the count and the fixed fallback", got)
 	}
 }
 

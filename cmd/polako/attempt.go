@@ -343,7 +343,7 @@ func (a *runAttempt) afterCleanExit() (*pullRequest, error) {
 		// reason the crash arm files those causes that way — otherwise
 		// clearing needs-human after -add-tools just burns back into the same
 		// ceiling.
-		reason = permissionParkReasonFor(a.rep.refusals, allowlist)
+		reason, _ = permissionParkReasonAndEntries(a.rep.refusals, allowlist)
 		if bound == "" {
 			category = parkPermission
 		}
