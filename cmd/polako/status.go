@@ -107,11 +107,15 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 	// this asks by name (pluginName) rather than manufacturing a -skill value
 	// just to satisfy pluginVersion's own cfg.skill-driven lookup.
 	cfg.pluginVersion, _, _ = statusPluginVersion(ctx, cfg)
-	statusLabelNote(ctx, cfg)
+	var notes []string
+	if note := statusLabelNote(ctx, cfg); note != "" {
+		notes = append(notes, note)
+	}
 	snap, err := readStatus(ctx, cfg, now)
 	if err != nil {
 		return err
 	}
+	snap.notes = notes
 	if opt.json {
 		return renderStatusJSON(out, cfg, snap)
 	}
@@ -122,18 +126,23 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 // statusLabelNote calls out a -label the repository has never defined —
 // the same thing preflight refuses `work` for, downgraded to a note here
 // because status only ever reads: it says what a real run would refuse
-// (labelGate, via refuseOrNote forced "dry"), then carries on regardless.
-// Best-effort like the usage and plan-doc reads below: a lookup that fails
-// for a real reason says nothing rather than failing the whole snapshot.
-func statusLabelNote(ctx context.Context, cfg config) {
+// (labelGate), then carries on regardless. Returned rather than narrated —
+// status prints one report, on stdout, and this note belongs under its
+// header like every other one, not on stderr above it. Best-effort like the
+// usage and plan-doc reads below: a lookup that fails for a real reason
+// returns "" rather than failing the whole snapshot.
+func statusLabelNote(ctx context.Context, cfg config) string {
 	if cfg.label == "" {
-		return
+		return ""
 	}
 	exists, err := labelExists(ctx, cfg, cfg.label)
 	if err != nil {
-		return
+		return ""
 	}
-	_ = refuseOrNote(cfg, labelGate(cfg.label, exists), true)
+	if err := labelGate(cfg.label, exists); err != nil {
+		return fmt.Sprintf("note: a real run would refuse to start here — %v", err)
+	}
+	return ""
 }
 
 // statusConfig builds the config the shared GitHub readers take, and settles
@@ -157,6 +166,13 @@ func statusConfig(ctx context.Context, opt statusOptions) (config, error) {
 		// listing pays for an old gh once rather than once per call.
 		queue: new(queueMemo),
 	}
+	// status's own queuePairs already prints a `proposed` row, so
+	// sayProposals's "ignoring N proposed issue(s)" would be both redundant
+	// and misleading here — it reads as "won't show these" right above where
+	// the report shows them. readParkedIssues (unpark.go) marks the same memo
+	// the same way, for the same reason: this verb tells the proposed count
+	// its own way.
+	cfg.queue.saidProposed.Store(true)
 	return resolveRepoConfig(ctx, cfg, opt.dir, opt.repo, "status reads GitHub")
 }
 
@@ -227,6 +243,11 @@ type statusSnapshot struct {
 	// .category is a fixed identifier (metrics.go), not comment text, so
 	// reading it here doesn't.
 	parks map[int]parkListItem
+	// notes is everything status would otherwise have narrated to stderr —
+	// today just statusLabelNote's — printed on stdout under the header
+	// instead, so `polako status > file` carries the whole report and a
+	// terminal reads it in order rather than above the header it explains.
+	notes []string
 }
 
 // statusPR is one open PR on a branch the skill named, and what GitHub says
@@ -456,6 +477,9 @@ func renderStatus(w io.Writer, rpt report, cfg config, snap statusSnapshot) {
 	fmt.Fprintf(w, "%s\n", rpt.bold(fmt.Sprintf("%s%s", cfg.repo, statusScope(cfg))))
 	if line := updateAvailableLine(snap.selfVersion, cfg.pluginVersion, snap.published); line != "" {
 		fmt.Fprintf(w, "%s\n", line)
+	}
+	for _, note := range snap.notes {
+		fmt.Fprintf(w, "%s\n", note)
 	}
 	printPairs(w, rpt, "", queuePairs(snap))
 	printStatusPRs(w, rpt, snap)
