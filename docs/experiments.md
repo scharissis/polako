@@ -67,7 +67,7 @@ happened; if that is most of the batch, the comparison is not one.
 | `visual-evidence-on` | Evidence adds little to `$/merged` on a frontend repo and causes zero parks. | Default on against `-visual-evidence=false`, same repo. | *pending* — compare cost per merged PR and the park rate between the two tags. | *open* |
 | `evidence-preview` | Shots from `build` plus `preview` are steadier than shots from `dev`. | Skill wording: prefer `preview` when the script exists, against today's `dev`-only wording. | *pending* — compare the shot failure/retry rate between the two tags. | *open* |
 | `evidence-webserver` | Where the repo has Playwright, a scratch `webServer` config beats background-and-stop. | Skill wording for that rung, against today's background-and-stop lifecycle. | *pending* — compare the shot failure/retry rate and turns spent in the capture step between the two tags. | *open* |
-| `setup-claude-md` | In a repo with no CLAUDE.md, the block `polako setup -apply` proposes cuts median turns per `implement-issue` run and the permission-refused park rate. | The CLAUDE.md block merged vs not, same repo, consecutive batches. | *pending* — compare median turns per run and the permission-refused park rate between the two. | *open* |
+| `setup-claude-md` | In a repo with no CLAUDE.md, the block that `polako setup -apply` proposes cuts median turns per `implement-issue` run and the permission-refused park rate. | The CLAUDE.md block merged vs not, same repo, consecutive batches. | *pending* — compare median turns per run and the permission-refused park rate between the two. | *open* |
 
 The `remediation-sonnet` and `stall-30m` rows come from
 `docs/continuous-improvement.md`, pillar 4, which chose them because the
