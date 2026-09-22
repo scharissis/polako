@@ -367,7 +367,7 @@ it: that's still polako's job. A parked issue's comment naming a category gets i
 | --- | --- | --- |
 | `-repo` | *(whatever `-dir` is a checkout of)* | Repository to report on, `owner/name`. Naming it is what lets the command run from anywhere — no checkout needed, just a `gh` authenticated for the repo. |
 | `-dir` | `.` | Path to the repository's main checkout, used to resolve the repository when `-repo` is not given. |
-| `-label` | *(none)* | Only count issues carrying this label, the same scoping `polako work`'s `-label` applies. `status` never refuses — it reads only — so a label the repository has never defined prints the same note `work`'s preflight would refuse with, above the counts, and carries on. |
+| `-label` | *(none)* | Only count issues carrying this label, the same scoping `polako work`'s `-label` applies. `status` never refuses — it reads only — so a label the repository has never defined prints the same note `work`'s preflight would refuse with, on stdout under the header, and carries on. |
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how open PRs are matched back to issues. |
 | `-strict-order` | `false` | Report as a work run with `-strict-order` would: an issue awaiting an answer keeps its place, so `next` can name it rather than the ready issue behind it. |
 | `-json` | `false` | Print one JSON document to stdout instead of the text report — see [As JSON](#as-json--json) below. |
@@ -425,20 +425,20 @@ polako status -json | jq .
     "review and merge PR #58",
     "grant Bash(echo:*) or fix the skill, then polako unpark #5",
     "curate #27, #28 (drop proposed to queue them)"
-  ],
+  ], "notes": [],
   "plans": { "docs": [{ "path": "docs/designs/backlog-fill.md", "state": "active", "open_children": 4, "containers": [{ "issue": 101, "total": 6, "completed": 2, "finished": false, "held": false }] }], "gone": [], "truncated": false },
   "plan": "plan: session 42%, week 52% (resets Sep 2, 6pm) — polako was 29% of the last 24h", "published": "0.24.0"
 }
 ```
 
-With `-json`, stdout carries exactly one document — no header, no
-`needs you:` line — the same snapshot the text report renders, field for
-field: `queue` holds the same five lists, `next` names the issue a shift
-would pick up and why, `prs` matches the text columns exactly (`not read`
-for a PR past the eight-PR cap; `unknown` means gh doesn't know), and
-`needs_you` is the closing line's clauses as an array. `plans` (plural —
-distinct from `plan`, the usage line below it) mirrors the plan documents
-table row for row; its `gone` is `{ "path", "issues" }`.
+With `-json`, stdout carries exactly one document — no header, no `needs
+you:` line — the same snapshot the text report renders, field for field:
+`queue` holds the same five lists, `next` names the issue a shift would pick
+up and why, `prs` matches the text columns exactly (`not read` for a PR past
+the eight-PR cap; `unknown` means gh doesn't know), and `needs_you` is the
+closing line's clauses as an array; `notes` names a missing `-label`.
+`plans` (plural — distinct from `plan`, the usage line below it) mirrors the
+plan documents table row for row; its `gone` is `{ "path", "issues" }`.
 
 `queue.containers`, and `plans.docs[].containers` the same way, is objects,
 not bare numbers — `{ "issue", "total", "completed", "finished", "held" }` —

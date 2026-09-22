@@ -32,7 +32,11 @@ type statusDoc struct {
 	PRs           []statusDocPR  `json:"prs"`
 	UndetailedPRs []int          `json:"undetailed_prs"`
 	NeedsYou      []string       `json:"needs_you"`
-	Plans         statusDocPlans `json:"plans"`
+	// Notes is everything the text report prints under its header that isn't
+	// part of the queue itself — today just a missing -label's note. Always
+	// `[]`, never null, the same rule every array field here holds to.
+	Notes []string       `json:"notes"`
+	Plans statusDocPlans `json:"plans"`
 	// Plan is the same line the text report prints, or nil when the usage
 	// probe could not answer — never an empty string standing in for "no
 	// usage", which would be indistinguishable from a genuine 0%.
@@ -213,6 +217,7 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 		PRs:           prs,
 		UndetailedPRs: nonNilSlice(snap.undetailed),
 		NeedsYou:      nonNilSlice(needsYouParts(snap)),
+		Notes:         nonNilSlice(snap.notes),
 		Plans: statusDocPlans{
 			Docs: nonNilSlice(planDocs), Gone: nonNilSlice(gone), Truncated: snap.plans.truncated,
 		},

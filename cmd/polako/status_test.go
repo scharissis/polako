@@ -348,14 +348,14 @@ func TestStatusJSONKeepsArraysEmptyNotNull(t *testing.T) {
 	}
 	for _, unwanted := range []string{
 		`"ready":null`, `"parked":null`, `"proposed":null`, `"containers":null`,
-		`"blocked":null`, `"prs":null`, `"undetailed_prs":null`, `"needs_you":null`,
+		`"blocked":null`, `"prs":null`, `"undetailed_prs":null`, `"needs_you":null`, `"notes":null`,
 	} {
 		if strings.Contains(out.String(), unwanted) {
 			t.Errorf("output has %q, want an empty array instead\n%s", unwanted, out.String())
 		}
 	}
 	for _, want := range []string{
-		`"ready": []`, `"blocked": []`, `"prs": []`, `"needs_you": []`,
+		`"ready": []`, `"blocked": []`, `"prs": []`, `"needs_you": []`, `"notes": []`,
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output is missing %q\n%s", want, out.String())
@@ -1079,18 +1079,18 @@ func TestStatusNextRespectsRestartSafetyOnAFlaggedIssue(t *testing.T) {
 
 // status never refuses — it reads only — so a -label the repository has
 // never defined gets the same message `work`'s preflight would refuse with,
-// downgraded to a note, and status carries on regardless.
+// downgraded to a note, and status carries on regardless. The note is
+// returned, not narrated: it belongs on stdout under the header, not on
+// stderr above it.
 func TestStatusLabelNoteWarnsOnAMissingLabel(t *testing.T) {
 	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{})
 	cfg.label = "typo"
 
-	logged := captureLog(t)
+	note := statusLabelNote(context.Background(), cfg)
 
-	statusLabelNote(context.Background(), cfg)
-
-	if !strings.Contains(logged.String(), "gh label create typo") {
-		t.Error("status should note that -label names a label the repository does not have")
+	if !strings.Contains(note, "gh label create typo") {
+		t.Errorf("note = %q, want it to note that -label names a label the repository does not have", note)
 	}
 }
 
@@ -1099,12 +1099,8 @@ func TestStatusLabelNoteIsSilentWhenTheLabelExists(t *testing.T) {
 	cfg, _ := statusConfigFor(t, &ghState{Labels: []string{"ready-for-claude"}})
 	cfg.label = "ready-for-claude"
 
-	logged := captureLog(t)
-
-	statusLabelNote(context.Background(), cfg)
-
-	if logged.Len() != 0 {
-		t.Errorf("status noted a label the repository has: %s", logged.String())
+	if note := statusLabelNote(context.Background(), cfg); note != "" {
+		t.Errorf("status noted a label the repository has: %q", note)
 	}
 }
 
@@ -1118,12 +1114,76 @@ func TestStatusLabelNoteIsSilentWhenTheLookupFails(t *testing.T) {
 	})
 	cfg.label = "ready-for-claude"
 
+	if note := statusLabelNote(context.Background(), cfg); note != "" {
+		t.Errorf("a failed lookup was reported as a missing label: %q", note)
+	}
+}
+
+// Issue #508: the -label note prints on stdout, right under the header — not
+// on stderr above it, where a `polako status > file` operator would never
+// see it and a terminal reader would see it before the thing it explains.
+func TestStatusLabelNotePrintsUnderTheHeaderOnStdout(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{Issues: map[string]*fakeIssue{"3": {Open: true}}})
+	cfg.label = "typo"
 	logged := captureLog(t)
 
-	statusLabelNote(context.Background(), cfg)
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	if note := statusLabelNote(context.Background(), cfg); note != "" {
+		snap.notes = append(snap.notes, note)
+	}
 
+	var out strings.Builder
+	renderStatus(&out, report{}, cfg, snap)
+	lines := strings.SplitN(out.String(), "\n", 3)
+	if len(lines) < 2 || !strings.Contains(lines[1], "gh label create typo") {
+		t.Errorf("note did not print on the line right under the header:\n%s", out.String())
+	}
+	// logged still carries the unrelated best-effort usage-probe failure the
+	// fake CLI produces (no fakeUsageEnv set here) — this checks only that
+	// the label note itself never reached the narration stream.
 	if strings.Contains(logged.String(), "gh label create") {
-		t.Errorf("a failed lookup was reported as a missing label: %s", logged.String())
+		t.Errorf("status wrote the label note to its narration stream: %s", logged.String())
+	}
+}
+
+// Issue #508: status's own queue row already names every proposed issue, so
+// sayProposals's "ignoring N proposed issue(s)" must never fire for it — it
+// would both land on stderr (invisible to `polako status > file`) and read
+// as "won't show these" right above a report that does. statusConfig marks
+// this by calling cfg.queue.saidProposed.Store(true) before reading the
+// backlog, the same way readParkedIssues (unpark.go) already does for
+// `unpark`; this test exercises that same mechanism directly, since
+// statusConfig itself needs a real `gh` on PATH to run.
+func TestStatusNeverNarratesTheProposedCount(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues: map[string]*fakeIssue{
+			"3": {Open: true},
+			"9": {Open: true, Labels: []string{proposedLabel}},
+		},
+	})
+	cfg.queue.saidProposed.Store(true)
+	logged := captureLog(t)
+
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	// logged still carries the unrelated best-effort usage-probe failure the
+	// fake CLI produces (no fakeUsageEnv set here) — this checks only that
+	// the proposed count itself never reached the narration stream.
+	if strings.Contains(logged.String(), "proposed issue(s)") {
+		t.Errorf("status narrated the proposed count: %s", logged.String())
+	}
+
+	var out strings.Builder
+	renderStatus(&out, report{}, cfg, snap)
+	if want := "proposed  1 issue — #9, labelled proposed"; !strings.Contains(out.String(), want) {
+		t.Errorf("report is missing the proposed row despite the narration being silenced:\n%s", out.String())
 	}
 }
 
