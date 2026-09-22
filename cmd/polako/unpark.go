@@ -330,16 +330,23 @@ type parkWork struct {
 	branch   string
 	prNumber int
 	prURL    string
-	checks   string   // one of the checks* verdicts (pr.go), "" when unread
+	prState  string   // the PR's own state (OPEN, CLOSED, MERGED); "" when prNumber == 0
+	checks   string   // one of the checks* verdicts (pr.go), "" when unread or the PR isn't OPEN
 	failing  []string // the checks that earned checksFailing
 	onOrigin bool     // only meaningful when prNumber == 0
 	ahead    int      // commits ahead of the default branch; only meaningful when onOrigin
 }
 
 // readParkWork reads one parked issue's branch: prForBranch first, and with
-// a PR, its checks. With no PR, def (the repository's default branch, read
-// once per listing by readParkedIssues) decides whether origin has the
+// an OPEN PR, its checks too — retried the same way every other read in this
+// chain is, so a transient failure there reads as "not read" rather than as
+// a silently green PR. With no PR, def (the repository's default branch,
+// read once per listing by readParkedIssues) decides whether origin has the
 // branch at all and how far ahead of def it sits.
+//
+// A PR that isn't OPEN (closed without merging — parkPRClosed's own case —
+// or merged) is read no further: its checks are not what a human is
+// deciding on, and the reason column already says why the issue parked.
 func readParkWork(ctx context.Context, cfg config, issue int, def string) parkWork {
 	branch := fmt.Sprintf("%s%d", cfg.branchPrefix, issue)
 	w := parkWork{branch: branch}
@@ -348,10 +355,17 @@ func readParkWork(ctx context.Context, cfg config, issue int, def string) parkWo
 		return w
 	}
 	if pr != nil {
-		w.read, w.prNumber, w.prURL = true, pr.Number, pr.URL
-		if view, verr := prStatus(ctx, cfg, pr.Number); verr == nil {
-			w.checks, w.failing = view.checks, view.failing
+		w.prNumber, w.prURL, w.prState = pr.Number, pr.URL, pr.State
+		if pr.State != "OPEN" {
+			w.read = true
+			return w
 		}
+		view, verr := retryRead(ctx, cfg, fmt.Sprintf("reading PR #%d", pr.Number),
+			func() (prView, error) { return prStatus(ctx, cfg, pr.Number) })
+		if verr != nil {
+			return w
+		}
+		w.read, w.checks, w.failing = true, view.checks, view.failing
 		return w
 	}
 	if def == "" {
@@ -548,6 +562,8 @@ func parkWorkSummary(w parkWork) string {
 	switch {
 	case !w.read:
 		return "not read"
+	case w.prNumber != 0 && w.prState != "OPEN":
+		return fmt.Sprintf("PR #%d (%s)", w.prNumber, strings.ToLower(w.prState))
 	case w.prNumber != 0:
 		if w.checks == checksFailing {
 			return fmt.Sprintf("PR #%d, CI red", w.prNumber)
@@ -567,6 +583,8 @@ func renderParkWorkDetail(w io.Writer, rpt report, work parkWork) {
 	switch {
 	case !work.read:
 		fmt.Fprintf(w, "  %s  not read\n", rpt.dim("work     "))
+	case work.prNumber != 0 && work.prState != "OPEN":
+		fmt.Fprintf(w, "  %s  %s (%s)\n", rpt.dim("pr       "), work.prURL, strings.ToLower(work.prState))
 	case work.prNumber != 0:
 		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("pr       "), work.prURL)
 		if len(work.failing) > 0 {
