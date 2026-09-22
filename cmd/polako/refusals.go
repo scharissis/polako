@@ -123,10 +123,10 @@ func limitRefusal(result string) bool {
 // permissionParkReason is the fallback park message for when nothing in a
 // run's refusals says anything actionable — no structural refusal recorded
 // at all (the #138 shape, where the ask was only the run's own final words)
-// or one whose tool_use never correlated to a command. permissionParkFor and
-// permissionParkReasonWorkedAround both fall back to this; see them for the
-// derived reason — preferred, per issue #432, when a refusal actually says
-// what to grant.
+// or one whose tool_use never correlated to a command.
+// permissionParkReasonAndEntries and permissionParkReasonWorkedAroundAndEntries
+// both fall back to this; see them for the derived reason — preferred, per
+// issue #432, when a refusal actually says what to grant.
 const permissionParkReason = "the run stopped to ask for a permission this " +
 	"allowlist does not grant. To fix it: find the tool it reached for — " +
 	"named in the terminal right after this park, and saved in the shift " +
@@ -138,9 +138,9 @@ const permissionParkReason = "the run stopped to ask for a permission this " +
 
 // permissionParkEntries derives the -add-tools entries a set of refusals
 // gives, deduplicated and filtered to addToolsEntryThreadSafe — the same
-// list both permissionParkAdvice's prose (posted to the issue thread) and
-// parkIssue's `Refused:` footer use, since nothing unsafe for one is safe
-// for the other. Also reports whether any refusal was ungrantable (a `$VAR`,
+// list both permissionParkAdviceFrom's prose (posted to the issue thread)
+// and parkIssue's `Refused:` footer use, since nothing unsafe for one is
+// safe for the other. Also reports whether any refusal was ungrantable (a `$VAR`,
 // no grant fixes it) or matched the never-grant table, so a caller with no
 // entries can still say why.
 func permissionParkEntries(refusals []refusal, allowlist string) (entries []string, ungrantable, never bool) {
@@ -200,28 +200,11 @@ func permissionParkAdviceFrom(entries []string, ungrantable, never bool) (advice
 	}
 }
 
-// permissionParkAdvice turns a refusal set into what a park's reason says
-// about fixing it — issue #432: the
-// entries to rerun with when at least one can be derived, why none can be
-// when every refusal explains itself, or false when there is nothing
-// actionable to say (the caller falls back to permissionParkReason's fixed
-// pointer at the terminal in that case).
-func permissionParkAdvice(refusals []refusal, allowlist string) (advice string, ok bool) {
-	entries, ungrantable, never := permissionParkEntries(refusals, allowlist)
-	return permissionParkAdviceFrom(entries, ungrantable, never)
-}
-
-// permissionParkReasonFor is a permission park's reason, derived from what
-// actually refused it, falling back to permissionParkReason's fixed pointer
-// at the terminal when permissionParkAdvice has nothing to say.
-func permissionParkReasonFor(refusals []refusal, allowlist string) string {
-	reason, _ := permissionParkReasonAndEntries(refusals, allowlist)
-	return reason
-}
-
-// permissionParkReasonAndEntries is permissionParkReasonFor plus the same
-// thread-safe entries a caller needs for the `Refused:` footer, computed
-// once instead of twice.
+// permissionParkReasonAndEntries is a permission park's reason, derived from
+// what actually refused it and falling back to permissionParkReason's fixed
+// pointer at the terminal when permissionParkAdviceFrom has nothing to say
+// (issue #432), plus the same thread-safe entries a caller needs for the
+// `Refused:` footer, computed once instead of twice.
 func permissionParkReasonAndEntries(refusals []refusal, allowlist string) (reason string, entries []string) {
 	entries, ungrantable, never := permissionParkEntries(refusals, allowlist)
 	if advice, ok := permissionParkAdviceFrom(entries, ungrantable, never); ok {
@@ -230,22 +213,16 @@ func permissionParkReasonAndEntries(refusals []refusal, allowlist string) (reaso
 	return permissionParkReason, entries
 }
 
-// permissionParkReasonWorkedAround is the eventual park's reason once a
-// worked-around refusal (issue #461) has spent the clean-exit resume budget
-// with still no PR. Unlike permissionParkReasonFor's confident "the run was
-// refused X — fix it", this hedges: the run kept going after its last
-// refusal, so the refusal may not be the actual blocker — #390's own case,
-// where granting the tool it named would have fixed nothing and the real
-// blocker (an unreachable SSH agent) was in the run's own last words
-// instead, which the aside carries alongside this (see runReport.lastResultText).
-func permissionParkReasonWorkedAround(refusals []refusal, allowlist string) string {
-	reason, _ := permissionParkReasonWorkedAroundAndEntries(refusals, allowlist)
-	return reason
-}
-
-// permissionParkReasonWorkedAroundAndEntries is
-// permissionParkReasonWorkedAround plus the same thread-safe entries a
-// caller needs for the `Refused:` footer, computed once instead of twice.
+// permissionParkReasonWorkedAroundAndEntries is the eventual park's reason
+// once a worked-around refusal (issue #461) has spent the clean-exit resume
+// budget with still no PR, plus the same thread-safe entries a caller needs
+// for the `Refused:` footer, computed once instead of twice. Unlike
+// permissionParkReasonAndEntries's confident "the run was refused X — fix
+// it", this hedges: the run kept going after its last refusal, so the
+// refusal may not be the actual blocker — #390's own case, where granting
+// the tool it named would have fixed nothing and the real blocker (an
+// unreachable SSH agent) was in the run's own last words instead, which the
+// aside carries alongside this (see runReport.lastResultText).
 func permissionParkReasonWorkedAroundAndEntries(refusals []refusal, allowlist string) (reason string, entries []string) {
 	entries, ungrantable, never := permissionParkEntries(refusals, allowlist)
 	lead := fmt.Sprintf("the run opened no PR, and was refused %s along the way — "+
