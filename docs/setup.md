@@ -22,7 +22,7 @@ setup
   origin/HEAD         ok
   .gitignore          missing        missing /.worktrees/, /PLAN.md, /.polako-scratch/ — `polako setup -apply` proposes it through a PR
   CLAUDE.md           missing        the polako block is missing or out of date — `polako setup -apply` proposes it through a PR; run `/init` for the rest of CLAUDE.md
-  docs/VISION.md      missing        missing docs/VISION.md, docs/plans/README.md — optional — `polako setup -apply` can scaffold them (advice only)
+  docs/VISION.md      missing        missing docs/VISION.md, docs/designs/README.md — optional — `polako setup -apply` can scaffold them (advice only)
   plugin              ok             0.23.0
   sub-issue support   ok
   build tools         missing        not in the default allowlist — pass -add-tools "Bash(just:*)"
@@ -154,7 +154,7 @@ raw `gh` error.
 After the labels, `-apply` asks up to three more questions, each `[Y/n]`
 default yes except the last: propose the missing `.gitignore` lines, propose
 the CLAUDE.md block, and — default *no* — also scaffold `docs/VISION.md` and
-`docs/plans/README.md`. `-yes` takes each step's own default, so a plain
+`docs/designs/README.md`. `-yes` takes each step's own default, so a plain
 `-apply -yes` run proposes the first two and leaves the scaffold alone;
 scaffolding it needs an explicit `y` on that question.
 

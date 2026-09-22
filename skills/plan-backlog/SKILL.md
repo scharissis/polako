@@ -1,11 +1,11 @@
 ---
 description: Turn a vision document into a curated backlog of proposed epics and one-PR issues
-argument-hint: [vision-doc] [focus]
-arguments: [vision, focus]
+argument-hint: [design-doc] [focus]
+arguments: [design, focus]
 disable-model-invocation: true
 ---
 
-# Propose a backlog from $vision
+# Propose a backlog from $design
 
 Focus, if one was given: $focus
 
@@ -38,7 +38,7 @@ is worse than skipping a check that was never asked for.
 
 ## The document is required
 
-If $vision is empty, stop and ask which document to work from. Never guess
+If $design is empty, stop and ask which document to work from. Never guess
 which file is the roadmap: picking the wrong one produces a plausible backlog
 for a project nobody is building, and the mistake is invisible until a curator
 reads seven issues that make no sense.
@@ -47,9 +47,9 @@ reads seven issues that make no sense.
 
 This travels with the skill into any repo it runs in, not just this one:
 `docs/VISION.md` is the long-range document, one plan per file under
-`docs/plans/`, no `Status:` or `Tracking:` line, `polako status` is the
+`docs/designs/`, no `Status:` or `Tracking:` line, `polako status` is the
 index, a done plan leaves once its durable content moves into `docs/`
-proper. `$vision` may name either — the roadmap itself, or one of its own
+proper. `$design` may name either — the roadmap itself, or one of its own
 plan documents for a single batch.
 
 ## This run gets one turn
@@ -87,7 +87,7 @@ a `gh` rejection, a degraded mode — gets reported in its own words, never as
 raw `git`, `ssh`, `gh` or env output pasted verbatim.
 
 ## Phase 0 — Context and posture (every run, before anything else)
-1. Read $vision, resolved inside the repository.
+1. Read $design, resolved inside the repository.
 2. Read the backlog, **including proposals already filed**:
    `gh issue list --state open --limit 200 --json number,title,labels,body`.
    Then recently closed work, which is where the "we already did that" answers

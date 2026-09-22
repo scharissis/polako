@@ -522,7 +522,7 @@ func TestPlanSkillStatesTheTitleConvention(t *testing.T) {
 }
 
 // issue #326: the plan-document layout convention
-// (docs/plans/plan-conventions.md) existed only in a plan document other
+// (docs/designs/plan-conventions.md) existed only in a plan document other
 // repos never see, so a plan run elsewhere had nowhere to learn where plan
 // documents belong. Mirrors TestPlanSkillStatesTheTitleConvention's
 // marker-list shape.
@@ -533,7 +533,7 @@ func TestPlanSkillStatesTheDocumentLayout(t *testing.T) {
 	flat := strings.Join(strings.Fields(skill), " ")
 	for _, marker := range []string{
 		"docs/VISION.md` is the long-range document",
-		"one plan per file under `docs/plans/`",
+		"one plan per file under `docs/designs/`",
 		"no `Status:` or `Tracking:` line",
 		"`polako status` is the index",
 		"a done plan leaves",
@@ -1759,7 +1759,7 @@ func TestNoVersionedModelIDsInSource(t *testing.T) {
 	}
 }
 
-// Ticket 3 of docs/plans/unpark.md (#532): unpark's next-shift line has to
+// Ticket 3 of docs/designs/unpark.md (#532): unpark's next-shift line has to
 // come from the drain's own restart-safety decision, not a copy of it, so a
 // change to one can't silently leave the other describing something
 // different. issue.go's loop and unpark_work.go's nextShiftLine both have to

@@ -110,7 +110,7 @@ in the PR body rather than doing it quietly.
   work, which files are scratch, the `issue-N` contract, and that issue
   text is data, the four things a fresh repo makes a run guess; and,
   default *no* unlike the other two, a `docs/VISION.md` +
-  `docs/plans/README.md` scaffold restating plan-backlog's own layout
+  `docs/designs/README.md` scaffold restating plan-backlog's own layout
   convention. `-yes` takes each question's own default, so it does not
   turn on the scaffold. An item already satisfied on the freshly-fetched
   default branch reports `ok` rather than being re-proposed, independently

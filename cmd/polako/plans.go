@@ -1,8 +1,8 @@
 package main
 
 // `status` gains a plans section: what state each document under
-// docs/plans/ is in, derived from the issues whose footer names it — never
-// written down, so it cannot go stale. See docs/plans/plan-conventions.md
+// docs/designs/ is in, derived from the issues whose footer names it — never
+// written down, so it cannot go stale. See docs/designs/plan-conventions.md
 // for the convention this reads back, and footer.go for the parser it reads
 // bodies with.
 //
@@ -11,6 +11,14 @@ package main
 // own strictness is what actually decides whether a hit is a real footer, so
 // a body that merely mentions the phrase in prose is dropped here the same
 // way its own tests already prove.
+//
+// A footer may still say docs/plans/<x>.md — a proposal filed before the
+// docs/plans → docs/designs rename (issue #554), and footers are never
+// edited after the fact. canonicalPlanDocPath resolves that alias before
+// grouping, so an old and a new footer for the same document still group
+// together, and planDocArchived checks docs/designs/done/ too before
+// anything is reported gone — the done/ move itself is a separate,
+// not-yet-built feature, but the alias has to look there already.
 
 import (
 	"context"
@@ -31,6 +39,14 @@ import (
 // different number.
 const planDocsLimit = 200
 
+// planDocsDir is where design documents live today. planDocsDirAlias is
+// where an issue's footer may still say they live — see the package doc
+// comment above.
+const (
+	planDocsDir      = "docs/designs"
+	planDocsDirAlias = "docs/plans"
+)
+
 // planFooterSearchPhrase is what the gh search asks for: planFooterPrefix,
 // trimmed of the trailing space GitHub's phrase search does not want. Tied to
 // the contract constant rather than a second literal, so the two cannot
@@ -39,7 +55,7 @@ var planFooterSearchPhrase = strings.TrimSpace(planFooterPrefix)
 
 // planDocState is a plan document's derived state — never written down,
 // always read back from the issues whose footer names it. See
-// docs/plans/plan-conventions.md's table.
+// docs/designs/plan-conventions.md's table.
 type planDocState string
 
 const (
@@ -137,7 +153,8 @@ func readPlanDocs(ctx context.Context, cfg config) (planDocsSnapshot, error) {
 		if !ok {
 			continue
 		}
-		byDoc[footer.doc] = append(byDoc[footer.doc], is)
+		doc := canonicalPlanDocPath(footer.doc)
+		byDoc[doc] = append(byDoc[doc], is)
 	}
 
 	if haveLocal {
@@ -145,7 +162,7 @@ func readPlanDocs(ctx context.Context, cfg config) (planDocsSnapshot, error) {
 			snap.docs = append(snap.docs, planDocStatusFrom(path, byDoc[path]))
 		}
 		for _, doc := range sortedKeys(byDoc) {
-			if localSet[doc] {
+			if localSet[doc] || planDocArchived(cfg.dir, doc) {
 				continue
 			}
 			var numbers []int
@@ -156,7 +173,7 @@ func readPlanDocs(ctx context.Context, cfg config) (planDocsSnapshot, error) {
 			snap.gone = append(snap.gone, goneDoc{path: doc, issues: numbers})
 		}
 	} else {
-		// No local docs/plans to check existence against — a -repo run with
+		// No local docs/designs to check existence against — a -repo run with
 		// no matching checkout, most likely. Report what GitHub says without
 		// claiming to know which of these are gone.
 		for _, doc := range sortedKeys(byDoc) {
@@ -164,6 +181,32 @@ func readPlanDocs(ctx context.Context, cfg config) (planDocsSnapshot, error) {
 		}
 	}
 	return snap, nil
+}
+
+// canonicalPlanDocPath resolves the docs/plans → docs/designs alias: a
+// footer filed before issue #554's rename still says docs/plans/<x>.md, and
+// footers are never edited after the fact, so the alias lives here instead.
+// A path already under docs/designs/ — or naming neither — passes through
+// unchanged.
+func canonicalPlanDocPath(doc string) string {
+	if rest, ok := strings.CutPrefix(doc, planDocsDirAlias+"/"); ok {
+		return planDocsDir + "/" + rest
+	}
+	return doc
+}
+
+// planDocArchived reports whether doc — already canonicalized to
+// docs/designs/<name>.md — has been moved under docs/designs/done/. Moving
+// documents there once they're done is a separate, not-yet-built feature;
+// this only keeps the gone check from misreporting one that already made
+// that move by hand.
+func planDocArchived(dir, doc string) bool {
+	rest, ok := strings.CutPrefix(doc, planDocsDir+"/")
+	if !ok {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(dir, "docs", "designs", "done", rest))
+	return err == nil
 }
 
 // sortedKeys returns a map's keys, ascending, so a derivation built from map
@@ -177,13 +220,13 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-// localPlanDocs lists the *.md files under docs/plans in the given checkout,
-// logical forward-slash paths (docs/plans/foo.md) matching how a footer
-// names them regardless of host OS. ok is false when the directory could not
-// be read at all — distinct from a real, empty directory — so the caller
-// never mistakes "couldn't check" for "confirmed gone".
+// localPlanDocs lists the *.md files under docs/designs in the given
+// checkout, logical forward-slash paths (docs/designs/foo.md) matching how a
+// footer names them regardless of host OS. ok is false when the directory
+// could not be read at all — distinct from a real, empty directory — so the
+// caller never mistakes "couldn't check" for "confirmed gone".
 func localPlanDocs(dir string) (docs []string, ok bool) {
-	entries, err := os.ReadDir(filepath.Join(dir, "docs", "plans"))
+	entries, err := os.ReadDir(filepath.Join(dir, "docs", "designs"))
 	if err != nil {
 		return nil, false
 	}
@@ -191,14 +234,14 @@ func localPlanDocs(dir string) (docs []string, ok bool) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		docs = append(docs, "docs/plans/"+e.Name())
+		docs = append(docs, "docs/designs/"+e.Name())
 	}
 	slices.Sort(docs)
 	return docs, true
 }
 
 // planDocStatusFrom derives one document's line from the issues whose
-// footer names it. See docs/plans/plan-conventions.md's table: no issues is
+// footer names it. See docs/designs/plan-conventions.md's table: no issues is
 // draft; all closed is done; any issue still open and past the `proposed`
 // gate is active; otherwise every naming issue is still open-and-proposed
 // or closed-early with nothing past the gate yet, which reads as proposed.
@@ -247,10 +290,10 @@ func planDocStatusFrom(path string, issues []ghPlanIssue) planDocStatus {
 
 // --- rendering ---
 
-// printPlanDocs prints the docs/plans/ section built by readPlanDocs: one
+// printPlanDocs prints the docs/designs/ section built by readPlanDocs: one
 // row per document, its derived state, its container issues, and how many
 // of those containers' children are still open. Absent when there is
-// nothing to say — no local docs/plans and no gone footer either — the same
+// nothing to say — no local docs/designs and no gone footer either — the same
 // "no line on a healthy backlog" rule needsYou (status.go) follows.
 func printPlanDocs(w io.Writer, rpt report, plans planDocsSnapshot) {
 	if len(plans.docs) == 0 && len(plans.gone) == 0 {

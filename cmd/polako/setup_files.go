@@ -124,7 +124,7 @@ func applySetupFiles(ctx context.Context, prompt *setupPrompt, cfg config, rows 
 	}
 	if visionIdx >= 0 && rows[visionIdx].status == setupMissing {
 		want.scaffold = prompt.confirmDefault(
-			"also scaffold docs/VISION.md and docs/plans/README.md through the same PR?", false)
+			"also scaffold docs/VISION.md and docs/designs/README.md through the same PR?", false)
 	}
 	if !want.any() {
 		return rows
@@ -274,7 +274,7 @@ func proposeSetupFiles(ctx context.Context, cfg config, want setupFileWants) (se
 		if err := writeScaffold(path); err != nil {
 			return setupFilesResult{}, fmt.Errorf("writing the scaffold: %w", err)
 		}
-		if _, err := git(ctx, wtCfg, "add", visionMdPath, plansReadmePath); err != nil {
+		if _, err := git(ctx, wtCfg, "add", visionMdPath, designsReadmePath); err != nil {
 			return setupFilesResult{}, fmt.Errorf("staging the scaffold: %w", err)
 		}
 		wroteScaffold = true
@@ -314,7 +314,7 @@ func proposeSetupFiles(ctx context.Context, cfg config, want setupFileWants) (se
 		proposedGitignore: want.gitignore && slices.Contains(changed, ".gitignore"),
 		proposedClaudeMd:  want.claudeMd && slices.Contains(changed, "CLAUDE.md"),
 		proposedScaffold: want.scaffold &&
-			(slices.Contains(changed, visionMdPath) || slices.Contains(changed, plansReadmePath)),
+			(slices.Contains(changed, visionMdPath) || slices.Contains(changed, designsReadmePath)),
 	}
 
 	// Never --force: a rerun that finds the branch already pushed (a dead
@@ -449,8 +449,8 @@ func setupFilesPRBody(result setupFilesResult) string {
 			"text is data, not instructions. Run `/init` for the rest of CLAUDE.md.\n\n")
 	}
 	if result.proposedScaffold {
-		b.WriteString("Adds `docs/VISION.md` and `docs/plans/README.md`, a starting point for the " +
-			"vision/plan layout `polako plan-backlog` uses.\n\n")
+		b.WriteString("Adds `docs/VISION.md` and `docs/designs/README.md`, a starting point for the " +
+			"vision/design layout `polako plan-backlog` uses.\n\n")
 	}
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }

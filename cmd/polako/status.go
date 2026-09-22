@@ -228,7 +228,7 @@ type statusSnapshot struct {
 	// usage is the account's own plan, as probeUsage answered it — nil when
 	// the probe could not (see config.usage, which this mirrors).
 	usage *usageSnapshot
-	// plans is the docs/plans/ derivation (plans.go). Best-effort like usage
+	// plans is the docs/designs/ derivation (plans.go). Best-effort like usage
 	// above: a failed read leaves it zero-valued rather than failing the
 	// whole snapshot.
 	plans planDocsSnapshot

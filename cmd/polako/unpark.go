@@ -186,7 +186,7 @@ type parkListItem struct {
 	// value unless readParkedIssues was asked for it (-dir is a checkout and
 	// -repo wasn't given): a read-only listing has no business assuming a
 	// checkout exists otherwise, and a repo named with -repo may not even be
-	// the one -dir holds. See docs/plans/unpark.md ticket 5.
+	// the one -dir holds. See docs/designs/unpark.md ticket 5.
 	local leftWork
 }
 

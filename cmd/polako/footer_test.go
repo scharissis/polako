@@ -22,62 +22,62 @@ func TestParsePlanFooter(t *testing.T) {
 		},
 		{
 			name: "nested plan path",
-			body: "Proposed by polako plan from docs/plans/plan-conventions.md @ fdfedcb — edit freely; remove the `proposed` label to queue it.\n",
-			want: planFooter{doc: "docs/plans/plan-conventions.md", sha: "fdfedcb"},
+			body: "Proposed by polako plan from docs/designs/plan-conventions.md @ fdfedcb — edit freely; remove the `proposed` label to queue it.\n",
+			want: planFooter{doc: "docs/designs/plan-conventions.md", sha: "fdfedcb"},
 			ok:   true,
 		},
 		{
 			name: "edited tail",
-			body: "Proposed by polako plan from docs/plans/foo.md @ abc1234 — reviewed by Sam, ready to go\n",
-			want: planFooter{doc: "docs/plans/foo.md", sha: "abc1234"},
+			body: "Proposed by polako plan from docs/designs/foo.md @ abc1234 — reviewed by Sam, ready to go\n",
+			want: planFooter{doc: "docs/designs/foo.md", sha: "abc1234"},
 			ok:   true,
 		},
 		{
 			name: "tail with plain hyphen",
-			body: "Proposed by polako plan from docs/plans/foo.md @ abc1234 - edit freely\n",
-			want: planFooter{doc: "docs/plans/foo.md", sha: "abc1234"},
+			body: "Proposed by polako plan from docs/designs/foo.md @ abc1234 - edit freely\n",
+			want: planFooter{doc: "docs/designs/foo.md", sha: "abc1234"},
 			ok:   true,
 		},
 		{
 			name: "missing sha, tail kept",
-			body: "Proposed by polako plan from docs/plans/foo.md — edit freely; remove the `proposed` label to queue it.\n",
-			want: planFooter{doc: "docs/plans/foo.md"},
+			body: "Proposed by polako plan from docs/designs/foo.md — edit freely; remove the `proposed` label to queue it.\n",
+			want: planFooter{doc: "docs/designs/foo.md"},
 			ok:   true,
 		},
 		{
 			name: "missing sha, no tail",
-			body: "Proposed by polako plan from docs/plans/foo.md\n",
-			want: planFooter{doc: "docs/plans/foo.md"},
+			body: "Proposed by polako plan from docs/designs/foo.md\n",
+			want: planFooter{doc: "docs/designs/foo.md"},
 			ok:   true,
 		},
 		{
 			name: "tail separator removed but tail kept",
-			body: "Proposed by polako plan from docs/plans/foo.md @ abc1234 edit freely now\n",
-			want: planFooter{doc: "docs/plans/foo.md", sha: "abc1234"},
+			body: "Proposed by polako plan from docs/designs/foo.md @ abc1234 edit freely now\n",
+			want: planFooter{doc: "docs/designs/foo.md", sha: "abc1234"},
 			ok:   true,
 		},
 		{
 			name: "extra lines below the footer",
-			body: "Proposed by polako plan from docs/plans/foo.md @ abc1234 — edit freely\n\nPS added a note after the footer\n",
-			want: planFooter{doc: "docs/plans/foo.md", sha: "abc1234"},
+			body: "Proposed by polako plan from docs/designs/foo.md @ abc1234 — edit freely\n\nPS added a note after the footer\n",
+			want: planFooter{doc: "docs/designs/foo.md", sha: "abc1234"},
 			ok:   true,
 		},
 		{
 			name: "footer not the last line, indented",
-			body: "    Proposed by polako plan from docs/plans/foo.md @ abc1234 — edit freely\nmore prose\n",
-			want: planFooter{doc: "docs/plans/foo.md", sha: "abc1234"},
+			body: "    Proposed by polako plan from docs/designs/foo.md @ abc1234 — edit freely\nmore prose\n",
+			want: planFooter{doc: "docs/designs/foo.md", sha: "abc1234"},
 			ok:   true,
 		},
 		{
 			name: "quoted earlier footer then the real one",
-			body: "> Proposed by polako plan from docs/plans/old.md @ 0000000 — edit freely\n\nThis supersedes it.\n\nProposed by polako plan from docs/plans/new.md @ 1111111 — edit freely\n",
-			want: planFooter{doc: "docs/plans/new.md", sha: "1111111"},
+			body: "> Proposed by polako plan from docs/designs/old.md @ 0000000 — edit freely\n\nThis supersedes it.\n\nProposed by polako plan from docs/designs/new.md @ 1111111 — edit freely\n",
+			want: planFooter{doc: "docs/designs/new.md", sha: "1111111"},
 			ok:   true,
 		},
 		{
 			name: "only a quoted footer is still a footer",
-			body: "> Proposed by polako plan from docs/plans/old.md @ 0000000 — edit freely\n",
-			want: planFooter{doc: "docs/plans/old.md", sha: "0000000"},
+			body: "> Proposed by polako plan from docs/designs/old.md @ 0000000 — edit freely\n",
+			want: planFooter{doc: "docs/designs/old.md", sha: "0000000"},
 			ok:   true,
 		},
 		{
@@ -202,7 +202,7 @@ func TestParseParkFooter(t *testing.T) {
 }
 
 // parkCategoryFooter and parseParkCategory are two sides of the same
-// contract as parkFooter/parseParkFooter — ticket 1 of docs/plans/unpark.md
+// contract as parkFooter/parseParkFooter — ticket 1 of docs/designs/unpark.md
 // (#530): parkIssue writes the footer, unpark reads it back.
 func TestParkCategoryFooterRoundTrips(t *testing.T) {
 	t.Parallel()

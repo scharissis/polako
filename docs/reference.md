@@ -218,10 +218,10 @@ from inside your own hook.
 ## Planning a backlog unattended: `polako plan`
 
 `polako plan` runs the [`plan-backlog`](../README.md#planning-a-backlog) skill
-the way `polako work` runs `implement-issue`: point it at a vision document
+the way `polako work` runs `implement-issue`: point it at a design document
 and it proposes a curated backlog — epics and one-PR issues — behind the
 `proposed` label a human lifts to queue. The layout travels: `docs/VISION.md`
-the long-range document, one plan per file under `docs/plans/`, no
+the long-range document, one plan per file under `docs/designs/`, no
 `Status:`/`Tracking:` line, `polako status` the index, a done plan leaves.
 
 One `claude` invocation, bracketed by two enforcement mechanisms that keep
@@ -264,16 +264,16 @@ plan: no run history to price against — work a few issues and future plans wil
 nothing — no label, no milestone, no process, no record, no notification.
 
 ```bash
-polako plan -vision docs/VISION.md -dry-run
-polako plan -vision docs/VISION.md            # the real thing
+polako plan -design docs/VISION.md -dry-run
+polako plan -design docs/VISION.md            # the real thing
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `-vision` | *(none)* | Path, resolved under `-dir`, to the vision or roadmap document to plan from — `docs/VISION.md` for the long-range one, `docs/plans/<topic>.md` for a single batch. Exactly one of `-vision` / `-brief` is required — never a does-the-file-exist guess, so a typo fails loudly. |
-| `-brief` | *(none)* | Inline vision text in place of `-vision`, e.g. `-brief "a dating app for horses"` — the greenfield story, same trust tier as the document. Past ~2000 characters, put it in a file. |
+| `-design` | *(none)* | Path, resolved under `-dir`, to the design or roadmap document to plan from — `docs/VISION.md` for the long-range one, `docs/designs/<topic>.md` for a single batch. Exactly one of `-design` / `-brief` is required — never a does-the-file-exist guess, so a typo fails loudly. |
+| `-brief` | *(none)* | Inline design text in place of `-design`, e.g. `-brief "a dating app for horses"` — the greenfield story, same trust tier as the document. Past ~2000 characters, put it in a file. |
 | `-focus` | *(none)* | Free-text steer for the run, e.g. `-focus "only the observability section"`. |
-| `-milestone` | *(derived)* | Batch milestone title, created idempotently at preflight and attached to every issue the run files by the label pass. Defaults to the vision file's name, or the brief capped at 50 characters, cut at a word boundary. `-milestone off` skips the milestone entirely. |
+| `-milestone` | *(derived)* | Batch milestone title, created idempotently at preflight and attached to every issue the run files by the label pass. Defaults to the design file's name, or the brief capped at 50 characters, cut at a word boundary. `-milestone off` skips the milestone entirely. |
 | `-max-issues` | `10` | Ceiling on the issues a run may create, epics included. A ceiling, not a target — fewer, sharper issues beat coverage. |
 | `-model` / `-effort` | `opus` / *(CLI default)* | Passed to `claude --model` / `--effort`. `-model` is an alias, not a pinned id: a plan run happens once per batch and steers every run downstream, so it defaults to the strongest tier. |
 | `-skill` | `polako:plan-backlog` | Slash command the run invokes. |
@@ -294,7 +294,7 @@ duplicated helpers, abstractions nothing uses), filing what it finds as
 **proposals** under `plan`'s own curation gate and sizing contract.
 
 It differs from `plan` only in what it plans from and what it attaches: no
-`-vision` / `-brief` / `-milestone` — it reads the repository `-dir` already
+`-design` / `-brief` / `-milestone` — it reads the repository `-dir` already
 names, and attaches no milestone; `-focus` is the only free-text steer. The
 default `-tools` allowlist is narrower too: review-health's own SKILL.md
 bounds its `gh` surface to three call shapes — two `issue list` reads and
@@ -349,8 +349,8 @@ open prs on issue branches
 needs you: reply on #9; review and merge PR #58; grant Bash(echo:*) or fix the skill, then polako unpark #5; curate #27, #28 (drop proposed to queue them)
 ```
 
-Below that table, `plan documents` adds one row per file under `docs/plans/`:
-state derived from the naming issues (`docs/plans/plan-conventions.md`'s
+Below that table, `plan documents` adds one row per file under `docs/designs/`:
+state derived from the naming issues (`docs/designs/plan-conventions.md`'s
 table), their `(completed/total closed)` container epics and open children
 (shape in the JSON example below), and a `gone` line for a footer naming a
 deleted document. One capped `gh issue list` call for the section.
@@ -426,7 +426,7 @@ polako status -json | jq .
     "grant Bash(echo:*) or fix the skill, then polako unpark #5",
     "curate #27, #28 (drop proposed to queue them)"
   ],
-  "plans": { "docs": [{ "path": "docs/plans/backlog-fill.md", "state": "active", "open_children": 4, "containers": [{ "issue": 101, "total": 6, "completed": 2, "finished": false, "held": false }] }], "gone": [], "truncated": false },
+  "plans": { "docs": [{ "path": "docs/designs/backlog-fill.md", "state": "active", "open_children": 4, "containers": [{ "issue": 101, "total": 6, "completed": 2, "finished": false, "held": false }] }], "gone": [], "truncated": false },
   "plan": "plan: session 42%, week 52% (resets Sep 2, 6pm) — polako was 29% of the last 24h", "published": "0.24.0"
 }
 ```

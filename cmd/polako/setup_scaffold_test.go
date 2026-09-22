@@ -14,11 +14,11 @@ func TestSetupVisionRow(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	if r := setupVisionRow(config{dir: dir}); r.status != setupMissing || r.required ||
-		!strings.Contains(r.detail, visionMdPath) || !strings.Contains(r.detail, plansReadmePath) {
+		!strings.Contains(r.detail, visionMdPath) || !strings.Contains(r.detail, designsReadmePath) {
 		t.Errorf("row with neither page = %+v, want missing, not required, naming both", r)
 	}
 
-	// A repo with its own docs/VISION.md but no docs/plans/README.md still
+	// A repo with its own docs/VISION.md but no docs/designs/README.md still
 	// has something scaffoldNeedsWrite (and writeScaffold) would add — the
 	// row has to say so, not read ok off docs/VISION.md alone.
 	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
@@ -28,15 +28,15 @@ func TestSetupVisionRow(t *testing.T) {
 		t.Fatalf("writing docs/VISION.md: %v", err)
 	}
 	if r := setupVisionRow(config{dir: dir}); r.status != setupMissing ||
-		strings.Contains(r.detail, visionMdPath) || !strings.Contains(r.detail, plansReadmePath) {
-		t.Errorf("row with only docs/VISION.md present = %+v, want missing naming only %s", r, plansReadmePath)
+		strings.Contains(r.detail, visionMdPath) || !strings.Contains(r.detail, designsReadmePath) {
+		t.Errorf("row with only docs/VISION.md present = %+v, want missing naming only %s", r, designsReadmePath)
 	}
 
-	if err := os.MkdirAll(filepath.Join(dir, "docs", "plans"), 0o755); err != nil {
-		t.Fatalf("mkdir docs/plans: %v", err)
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "designs"), 0o755); err != nil {
+		t.Fatalf("mkdir docs/designs: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "docs", "plans", "README.md"), []byte("# Plans\n"), 0o644); err != nil {
-		t.Fatalf("writing docs/plans/README.md: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, "docs", "designs", "README.md"), []byte("# Designs\n"), 0o644); err != nil {
+		t.Fatalf("writing docs/designs/README.md: %v", err)
 	}
 	if r := setupVisionRow(config{dir: dir}); r.status != setupOK {
 		t.Errorf("row with both pages present = %+v, want ok", r)
@@ -55,7 +55,7 @@ func TestWriteScaffoldWritesBothPages(t *testing.T) {
 	if scaffoldNeedsWrite(dir) {
 		t.Errorf("scaffoldNeedsWrite still true after writeScaffold")
 	}
-	for _, rel := range []string{"docs/VISION.md", "docs/plans/README.md"} {
+	for _, rel := range []string{"docs/VISION.md", "docs/designs/README.md"} {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
 			t.Errorf("%s not written: %v", rel, err)
 		}
@@ -84,7 +84,7 @@ func TestWriteScaffoldNeverOverwritesAnExistingPage(t *testing.T) {
 	if string(got) != human {
 		t.Errorf("docs/VISION.md = %q, want the human's own content untouched", got)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "docs", "plans", "README.md")); err != nil {
-		t.Errorf("docs/plans/README.md not written: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "docs", "designs", "README.md")); err != nil {
+		t.Errorf("docs/designs/README.md not written: %v", err)
 	}
 }

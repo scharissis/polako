@@ -273,7 +273,7 @@ func TestStatusNamesTheGrantAParkedIssueIsWaitingOn(t *testing.T) {
 // permission case above — and a hand-labelled issue (no park comment of
 // polako's own) still keeps today's batched clause. Same fixture shape
 // TestStatusNamesTheGrantAParkedIssueIsWaitingOn drives, for the category
-// half of docs/plans/unpark.md ticket 6.
+// half of docs/designs/unpark.md ticket 6.
 func TestStatusNamesTheParkCategoryClause(t *testing.T) {
 	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
@@ -1333,20 +1333,20 @@ func planFooterFor(doc, sha string) string {
 	return fmt.Sprintf(planFooterPrefix+"%s @ %s — edit freely; remove the `proposed` label to queue it.", doc, sha)
 }
 
-// writePlanDoc creates an empty docs/plans/<name> file in dir — the local
+// writeDesignDoc creates an empty docs/designs/<name> file in dir — the local
 // half of the derivation, localPlanDocs (plans.go).
-func writePlanDoc(t *testing.T, dir, name string) {
+func writeDesignDoc(t *testing.T, dir, name string) {
 	t.Helper()
-	plansDir := filepath.Join(dir, "docs", "plans")
-	if err := os.MkdirAll(plansDir, 0o755); err != nil {
-		t.Fatalf("mkdir docs/plans: %v", err)
+	designsDir := filepath.Join(dir, "docs", "designs")
+	if err := os.MkdirAll(designsDir, 0o755); err != nil {
+		t.Fatalf("mkdir docs/designs: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(plansDir, name), []byte("# "+name+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(designsDir, name), []byte("# "+name+"\n"), 0o644); err != nil {
 		t.Fatalf("writing %s: %v", name, err)
 	}
 }
 
-// The whole state table docs/plans/plan-conventions.md describes, one doc per
+// The whole state table docs/designs/plan-conventions.md describes, one doc per
 // case, plus a container and its open-children count.
 func TestPlanDocsDerivesState(t *testing.T) {
 	t.Parallel()
@@ -1354,20 +1354,20 @@ func TestPlanDocsDerivesState(t *testing.T) {
 		Issues: map[string]*fakeIssue{
 			// backlog-fill.md: one issue open past the gate makes it active,
 			// whatever else names it.
-			"1": {Open: true, Labels: []string{proposedLabel}, Body: planFooterFor("docs/plans/backlog-fill.md", "1a2b3c4")},
-			"2": {Open: true, Body: planFooterFor("docs/plans/backlog-fill.md", "1a2b3c4")},
+			"1": {Open: true, Labels: []string{proposedLabel}, Body: planFooterFor("docs/designs/backlog-fill.md", "1a2b3c4")},
+			"2": {Open: true, Body: planFooterFor("docs/designs/backlog-fill.md", "1a2b3c4")},
 			// in-flight.md: every naming issue is either closed early or
 			// still gated — proposed, neither active nor done.
-			"3": {Open: false, Labels: []string{proposedLabel}, Body: planFooterFor("docs/plans/in-flight.md", "abc1234")},
-			"4": {Open: true, Labels: []string{proposedLabel}, Body: planFooterFor("docs/plans/in-flight.md", "abc1234")},
+			"3": {Open: false, Labels: []string{proposedLabel}, Body: planFooterFor("docs/designs/in-flight.md", "abc1234")},
+			"4": {Open: true, Labels: []string{proposedLabel}, Body: planFooterFor("docs/designs/in-flight.md", "abc1234")},
 			// shipped.md: every naming issue closed.
-			"5": {Open: false, Body: planFooterFor("docs/plans/shipped.md", "def5678")},
+			"5": {Open: false, Body: planFooterFor("docs/designs/shipped.md", "def5678")},
 			// epic.md: a container, open past the gate, with children left.
-			"6": {Open: true, Body: planFooterFor("docs/plans/epic.md", "9999999"), SubIssues: 5, SubIssuesCompleted: 2},
+			"6": {Open: true, Body: planFooterFor("docs/designs/epic.md", "9999999"), SubIssues: 5, SubIssuesCompleted: 2},
 		},
 	})
 	for _, name := range []string{"backlog-fill.md", "in-flight.md", "shipped.md", "epic.md", "empty.md"} {
-		writePlanDoc(t, cfg.dir, name)
+		writeDesignDoc(t, cfg.dir, name)
 	}
 
 	snap, err := readPlanDocs(context.Background(), cfg)
@@ -1385,26 +1385,26 @@ func TestPlanDocsDerivesState(t *testing.T) {
 		t.Fatalf("docs = %d, want 5: %+v", len(got), got)
 	}
 	for path, want := range map[string]planDocState{
-		"docs/plans/backlog-fill.md": planActive,
-		"docs/plans/in-flight.md":    planProposed,
-		"docs/plans/shipped.md":      planDone,
-		"docs/plans/epic.md":         planActive,
-		"docs/plans/empty.md":        planDraft,
+		"docs/designs/backlog-fill.md": planActive,
+		"docs/designs/in-flight.md":    planProposed,
+		"docs/designs/shipped.md":      planDone,
+		"docs/designs/epic.md":         planActive,
+		"docs/designs/empty.md":        planDraft,
 	} {
 		if got[path].state != want {
 			t.Errorf("%s state = %s, want %s", path, got[path].state, want)
 		}
 	}
-	epic := got["docs/plans/epic.md"]
+	epic := got["docs/designs/epic.md"]
 	if len(epic.containers) != 1 || epic.containers[0].number != 6 {
 		t.Fatalf("epic.md containers = %+v, want just #6", epic.containers)
 	}
 	if epic.openChildren != 3 {
 		t.Errorf("epic.md openChildren = %d, want 3 (5 total, 2 completed)", epic.openChildren)
 	}
-	if len(got["docs/plans/backlog-fill.md"].containers) != 0 {
+	if len(got["docs/designs/backlog-fill.md"].containers) != 0 {
 		t.Errorf("backlog-fill.md names no sub-issues, want no containers, got %+v",
-			got["docs/plans/backlog-fill.md"].containers)
+			got["docs/designs/backlog-fill.md"].containers)
 	}
 }
 
@@ -1414,31 +1414,86 @@ func TestPlanDocsGoneWhenFileMissing(t *testing.T) {
 	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
-			"7": {Open: true, Labels: []string{proposedLabel}, Body: planFooterFor("docs/plans/deleted.md", "0000000")},
+			"7": {Open: true, Labels: []string{proposedLabel}, Body: planFooterFor("docs/designs/deleted.md", "0000000")},
 		},
 	})
-	writePlanDoc(t, cfg.dir, "kept.md")
+	writeDesignDoc(t, cfg.dir, "kept.md")
 
 	snap, err := readPlanDocs(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("readPlanDocs: %v", err)
 	}
-	if len(snap.docs) != 1 || snap.docs[0].path != "docs/plans/kept.md" || snap.docs[0].state != planDraft {
+	if len(snap.docs) != 1 || snap.docs[0].path != "docs/designs/kept.md" || snap.docs[0].state != planDraft {
 		t.Fatalf("docs = %+v, want just kept.md as draft", snap.docs)
 	}
-	if len(snap.gone) != 1 || snap.gone[0].path != "docs/plans/deleted.md" || !slices.Equal(snap.gone[0].issues, []int{7}) {
+	if len(snap.gone) != 1 || snap.gone[0].path != "docs/designs/deleted.md" || !slices.Equal(snap.gone[0].issues, []int{7}) {
 		t.Fatalf("gone = %+v, want deleted.md naming #7", snap.gone)
 	}
 }
 
-// With no local docs/plans directory to check existence against — a -repo
+// issue #554: a footer filed before the docs/plans → docs/designs rename
+// still says docs/plans/<x>.md, and footers are never edited after the
+// fact — so the derivation has to resolve that alias itself, against
+// today's docs/designs/<x>.md.
+func TestPlanDocsResolvesLegacyPlansFooterAgainstDesigns(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true, Labels: []string{proposedLabel}, Body: planFooterFor("docs/plans/backlog-fill.md", "1a2b3c4")},
+		},
+	})
+	writeDesignDoc(t, cfg.dir, "backlog-fill.md")
+
+	snap, err := readPlanDocs(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("readPlanDocs: %v", err)
+	}
+	if len(snap.gone) != 0 {
+		t.Errorf("gone = %+v, want none — the legacy footer resolves to a file that exists", snap.gone)
+	}
+	if len(snap.docs) != 1 || snap.docs[0].path != "docs/designs/backlog-fill.md" || snap.docs[0].state != planProposed {
+		t.Fatalf("docs = %+v, want backlog-fill.md as proposed, grouped under its docs/designs/ path", snap.docs)
+	}
+}
+
+// The done/ move itself is a separate, not-yet-built feature (see the issue
+// body's "Out of scope"), but the alias already has to look there: a legacy
+// footer whose document was archived under docs/designs/done/ must not be
+// reported gone just because it is absent from the top-level directory.
+func TestPlanDocsResolvesLegacyPlansFooterAgainstDesignsDone(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: false, Body: planFooterFor("docs/plans/shipped.md", "1a2b3c4")},
+		},
+	})
+	// No file at the top level of docs/designs/ — writeDesignDoc always
+	// writes there — so the archived copy is written by hand, under done/.
+	doneDir := filepath.Join(cfg.dir, "docs", "designs", "done")
+	if err := os.MkdirAll(doneDir, 0o755); err != nil {
+		t.Fatalf("mkdir docs/designs/done: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(doneDir, "shipped.md"), []byte("# shipped.md\n"), 0o644); err != nil {
+		t.Fatalf("writing shipped.md: %v", err)
+	}
+
+	snap, err := readPlanDocs(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("readPlanDocs: %v", err)
+	}
+	if len(snap.gone) != 0 {
+		t.Errorf("gone = %+v, want none — the document was archived under docs/designs/done/, not deleted", snap.gone)
+	}
+}
+
+// With no local docs/designs directory to check existence against — a -repo
 // run reporting on a repository the checkout does not hold, most likely —
 // every footer-named doc is reported plainly, never guessed to be gone.
 func TestPlanDocsWithNoLocalCheckoutReportsNothingRatherThanGuessing(t *testing.T) {
 	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
-			"1": {Open: true, Body: planFooterFor("docs/plans/somewhere.md", "1111111")},
+			"1": {Open: true, Body: planFooterFor("docs/designs/somewhere.md", "1111111")},
 		},
 	})
 
@@ -1449,7 +1504,7 @@ func TestPlanDocsWithNoLocalCheckoutReportsNothingRatherThanGuessing(t *testing.
 	if len(snap.gone) != 0 {
 		t.Errorf("gone = %+v, want none — a missing local directory must not be read as every footer being gone", snap.gone)
 	}
-	if len(snap.docs) != 1 || snap.docs[0].path != "docs/plans/somewhere.md" {
+	if len(snap.docs) != 1 || snap.docs[0].path != "docs/designs/somewhere.md" {
 		t.Fatalf("docs = %+v, want the one issue's doc reported", snap.docs)
 	}
 }
@@ -1463,10 +1518,10 @@ func TestPlanDocsWarnsWhenTheSearchIsTruncated(t *testing.T) {
 	// from landing exactly on it (see the next test).
 	issues := make(map[string]*fakeIssue, planDocsLimit+1)
 	for i := 1; i <= planDocsLimit+1; i++ {
-		issues[strconv.Itoa(i)] = &fakeIssue{Open: true, Body: planFooterFor("docs/plans/flood.md", "abc0000")}
+		issues[strconv.Itoa(i)] = &fakeIssue{Open: true, Body: planFooterFor("docs/designs/flood.md", "abc0000")}
 	}
 	cfg, _ := statusConfigFor(t, &ghState{Issues: issues})
-	writePlanDoc(t, cfg.dir, "flood.md")
+	writeDesignDoc(t, cfg.dir, "flood.md")
 
 	snap, err := readPlanDocs(context.Background(), cfg)
 	if err != nil {
@@ -1490,10 +1545,10 @@ func TestPlanDocsNotTruncatedExactlyAtTheLimit(t *testing.T) {
 	t.Parallel()
 	issues := make(map[string]*fakeIssue, planDocsLimit)
 	for i := 1; i <= planDocsLimit; i++ {
-		issues[strconv.Itoa(i)] = &fakeIssue{Open: true, Body: planFooterFor("docs/plans/flood.md", "abc0000")}
+		issues[strconv.Itoa(i)] = &fakeIssue{Open: true, Body: planFooterFor("docs/designs/flood.md", "abc0000")}
 	}
 	cfg, _ := statusConfigFor(t, &ghState{Issues: issues})
-	writePlanDoc(t, cfg.dir, "flood.md")
+	writeDesignDoc(t, cfg.dir, "flood.md")
 
 	snap, err := readPlanDocs(context.Background(), cfg)
 	if err != nil {
@@ -1511,10 +1566,10 @@ func TestRenderStatusAndJSONIncludePlanDocuments(t *testing.T) {
 	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
-			"1": {Open: true, Body: planFooterFor("docs/plans/backlog-fill.md", "1a2b3c4")},
+			"1": {Open: true, Body: planFooterFor("docs/designs/backlog-fill.md", "1a2b3c4")},
 		},
 	})
-	writePlanDoc(t, cfg.dir, "backlog-fill.md")
+	writeDesignDoc(t, cfg.dir, "backlog-fill.md")
 
 	snap, err := readStatus(context.Background(), cfg, statusNow)
 	if err != nil {
@@ -1523,7 +1578,7 @@ func TestRenderStatusAndJSONIncludePlanDocuments(t *testing.T) {
 
 	var out strings.Builder
 	renderStatus(&out, report{}, cfg, snap)
-	for _, want := range []string{"plan documents", "docs/plans/backlog-fill.md", "active"} {
+	for _, want := range []string{"plan documents", "docs/designs/backlog-fill.md", "active"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("report missing %q:\n%s", want, out.String())
 		}
@@ -1537,7 +1592,7 @@ func TestRenderStatusAndJSONIncludePlanDocuments(t *testing.T) {
 	if err := json.Unmarshal([]byte(jsonOut.String()), &doc); err != nil {
 		t.Fatalf("output did not parse as JSON: %v\n%s", err, jsonOut.String())
 	}
-	if len(doc.Plans.Docs) != 1 || doc.Plans.Docs[0].Path != "docs/plans/backlog-fill.md" || doc.Plans.Docs[0].State != "active" {
+	if len(doc.Plans.Docs) != 1 || doc.Plans.Docs[0].Path != "docs/designs/backlog-fill.md" || doc.Plans.Docs[0].State != "active" {
 		t.Errorf("doc.Plans.Docs = %+v, want backlog-fill.md active", doc.Plans.Docs)
 	}
 }

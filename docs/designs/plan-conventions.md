@@ -4,7 +4,7 @@ Scope: docs layout, `status`, the drain's container-close step, the
 `plan-backlog` skill · Behavior change: `status` gains a section; a drain
 files one extra `proposed` issue when an epic closes
 
-Five plan documents sit under `plans/`, a sixth under `docs/plans/`. Every one
+Five plan documents sit under `plans/`, a sixth under `docs/designs/`. Every one
 says `Status: proposed`, including two whose work shipped months ago. Nothing
 reads that line, so nothing corrects it. A reader cannot tell what is done,
 what is in progress, and what is a stale idea, and the repo has no rule for
@@ -18,8 +18,8 @@ written down. It is derived from the issues that name the plan.**
 
 - **`docs/VISION.md`** is the one long-range document: what stays true, where
   it goes next. It has no status and is never "done".
-- **`docs/plans/<topic>.md`** is one document per initiative. A plan is the
-  vision for its own batch: `polako plan -vision docs/plans/<topic>.md`.
+- **`docs/designs/<topic>.md`** is one document per initiative. A plan is the
+  vision for its own batch: `polako plan -design docs/designs/<topic>.md`.
 - **No `Status:` line, no `Tracking:` line, no index file.** `polako status`
   is the index. A line nobody writes cannot go stale.
 - **Phases are task lists.** `- [x]` / `- [ ]` inside the document, which
@@ -35,7 +35,7 @@ not its progress, and do not go stale.
 
 Every issue `plan` creates ends with a footer:
 
-    Proposed by polako plan from docs/plans/foo.md @ 1a2b3c4 — edit freely; remove the `proposed` label to queue it.
+    Proposed by polako plan from docs/designs/foo.md @ 1a2b3c4 — edit freely; remove the `proposed` label to queue it.
 
 That footer is the pointer, running from issue to document. Reverse it and a
 document's state falls out of GitHub alone:
@@ -48,7 +48,7 @@ document's state falls out of GitHub alone:
 | all closed | done |
 
 `polako status` gains a plans section: one line per file under
-`docs/plans/`, its derived state, its container issues, and the count of open
+`docs/designs/`, its derived state, its container issues, and the count of open
 children. A document with no issues prints as draft. An issue whose footer
 names a document that no longer exists prints under a final "gone" line so a
 deleted plan's leftovers are visible.
@@ -74,7 +74,7 @@ comments on the thread first (`closeFinishedContainers`). Extend that step:
 after the close, if the container's footer names a document and no other open
 issue names it, file one issue:
 
-    docs: retire docs/plans/foo.md — every issue it proposed is closed
+    docs: retire docs/designs/foo.md — every issue it proposed is closed
 
 Labelled `proposed`, like everything a machine creates. Its body names the
 container that just closed, the document, and the rule: move what is still

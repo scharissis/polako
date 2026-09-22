@@ -1,7 +1,7 @@
 package main
 
 // `polako plan` runs the plan-backlog skill unattended, the way `polako work`
-// runs implement-issue: point it at a vision document (or an inline -brief) and
+// runs implement-issue: point it at a design document (or an inline -brief) and
 // it proposes a curated backlog — epics and one-PR issues — behind the
 // `proposed` label a human lifts to queue the work.
 //
@@ -46,7 +46,7 @@ const planSkillDir = "plan-backlog"
 const defaultPlanSkill = "polako:" + planSkillDir
 
 // planTools is the --allowedTools for an unattended plan run: a fraction of the
-// drain's defaultTools. A plan run reads a vision document and an entire open
+// drain's defaultTools. A plan run reads a design document and an entire open
 // backlog — attacker-editable on any repo that takes outside issues — and its
 // whole write surface is creating labelled proposals. Repo reads, GitHub issue
 // reads, Write for the scratch body file, and `gh issue create`. Nothing that
@@ -57,16 +57,16 @@ const planTools = "Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git 
 	"Read,Glob,Grep,TodoWrite,Write"
 
 // planBriefMax is where -h stops taking a -brief and starts advising a file: a
-// vision past a couple of thousand characters is a document, and belongs in one
+// design past a couple of thousand characters is a document, and belongs in one
 // so the provenance footer can carry its sha.
 const planBriefMax = 2000
 
 // planOptions is the shared intake flag set plus the three flags that are
-// plan's alone: the vision document (or inline brief) to plan from, and the
+// plan's alone: the design document (or inline brief) to plan from, and the
 // batch milestone the label pass attaches.
 type planOptions struct {
 	intakeOptions
-	vision    string
+	design    string
 	brief     string
 	milestone string
 }
@@ -92,14 +92,14 @@ func runPlan(ctx context.Context, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("plan", flag.ContinueOnError)
 	fs.SetOutput(out)
 	var opt planOptions
-	fs.StringVar(&opt.vision, "vision", "", "path (under -dir) to the vision or roadmap document to plan from")
-	fs.StringVar(&opt.brief, "brief", "", "inline vision text, in place of -vision — exactly one of the two is required")
+	fs.StringVar(&opt.design, "design", "", "path (under -dir) to the design or roadmap document to plan from — docs/VISION.md included")
+	fs.StringVar(&opt.brief, "brief", "", "inline design text, in place of -design — exactly one of the two is required")
 	fs.StringVar(&opt.milestone, "milestone", "",
-		"batch milestone title, or \"off\" to skip it (default: the vision file's name, or the brief's first words)")
+		"batch milestone title, or \"off\" to skip it (default: the design file's name, or the brief's first words)")
 	registerIntakeFlags(fs, &opt.intakeOptions, planVerb)
 	fs.Usage = func() {
-		fmt.Fprint(fs.Output(), "Usage: polako plan (-vision <doc> | -brief \"<text>\") [flags]\n\n"+
-			"Propose a curated backlog from a vision document: run the plan-backlog skill\n"+
+		fmt.Fprint(fs.Output(), "Usage: polako plan (-design <doc> | -brief \"<text>\") [flags]\n\n"+
+			"Propose a curated backlog from a design document: run the plan-backlog skill\n"+
 			"unattended, filing epics and one-PR issues behind the `proposed` label a human\n"+
 			"lifts to queue the work. Every issue the run creates is normalised to carry\n"+
 			"exactly that label before this exits, and the run is capped at -max-issues.\n\n"+
@@ -146,7 +146,7 @@ func planRun(ctx context.Context, cfg config, opt planOptions, milestone string,
 		record: func(cfg config, rep runReport, pf proposalFacts) {
 			cfg.rec.recordPlan(cfg, rep, planFacts{
 				proposalFacts: pf,
-				vision:        planVisionField(opt),
+				design:        planDesignField(opt),
 				milestone:     milestone,
 			})
 		},
@@ -156,22 +156,22 @@ func planRun(ctx context.Context, cfg config, opt planOptions, milestone string,
 // planPromptLabel names what a run is planning from, for the one log line that
 // announces it — the document path, or that it is an inline brief.
 func planPromptLabel(opt planOptions) string {
-	if opt.vision != "" {
-		return opt.vision
+	if opt.design != "" {
+		return opt.design
 	}
 	return "an inline brief"
 }
 
-// planVisionField is what the record's `vision` carries: the -vision path the
+// planDesignField is what the record's `design` carries: the -design path the
 // operator typed, or the literal "(brief)" for an inline one. A path is an
 // operator-chosen string and fair game; a brief can run to two thousand
 // characters of roadmap prose, which is document content and has no place in a
 // record — the standing recorder rule. (The batch `milestone` beside it is a
 // bounded identifier, the name of a real GitHub object the run attaches to
 // issues, so it is recorded as typed or derived.)
-func planVisionField(opt planOptions) string {
-	if opt.vision != "" {
-		return opt.vision
+func planDesignField(opt planOptions) string {
+	if opt.design != "" {
+		return opt.design
 	}
 	return "(brief)"
 }
@@ -191,46 +191,46 @@ func proposedNotifyReason(created, epics int) string {
 	return fmt.Sprintf("%s %s curation — remove the %s label to queue them", s, verb, proposedLabel)
 }
 
-// planConfig validates the vision/brief pair, then hands off to intakeConfig
-// for the config the gh helpers take. It never stats -vision to decide whether
+// planConfig validates the design/brief pair, then hands off to intakeConfig
+// for the config the gh helpers take. It never stats -design to decide whether
 // it was given: a does-the-file-exist heuristic would turn a typo'd path into a
 // silent "no document" instead of a loud failure. Preflight stats it once it is
 // settled that a path was the intent.
 func planConfig(opt *planOptions) (config, error) {
-	haveVision := strings.TrimSpace(opt.vision) != ""
+	haveDesign := strings.TrimSpace(opt.design) != ""
 	haveBrief := strings.TrimSpace(opt.brief) != ""
 	switch {
-	case haveVision && haveBrief:
-		return config{}, errors.New("-vision and -brief are mutually exclusive — pass a document path or inline text, not both")
-	case !haveVision && !haveBrief:
-		return config{}, errors.New("plan needs something to plan from — pass -vision <doc> (a path under -dir) " +
+	case haveDesign && haveBrief:
+		return config{}, errors.New("-design and -brief are mutually exclusive — pass a document path or inline text, not both")
+	case !haveDesign && !haveBrief:
+		return config{}, errors.New("plan needs something to plan from — pass -design <doc> (a path under -dir) " +
 			"or -brief \"<one sentence>\"")
 	}
 	if haveBrief && len(strings.TrimSpace(opt.brief)) > planBriefMax {
-		return config{}, fmt.Errorf("-brief is %d characters — past %d that is a document: put it in a file and pass -vision",
+		return config{}, fmt.Errorf("-brief is %d characters — past %d that is a document: put it in a file and pass -design",
 			len(strings.TrimSpace(opt.brief)), planBriefMax)
 	}
 	return intakeConfig(&opt.intakeOptions)
 }
 
 // planPreflight is intakePreflight plus the two checks that are plan's alone:
-// the -vision document resolves to a file under -dir, and — for a real run —
-// the batch milestone is ensured. The -vision stat runs first so a mistyped
+// the -design document resolves to a file under -dir, and — for a real run —
+// the batch milestone is ensured. The -design stat runs first so a mistyped
 // path fails before intakePreflight's real run declares the `proposed` label —
 // a failed `polako plan` must not leave orchestration state on a repo the
 // operator only pointed at. A dry run declares nothing: intakePreflight runs
 // the `--parent` probe (a read) but creates no label, and this creates no
 // milestone.
 func planPreflight(ctx context.Context, cfg *config, opt *planOptions) (milestone string, hierarchical bool, err error) {
-	if opt.vision != "" {
-		full := filepath.Join(cfg.dir, opt.vision)
+	if opt.design != "" {
+		full := filepath.Join(cfg.dir, opt.design)
 		info, statErr := os.Stat(full)
 		if statErr != nil {
-			return "", false, fmt.Errorf("-vision %s does not resolve to a file under -dir (%s): %w — "+
-				"check the path, or pass -brief for an inline vision", opt.vision, cfg.dir, statErr)
+			return "", false, fmt.Errorf("-design %s does not resolve to a file under -dir (%s): %w — "+
+				"check the path, or pass -brief for an inline design", opt.design, cfg.dir, statErr)
 		}
 		if info.IsDir() {
-			return "", false, fmt.Errorf("-vision %s is a directory, not a document", opt.vision)
+			return "", false, fmt.Errorf("-design %s is a directory, not a document", opt.design)
 		}
 	}
 
@@ -250,7 +250,7 @@ func planPreflight(ctx context.Context, cfg *config, opt *planOptions) (mileston
 }
 
 // planMilestoneTitle is the batch milestone's title: -milestone when set,
-// "" when it is "off", and otherwise derived — the vision file's base name
+// "" when it is "off", and otherwise derived — the design file's base name
 // without its extension, or the brief's first words.
 func planMilestoneTitle(opt *planOptions) string {
 	if m := strings.TrimSpace(opt.milestone); m != "" {
@@ -259,8 +259,8 @@ func planMilestoneTitle(opt *planOptions) string {
 		}
 		return m
 	}
-	if opt.vision != "" {
-		base := filepath.Base(filepath.ToSlash(opt.vision))
+	if opt.design != "" {
+		base := filepath.Base(filepath.ToSlash(opt.design))
 		if ext := filepath.Ext(base); ext != "" {
 			base = strings.TrimSuffix(base, ext)
 		}
@@ -359,8 +359,8 @@ func ensureMilestone(ctx context.Context, cfg config, title string) error {
 // no milestone and records nothing: pointing it at an unfamiliar repository
 // leaves that repository exactly as it found it.
 func planDryRun(cfg config, opt planOptions, milestone string, hierarchical bool, out io.Writer) error {
-	if opt.vision != "" {
-		cfg.logf("planning from %s", opt.vision)
+	if opt.design != "" {
+		cfg.logf("planning from %s", opt.design)
 	} else {
 		cfg.logf("planning from an inline brief (%d characters)", len(strings.TrimSpace(opt.brief)))
 	}
@@ -394,7 +394,7 @@ func planArgs(cfg config, opt planOptions) []string {
 // planPrompt is the -p string the skill is invoked with: the slash command and
 // its two declared arguments, the document (or brief) and the optional focus.
 // Just those two — the shipped plan-backlog SKILL.md declares `arguments:
-// [vision, focus]` and nothing more: it derives flat-vs-hierarchical from its
+// [design, focus]` and nothing more: it derives flat-vs-hierarchical from its
 // own `gh issue create` error, and the batch milestone is attached binary-side
 // by the label pass, so there is nothing more for the prompt to carry.
 func planPrompt(cfg config, opt planOptions) string {
@@ -408,15 +408,15 @@ func planPrompt(cfg config, opt planOptions) string {
 // planPromptSubject is the skill's first argument: the document path, or the
 // brief standing in its place.
 func planPromptSubject(opt planOptions) string {
-	if opt.vision != "" {
-		return opt.vision
+	if opt.design != "" {
+		return opt.design
 	}
 	return strings.TrimSpace(opt.brief)
 }
 
 // planSlashArg wraps a slash-command argument in double quotes when it carries
 // whitespace, so the skill sees one argument rather than several, escaping any
-// embedded quote so the wrapping is not closed early. A vision path or focus
+// embedded quote so the wrapping is not closed early. A design path or focus
 // steer carrying a literal quote is the rare case the escaping hedges against.
 func planSlashArg(s string) string {
 	if !strings.ContainsAny(s, " \t\"") {

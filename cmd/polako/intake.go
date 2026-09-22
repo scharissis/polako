@@ -20,7 +20,7 @@ import (
 )
 
 // intakeOptions is the flag set both intake verbs register identically:
-// `polako plan` wraps it with -vision/-brief/-milestone, `polako health` uses
+// `polako plan` wraps it with -design/-brief/-milestone, `polako health` uses
 // it as-is. Field order matches health's registration order.
 type intakeOptions struct {
 	focus          string
@@ -88,7 +88,7 @@ func registerIntakeFlags(fs *flag.FlagSet, opt *intakeOptions, v intakeVerb) {
 
 // intakeConfig builds the config the gh helpers take, the lightweight way
 // status's and tidy's are built rather than work's heavier preflight. planConfig
-// wraps it with its vision/brief validation; healthConfig is a thin call.
+// wraps it with its design/brief validation; healthConfig is a thin call.
 func intakeConfig(opt *intakeOptions) (config, error) {
 	if opt.maxIssues < 1 {
 		return config{}, fmt.Errorf("-max-issues %d makes no sense — a run has to be allowed at least one issue", opt.maxIssues)
@@ -135,7 +135,7 @@ func intakeConfig(opt *intakeOptions) (config, error) {
 // `gh issue create --parent` capability probe whose result a dry run reports.
 // For a real run it also pins the CLI and skill versions the record carries
 // and declares the `proposed` label GitHub would otherwise refuse. plan wraps
-// this with its -vision stat and the batch milestone; health calls it and adds
+// this with its -design stat and the batch milestone; health calls it and adds
 // nothing. verb is the noun in the binaries-missing error.
 func intakePreflight(ctx context.Context, cfg *config, opt *intakeOptions, verb string) (hierarchical bool, err error) {
 	for _, bin := range []string{cfg.claudeBin, cfg.ghBin, "git"} {
