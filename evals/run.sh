@@ -100,8 +100,7 @@ python3 -c 'import sys; float(sys.argv[1])' "$max_cost" 2>/dev/null || {
 # evals_dir sits inside repo_root, the default plugin_dir. mktemp -d keeps
 # this true unconditionally, including under --plugin-dir <worktree>, rather
 # than relying on the worktree happening to sit outside evals_dir too.
-results_root=$(mktemp -d "${TMPDIR:-/tmp}/polako-evals.XXXXXX")
-results=$results_root/$(date +%Y%m%d-%H%M%S)-by-hand
+results=$(mktemp -d "${TMPDIR:-/tmp}/polako-evals.XXXXXX")/$(date +%Y%m%d-%H%M%S)-by-hand
 mkdir -p "$results"
 echo "results: $results"
 
