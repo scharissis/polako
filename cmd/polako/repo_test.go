@@ -1759,6 +1759,30 @@ func TestNoVersionedModelIDsInSource(t *testing.T) {
 	}
 }
 
+// Ticket 3 of docs/plans/unpark.md (#532): unpark's next-shift line has to
+// come from the drain's own restart-safety decision, not a copy of it, so a
+// change to one can't silently leave the other describing something
+// different. issue.go's loop and unpark_work.go's nextShiftLine both have to
+// call waitsOnPR — a source scan rather than a behavioral test, because the
+// failure mode this guards against is someone inlining the `pr != nil` check
+// again instead of calling the shared function.
+func TestIssueLoopAndUnparkShareRestartSafety(t *testing.T) {
+	t.Parallel()
+	issue := readRepoFile(t, "cmd", "polako", "issue.go")
+	unpark := readRepoFile(t, "cmd", "polako", "unpark_work.go")
+	if !strings.Contains(issue, "waitsOnPR(pr)") {
+		t.Errorf("issue.go's loop no longer calls waitsOnPR — it and unpark's next-shift line can now disagree")
+	}
+	if !strings.Contains(unpark, "waitsOnPR(pr)") {
+		t.Errorf("unpark_work.go's nextShiftLine no longer calls waitsOnPR — it and the drain's restart safety can now disagree")
+	}
+
+	const marker = "Restart safety."
+	if !strings.Contains(readRepoFile(t, "CLAUDE.md"), marker) {
+		t.Errorf("CLAUDE.md is missing the restart-safety invariant (%q) this test enforces", marker)
+	}
+}
+
 // A queue is derived by excluding orchestration labels, and the -label gate is
 // the one thing standing between "anyone can open an issue" and "anyone can
 // queue work for an unattended agent". An issue form's `labels:` key is applied
