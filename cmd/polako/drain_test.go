@@ -118,6 +118,18 @@ type ghState struct {
 	// Empty falls back to fakeViewerLogin, so a fixture that never sets this
 	// still has a login every comment's own author defaults to.
 	ViewerLogin string `json:"viewer_login"`
+
+	// DefaultBranch is what `gh api repos/{owner}/{repo} --jq .default_branch`
+	// answers — unpark's own read (unparkDefaultBranch), the base half of the
+	// compare it makes for a parked issue with no PR. Empty falls back to
+	// "main", so a fixture that never sets this still has one.
+	DefaultBranch string `json:"default_branch"`
+	// CompareAhead is what `gh api .../compare/{def}...{branch} --jq
+	// .ahead_by` answers, keyed by branch name — unpark's own read
+	// (branchAheadOfDefault) for a parked issue with no PR. A branch absent
+	// from this map answers 404, the same as a branch that never reached
+	// origin.
+	CompareAhead map[string]int `json:"compare_ahead"`
 }
 
 // fakeViewerLogin is ViewerLogin's default — the account every gh call in a
@@ -256,6 +268,14 @@ func viewerLogin(st *ghState) string {
 	return fakeViewerLogin
 }
 
+// apiIsBareRepoPath reports whether a is exactly repos/{owner}/{repo} with
+// nothing past it — unparkDefaultBranch's own call, told apart from every
+// other repos/... path (compare, labels, milestones, ...) by having exactly
+// two slashes.
+func apiIsBareRepoPath(a string) bool {
+	return strings.HasPrefix(a, "repos/") && strings.Count(a, "/") == 2
+}
+
 // apiIssue picks the issue number out of the one REST path the drain asks for,
 // repos/{owner}/{repo}/issues/N/comments?per_page=100.
 func apiIssue(path string) string {
@@ -352,8 +372,16 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			return answerContents(st, args)
 		} else if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "/protection") }) {
 			return answerBranchProtection(st)
+		} else if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "/compare/") }) {
+			// unpark's own read for a parked issue with no PR
+			// (branchAheadOfDefault): repos/{owner}/{repo}/compare/{def}...{branch}.
+			call = "api compare"
 		} else if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "/labels/") }) {
 			call = "api label"
+		} else if slices.ContainsFunc(args, apiIsBareRepoPath) {
+			// unpark's own default-branch read (unparkDefaultBranch):
+			// repos/{owner}/{repo}, nothing past it.
+			call = "api repo"
 		} else {
 			call = "api comments"
 		}
@@ -520,6 +548,36 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 
 	case "api user":
 		return fmt.Sprintf("%s\n", viewerLogin(st)), false, 0
+
+	case "api repo":
+		// unparkDefaultBranch's own call: repos/{owner}/{repo} --jq
+		// .default_branch.
+		def := st.DefaultBranch
+		if def == "" {
+			def = "main"
+		}
+		return def + "\n", false, 0
+
+	case "api compare":
+		// branchAheadOfDefault's own call:
+		// repos/{owner}/{repo}/compare/{def}...{branch} --jq .ahead_by. A
+		// branch CompareAhead never named answers the way GitHub answers a
+		// compare against a ref that doesn't exist: 404.
+		var path string
+		for _, a := range args {
+			if strings.Contains(a, "/compare/") {
+				path = a
+				break
+			}
+		}
+		_, rest, _ := strings.Cut(path, "/compare/")
+		_, branch, _ := strings.Cut(rest, "...")
+		ahead, ok := st.CompareAhead[branch]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "gh: No common ancestor (HTTP 404)\n")
+			return "", false, 1
+		}
+		return fmt.Sprintf("%d\n", ahead), false, 0
 
 	case "api label":
 		// labelExists's own call: repos/{owner}/{repo}/labels/<name>, name

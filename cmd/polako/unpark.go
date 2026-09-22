@@ -25,10 +25,11 @@ import (
 )
 
 type unparkOptions struct {
-	dir   string
-	repo  string
-	apply bool
-	yes   bool
+	dir          string
+	repo         string
+	apply        bool
+	yes          bool
+	branchPrefix string
 }
 
 // runUnpark is the `unpark` subcommand: parse its own flags, list the parked
@@ -46,6 +47,7 @@ func runUnpark(ctx context.Context, args []string, in io.Reader, isTTY bool, out
 		"remove needs-human from the issues you approve, asking [y/N] first — needs a terminal, or -yes")
 	fs.BoolVar(&opt.yes, "yes", false,
 		"with -apply, clear every listed issue without asking — required when stdin isn't a terminal")
+	fs.StringVar(&opt.branchPrefix, "branch-prefix", "issue-", "branch name prefix the skill uses")
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako unpark [flags] [issue]\n\n"+
 			"Lists every issue labelled needs-human, with the reason and any -add-tools\n"+
@@ -124,8 +126,9 @@ func unparkIssueArg(rest []string) (int, error) {
 // from -dir.
 func unparkConfig(ctx context.Context, opt unparkOptions) (config, error) {
 	cfg := config{
-		ghBin:       "gh",
-		ghRetryWait: ghRetryDelay,
+		ghBin:        "gh",
+		ghRetryWait:  ghRetryDelay,
+		branchPrefix: opt.branchPrefix,
 	}
 	if _, err := exec.LookPath(cfg.ghBin); err != nil {
 		return cfg, fmt.Errorf("%q not found on PATH (%w) — unpark reads and writes GitHub through it", cfg.ghBin, err)
@@ -168,6 +171,11 @@ type parkListItem struct {
 	entries  []string
 	ignored  []string
 	category string
+	// work is read separately from the rest of this struct — it needs
+	// gh calls readParkListItem doesn't make, and readParkListItems is
+	// shared with status.go's own needs-you line, which has no use for it.
+	// See readParkWork.
+	work parkWork
 }
 
 // unparkReasonWidth is where the table clips a reason. The fallback permission
@@ -210,6 +218,15 @@ func readParkedIssues(ctx context.Context, cfg config, only int) ([]parkListItem
 	items := make([]parkListItem, len(parked))
 	for i, issue := range parked {
 		items[i] = byIssue[issue]
+	}
+	if len(items) > 0 {
+		// Resolved once for the whole listing, not per issue — only the
+		// no-PR/compare path below needs it, and a failure here still lets
+		// every issue with an open PR render normally.
+		def, _ := unparkDefaultBranch(ctx, cfg)
+		for i := range items {
+			items[i].work = readParkWork(ctx, cfg, items[i].issue, def)
+		}
 	}
 	return items, nil
 }
@@ -295,6 +312,102 @@ func parkCommentReason(body string) string {
 		rest = rest[:i]
 	}
 	return rest
+}
+
+// --- reading work: branch, PR and CI ---
+
+// parkWork is what unpark shows about a parked issue's branch, PR and CI —
+// the first thing a human checks about a park: is there already a PR, is it
+// green, or is there nothing pushed at all. read is false when the chain of
+// gh calls below could not finish — the row still renders, as "not read",
+// the same best-effort rule readParkListItem follows for reason.
+//
+// GitHub only, on purpose: local, unpushed work is a separate concern (a
+// later child of #529) that would need the worktree on this machine, which
+// a read-only listing has no business assuming exists.
+type parkWork struct {
+	read     bool
+	branch   string
+	prNumber int
+	prURL    string
+	checks   string   // one of the checks* verdicts (pr.go), "" when unread
+	failing  []string // the checks that earned checksFailing
+	onOrigin bool     // only meaningful when prNumber == 0
+	ahead    int      // commits ahead of the default branch; only meaningful when onOrigin
+}
+
+// readParkWork reads one parked issue's branch: prForBranch first, and with
+// a PR, its checks. With no PR, def (the repository's default branch, read
+// once per listing by readParkedIssues) decides whether origin has the
+// branch at all and how far ahead of def it sits.
+func readParkWork(ctx context.Context, cfg config, issue int, def string) parkWork {
+	branch := fmt.Sprintf("%s%d", cfg.branchPrefix, issue)
+	w := parkWork{branch: branch}
+	pr, err := prForBranch(ctx, cfg, branch)
+	if err != nil {
+		return w
+	}
+	if pr != nil {
+		w.read, w.prNumber, w.prURL = true, pr.Number, pr.URL
+		if view, verr := prStatus(ctx, cfg, pr.Number); verr == nil {
+			w.checks, w.failing = view.checks, view.failing
+		}
+		return w
+	}
+	if def == "" {
+		// The default-branch read already failed for the whole listing —
+		// nothing left to compare against.
+		return w
+	}
+	ahead, onOrigin, err := branchAheadOfDefault(ctx, cfg, def, branch)
+	if err != nil {
+		return w
+	}
+	w.read, w.onOrigin, w.ahead = true, onOrigin, ahead
+	return w
+}
+
+// branchAheadOfDefault reads how far branch is ahead of def on origin. The
+// gh CLI has no subcommand for a compare, only `gh api`; a 404 answers "no
+// branch on origin" definitively, the same shape labelExists (labels.go)
+// turns its own 404 into (false, nil) before retryRead ever sees it as
+// something to retry.
+func branchAheadOfDefault(ctx context.Context, cfg config, def, branch string) (ahead int, onOrigin bool, err error) {
+	type compareResult struct {
+		ahead    int
+		onOrigin bool
+	}
+	r, err := retryRead(ctx, cfg, "comparing "+branch+" to "+def, func() (compareResult, error) {
+		out, err := gh(ctx, cfg, "api",
+			fmt.Sprintf("repos/{owner}/{repo}/compare/%s...%s", def, branch), "--jq", ".ahead_by")
+		if err == nil {
+			n, perr := strconv.Atoi(strings.TrimSpace(string(out)))
+			if perr != nil {
+				return compareResult{}, perr
+			}
+			return compareResult{ahead: n, onOrigin: true}, nil
+		}
+		if isNotFoundError(err) {
+			return compareResult{}, nil
+		}
+		return compareResult{}, err
+	})
+	return r.ahead, r.onOrigin, err
+}
+
+// unparkDefaultBranch reads the repository's default branch name — the base
+// half of the compare readParkWork uses for a pushed branch with no PR yet.
+// Best-effort like ghViewerLogin: a failure here is reported by returning it,
+// and readParkedIssues treats it the same way it treats any other read that
+// could not finish — the listing still runs, minus the one thing it enabled.
+func unparkDefaultBranch(ctx context.Context, cfg config) (string, error) {
+	return retryRead(ctx, cfg, "reading the repository's default branch", func() (string, error) {
+		out, err := gh(ctx, cfg, "api", "repos/{owner}/{repo}", "--jq", ".default_branch")
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(out)), nil
+	})
 }
 
 // validParkEntryRe matches the two shapes addToolsEntry (refusals.go) ever
@@ -390,15 +503,17 @@ func renderUnpark(w io.Writer, rpt report, cfg config, items []parkListItem, sin
 		if cfg.repo != "" {
 			fmt.Fprintf(w, "  %s  https://github.com/%s/issues/%d\n", rpt.dim("thread   "), cfg.repo, it.issue)
 		}
+		renderParkWorkDetail(w, rpt, it.work)
 		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("reason   "), it.reason)
 		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("add-tools"), renderParkEntries(it))
 		return
 	}
 	rows := make([][]string, len(items))
 	for i, it := range items {
-		rows[i] = []string{"#" + strconv.Itoa(it.issue), clip(it.reason, unparkReasonWidth), renderParkEntries(it)}
+		rows[i] = []string{"#" + strconv.Itoa(it.issue), parkWorkSummary(it.work),
+			clip(it.reason, unparkReasonWidth), renderParkEntries(it)}
 	}
-	printTable(w, rpt, "parked", []string{"issue", "reason", "add-tools"}, rows, 3)
+	printTable(w, rpt, "parked", []string{"issue", "work", "reason", "add-tools"}, rows, 4)
 }
 
 // printUnparkNextStep closes a listing that changed nothing with what to run
@@ -424,4 +539,42 @@ func renderParkEntries(it parkListItem) string {
 		parts = append(parts, e+" (ignored)")
 	}
 	return strings.Join(parts, ", ")
+}
+
+// parkWorkSummary is the table's clipped work cell: whether there's a PR and
+// whether its CI is red, or, with no PR, whether the branch reached origin
+// at all and how far ahead it is.
+func parkWorkSummary(w parkWork) string {
+	switch {
+	case !w.read:
+		return "not read"
+	case w.prNumber != 0:
+		if w.checks == checksFailing {
+			return fmt.Sprintf("PR #%d, CI red", w.prNumber)
+		}
+		return fmt.Sprintf("PR #%d", w.prNumber)
+	case w.onOrigin:
+		return fmt.Sprintf("%s, %s, no PR", w.branch, plural(w.ahead, "commit"))
+	default:
+		return "nothing pushed"
+	}
+}
+
+// renderParkWorkDetail is the one-issue view's expansion of parkWorkSummary:
+// the PR link and any failing check names, or the branch and its commit
+// count when there's no PR yet.
+func renderParkWorkDetail(w io.Writer, rpt report, work parkWork) {
+	switch {
+	case !work.read:
+		fmt.Fprintf(w, "  %s  not read\n", rpt.dim("work     "))
+	case work.prNumber != 0:
+		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("pr       "), work.prURL)
+		if len(work.failing) > 0 {
+			fmt.Fprintf(w, "  %s  %s\n", rpt.dim("checks   "), strings.Join(work.failing, ", "))
+		}
+	case work.onOrigin:
+		fmt.Fprintf(w, "  %s  %s, %s, no PR\n", rpt.dim("branch   "), work.branch, plural(work.ahead, "commit"))
+	default:
+		fmt.Fprintf(w, "  %s  nothing pushed\n", rpt.dim("branch   "))
+	}
 }
