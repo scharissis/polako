@@ -428,8 +428,8 @@ func appendGitignoreLines(dir string, lines []string) error {
 
 // setupFilesPRBody lists what the pushed branch actually carries over
 // remoteDefault — the .gitignore lines, always the same fixed set per
-// issue #416's "Done when" for that half of the ticket, plus the
-// CLAUDE.md block and the scaffold when either is on the branch too. Reads
+// issue #416's own "Done when", plus the CLAUDE.md block and the scaffold
+// when either is on the branch too. Reads
 // result's proposed* fields, which come from a diff against remoteDefault —
 // not "did this run's own write step add it", so an item an earlier dead
 // run already committed still gets named here.
