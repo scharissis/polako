@@ -199,7 +199,6 @@ func newShift(cfg config) *shift {
 	if skip == nil {
 		skip = map[int]bool{}
 	}
-	cfg.skip = skip
 	return &shift{
 		cfg:                 cfg,
 		started:             time.Now(),
