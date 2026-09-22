@@ -1332,6 +1332,26 @@ func captureUI(t *testing.T, u *ui) {
 	t.Cleanup(func() { testCaptureUI.Delete(t) })
 }
 
+// fakeClaudeConfig is the config builder shared by every test that dispatches
+// the fake CLI through execClaude — claude_test.go's own tests, and
+// gate_test.go's, metrics_test.go's and status_test.go's fixtures too — which
+// is why it lives here with the rest of the harness rather than in one of
+// those topic files.
+func fakeClaudeConfig(t *testing.T, mode string) config {
+	t.Helper()
+	return config{
+		env:            fakeEnv(fakeClaudeEnv, mode), // handed to the child, not set on the parent
+		ui:             testUI(t),
+		dir:            t.TempDir(),
+		claudeBin:      fakeCLI(t), // this test package, re-entered via TestMain
+		skill:          defaultSkill,
+		permissionMode: "acceptEdits",
+		tools:          "Read",
+		stall:          10 * time.Second,
+		visualEvidence: true,
+	}
+}
+
 // Only SIGINT used to cancel the run. A SIGTERM — a machine shutting down, a
 // service manager stopping the unit, a plain pkill — killed the supervisor
 // outright, so the context never cancelled and exec.CommandContext never killed

@@ -331,21 +331,6 @@ func TestSleepReturnsOnCancel(t *testing.T) {
 
 // --- end-to-end runs against the fake claude CLI ---
 
-func fakeClaudeConfig(t *testing.T, mode string) config {
-	t.Helper()
-	return config{
-		env:            fakeEnv(fakeClaudeEnv, mode), // handed to the child, not set on the parent
-		ui:             testUI(t),
-		dir:            t.TempDir(),
-		claudeBin:      fakeCLI(t), // this test package, re-entered via TestMain
-		skill:          defaultSkill,
-		permissionMode: "acceptEdits",
-		tools:          "Read",
-		stall:          10 * time.Second,
-		visualEvidence: true,
-	}
-}
-
 func TestExecClaudeStreamsEventsAndCapturesSession(t *testing.T) {
 	t.Parallel()
 	buf := captureLog(t)
