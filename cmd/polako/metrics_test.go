@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -896,5 +897,37 @@ func TestSummaryCommentSaysWhenItsNumbersAreUndercounts(t *testing.T) {
 	}
 	if !strings.Contains(got, "undercounts") {
 		t.Errorf("summary does not say the numbers are low:\n%s", got)
+	}
+}
+
+// -post-summary is the one path that shows run data to anybody but the
+// operator, so it keeps the discipline the records keep: what the run said
+// never reaches it. The recorder is off here, which is also the combination
+// the README offers to an operator who wants no local files at all.
+func TestSummaryCommentNeverCarriesWhatTheRunSaid(t *testing.T) {
+	t.Parallel()
+	captureLog(t)
+	cfg := fakeClaudeConfig(t, "stream")
+	cfg.repo, cfg.rec = "owner/repo", newRecorder(metricsOff)
+
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0)
+	if err != nil {
+		t.Fatalf("execClaude: %v", err)
+	}
+	var tally issueTally
+	tally.add(cfg.rec.recordRun(cfg, runContext{issue: 7, reason: reasonImplement,
+		outcome: outcomeOpenedPR, started: time.Now(), ended: time.Now()}, rep))
+
+	body := summaryComment(tally)
+	for _, leaked := range []string{"Reading the issue", "go test ./...", "Bash", "compact", "Opened a PR"} {
+		if strings.Contains(body, leaked) {
+			t.Errorf("summary carries %q from the stream:\n%s", leaked, body)
+		}
+	}
+	// The numbers the canned result reported, which is all it may carry.
+	for _, want := range []string{"1 run", "$0.50"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("summary is missing %q:\n%s", want, body)
+		}
 	}
 }

@@ -6016,3 +6016,25 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 		})
 	}
 }
+
+func TestPickLowestHonoursSkip(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		numbers []int
+		skip    map[int]bool
+		want    int
+	}{
+		{"unordered input", []int{9, 3, 17}, nil, 3},
+		{"skips the head of the line", []int{9, 3, 17}, map[int]bool{3: true}, 9},
+		{"everything skipped", []int{3}, map[int]bool{3: true}, 0},
+		{"no issues", nil, nil, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := pickLowest(c.numbers, c.skip); got != c.want {
+				t.Errorf("pickLowest(%v, %v) = %d, want %d", c.numbers, c.skip, got, c.want)
+			}
+		})
+	}
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -517,5 +518,71 @@ func TestReleaseVersionRejectsAPseudoVersion(t *testing.T) {
 		t.Errorf("releaseVersion(v0.4.0) = %q, %v; want the bare version", v, ok)
 	} else if want := [3]int{0, 4, 0}; parts != want {
 		t.Errorf("releaseVersion(v0.4.0) parts = %v, want %v", parts, want)
+	}
+}
+
+// effortFlagGate fails the run before it starts when -effort is set and the
+// installed CLI has no --effort — otherwise the usage error lands an hour in,
+// looks like a crash, and burns every resume. The message names the CLI
+// version so the operator knows which install to update.
+func TestEffortFlagGate(t *testing.T) {
+	t.Setenv(fakeClaudeEnv, "stream") // any mode: --help is argv-dispatched ahead of it
+	cfg := config{claudeBin: fakeCLI(t), dir: t.TempDir()}
+
+	// Unset -effort: no probe, no error, whatever the CLI is.
+	if err := effortFlagGate(context.Background(), cfg); err != nil {
+		t.Errorf("effortFlagGate with no -effort = %v, want nil", err)
+	}
+
+	cfg.effort = "medium"
+	if err := effortFlagGate(context.Background(), cfg); err != nil {
+		t.Errorf("a CLI whose --help lists --effort should pass, got %v", err)
+	}
+
+	// -remediation-effort is the other flag that gates: it maps to the same
+	// --effort, so a CLI that lists it passes with only that one set.
+	remOnly := config{claudeBin: cfg.claudeBin, dir: cfg.dir, remediationEffort: "medium"}
+	if err := effortFlagGate(context.Background(), remOnly); err != nil {
+		t.Errorf("-remediation-effort alone should gate like -effort, got %v", err)
+	}
+
+	// -effort-by-size can put --effort on the argv too, so it gates like the
+	// other two: alone it passes against a CLI that lists --effort.
+	sizeOnly := config{claudeBin: cfg.claudeBin, dir: cfg.dir, effortBySize: "S=medium"}
+	if err := effortFlagGate(context.Background(), sizeOnly); err != nil {
+		t.Errorf("-effort-by-size alone should gate like -effort, got %v", err)
+	}
+
+	t.Setenv(fakeEffortHelpEnv, "0") // model an older CLI
+	if err := effortFlagGate(context.Background(), sizeOnly); err == nil ||
+		!strings.Contains(err.Error(), "-effort-by-size") {
+		t.Errorf("the error should name -effort-by-size, got %v", err)
+	}
+	err := effortFlagGate(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("effortFlagGate let -effort through against a CLI with no --effort")
+	}
+	if !strings.Contains(err.Error(), "2.1.99") {
+		t.Errorf("the error should name the CLI version, got %v", err)
+	}
+	// A bad -remediation-effort against an old CLI names that flag, not -effort.
+	if err := effortFlagGate(context.Background(), remOnly); err == nil ||
+		!strings.Contains(err.Error(), "-remediation-effort") {
+		t.Errorf("the error should name -remediation-effort, got %v", err)
+	}
+	// Both set: name both, so the operator does not fix one and hit the other.
+	both := config{claudeBin: cfg.claudeBin, dir: cfg.dir, effort: "high", remediationEffort: "medium"}
+	err = effortFlagGate(context.Background(), both)
+	if err == nil || !strings.Contains(err.Error(), "-effort high") ||
+		!strings.Contains(err.Error(), "-remediation-effort medium") {
+		t.Errorf("with both effort flags set the error should name both, got %v", err)
+	}
+
+	// A probe that will not run at all is best-effort: warn, don't block —
+	// a broken CLI has its own louder failure coming.
+	broken := cfg
+	broken.claudeBin = filepath.Join(t.TempDir(), "no-such-claude")
+	if err := effortFlagGate(context.Background(), broken); err != nil {
+		t.Errorf("a failed --help probe should not block the run, got %v", err)
 	}
 }
