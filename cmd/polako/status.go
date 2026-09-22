@@ -247,9 +247,11 @@ type statusSnapshot struct {
 	// copied. Best-effort like usage and plans below: nil when the read
 	// failed, which needsYouParts and statusDocFrom both treat as "no
 	// footer on any parked issue" rather than failing the whole snapshot.
-	// Only ever holds parkListItem.entries — never .reason, which is
-	// clipped comment text and would break the "no comment text reaches
-	// the terminal" rule this report holds to everywhere else.
+	// Only ever holds parkListItem.entries and .category — never .reason,
+	// which is clipped comment text and would break the "no comment text
+	// reaches the terminal" rule this report holds to everywhere else.
+	// .category is a fixed identifier (metrics.go), not comment text, so
+	// reading it here doesn't.
 	parks map[int]parkListItem
 }
 
@@ -721,6 +723,31 @@ func needsYou(snap statusSnapshot) string {
 	return "needs you: " + strings.Join(parts, "; ")
 }
 
+// parkNeedsYouClause is the short "why it parked" phrase the needs-you line
+// uses per park category (metrics.go) — distinct from parkNextStepTable
+// (unpark_work.go), which is a "what to do" sentence for unpark's own
+// single-issue view. This line already ends "— polako unpark N", so it only
+// has to say what happened, terse enough to sit beside other issues' own
+// clauses on one line. parkPermission's entry is used only when the park
+// named no grantable entry — a granted one keeps needsYouParts's own
+// existing "grant ..." wording instead. A category missing here is a bug:
+// TestParkNeedsYouClauseCoversEveryCategory walks parkReasonOrder and fails
+// if one turns up without a phrase.
+var parkNeedsYouClause = map[string]string{
+	parkBudget:     "hit its time or cost cap",
+	parkRetries:    "kept crashing and ran out of retries",
+	parkNothing:    "ran clean but left nothing behind",
+	parkNoSkill:    "asked for a skill this install doesn't have",
+	parkAuth:       "hit an API auth failure",
+	parkPermission: "was refused a permission",
+	parkConflicts:  "gave up resolving a merge conflict",
+	parkChecks:     "gave up on a failing check",
+	parkReview:     "gave up resolving review feedback",
+	parkPRState:    "left its PR in a state polako doesn't know",
+	parkPRClosed:   "had its PR closed without merging",
+	parkUnknown:    "parked for a reason polako couldn't name",
+}
+
 // needsYouParts is needsYou's derivation on its own, one clause per item, so
 // the JSON renderer can carry the same list structured rather than joined
 // into prose — the "second renderer, not a second pipeline" rule applied to
@@ -748,30 +775,46 @@ func needsYouParts(snap statusSnapshot) []string {
 	if len(stuck) > 0 {
 		parts = append(parts, "approve the checks waiting on you on PR "+strings.Join(stuck, ", "))
 	}
-	// A parked issue whose own park comment named entries a rerun could use
-	// gets its own clause naming them — a footer-less park, or one whose
-	// footer named nothing valid (validParkEntry), keeps today's batched
-	// clause instead. snap.parks is nil (not just empty) when the read
-	// itself failed, and a nil map's lookups all miss the same way an empty
-	// one's would, so every parked issue falls back to the batched clause.
-	// One pass decides both lists, so the two clauses can never classify the
-	// same issue two different ways.
+	// A parked issue whose own park comment named entries a rerun could grant
+	// gets its own clause naming them, whatever its category — including a
+	// pre-#530 comment with a Refused: footer but no Park: one, category
+	// "". Otherwise, a named category gets its parkNeedsYouClause phrase. A
+	// park with no entries and no category — no comment of polako's own to
+	// read, or a hand label — keeps today's batched clause. snap.parks is
+	// nil (not just empty) when the read itself failed, and a nil map's
+	// lookups all miss the same way an empty one's would, so every parked
+	// issue falls back to the batched clause. One pass decides both lists,
+	// so the two clauses can never classify the same issue two different
+	// ways.
 	var undecided []int
-	var granted []string
+	var perIssue []string
 	for _, issue := range snap.queues.parked {
 		it, ok := snap.parks[issue]
-		if !ok || len(it.entries) == 0 {
+		switch {
+		case !ok:
 			undecided = append(undecided, issue)
-			continue
+		case len(it.entries) > 0:
+			perIssue = append(perIssue, fmt.Sprintf("grant %s or fix the skill, then polako unpark #%d",
+				strings.Join(it.entries, ", "), issue))
+		case it.category != "":
+			if clause, ok := parkNeedsYouClause[it.category]; ok {
+				perIssue = append(perIssue, fmt.Sprintf("#%d %s — polako unpark %d", issue, clause, issue))
+			} else {
+				// A category readStatus recognized (parseParkCategory only
+				// returns one from parkReasonOrder) but this table hasn't
+				// caught up with — the completeness test should catch this
+				// first, but the batched clause is still a truthful fallback.
+				undecided = append(undecided, issue)
+			}
+		default:
+			undecided = append(undecided, issue)
 		}
-		granted = append(granted, fmt.Sprintf("grant %s or fix the skill, then polako unpark #%d",
-			strings.Join(it.entries, ", "), issue))
 	}
 	if len(undecided) > 0 {
 		parts = append(parts, fmt.Sprintf("decide what to do about %s (drop %s to requeue)",
 			issueRefs(undecided), needsHumanLabel))
 	}
-	parts = append(parts, granted...)
+	parts = append(parts, perIssue...)
 	// Curation is a person's job by construction — nothing else takes the label
 	// off — so a backlog of proposals is one of the things only a person moves.
 	if len(snap.queues.proposed) > 0 {

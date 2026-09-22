@@ -57,17 +57,21 @@ type statusDocQueue struct {
 	Containers []statusDocContainer `json:"containers"`
 }
 
-// statusDocParked is one parked issue with the entries its own park comment
-// named — #168's widening applied here too: bare issue numbers to objects,
-// so a caller can tell a park with a named grant from one still waiting on a
-// person's own judgment without a second call. Entries is always `[]`, never
-// null — the same rule every array field in this document holds to — and
-// only ever the valid, thread-safe entries validParkEntry accepts; an
-// ignored one (unpark's own term for a footer entry shaped wrong, or naming
-// a never-grant command) is left out, same as unpark's own rendering.
+// statusDocParked is one parked issue with the entries and category its own
+// park comment named — #168's widening applied here too: bare issue numbers
+// to objects, so a caller can tell a park with a named grant from one still
+// waiting on a person's own judgment without a second call. Entries is
+// always `[]`, never null — the same rule every array field in this
+// document holds to — and only ever the valid, thread-safe entries
+// validParkEntry accepts; an ignored one (unpark's own term for a footer
+// entry shaped wrong, or naming a never-grant command) is left out, same as
+// unpark's own rendering. Category is one of the fixed identifiers in
+// metrics.go, or "" when the comment carried none parseParkCategory
+// recognizes — no comment of polako's own, or a hand label.
 type statusDocParked struct {
-	Issue   int      `json:"issue"`
-	Entries []string `json:"entries"`
+	Issue    int      `json:"issue"`
+	Entries  []string `json:"entries"`
+	Category string   `json:"category"`
 }
 
 // statusDocContainer is one container issue with its sub-issue rollup, so a
@@ -160,7 +164,11 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 
 	parked := make([]statusDocParked, 0, len(snap.queues.parked))
 	for _, issue := range snap.queues.parked {
-		parked = append(parked, statusDocParked{Issue: issue, Entries: nonNilSlice(snap.parks[issue].entries)})
+		parked = append(parked, statusDocParked{
+			Issue:    issue,
+			Entries:  nonNilSlice(snap.parks[issue].entries),
+			Category: snap.parks[issue].category,
+		})
 	}
 
 	prs := make([]statusDocPR, 0, len(snap.prs))

@@ -361,7 +361,7 @@ never asking whether a shift is running — so it's useful from a laptop about
 a shift running on a server. The closing `needs you:` line is the point of
 the whole thing — items only a person can move. A PR polako would remediate
 itself (conflicting, red, or an unanswered review) is deliberately not on
-it: that's still polako's job. A parked issue with a named grant gets its own clause instead of the batched one — `polako unpark`'s own read, reused.
+it: that's still polako's job. A parked issue's comment naming a category gets its own clause instead of the batched one; a hand-labelled park keeps today's line. `polako unpark`'s own read, reused.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
@@ -404,7 +404,7 @@ polako status -json | jq .
   "queue": {
     "ready": [14, 19, 23],
     "blocked": [{ "issue": 9, "quiet_seconds": 93600 }],
-    "parked": [{ "issue": 5, "entries": ["Bash(echo:*)"] }],
+    "parked": [{ "issue": 5, "entries": ["Bash(echo:*)"], "category": "permission_refused" }],
     "proposed": [27, 28],
     "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false, "held": false }]
   },
@@ -444,7 +444,7 @@ table row for row; its `gone` is `{ "path", "issues" }`.
 not bare numbers — `{ "issue", "total", "completed", "finished", "held" }` —
 so a caller can tell a finished container from one in progress without a
 second call. For a finished one, `held: false` means the next shift is about
-to close it, `held: true` means it's the caller's. `queue.parked` is `{ "issue", "entries" }` the same way — `polako unpark`'s own read.
+to close it, `held: true` means it's the caller's. `queue.parked` is `{ "issue", "entries", "category" }` the same way — `polako unpark`'s own read; `category` is one of the fixed identifiers in `metrics.go`, or `""` for a hand-labelled park.
 Every array field is always `[]`, never `null`; `quiet_seconds`, `plan` and
 `published` can be *absent* instead of a fake zero or empty string. Same
 rule as the text report: no issue, PR or comment text, only numbers,

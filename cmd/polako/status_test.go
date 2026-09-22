@@ -257,11 +257,78 @@ func TestStatusNamesTheGrantAParkedIssueIsWaitingOn(t *testing.T) {
 	if err := json.Unmarshal([]byte(out.String()), &doc); err != nil {
 		t.Fatalf("output did not parse as JSON: %v\n%s", err, out.String())
 	}
-	want := []statusDocParked{{Issue: 16, Entries: []string{"Bash(echo:*)"}}, {Issue: 22, Entries: []string{}}}
+	want := []statusDocParked{
+		{Issue: 16, Entries: []string{"Bash(echo:*)"}, Category: parkPermission},
+		{Issue: 22, Entries: []string{}},
+	}
 	if !slices.EqualFunc(doc.Queue.Parked, want, func(a, b statusDocParked) bool {
-		return a.Issue == b.Issue && slices.Equal(a.Entries, b.Entries)
+		return a.Issue == b.Issue && slices.Equal(a.Entries, b.Entries) && a.Category == b.Category
 	}) {
 		t.Errorf("queue.parked = %+v, want %+v", doc.Queue.Parked, want)
+	}
+}
+
+// Issue #535: a parked issue whose park comment named a category other than
+// permission_refused gets its own needs-you clause too, not just the
+// permission case above — and a hand-labelled issue (no park comment of
+// polako's own) still keeps today's batched clause. Same fixture shape
+// TestStatusNamesTheGrantAParkedIssueIsWaitingOn drives, for the category
+// half of docs/plans/unpark.md ticket 6.
+func TestStatusNamesTheParkCategoryClause(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues: map[string]*fakeIssue{
+			"13": {Open: true, Labels: []string{needsHumanLabel}, Comments: 1,
+				Bodies: map[int]string{1: parkCommentBody(13, "it hit -max-issue-time", nil, parkBudget)}},
+			"22": {Open: true, Labels: []string{needsHumanLabel}},
+		},
+	})
+
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	got := needsYou(snap)
+	if want := fmt.Sprintf("#13 %s — polako unpark 13", parkNeedsYouClause[parkBudget]); !strings.Contains(got, want) {
+		t.Errorf("needsYou = %q, want it to contain %q", got, want)
+	}
+	if want := "decide what to do about #22 (drop needs-human to requeue)"; !strings.Contains(got, want) {
+		t.Errorf("needsYou = %q, want #22 (no park comment) to keep today's line %q", got, want)
+	}
+	// #13 never falls into the batched clause once it has its own.
+	if strings.Contains(got, "decide what to do about #13") {
+		t.Errorf("needsYou = %q, #13 should not also be in the batched clause", got)
+	}
+
+	var out strings.Builder
+	if err := renderStatusJSON(&out, cfg, snap); err != nil {
+		t.Fatalf("renderStatusJSON: %v", err)
+	}
+	var doc statusDoc
+	if err := json.Unmarshal([]byte(out.String()), &doc); err != nil {
+		t.Fatalf("output did not parse as JSON: %v\n%s", err, out.String())
+	}
+	want := []statusDocParked{
+		{Issue: 13, Entries: []string{}, Category: parkBudget},
+		{Issue: 22, Entries: []string{}},
+	}
+	if !slices.EqualFunc(doc.Queue.Parked, want, func(a, b statusDocParked) bool {
+		return a.Issue == b.Issue && slices.Equal(a.Entries, b.Entries) && a.Category == b.Category
+	}) {
+		t.Errorf("queue.parked = %+v, want %+v", doc.Queue.Parked, want)
+	}
+}
+
+// A category missing from parkNeedsYouClause is a bug the same way a
+// category missing from parkNextStepTable is (TestParkNextStepCoversEvery
+// Category, unpark_nextstep_test.go): the needs-you line would silently
+// fall back to the batched clause for it.
+func TestParkNeedsYouClauseCoversEveryCategory(t *testing.T) {
+	t.Parallel()
+	for _, category := range parkReasonOrder {
+		if _, ok := parkNeedsYouClause[category]; !ok {
+			t.Errorf("parkNeedsYouClause has no entry for %q", category)
+		}
 	}
 }
 
