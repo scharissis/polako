@@ -14,7 +14,8 @@ const planFooterPrefix = "Proposed by polako plan from "
 // planFooter is what a proposed issue's footer points at: the plan document the
 // issue was filed from, and the short commit SHA the repository was at when
 // `plan` filed it. sha is "" when the footer has been edited to drop it — the
-// document path is the half that matters, and the parse still succeeds.
+// parse still succeeds as long as doc ends in .md; without a SHA to fall back
+// on, that suffix is the only thing left telling doc apart from stray prose.
 type planFooter struct {
 	doc string
 	sha string
