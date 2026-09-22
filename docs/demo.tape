@@ -53,7 +53,7 @@ Sleep 500ms
 
 # What would filling the backlog run? Same -dry-run, on `plan`: the cap, the
 # milestone, and a narrower allowlist than work's.
-Type "polako plan -vision docs/VISION.md -dry-run" Sleep 500ms Enter
+Type "polako plan -design docs/VISION.md -dry-run" Sleep 500ms Enter
 Sleep 7s
 
 Type "clear" Sleep 300ms Enter
