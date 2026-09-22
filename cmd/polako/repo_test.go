@@ -1425,6 +1425,30 @@ func TestCloseCommandInTheSkillMatchesTheGrantedPrefix(t *testing.T) {
 	}
 }
 
+// Issue #390: a comment posted with its text inline on the command line
+// passes through shell quoting, and a stray escape from that lands on a
+// public thread (issue #381's second question did, 2026-09-18). Every
+// comment the skill posts — the blocked-question path and the fourth
+// ending's closing comment — writes a scratch file first and posts with
+// --body-file, the same mechanism the PR body already uses.
+func TestCommentsGoThroughBodyFileNotInlineText(t *testing.T) {
+	t.Parallel()
+	const issue = 42
+	skill := strings.ReplaceAll(readRepoFile(t, "skills", skillDir, "SKILL.md"), "$issue", strconv.Itoa(issue))
+	flat := strings.Join(strings.Fields(skill), " ")
+
+	for _, want := range []string{
+		fmt.Sprintf("gh issue comment %d --body-file <worktree>/%s/QUESTION.md", issue, scratchDir),
+		fmt.Sprintf("gh issue comment %d --body-file <worktree>/%s/CLOSE_COMMENT.md", issue, scratchDir),
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("SKILL.md no longer spells %q — without a scratch file and --body-file, a"+
+				" comment's text passes through shell quoting and a stray escape can land on a"+
+				" public thread", want)
+		}
+	}
+}
+
 // The skill names the branch and the supervisor finds the PR by that head
 // branch, never asking the skill what it chose. Rename either half alone and
 // every PR the other half goes looking for is simply absent — which reads as
