@@ -252,7 +252,7 @@ type fakePR struct {
 
 // fakeReview is one entry of `pr view --json reviews`. Author is optional:
 // the tests here have a single reviewer, and the reduction to one verdict per
-// reviewer is exercised by name in main_test.go.
+// reviewer is exercised by name in pr_test.go.
 type fakeReview struct {
 	Author      string `json:"author"`
 	State       string `json:"state"`
