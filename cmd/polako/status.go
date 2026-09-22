@@ -247,9 +247,11 @@ type statusSnapshot struct {
 	// copied. Best-effort like usage and plans below: nil when the read
 	// failed, which needsYouParts and statusDocFrom both treat as "no
 	// footer on any parked issue" rather than failing the whole snapshot.
-	// Only ever holds parkListItem.entries — never .reason, which is
-	// clipped comment text and would break the "no comment text reaches
-	// the terminal" rule this report holds to everywhere else.
+	// Only ever holds parkListItem.entries and .category — never .reason,
+	// which is clipped comment text and would break the "no comment text
+	// reaches the terminal" rule this report holds to everywhere else.
+	// .category is a fixed identifier (metrics.go), not comment text, so
+	// reading it here doesn't.
 	parks map[int]parkListItem
 }
 
