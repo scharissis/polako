@@ -123,12 +123,14 @@ evals/run.sh --max-cost 5          # stop before the next case once $5 is spent
 ```
 
 `run.sh` reproduces what `plugin eval` would do for this suite — scaffold each
-case into a fresh workspace under `evals/results/<timestamp>-by-hand/`, run the
-case's prompt in a headless session with the plugin loaded (from this checkout,
-or from `--plugin-dir` — how an `implement-issue` run drives the suite from its
-worktree while invoking the main checkout's copy of this script, so the tool
-grant can stay a fixed `Bash(evals/run.sh:*)`), then grade what the run left
-behind (`lib/grade.py`). `file_exists` and `no_leak` graders are checked
+case into a fresh workspace under a `<timestamp>-by-hand/` directory inside a
+`mktemp -d` root outside the checkout (`$TMPDIR` or `/tmp` — not
+`evals/results/`; see below), run the case's prompt in a headless session with
+the plugin loaded (from this checkout, or from `--plugin-dir` — how an
+`implement-issue` run drives the suite from its worktree while invoking the
+main checkout's copy of this script, so the tool grant can stay a fixed
+`Bash(evals/run.sh:*)`), then grade what the run left behind (`lib/grade.py`).
+`file_exists` and `no_leak` graders are checked
 mechanically — the latter is this runner's own invention, a case-insensitive
 substring search over everything under `.eval/` but the scratch origin (the
 seeded hook names the terms itself) for one `term`, and it exists
@@ -158,8 +160,11 @@ divergences from a naive reading of the cases, each argued where it lives:
   fire on a path that never reaches `/code-review` (issue #127) — the CLI's
   own ablation mode demotes them the same way.
 
-Results under `evals/results/` are scratch, and gitignored like the CLI's own.
-The durable record of a run is the per-case verdicts quoted in the PR body —
+Results land outside the checkout, in a `mktemp -d` directory a run's own
+final message names (`results: ...`) — not `evals/results/` (issue #459: a
+workspace inside `--plugin-dir`'s tree gets every write refused as
+"sensitive"). The durable record of a run is the per-case verdicts quoted in
+the PR body —
 "say what was verified", the convention `CLAUDE.md` sets — and, for tagged
 skill experiments, a row in `docs/experiments.md`.
 
@@ -255,7 +260,11 @@ paths in every case; `run.sh` guarantees the assumption by construction, so
 the hand-run settles nothing here); whether the real runner applies the
 workspace settings the scaffold writes (if it does, #126 is a by-hand quirk;
 if not, every case fails loudly on its first `gh` call); whether its `llm`
-graders can read workspace files or only the transcript; and whether
+graders can read workspace files or only the transcript; whether
 `--ablation none` scores `tool_used` graders it would otherwise treat as
-indicators. Check those six on the first entitled run, before reading
-anything into scores — then fold the answers in above and delete this section.
+indicators; and whether the real runner's own scaffolded workspace hits the
+same "sensitive file" wall `run.sh` worked around by moving its results
+directory outside the checkout (issue #459) — its workspace location under
+`plugin eval` is unknown until it actually runs. Check those seven on the
+first entitled run, before reading anything into scores — then fold the
+answers in above and delete this section.
