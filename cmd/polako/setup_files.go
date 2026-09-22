@@ -234,12 +234,10 @@ func proposeSetupFiles(ctx context.Context, cfg config, want setupFileWants) (se
 	}); err != nil {
 		return setupFilesResult{}, fmt.Errorf("fetching origin: %w", err)
 	}
-	head, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short")
+	remoteDefault, defaultBranch, err := originHead(ctx, cfg)
 	if err != nil {
 		return setupFilesResult{}, fmt.Errorf("resolving origin's default branch: %w", err)
 	}
-	remoteDefault := strings.TrimSpace(string(head)) // "origin/main"
-	defaultBranch := strings.TrimPrefix(remoteDefault, "origin/")
 
 	path, err := setupWorktree(ctx, cfg, remoteDefault)
 	if err != nil {

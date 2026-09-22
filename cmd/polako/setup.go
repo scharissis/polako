@@ -24,7 +24,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strings"
 )
 
 type setupOptions struct {
@@ -359,11 +358,11 @@ func originDefaultBranch(ctx context.Context, cfg config) (branch string, notChe
 	if _, err := git(ctx, cfg, "rev-parse", "--git-dir"); err != nil {
 		return "", true, err
 	}
-	out, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short")
+	_, local, err := originHead(ctx, cfg)
 	if err != nil {
 		return "", false, err
 	}
-	return strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/"), false, nil
+	return local, false, nil
 }
 
 // setupPluginRow reuses pluginVersion and skewComparison — the same reads

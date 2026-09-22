@@ -249,8 +249,7 @@ func inspectLeftWork(ctx context.Context, cfg config, issue int) leftWork {
 	// origin's default branch rather than the local one: the count is the same
 	// either way, and the remote ref does not depend on the operator's checkout
 	// being on the right branch when the park happens.
-	if head, err := git(ctx, cfg, "symbolic-ref", "refs/remotes/origin/HEAD", "--short"); err == nil {
-		base := strings.TrimSpace(string(head))
+	if base, _, err := originHead(ctx, cfg); err == nil {
 		if out, err := git(ctx, cfg, "rev-list", "--count", base+".."+w.branch); err == nil {
 			if n, err := strconv.Atoi(strings.TrimSpace(string(out))); err == nil {
 				w.commits, w.counted = n, true
