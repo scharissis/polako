@@ -307,8 +307,13 @@ URL, and never a reason to stop or ask.
    the set can change between runs.
    - An open blocker not yet raised: ask about it the way "Asking a question"
      above describes — name every open blocker's issue number and say this run
-     is waiting on it — and stop. Do not create the worktree or the branch.
-     This is the existing stop shape, not a fourth one.
+     is waiting on it — and stop. Do not create the worktree or the branch:
+     that recipe's scratch file goes under `<main-checkout>/.polako-scratch/`
+     instead of `<worktree>/.polako-scratch/` for this one call, since no
+     issue worktree exists yet — `<main-checkout>` is the first line of `git
+     worktree list`, and Write creates the directory the same way it does
+     under an issue's own worktree. This is the existing stop shape, not a
+     fourth one.
    - An open blocker already raised — `awaiting-answer` is already on this
      issue, the thread's question names this same blocker, and nothing else
      on the thread is outstanding: leave the label alone, don't post again,
