@@ -23,8 +23,8 @@ plan's week-usage percent at pickup and at the terminal state.
 each write their own kind, `plan` and `health` — one line per run, plus
 `issues_created`, `epics_created`, `cap` (`-max-issues`) and
 `labels_enforced`; `plan` also carries `design` and `milestone`, `health`
-neither, and neither carries an issue or PR number. `stats` skips both
-kinds today.
+neither, and neither an issue or PR number. Design runs write their own
+`design-run` and `design-issue`, not `run`/`issue`; `stats` skips all four.
 
 **What is never written:** issue titles, bodies, PR titles, comment text,
 review text, diffs, or anything the model said — reviews are counted, never

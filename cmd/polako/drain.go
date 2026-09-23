@@ -131,7 +131,9 @@ func resumeHint(cfg config, issue int, st *issueState) {
 		cfg.logf("issue #%d: `claude --resume %s` reopens what the last skill run on it did",
 			issue, st.session)
 	}
-	if cfg.shiftID != "" {
+	// stats skips design kinds, so for a design run it would point at an
+	// empty report.
+	if cfg.shiftID != "" && cfg.verb != designVerb {
 		cfg.logf("issue #%d: `polako stats -shift %s` reports on this shift alone",
 			issue, cfg.shiftID)
 	}
