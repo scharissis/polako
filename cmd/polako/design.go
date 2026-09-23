@@ -159,17 +159,22 @@ func designPreflight(ctx context.Context, cfg *config, issue int) error {
 	if err := preflightShared(ctx, cfg, nil); err != nil {
 		return err
 	}
-	// Declared up front for the reason workGates gives awaiting-answer: the
-	// run that applies it holds no grant that could create it. Not on a dry
-	// run, which declares nothing.
+	// The issue first, so a refusal leaves the repository as it found it.
+	labelled, err := checkDesignIssue(ctx, *cfg, issue)
+	if err != nil {
+		return err
+	}
+	// Declared before the run for the reason workGates gives awaiting-answer:
+	// the run that applies it holds no grant that could create it. Not on a
+	// dry run, which declares nothing.
 	if !cfg.dryRun {
 		for _, name := range []string{awaitingAnswerLabel, designLabel} {
 			l := labelByName(name)
 			_ = ensureLabel(ctx, *cfg, l.name, l.color, l.description)
 		}
 	}
-	if err := checkDesignIssue(ctx, cfg, issue); err != nil {
-		return err
+	if !labelled {
+		labelDesignIssue(ctx, *cfg, issue)
 	}
 	cfg.logf("%s — running /%s on issue #%d, polling every %s", cfg.repo, cfg.skill, issue, cfg.poll)
 	settingsBlock(*cfg, designPairs(*cfg))
@@ -188,23 +193,23 @@ type designIssueView struct {
 }
 
 // checkDesignIssue refuses an issue no design run should touch, each with the
-// move that fixes it, and puts the design label on one that lacks it. These
-// refuse on -dry-run too: they're facts about the issue, not a policy gate a
-// preview could look past.
-func checkDesignIssue(ctx context.Context, cfg *config, issue int) error {
+// move that fixes it, and reports whether it already carries the design
+// label. A read only. These refuse on -dry-run too: they're facts about the
+// issue, not a policy gate a preview could look past.
+func checkDesignIssue(ctx context.Context, cfg config, issue int) (labelled bool, err error) {
 	n := strconv.Itoa(issue)
-	out, err := gh(ctx, *cfg, "issue", "view", n, "--json", "state,labels,"+subIssuesField)
+	out, err := gh(ctx, cfg, "issue", "view", n, "--json", "state,labels,"+subIssuesField)
 	if unknownJSONField(err) {
 		// A gh from before sub-issues. Losing the container check costs a
 		// refusal that would otherwise have fired; the other three still do.
-		out, err = gh(ctx, *cfg, "issue", "view", n, "--json", "state,labels")
+		out, err = gh(ctx, cfg, "issue", "view", n, "--json", "state,labels")
 	}
 	if err != nil {
-		return fmt.Errorf("could not read issue #%d — check it exists in %s: %w", issue, cfg.repo, err)
+		return false, fmt.Errorf("could not read issue #%d — check it exists in %s: %w", issue, cfg.repo, err)
 	}
 	var v designIssueView
 	if err := json.Unmarshal(out, &v); err != nil {
-		return fmt.Errorf("unreadable `gh issue view` reply for #%d (is gh current?): %w", issue, err)
+		return false, fmt.Errorf("unreadable `gh issue view` reply for #%d (is gh current?): %w", issue, err)
 	}
 	var labels []string
 	for _, l := range v.Labels {
@@ -212,34 +217,35 @@ func checkDesignIssue(ctx context.Context, cfg *config, issue int) error {
 	}
 	switch {
 	case !strings.EqualFold(v.State, "OPEN"):
-		return fmt.Errorf("issue #%d is closed — reopen it to design it", issue)
+		return false, fmt.Errorf("issue #%d is closed — reopen it to design it", issue)
 	case v.SubIssuesSummary.Total > 0:
-		return fmt.Errorf("issue #%d has sub-issues, so it's a container — a design request has no sub-issues; "+
+		return false, fmt.Errorf("issue #%d has sub-issues, so it's a container — a design request has no sub-issues; "+
 			"open a separate issue for the design", issue)
 	case slices.Contains(labels, needsHumanLabel):
-		return fmt.Errorf("issue #%d is parked (%s) — `polako unpark %d` says why; "+
+		return false, fmt.Errorf("issue #%d is parked (%s) — `polako unpark %d` says why; "+
 			"clear it with `polako unpark -apply %d` first", issue, needsHumanLabel, issue, issue)
 	case slices.Contains(labels, proposedLabel):
-		return fmt.Errorf("issue #%d still carries %s — drop %s first; exclusion beats inclusion",
+		return false, fmt.Errorf("issue #%d still carries %s — drop %s first; exclusion beats inclusion",
 			issue, proposedLabel, proposedLabel)
 	}
-	if slices.Contains(labels, designLabel) {
-		return nil
-	}
+	return slices.Contains(labels, designLabel), nil
+}
+
+// labelDesignIssue puts the design label on an issue named without it.
+// Naming the issue on the command line is the human act; the label's job
+// from here on is keeping work off it. A failed add isn't fatal — the design
+// run itself doesn't need it.
+func labelDesignIssue(ctx context.Context, cfg config, issue int) {
 	if cfg.dryRun {
 		cfg.logf("issue #%d has no %q label — a real run would add it", issue, designLabel)
-		return nil
+		return
 	}
-	// Naming the issue on the command line is the human act; the label's job
-	// from here on is keeping work off it. A failed add isn't fatal — the
-	// design run itself doesn't need it.
-	if _, err := gh(ctx, *cfg, "issue", "edit", n, "--add-label", designLabel); err != nil {
+	if _, err := gh(ctx, cfg, "issue", "edit", strconv.Itoa(issue), "--add-label", designLabel); err != nil {
 		cfg.narrate(sevWarning, "could not add the %q label to #%d (%v) — add it by hand, or polako work may pick the issue up",
 			designLabel, issue, err)
-		return nil
+		return
 	}
 	cfg.logf("issue #%d: added the %q label, so polako work leaves it alone", issue, designLabel)
-	return nil
 }
 
 // designPairs is work's startup recap minus what doesn't apply to one named

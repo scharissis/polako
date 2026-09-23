@@ -161,8 +161,12 @@ func TestDesignPreflightRefusesWithTheRemedy(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("designPreflight = %v, want a refusal saying %q", err, tc.want)
 			}
-			if slices.Contains(finalGhState(t, path).Issues["1"].Labels, designLabel) {
+			st := finalGhState(t, path)
+			if slices.Contains(st.Issues["1"].Labels, designLabel) {
 				t.Error("a refused issue was labelled design anyway")
+			}
+			if len(st.Labels) != 0 {
+				t.Errorf("a refusal declared labels on the repo: %v", st.Labels)
 			}
 		})
 	}
