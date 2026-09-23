@@ -315,12 +315,14 @@ Estimate: M
 gates, and can't call it: `queueGate` refuses an unfiltered public repo, and
 the function is at its size budget.
 
-**Shape.** New `cmd/polako/preflight.go`. `preflightShared(ctx, cfg, verb)`
-returns the repo visibility and does: binaries, `checkNotifyCommand`, git
-dir, `gh repo view` into `cfg.repo`, shift log, `claudeVersion` and
-`pluginVersion`, `warnClaudeModelEnv`, `effortFlagGate`, `probeUsage`, the
-skew gate and `-ignore-skew` line, `updateNoticeLine`. `preflight` becomes:
-shared, then `queueGate` and `labelGate`, `ensureLabel(awaiting-answer)`, the
+**Shape.** New `cmd/polako/preflight.go`. `preflightShared(ctx, cfg, gate)`
+does: binaries, `checkNotifyCommand`, git dir, `gh repo view` into
+`cfg.repo`, shift log, then the caller's `gate(visibility)` (nil for none),
+then `claudeVersion` and `pluginVersion`, `warnClaudeModelEnv`,
+`effortFlagGate`, `probeUsage`, the skew gate and `-ignore-skew` line,
+`updateNoticeLine`. The gate runs mid-way so a queue refusal still lands
+before the probes. `preflight` becomes: shared with `workGates` as its gate
+(`queueGate`, `labelGate`, `ensureLabel(awaiting-answer)`), then the
 "running /skill per issue" line, `settingsBlock`. Log-line order is
 preserved where a test pins it; where the extraction moves one, the PR body
 says which.
