@@ -313,12 +313,14 @@ func preflight(ctx context.Context, cfg *config) error {
 	// different ways.
 	//
 	// The marked-label lookup below only runs in the one shape that is about
-	// to refuse (or, on -dry-run, note the refusal) — every other run of
-	// this preflight costs nothing extra for it. Best-effort, and cfg.label
-	// itself is never set from it: work still never scopes itself, this only
-	// changes what the message names.
+	// to refuse (or, on -dry-run, note the refusal) — asked of queueGate
+	// itself, with no marked label yet, rather than a hand-derived copy of
+	// its condition that could drift from it. Every other run of this
+	// preflight costs nothing extra. Best-effort, and cfg.label itself is
+	// never set from it: work still never scopes itself, this only changes
+	// what the message names.
 	var markedLabel string
-	if cfg.label == "" && !cfg.ungated && strings.EqualFold(repoView.Visibility, "PUBLIC") {
+	if queueGate(repoView.Visibility, cfg.label, cfg.ungated, "") != nil {
 		markedLabel, _, _ = markedGateLabel(ctx, *cfg)
 	}
 	if err := refuseOrNote(*cfg, queueGate(repoView.Visibility, cfg.label, cfg.ungated, markedLabel), cfg.dryRun); err != nil {
