@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 )
 
 // openIssues asks GitHub what there is to work: the issues ready now, the
@@ -46,8 +47,10 @@ func openIssues(ctx context.Context, cfg config) (ready, blocked, parked []int, 
 // sub-issue rollup that says an issue is a container rather than a work item,
 // and the blockedBy connection that says a ready issue has an unmerged
 // prerequisite. See listOpenIssues for the gh that cannot serve the last two.
+// updatedAt no exclusion reads: it rides along for `status`, which has no
+// other cheap way to say how long a parked or proposed issue has sat.
 const (
-	issueFields    = "number,labels"
+	issueFields    = "number,labels,updatedAt"
 	subIssuesField = "subIssuesSummary"
 	blockedByField = "blockedBy"
 )
@@ -134,6 +137,19 @@ type issueQueues struct {
 	proposed   []int
 	containers []containerInfo
 	heldBack   []heldBackInfo
+	// detail is what the listing said about each issue beyond its queue, keyed
+	// by number. Only `status` renders it; the drain never reads it, and
+	// re-reads an issue's labels at pickup (issuePickupPolicy) rather than
+	// trusting a listing that may be minutes old.
+	detail map[int]issueDetail
+}
+
+// issueDetail is one listed issue's age and its own model:/effort: labels,
+// parsed silently. An epic's inherited labels are not here: that is a read
+// per issue, which a snapshot does not pay for.
+type issueDetail struct {
+	updated time.Time // zero when the listing carried no readable updatedAt
+	policy  labelChoice
 }
 
 // containerInfo is one container issue and the sub-issue rollup that says
@@ -252,8 +268,10 @@ func sortIssueQueues(issues []ghIssue) issueQueues {
 			seenOpen[is.Number] = true
 		}
 	}
-	q := issueQueues{ready: make([]int, 0, len(issues))}
+	q := issueQueues{ready: make([]int, 0, len(issues)), detail: make(map[int]issueDetail, len(issues))}
 	for _, is := range issues {
+		policy, _ := parseLabelPolicy(is.Labels)
+		q.detail[is.Number] = issueDetail{updated: recTime(is.UpdatedAt), policy: policy}
 		switch {
 		case is.SubIssues.Total > 0:
 			// A container, and containers are never worked — whatever their
@@ -320,7 +338,10 @@ type ghIssue struct {
 	// or -model-by-size arms it (issuePickupPolicy) — the listing never asks
 	// for it. The one reader is sizeFromBody's anchored Estimate: match; the
 	// rest of the body is data the drain does not act on.
-	Body      string `json:"body"`
+	Body string `json:"body"`
+	// UpdatedAt is GitHub's last-touched time for the issue, read by `status`
+	// alone (issueDetail).
+	UpdatedAt string `json:"updatedAt"`
 	SubIssues struct {
 		Total     int `json:"total"`
 		Completed int `json:"completed"`

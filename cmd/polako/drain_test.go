@@ -175,6 +175,9 @@ type fakeIssue struct {
 	// it — so one date says everything a per-comment one would. Empty stands
 	// for a thread whose dates GitHub did not report.
 	CommentedAt string `json:"commented_at"`
+	// UpdatedAt is the listing's updatedAt, rendered only when asked for and
+	// set — empty stands for an issue whose date GitHub did not report.
+	UpdatedAt string `json:"updated_at"`
 
 	// ReplyOnRead is a human answering a question while the supervisor polls:
 	// their comment appears on the Nth read of the thread from now. Counting
@@ -1002,6 +1005,9 @@ func listIssues(st *ghState, label, author, fields string) (out string, changed 
 			labels = append(labels, fmt.Sprintf(`{"name":%q}`, l))
 		}
 		row := fmt.Sprintf(`{"number":%d,"labels":[%s]`, n, strings.Join(labels, ","))
+		if strings.Contains(fields, "updatedAt") && is.UpdatedAt != "" {
+			row += fmt.Sprintf(`,"updatedAt":%q`, is.UpdatedAt)
+		}
 		if milestone {
 			if is.Milestone == "" {
 				row += `,"milestone":null`
