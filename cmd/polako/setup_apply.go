@@ -223,54 +223,49 @@ func applySetup(ctx context.Context, prompt *setupPrompt, cfg config, rows []set
 		defs = append(defs, def)
 		rows = append(rows, checkLabelDef(ctx, cfg, true, def))
 	}
+	// One pass: the two cases below are mutually exclusive per def — missing
+	// (needs creating) and existing-but-unmarked (needs marking) can never
+	// both be true of the same row — so there is nothing a second traversal
+	// over the same defs/rows index space would find that this one does not.
 	start := len(rows) - len(defs)
 	for i, def := range defs {
 		ri := start + i
-		if rows[ri].status != setupMissing {
-			continue
-		}
-		if !prompt.confirm(fmt.Sprintf("create the %q label?", def.name)) {
-			continue
-		}
-		if err := ensureLabel(ctx, cfg, def.name, def.color, def.description); err != nil {
-			if isAlreadyExistsError(err) {
-				// Someone else created it between the read pass and here —
-				// a concurrent operator, or (with -policy-labels) an -label
-				// that collided with a name dedupeLabelDefs let through
-				// under a different required flag. Either way the label
-				// exists now, which is what this step wanted.
-				rows[ri] = setupRow{name: def.name, status: setupOK, required: def.required}
-				fmt.Fprintf(prompt.out, "  %q already exists\n", def.name)
+		switch {
+		case rows[ri].status == setupMissing:
+			if !prompt.confirm(fmt.Sprintf("create the %q label?", def.name)) {
 				continue
 			}
-			// Named rather than relayed: the likeliest cause by far is a
-			// token without push access, and raw gh stderr for that is a
-			// wall of JSON an operator has to decode to reach the same
-			// conclusion.
-			fmt.Fprintf(prompt.out, "  could not create %q — needs write access to %s\n", def.name, cfg.repo)
-			continue
+			if err := ensureLabel(ctx, cfg, def.name, def.color, def.description); err != nil {
+				if isAlreadyExistsError(err) {
+					// Someone else created it between the read pass and here —
+					// a concurrent operator, or (with -policy-labels) an -label
+					// that collided with a name dedupeLabelDefs let through
+					// under a different required flag. Either way the label
+					// exists now, which is what this step wanted.
+					rows[ri] = setupRow{name: def.name, status: setupOK, required: def.required}
+					fmt.Fprintf(prompt.out, "  %q already exists\n", def.name)
+					continue
+				}
+				// Named rather than relayed: the likeliest cause by far is a
+				// token without push access, and raw gh stderr for that is a
+				// wall of JSON an operator has to decode to reach the same
+				// conclusion.
+				fmt.Fprintf(prompt.out, "  could not create %q — needs write access to %s\n", def.name, cfg.repo)
+				continue
+			}
+			rows[ri] = setupRow{name: def.name, status: setupOK, required: def.required}
+			fmt.Fprintf(prompt.out, "  created %q\n", def.name)
+		case def.isGateLabel && rows[ri].detail == unmarkedGateLabelDetail:
+			if !prompt.confirm(fmt.Sprintf("mark %q as the gate label?", def.name)) {
+				continue
+			}
+			if err := ensureLabelMarked(ctx, cfg, def.name); err != nil {
+				fmt.Fprintf(prompt.out, "  could not mark %q — needs write access to %s\n", def.name, cfg.repo)
+				continue
+			}
+			rows[ri] = setupRow{name: def.name, status: setupOK, required: def.required}
+			fmt.Fprintf(prompt.out, "  marked %q as the gate label\n", def.name)
 		}
-		rows[ri] = setupRow{name: def.name, status: setupOK, required: def.required}
-		fmt.Fprintf(prompt.out, "  created %q\n", def.name)
-	}
-	// A second pass, not folded into the loop above: this one acts on rows
-	// the create loop skips outright (status is setupOK, not setupMissing) —
-	// a gate label that already exists but predates setup's own marker, on
-	// this run or an earlier one that named -label without -apply.
-	for i, def := range defs {
-		if !def.isGateLabel || rows[start+i].detail != unmarkedGateLabelDetail {
-			continue
-		}
-		ri := start + i
-		if !prompt.confirm(fmt.Sprintf("mark %q as the gate label?", def.name)) {
-			continue
-		}
-		if err := ensureLabelMarked(ctx, cfg, def.name); err != nil {
-			fmt.Fprintf(prompt.out, "  could not mark %q — needs write access to %s\n", def.name, cfg.repo)
-			continue
-		}
-		rows[ri] = setupRow{name: def.name, status: setupOK, required: def.required}
-		fmt.Fprintf(prompt.out, "  marked %q as the gate label\n", def.name)
 	}
 	return rows, gateLabel
 }
