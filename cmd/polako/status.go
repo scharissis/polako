@@ -103,6 +103,10 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 	if rest := fs.Args(); len(rest) > 0 {
 		return fmt.Errorf("unexpected argument %q — status takes flags only", rest[0])
 	}
+	metricsDir, err := statusMetricsDir(opt.metrics)
+	if err != nil {
+		return err
+	}
 
 	cfg, err := statusConfig(ctx, opt)
 	if err != nil {
@@ -134,8 +138,7 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 	snap.labelSource = labelSource
 	// After readStatus has returned, not inside it: nothing the GitHub read
 	// derives — queues, next, needs you — can see run data this way.
-	snap.lastShift = readLastShift(resolveDataDir(opt.metrics, "metrics", "metrics", "to read run data from"),
-		cfg.repo, now)
+	snap.lastShift = readLastShift(metricsDir, cfg.repo, now)
 	if opt.json {
 		return renderStatusJSON(out, cfg, snap)
 	}

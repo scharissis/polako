@@ -13,8 +13,23 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 )
+
+// statusMetricsDir resolves status's -metrics before anything is read: ""
+// for off (or no home directory), else the directory. A path naming a file
+// is refused with the same fix stats gives for it — the glob inside a file
+// finds nothing, and a silently missing line would read as "no history".
+func statusMetricsDir(spec string) (string, error) {
+	dir := resolveDataDir(spec, "metrics", "metrics", "to read run data from")
+	if info, err := os.Stat(dir); dir != "" && err == nil && !info.IsDir() {
+		return "", fmt.Errorf("-metrics %s is a file, not a directory — pass the directory that holds the .jsonl files (%s)",
+			dir, filepath.Dir(dir))
+	}
+	return dir, nil
+}
 
 // lastShift is the newest shift in this repository's records, summed the way
 // `stats -shift <id>` would sum it.
