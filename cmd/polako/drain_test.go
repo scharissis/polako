@@ -4784,6 +4784,11 @@ func TestDrainWorksNoDesignRequest(t *testing.T) {
 			if strings.Contains(out, "session started") || strings.Contains(out, "#2 is labelled") {
 				t.Errorf("the drain touched a design request\n%s", out)
 			}
+			// A shift that ends "backlog cleared" has already named what it left.
+			want := "ignoring 2 design request(s) labelled design — they want a plan, not code"
+			if got := strings.Count(out, want); got != 1 {
+				t.Errorf("the ignored design requests should be named exactly once, got %d\n%s", got, out)
+			}
 		})
 	}
 }

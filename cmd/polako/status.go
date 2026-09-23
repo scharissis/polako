@@ -272,8 +272,9 @@ func statusConfig(ctx context.Context, opt statusOptions) (config, error) {
 	// and misleading here — it reads as "won't show these" right above where
 	// the report shows them. readParkedIssues (unpark.go) marks the same memo
 	// the same way, for the same reason: this verb tells the proposed count
-	// its own way.
+	// its own way. The design row, likewise.
 	cfg.queue.saidProposed.Store(true)
+	cfg.queue.saidDesign.Store(true)
 	return resolveRepoConfig(ctx, cfg, opt.dir, opt.repo, "status reads GitHub")
 }
 

@@ -73,6 +73,7 @@ func openQueues(ctx context.Context, cfg config) (issueQueues, error) {
 		return issueQueues{}, err
 	}
 	cfg.sayProposals(len(q.proposed))
+	cfg.sayDesign(len(q.design))
 	return q, nil
 }
 
@@ -606,14 +607,15 @@ func replyArrived(comments []issueComment, baseline int64) bool {
 	})
 }
 
-// queueMemo is the two things a shift finds out while listing its backlog that
-// it only wants to act on, and say, once. Neither is durable and neither is
-// read back after the process ends: one is a fact about this gh binary, the
-// other is a line an operator needs at the top of a shift rather than once per
-// issue. See config.queue.
+// queueMemo is the things a shift finds out while listing its backlog that it
+// only wants to act on, and say, once. None is durable and none is read back
+// after the process ends: one is a fact about this gh binary, the others are
+// lines an operator needs at the top of a shift rather than once per issue.
+// See config.queue.
 type queueMemo struct {
 	extendedFieldsOff atomic.Bool
 	saidProposed      atomic.Bool
+	saidDesign        atomic.Bool
 }
 
 // seesExtendedFields reports whether the listing should still ask for the
@@ -652,4 +654,17 @@ func (c config) sayProposals(n int) {
 	}
 	c.narrate(sevWarning, "ignoring %d proposed issue(s) awaiting curation — remove the %s label to queue them",
 		n, proposedLabel)
+}
+
+// sayDesign is sayProposals for the design gate: once a shift, and only when
+// there are some, so a shift that ends "backlog cleared" with design requests
+// still open has already said they were there and why it left them.
+func (c config) sayDesign(n int) {
+	if n == 0 {
+		return
+	}
+	if c.queue != nil && c.queue.saidDesign.Swap(true) {
+		return
+	}
+	c.narrate(sevWarning, "ignoring %d design request(s) labelled %s — they want a plan, not code", n, designLabel)
 }
