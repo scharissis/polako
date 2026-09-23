@@ -655,16 +655,8 @@ func queuePairs(snap statusSnapshot) [][2]string {
 		pairs = append(pairs, [2]string{"held back", heldBackLine(q)})
 	}
 	if len(q.blocked) > 0 {
-		refs := make([]string, 0, len(q.blocked))
-		for _, n := range q.blocked {
-			ref := "#" + strconv.Itoa(n)
-			if d, ok := snap.quiet[n]; ok {
-				ref += " (quiet " + dur(d) + ")"
-			}
-			refs = append(refs, ref)
-		}
 		pairs = append(pairs, [2]string{"awaiting you",
-			fmt.Sprintf("%s — %s", plural(len(q.blocked), "issue"), strings.Join(refs, ", "))})
+			fmt.Sprintf("%s — %s", plural(len(q.blocked), "issue"), annotatedRefs(q.blocked, snap.quietNote))})
 	}
 	if len(q.parked) > 0 {
 		pairs = append(pairs, [2]string{"parked",

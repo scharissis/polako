@@ -40,6 +40,15 @@ func (snap statusSnapshot) idleNote(n int) string {
 	return ""
 }
 
+// quietNote is idleNote's awaiting-you twin: the thread's silence, from its
+// newest comment, rather than the listing's updatedAt.
+func (snap statusSnapshot) quietNote(n int) string {
+	if d, ok := snap.quiet[n]; ok {
+		return "quiet " + dur(d)
+	}
+	return ""
+}
+
 // policyNote is one issue's own model:/effort: labels as `status` shows them
 // — "opus, high" — or "" when neither family resolved. A malformed or doubled
 // label resolves to nothing (parseLabelPolicy), so it shows nothing here
