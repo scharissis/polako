@@ -254,7 +254,11 @@ and misses what's half there. So measure first:
   document's starting point or a reason to ask.
 - Run what the repo gives you to run: its test suite, its build, the CLI
   the request is about, a probe of a flag or an error path. A claim about
-  behaviour is worth more measured than read.
+  behaviour is worth more measured than read. But only what this run is
+  granted: a command outside `--allowedTools` raises a prompt nobody
+  answers (see "No prompts, ever"). When the one measurement you want
+  needs such a command, don't run it — read the code instead, and mark
+  that finding "read, not run" so the reviewer knows.
 - Record every finding as a pointer (`file:function`, or `file:line` when
   there's no function) or as a run with its result described in words.
   A finding with neither is a guess; drop it or go measure it.
