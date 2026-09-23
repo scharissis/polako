@@ -103,6 +103,7 @@ func TestPreflightSharedLeavesTheQueueGateToTheCaller(t *testing.T) {
 	_, checkout := upstream(t)
 	cfg, _ := drainConfig(t, "stream", &ghState{Visibility: "PUBLIC"})
 	cfg.dir = checkout
+	cfg.repo = "" // drainConfig fills it; preflightShared has to, from gh repo view
 
 	if err := preflightShared(context.Background(), &cfg, nil); err != nil {
 		t.Fatalf("preflightShared refused an unlabelled public repository: %v", err)
