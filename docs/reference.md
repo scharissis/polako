@@ -420,7 +420,7 @@ polako status -json | jq .
     "blocked": [{ "issue": 9, "quiet_seconds": 93600 }],
     "parked": [{ "issue": 5, "entries": ["Bash(echo:*)"], "category": "permission_refused" }],
     "proposed": [27, 28],
-    "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false, "held": false, "closed": false }], "outside_gate": [], "ungated_proposed": [], "details": [{ "issue": 5, "quiet_seconds": 1036800 }, { "issue": 14, "model": "opus", "effort": "high" }, { "issue": 27, "quiet_seconds": 259200 }, { "issue": 28, "quiet_seconds": 259200 }, { "issue": 33, "effort": "max" }]
+    "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false, "held": false, "closed": false }], "outside_gate": [], "ungated_proposed": [], "details": [{ "issue": 5, "idle_seconds": 1036800 }, { "issue": 14, "model": "opus", "effort": "high" }, { "issue": 27, "idle_seconds": 259200 }, { "issue": 28, "idle_seconds": 259200 }, { "issue": 33, "effort": "max" }]
   },
   "next": {
     "issue": 14,
@@ -455,7 +455,7 @@ closing line's clauses as an array; `notes` names a missing `-label`.
 from, the last one meaning `status` found it itself via `setup`'s
 gate-label marker; absent when the report is unscoped.
 `queue.held_back` is `{ "issue", "blockers" }`, the `held back` row's own
-issues with their still-open `blockedBy` dependencies. `queue.outside_gate` is the `outside the gate` row uncapped; `queue.ungated_proposed` is the part of `proposed` lacking the gate label; both `[]` when unscoped. `queue.details` is `{ "issue", "quiet_seconds", "model", "effort" }`, one per issue the text rows annotate, ascending — a sidecar, so `ready` and `proposed` stay bare numbers; each of the last three is absent with nothing to say, and `model` is `"default"` for `model:default`.
+issues with their still-open `blockedBy` dependencies. `queue.outside_gate` is the `outside the gate` row uncapped; `queue.ungated_proposed` is the part of `proposed` lacking the gate label; both `[]` when unscoped. `queue.details` is `{ "issue", "idle_seconds", "model", "effort" }`, one per issue the text rows annotate, ascending — a sidecar, so `ready` and `proposed` stay bare numbers; each of the last three is absent with nothing to say, and `model` is `"default"` for `model:default`. `idle_seconds` is the `updatedAt` span, named apart from `quiet_seconds`, the newest comment's.
 `plans` (plural — distinct from `plan`, the usage line below it) mirrors the
 plan documents table row for row; its `gone` is `{ "path", "issues", "open"
 }` — `issues` is every naming issue, open or closed, unlike the text

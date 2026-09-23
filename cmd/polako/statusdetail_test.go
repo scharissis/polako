@@ -59,8 +59,8 @@ func TestStatusShowsListingDetails(t *testing.T) {
 	secs := func(d time.Duration) *int64 { s := int64(d.Seconds()); return &s }
 	want := []statusDocDetail{
 		{Issue: 3, Model: "opus", Effort: "max"},
-		{Issue: 9, QuietSeconds: secs(12 * 24 * time.Hour)},
-		{Issue: 12, QuietSeconds: secs(3 * 24 * time.Hour)},
+		{Issue: 9, IdleSeconds: secs(12 * 24 * time.Hour)},
+		{Issue: 12, IdleSeconds: secs(3 * 24 * time.Hour)},
 		{Issue: 13, Effort: "high"},
 	}
 	got := doc.Queue.Details
@@ -69,9 +69,9 @@ func TestStatusShowsListingDetails(t *testing.T) {
 	}
 	for i := range want {
 		g, w := got[i], want[i]
-		sameQuiet := (g.QuietSeconds == nil) == (w.QuietSeconds == nil) &&
-			(g.QuietSeconds == nil || *g.QuietSeconds == *w.QuietSeconds)
-		if g.Issue != w.Issue || g.Model != w.Model || g.Effort != w.Effort || !sameQuiet {
+		sameIdle := (g.IdleSeconds == nil) == (w.IdleSeconds == nil) &&
+			(g.IdleSeconds == nil || *g.IdleSeconds == *w.IdleSeconds)
+		if g.Issue != w.Issue || g.Model != w.Model || g.Effort != w.Effort || !sameIdle {
 			t.Errorf("queue.details[%d] = %+v, want %+v", i, g, w)
 		}
 	}

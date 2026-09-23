@@ -108,14 +108,15 @@ func heldBackLine(q issueQueues) string {
 }
 
 // statusDocDetail is one issue's entry in `status -json`'s queue.details: the
-// same facts the text rows annotate, for the same issues. QuietSeconds is a
-// pointer for the reason statusDocBlocked's is; Model is "default" for
-// model:default, the account's own default.
+// same facts the text rows annotate, for the same issues. IdleSeconds is a
+// pointer for the reason statusDocBlocked's QuietSeconds is, and named apart
+// from it because it measures something else: updatedAt, which any edit
+// resets, not the newest comment. Model is "default" for model:default.
 type statusDocDetail struct {
-	Issue        int    `json:"issue"`
-	QuietSeconds *int64 `json:"quiet_seconds,omitempty"`
-	Model        string `json:"model,omitempty"`
-	Effort       string `json:"effort,omitempty"`
+	Issue       int    `json:"issue"`
+	IdleSeconds *int64 `json:"idle_seconds,omitempty"`
+	Model       string `json:"model,omitempty"`
+	Effort      string `json:"effort,omitempty"`
 }
 
 // statusDocDetails lists, ascending, every issue a text row annotates —
@@ -126,7 +127,7 @@ func statusDocDetails(snap statusSnapshot) []statusDocDetail {
 	var out []statusDocDetail
 	for n, d := range snap.idle {
 		secs := int64(d.Seconds())
-		out = append(out, statusDocDetail{Issue: n, QuietSeconds: &secs})
+		out = append(out, statusDocDetail{Issue: n, IdleSeconds: &secs})
 	}
 	workable := slices.Clone(q.ready)
 	for _, h := range q.heldBack {
