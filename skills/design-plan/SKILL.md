@@ -178,10 +178,12 @@ supervisor to carry on without an answer.
 2. Run `git worktree list`.
 3. Check `blockedBy` before Phase 1 creates anything. `nodes` empty, or every
    node closed, is the common path: say nothing, carry on. An open blocker
-   not yet raised on the thread: ask about it (scratch file under
-   `<main-checkout>/.polako-scratch/` for this one call, since no issue
-   worktree exists yet — `<main-checkout>` is the first line of `git worktree
-   list`), naming every open blocker, and stop. One already raised —
+   not yet raised on the thread: ask about it, naming every open blocker,
+   and stop. No issue worktree exists yet, so for this one call the scratch
+   directory is `<main-checkout>/.polako-scratch/` (`<main-checkout>` is the
+   first line of `git worktree list`): Read its `.gitignore` and Write the
+   single line `*` if it's missing, the same as Phase 1 does, and clean up
+   with `git -C <main-checkout>` in place of `git -C <worktree>`. One already raised —
    `awaiting-answer` still up, the thread's question names this same
    blocker, and nothing else outstanding: leave it and stop. An open blocker
    the thread doesn't name yet counts as not yet raised. Every blocker a run
