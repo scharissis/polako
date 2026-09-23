@@ -115,6 +115,27 @@ func TestDesignConfigPinsVerbEvidenceAndWait(t *testing.T) {
 	}
 }
 
+// The startup recap names nothing a design run doesn't do.
+func TestDesignPairsDropWhatOneIssueDoesNot(t *testing.T) {
+	t.Parallel()
+	cfg := config{shiftID: "s1", rec: newRecorder(t.TempDir()), notifyCmd: "tell-me", strictOrder: true}
+	rows := map[string]string{}
+	for _, p := range designPairs(cfg) {
+		rows[p[0]] = p[1]
+	}
+	for _, gone := range []string{"epics", "shift"} {
+		if _, ok := rows[gone]; ok {
+			t.Errorf("design's recap has a %q row: %v", gone, rows)
+		}
+	}
+	if strings.Contains(rows["notify"], "backlog clears") {
+		t.Errorf("notify row promises a backlog event: %q", rows["notify"])
+	}
+	if rows["wait"] == "" {
+		t.Errorf("-wait on, but no wait row: %v", rows)
+	}
+}
+
 // Each refusal names the move that fixes it, and none writes the design label.
 func TestDesignPreflightRefusesWithTheRemedy(t *testing.T) {
 	t.Parallel()

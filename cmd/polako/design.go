@@ -250,8 +250,15 @@ func designPairs(cfg config) [][2]string {
 		switch p[0] {
 		case "epics":
 			continue // design closes no containers
+		case "shift":
+			// stats skips design kinds, so its -shift pointer would name an
+			// empty report — resumeHint drops it for the same reason.
+			continue
 		case "dry-run":
 			p[1] = "printing the invocation only — no claude run, no GitHub write, no run data"
+		case "notify":
+			p[1] = fmt.Sprintf("on — `%s` runs when the issue parks, asks a question, or the run stops early",
+				cfg.notifyCmd)
 		}
 		pairs = append(pairs, p)
 	}
