@@ -273,8 +273,9 @@ const noPricingHistory = "no run history to price against — work a few issues 
 // the operator has. It never invents a figure; with no usable history it says
 // exactly that and stops.
 //
-// This is the second of telemetry's two readers, the one named beside `stats`
-// in CLAUDE.md's write-only-telemetry invariant: human-facing rendering,
+// This is one of telemetry's three readers, named beside `stats` and
+// `status`'s last-shift line (readLastShift) in CLAUDE.md's
+// write-only-telemetry invariant: human-facing rendering,
 // computed after the run has ended, deciding nothing the supervisor does.
 // Delete the metrics directory mid-run and the only change is this line
 // falling back to noPricingHistory. It reuses loadRecords + rollUpIssues — the

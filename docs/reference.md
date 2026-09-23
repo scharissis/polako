@@ -385,6 +385,7 @@ it: that's still polako's job. A parked issue's comment naming a category gets i
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how open PRs are matched back to issues. |
 | `-strict-order` | `false` | Report as a work run with `-strict-order` would: an issue awaiting an answer keeps its place, so `next` can name it rather than the ready issue behind it. |
 | `-json` | `false` | Print one JSON document to stdout instead of the text report — see [As JSON](#as-json--json) below. |
+| `-metrics` | `~/.polako/metrics` | Directory holding the run-data records the `last shift here` line reads, or `off` to read none and drop the line. Same directory `polako work` writes to. |
 
 They take environment defaults the same way `polako work`'s do — a
 `POLAKO_LABEL` that scopes your work scopes the report too, named on the
@@ -394,9 +395,7 @@ hatch typed on one invocation, not a property of the backlog.
 **Reads only.** Every call is a read subcommand polako itself re-derives
 state with at startup — `gh issue list`, `gh pr list`, `gh pr view`, the REST
 read of a thread's comments — so nothing moves an issue, label or PR. It
-reads no run data either (those files are for `stats` and `polako plan`'s
-pricing line) and prints no issue, PR or comment text — numbers, branches,
-labels and states only, enough to decide where to go next.
+prints no issue, PR or comment text. One line — `last shift here: …` — comes from this machine's run data, the records' third reader beside `stats` and the pricing line; nothing else in the report reads it. No local records, or `-metrics off`, and it's absent.
 
 Two things about the numbers. **Quiet** is the age of the newest comment on
 a thread, a proxy for how long a question has waited — which comment is the
@@ -442,7 +441,7 @@ polako status -json | jq .
     "curate #27, #28 (drop proposed to queue them)"
   ], "notes": [],
   "plans": { "docs": [{ "path": "docs/designs/backlog-fill.md", "state": "active", "open_children": 4, "containers": [{ "issue": 101, "total": 6, "completed": 2, "finished": false, "held": false, "closed": false }] }, { "path": "docs/designs/epic.md", "state": "done", "open_children": 0, "containers": [{ "issue": 202, "total": 3, "completed": 3, "finished": true, "held": false, "closed": true }] }], "gone": [{ "path": "docs/designs/dropped.md", "issues": [88, 91], "open": 1 }], "truncated": false },
-  "plan": "plan: session 42%, week 52% (resets Sep 2, 6pm) — polako was 29% of the last 24h", "published": "0.24.0"
+  "plan": "plan: session 42%, week 52% (resets Sep 2, 6pm) — polako was 29% of the last 24h", "published": "0.24.0", "last_shift": { "shift": "3f9a1c20", "started": "2026-09-21T02:10:00Z", "span_seconds": 22320, "merged": 4, "parked": 1, "cost_usd": 31.2 }
 }
 ```
 
@@ -471,7 +470,7 @@ caller's. `closed` is only ever true under `plans.docs[]` — `queue.containers`
 is open issues alone — and means exactly that: already closed, nothing left
 for anyone to do. `queue.parked` is `{ "issue", "entries", "category" }` the same way — `polako unpark`'s own read; `category` is one of the fixed identifiers in `metrics.go`, or `""` for a hand-labelled park.
 Every array field is always `[]`, never `null`; `quiet_seconds`, `plan` and
-`published` can be *absent* instead of a fake zero or empty string. Same
+`published` can be *absent* instead of a fake zero or empty string; `last_shift` (`started` in UTC) is `null` with no local run data. Same
 rule as the text report: no issue, PR or comment text, only numbers,
 branches, labels, states and URLs.
 
