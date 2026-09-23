@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -157,13 +158,22 @@ func readStatusRunData(metricsDir, repo string, now time.Time) statusRunData {
 	return rd
 }
 
-// readySuffix prices the ready row: the ready count times the same median
-// proposalPricingLine prices with — "" with no history or nothing ready.
-func (rd statusRunData) readySuffix(ready int) string {
-	if rd.readyMedian == nil || ready == 0 {
+// readySuffix prices the ready row: the same median proposalPricingLine
+// prices with, times the ready issues a drain would actually run the skill on
+// — "" with no history or none to run. A ready issue whose branch already has
+// an open PR is left out: restart safety means a drain waits on that PR rather
+// than paying for a fresh run.
+func (rd statusRunData) readySuffix(ready []int, prs []statusPR) string {
+	n := len(ready)
+	for _, pr := range prs {
+		if slices.Contains(ready, pr.issue) {
+			n--
+		}
+	}
+	if rd.readyMedian == nil || n <= 0 {
 		return ""
 	}
-	return " — about " + approxUSD(float64(ready)*rd.readyMedian.cost) + " at your median"
+	return " — about " + approxUSD(float64(n)*rd.readyMedian.cost) + " at your median"
 }
 
 // parkedRefs is issueRefs with each parked issue's recorded reason beside it,

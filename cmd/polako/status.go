@@ -646,7 +646,7 @@ func queuePairs(snap statusSnapshot) [][2]string {
 	if len(q.open()) == 0 && !snap.gate.open() {
 		return [][2]string{{"queue", "nothing open — a shift starting now would find the backlog cleared"}}
 	}
-	pairs := [][2]string{{"ready", queueLine(q.ready) + snap.runData.readySuffix(len(q.ready))}}
+	pairs := [][2]string{{"ready", queueLine(q.ready) + snap.runData.readySuffix(q.ready, snap.prs)}}
 	if len(q.heldBack) > 0 {
 		pairs = append(pairs, [2]string{"held back", heldBackLine(q.heldBack)})
 	}

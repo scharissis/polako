@@ -158,18 +158,25 @@ func TestReadParkReasonsKeepsTheNewestPark(t *testing.T) {
 func TestReadySuffix(t *testing.T) {
 	t.Parallel()
 	m := &issueMedian{cost: 7.5, n: 2}
+	five := []int{1, 2, 3, 4, 5}
+	// A PR on a ready issue means a drain waits on it, not a fresh run; a PR
+	// on an issue outside the ready row changes nothing.
+	prs := []statusPR{{number: 40, issue: 3}, {number: 90, issue: 9}}
 	for _, c := range []struct {
 		m     *issueMedian
-		ready int
+		ready []int
+		prs   []statusPR
 		want  string
 	}{
-		{m, 5, " — about $38 at your median"},
-		{m, 1, " — about $7.50 at your median"},
-		{m, 0, ""},
-		{nil, 5, ""},
+		{m, five, nil, " — about $38 at your median"},
+		{m, five, prs, " — about $30 at your median"},
+		{m, []int{1}, nil, " — about $7.50 at your median"},
+		{m, []int{3}, prs, ""},
+		{m, nil, nil, ""},
+		{nil, five, nil, ""},
 	} {
-		if got := (statusRunData{readyMedian: c.m}).readySuffix(c.ready); got != c.want {
-			t.Errorf("readySuffix(%v, %d) = %q, want %q", c.m, c.ready, got, c.want)
+		if got := (statusRunData{readyMedian: c.m}).readySuffix(c.ready, c.prs); got != c.want {
+			t.Errorf("readySuffix(%v, %v, %v) = %q, want %q", c.m, c.ready, c.prs, got, c.want)
 		}
 	}
 }
@@ -183,6 +190,7 @@ func TestStatusRunDataChangesOnlyItsOwnDetails(t *testing.T) {
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
 			"3": {Open: true},
+			"4": {Open: true},
 			"7": {Open: true, Labels: []string{awaitingAnswerLabel}},
 			"9": {Open: true, Labels: []string{needsHumanLabel}},
 		},
@@ -220,12 +228,13 @@ func TestStatusRunDataChangesOnlyItsOwnDetails(t *testing.T) {
 	if i < 0 {
 		t.Fatalf("report with run data is missing %q\ngot:\n%s", wantLastShiftLine(metrics), with)
 	}
-	// Merged #1 ($5) and #3 ($10) make a $7.50 median; one issue is ready.
+	// Merged #1 ($5) and #3 ($10) make a $7.50 median; of the two ready
+	// issues only #4 is priced, since #3's branch already has PR #40.
 	wantText := strings.NewReplacer(
-		"#3\n", "#3 — about $7.50 at your median\n",
+		"#3, #4\n", "#3, #4 — about $7.50 at your median\n",
 		"#9, labelled", "#9 (budget), labelled",
 	).Replace(without)
-	for _, s := range []string{"#3 — about $7.50 at your median", "#9 (budget), labelled"} {
+	for _, s := range []string{"#3, #4 — about $7.50 at your median", "#9 (budget), labelled"} {
 		if !strings.Contains(wantText, s) {
 			t.Fatalf("report with run data should carry %q\ngot:\n%s", s, with)
 		}
