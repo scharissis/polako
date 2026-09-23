@@ -15,7 +15,8 @@ package main
 //     itself re-derives state with at startup, so nothing here can move an
 //     issue, a label or a PR.
 //   - One line of run data, and nothing else from it. status is the third
-//     reader of the metrics files, beside `stats` and `plan`'s pricing line:
+//     reader of the metrics files, beside `stats` and the pricing line `plan`
+//     and `health` print:
 //     the "last shift here" line (statuslastshift.go), read after the GitHub
 //     snapshot and feeding no queue row, `next` or `needs you`. It says
 //     "here" because the drain being asked about may be running on somebody
