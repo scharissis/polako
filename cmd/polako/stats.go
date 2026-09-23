@@ -146,18 +146,10 @@ func runStats(args []string, out, errOut io.Writer, now time.Time, rpt report) e
 		// for a window, with no line in the output to correct them.
 		return fmt.Errorf("-since %s is negative — it is how far back to look, e.g. -since 168h", opt.since)
 	}
-	// fs.Visit rather than a zero check: -since 0s is a real (if odd) explicit
-	// value, and only an explicit -since should collide with an explicit
-	// -window. Neither silently wins over the other.
-	var sinceSet, windowSet bool
-	fs.Visit(func(f *flag.Flag) {
-		switch f.Name {
-		case "since":
-			sinceSet = true
-		case "window":
-			windowSet = true
-		}
-	})
+	// flagWasSet rather than a zero check: -since 0s is a real (if odd)
+	// explicit value, and only an explicit -since should collide with an
+	// explicit -window. Neither silently wins over the other.
+	sinceSet, windowSet := flagWasSet(fs, "since"), flagWasSet(fs, "window")
 	if sinceSet && windowSet {
 		return fmt.Errorf("-since and -window both name a window to report — pass one, not both")
 	}

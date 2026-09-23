@@ -110,16 +110,10 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 	cfg.pluginVersion, _, _ = statusPluginVersion(ctx, cfg)
 
 	// labelFromFlag/labelFromEnv say where opt.label (now cfg.label) came
-	// from, if it's set at all: fs.Visit only reports flags Parse actually
-	// set from args — applyEnvDefaults sets the *default* via f.Value.Set
-	// directly, which never touches that set, so a flag left at an
+	// from, if it's set at all — flagWasSet, not applyEnvDefaults's own
+	// f.Value.Set, which never touches fs.Visit's set, so a flag left at an
 	// env-supplied value is not mistaken for one typed on this invocation.
-	labelFromFlag := false
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "label" {
-			labelFromFlag = true
-		}
-	})
+	labelFromFlag := flagWasSet(fs, "label")
 	labelFromEnv := !labelFromFlag && os.Getenv(envVarName("label")) != ""
 
 	var labelSource string
