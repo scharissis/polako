@@ -95,6 +95,27 @@ func TestPreflightRefusesAnUngatedPublicQueue(t *testing.T) {
 	}
 }
 
+// The queue gate is the caller's, not preflightShared's: a verb with no queue
+// runs on a public repository with no -label, so the shared half must pass it
+// and hand the visibility back for work's preflight to gate on.
+func TestPreflightSharedLeavesTheQueueGateToTheCaller(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{Visibility: "PUBLIC"})
+	cfg.dir = checkout
+
+	visibility, err := preflightShared(context.Background(), &cfg)
+	if err != nil {
+		t.Fatalf("preflightShared refused an unlabelled public repository: %v", err)
+	}
+	if visibility != "PUBLIC" {
+		t.Errorf("visibility = %q, want PUBLIC for the caller to gate on", visibility)
+	}
+	if cfg.repo == "" {
+		t.Error("preflightShared left cfg.repo empty")
+	}
+}
+
 // A public repository whose gate label is already marked gets a refusal
 // naming it — "pass -label ready" — rather than the generic placeholder, and
 // cfg.label itself stays empty: work still never scopes itself, only the
