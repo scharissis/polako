@@ -163,11 +163,12 @@ func TestDesignSkillKeepsTheBranchAndScratchContracts(t *testing.T) {
 	t.Parallel()
 	skill := designSkill(t)
 	flat := strings.Join(strings.Fields(skill), " ")
+	branch := stringFlagDefault(t, "branch-prefix") + "$issue"
 
 	for _, marker := range []string{
-		"gh pr create --head issue-$issue",
+		"gh pr create --head " + branch,
 		"Closes #$issue",
-		"<main-checkout>/.worktrees/issue-$issue",
+		"<main-checkout>/.worktrees/" + branch,
 		"<worktree>/" + scratchDir + "/.gitignore",
 		"--body-file <worktree>/" + scratchDir + "/PR_BODY.md",
 	} {
