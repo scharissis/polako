@@ -52,10 +52,11 @@ const (
 	blockedByField = "blockedBy"
 )
 
-// openQueues reads the open backlog off GitHub and sorts it. Both readers of
-// the queue come through here — the drain and `-dry-run` by way of openIssues,
-// `status` directly — so an exclusion added to selectableIssues reaches every
-// one of them at once and cannot drift between two copies of the same argv.
+// openQueues reads the open backlog off GitHub and sorts it. Every reader of
+// the queue comes through here — the drain and `-dry-run` by way of openIssues,
+// `status` by way of statusQueues — so an exclusion added to sortIssueQueues
+// reaches every one of them at once and cannot drift between two copies of the
+// same argv.
 func openQueues(ctx context.Context, cfg config) (issueQueues, error) {
 	out, err := retryRead(ctx, cfg, "listing open issues", func() ([]byte, error) {
 		return listOpenIssues(ctx, cfg)
@@ -217,10 +218,25 @@ func (q issueQueues) open() []int {
 // Every list comes back ascending because the drain works them lowest first,
 // and `gh issue list` guarantees no order of its own.
 func selectableIssues(raw []byte) (issueQueues, error) {
+	issues, err := parseIssueList(raw)
+	if err != nil {
+		return issueQueues{}, err
+	}
+	return sortIssueQueues(issues), nil
+}
+
+func parseIssueList(raw []byte) ([]ghIssue, error) {
 	var issues []ghIssue
 	if err := json.Unmarshal(raw, &issues); err != nil {
-		return issueQueues{}, fmt.Errorf("parsing issue list: %w", err)
+		return nil, fmt.Errorf("parsing issue list: %w", err)
 	}
+	return issues, nil
+}
+
+// sortIssueQueues is selectableIssues on an already-parsed listing, so
+// `status` can sort the issues outside its gate label by the same rules
+// (statusgate.go).
+func sortIssueQueues(issues []ghIssue) issueQueues {
 	// The state a blockedBy node names is what settles openness. A gh whose
 	// node carries no state at all falls back to this — presence among the
 	// numbers this same open-issues listing already found — numbers already
@@ -268,7 +284,7 @@ func selectableIssues(raw []byte) (issueQueues, error) {
 	slices.Sort(q.proposed)
 	slices.SortFunc(q.containers, func(a, b containerInfo) int { return a.number - b.number })
 	slices.SortFunc(q.heldBack, func(a, b heldBackInfo) int { return a.number - b.number })
-	return q, nil
+	return q
 }
 
 // openBlockers returns, ascending, the blockedBy dependencies of is that this

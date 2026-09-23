@@ -287,6 +287,7 @@ func statusPluginVersion(ctx context.Context, cfg config) (version, id, scope st
 // the derivation can be tested without reading columns out of a table.
 type statusSnapshot struct {
 	queues issueQueues
+	gate   gateSplit // what a gated report sees beyond the queues (statusgate.go)
 	// next is the issue a drain starting now would pick up, or 0 for none: the
 	// lowest ready one, else the lowest one waiting on an answer — which a
 	// drain runs to find out whether the reply is already on the thread.
@@ -362,11 +363,11 @@ func readStatus(ctx context.Context, cfg config, now time.Time) (statusSnapshot,
 	// The drain's own listing, exclusions and all: what `status` says a drain
 	// would work has to be derived the way the drain derives it, or the two
 	// disagree the moment one of them learns a new exclusion.
-	queues, err := openQueues(ctx, cfg)
+	queues, gate, err := statusQueues(ctx, cfg)
 	if err != nil {
 		return snap, err
 	}
-	snap.queues = queues
+	snap.queues, snap.gate = queues, gate
 	// The drain's own rule, in dryRun's words: the lowest ready issue, and with
 	// none, the lowest issue waiting on an answer. -strict-order is the one
 	// thing that changes it — openIssues folds the two queues into one there, so
@@ -621,7 +622,7 @@ func statusScope(cfg config, source string) string {
 
 func queuePairs(snap statusSnapshot) [][2]string {
 	q := snap.queues
-	if len(q.open()) == 0 {
+	if len(q.open()) == 0 && !snap.gate.open() {
 		return [][2]string{{"queue", "nothing open — a shift starting now would find the backlog cleared"}}
 	}
 	pairs := [][2]string{{"ready", queueLine(q.ready)}}
@@ -656,6 +657,9 @@ func queuePairs(snap statusSnapshot) [][2]string {
 	if len(q.containers) > 0 {
 		pairs = append(pairs, [2]string{"containers",
 			fmt.Sprintf("%s — %s", plural(len(q.containers), "issue"), containerRefs(q.containers))})
+	}
+	if len(snap.gate.outside) > 0 {
+		pairs = append(pairs, [2]string{"outside the gate", outsideGateLine(snap.gate.outside)})
 	}
 	// Last, because it is the answer the rest of the table is context for.
 	pairs = append(pairs, [2]string{"next", nextLine(snap)})
@@ -733,6 +737,9 @@ func nextLine(snap statusSnapshot) string {
 		}
 		if len(snap.queues.containers) > 0 {
 			held = append(held, "a tracking container")
+		}
+		if len(snap.gate.outside) > 0 || snap.gate.held > 0 {
+			held = append(held, "outside the gate")
 		}
 		if len(held) == 0 {
 			return "nothing — no open issue at all"
@@ -937,10 +944,7 @@ func needsYouParts(snap statusSnapshot) []string {
 	parts = append(parts, perIssue...)
 	// Curation is a person's job by construction — nothing else takes the label
 	// off — so a backlog of proposals is one of the things only a person moves.
-	if len(snap.queues.proposed) > 0 {
-		parts = append(parts, fmt.Sprintf("curate %s (drop %s to queue them)",
-			issueRefs(snap.queues.proposed), proposedLabel))
-	}
+	parts = append(parts, curateClauses(snap)...)
 	// A finished container polako would close itself, so it is not yours — but
 	// one a human has held with needs-human or proposed it will not touch, and
 	// that one is now the operator's to close.

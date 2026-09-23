@@ -351,7 +351,7 @@ needs you: reply on #9; review and merge PR #58; grant Bash(echo:*) or fix the s
 ```
 
 `held back` names an otherwise-ready issue behind an open `blockedBy`
-dependency — recomputed every pass, so it clears itself once that blocker closes.
+dependency — recomputed every pass, so it clears itself once that blocker closes. Scoped to a gate label, the queues come from the same `--label` listing `work -label` drains, and one more unscoped listing finds what's outside it. Two things reach past the gate. `proposed` stays repo-wide, and a proposal without the gate label gets a clause naming both moves — `curate #7 (drop proposed, add ready)`. An `outside the gate` row lists open issues with neither the gate label nor a hold (`needs-human`, `proposed`, `awaiting-answer`): numbers only, the first ten, then `and N more`, absent when empty. Out-of-gate containers are left out.
 
 Below that table, `plan documents` adds one row per file under `docs/designs/`:
 state derived from the naming issues (`docs/designs/plan-conventions.md`'s
@@ -381,7 +381,7 @@ it: that's still polako's job. A parked issue's comment naming a category gets i
 | --- | --- | --- |
 | `-repo` | *(whatever `-dir` is a checkout of)* | Repository to report on, `owner/name`. Naming it is what lets the command run from anywhere — no checkout needed, just a `gh` authenticated for the repo. |
 | `-dir` | `.` | Path to the repository's main checkout, used to resolve the repository when `-repo` is not given. |
-| `-label` | *(none)* | Only count issues carrying this label, the same scoping `polako work`'s `-label` applies. `status` never refuses — it reads only — so a label the repository has never defined prints the same note `work`'s preflight would refuse with, on stdout under the header, and carries on. With neither this nor `POLAKO_LABEL` set, `status` looks for the one label carrying `setup`'s own gate-label marker and scopes itself to it, saying so in the header ("gate label, read from GitHub"); more than one marked label leaves it unscoped, with a note; still unscoped on a public repository notes the same refusal a real `work` run would make. |
+| `-label` | *(none)* | Only count issues carrying this label, the same scoping `polako work`'s `-label` applies — `proposed` and the `outside the gate` row still reach past it, see above. `status` never refuses — it reads only — so a label the repository has never defined prints the same note `work`'s preflight would refuse with, on stdout under the header, and carries on. With neither this nor `POLAKO_LABEL` set, `status` looks for the one label carrying `setup`'s own gate-label marker and scopes itself to it, saying so in the header ("gate label, read from GitHub"); more than one marked label leaves it unscoped, with a note; still unscoped on a public repository notes the same refusal a real `work` run would make. |
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how open PRs are matched back to issues. |
 | `-strict-order` | `false` | Report as a work run with `-strict-order` would: an issue awaiting an answer keeps its place, so `next` can name it rather than the ready issue behind it. |
 | `-json` | `false` | Print one JSON document to stdout instead of the text report — see [As JSON](#as-json--json) below. |
@@ -421,7 +421,7 @@ polako status -json | jq .
     "blocked": [{ "issue": 9, "quiet_seconds": 93600 }],
     "parked": [{ "issue": 5, "entries": ["Bash(echo:*)"], "category": "permission_refused" }],
     "proposed": [27, 28],
-    "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false, "held": false, "closed": false }]
+    "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false, "held": false, "closed": false }], "outside_gate": [], "ungated_proposed": []
   },
   "next": {
     "issue": 14,
@@ -448,7 +448,7 @@ polako status -json | jq .
 
 With `-json`, stdout carries exactly one document — no header, no `needs
 you:` line — the same snapshot the text report renders, field for field:
-`queue` holds the same six lists, `next` names the issue a shift would pick
+`queue` holds the same lists, `next` names the issue a shift would pick
 up and why, `prs` matches the text columns exactly (`not read` for a PR past
 the eight-PR cap; `unknown` means gh doesn't know), and `needs_you` is the
 closing line's clauses as an array; `notes` names a missing `-label`.
@@ -456,7 +456,7 @@ closing line's clauses as an array; `notes` names a missing `-label`.
 from, the last one meaning `status` found it itself via `setup`'s
 gate-label marker; absent when the report is unscoped.
 `queue.held_back` is `{ "issue", "blockers" }`, the `held back` row's own
-issues with their still-open `blockedBy` dependencies.
+issues with their still-open `blockedBy` dependencies. `queue.outside_gate` is the `outside the gate` row uncapped; `queue.ungated_proposed` is the part of `proposed` lacking the gate label; both `[]` when unscoped.
 `plans` (plural — distinct from `plan`, the usage line below it) mirrors the
 plan documents table row for row; its `gone` is `{ "path", "issues", "open"
 }` — `issues` is every naming issue, open or closed, unlike the text

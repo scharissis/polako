@@ -64,6 +64,12 @@ type statusDocQueue struct {
 	Parked     []statusDocParked    `json:"parked"`
 	Proposed   []int                `json:"proposed"`
 	Containers []statusDocContainer `json:"containers"`
+	// OutsideGate is gateSplit.outside in full — the text row stops at ten.
+	// Always `[]` on an unscoped report.
+	OutsideGate []int `json:"outside_gate"`
+	// UngatedProposed is the part of Proposed lacking the gate label, which
+	// takes adding it as well as dropping proposed to queue.
+	UngatedProposed []int `json:"ungated_proposed"`
 }
 
 // statusDocHeldBack is one otherwise-ready issue put down this pass because
@@ -234,12 +240,14 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 		Repo:  cfg.repo,
 		Scope: statusDocScope{Label: cfg.label, Source: snap.labelSource, StrictOrder: cfg.strictOrder},
 		Queue: statusDocQueue{
-			Ready:      nonNilSlice(snap.queues.ready),
-			HeldBack:   nonNilSlice(heldBack),
-			Blocked:    blocked,
-			Parked:     parked,
-			Proposed:   nonNilSlice(snap.queues.proposed),
-			Containers: nonNilSlice(containers),
+			Ready:           nonNilSlice(snap.queues.ready),
+			HeldBack:        nonNilSlice(heldBack),
+			Blocked:         blocked,
+			Parked:          parked,
+			Proposed:        nonNilSlice(snap.queues.proposed),
+			Containers:      nonNilSlice(containers),
+			OutsideGate:     nonNilSlice(snap.gate.outside),
+			UngatedProposed: nonNilSlice(snap.gate.ungatedProposed),
 		},
 		Next:          statusDocNext{Issue: snap.next, Reason: nextLine(snap)},
 		PRs:           prs,
