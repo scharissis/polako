@@ -149,6 +149,30 @@ func TestGatedStatusDoesNotCallOutsideIssuesCleared(t *testing.T) {
 	}
 }
 
+// Holds outside the gate get no row, but they are still open issues.
+func TestGatedStatusDoesNotCallOutsideHoldsCleared(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{Issues: map[string]*fakeIssue{
+		"5": {Open: true, Labels: []string{needsHumanLabel}},
+		"8": {Open: true, SubIssues: 2},
+	}})
+	cfg.label = "ready"
+
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	var out strings.Builder
+	renderStatus(&out, report{}, cfg, snap)
+	printed := out.String()
+	if strings.Contains(printed, "backlog cleared") || strings.Contains(printed, "no open issue at all") {
+		t.Errorf("open issues outside the gate are not a cleared backlog:\n%s", printed)
+	}
+	if want := "nothing — every open issue is outside the gate"; !strings.Contains(printed, want) {
+		t.Errorf("report is missing %q\ngot:\n%s", want, printed)
+	}
+}
+
 func TestOutsideGateLineStopsAtTen(t *testing.T) {
 	t.Parallel()
 	var nums []int

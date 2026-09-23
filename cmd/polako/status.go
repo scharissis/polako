@@ -622,7 +622,7 @@ func statusScope(cfg config, source string) string {
 
 func queuePairs(snap statusSnapshot) [][2]string {
 	q := snap.queues
-	if len(q.open()) == 0 && len(snap.gate.outside) == 0 {
+	if len(q.open()) == 0 && !snap.gate.open() {
 		return [][2]string{{"queue", "nothing open — a shift starting now would find the backlog cleared"}}
 	}
 	pairs := [][2]string{{"ready", queueLine(q.ready)}}
@@ -738,7 +738,7 @@ func nextLine(snap statusSnapshot) string {
 		if len(snap.queues.containers) > 0 {
 			held = append(held, "a tracking container")
 		}
-		if len(snap.gate.outside) > 0 {
+		if len(snap.gate.outside) > 0 || snap.gate.held > 0 {
 			held = append(held, "outside the gate")
 		}
 		if len(held) == 0 {

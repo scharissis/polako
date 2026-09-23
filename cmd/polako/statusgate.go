@@ -37,6 +37,14 @@ type gateSplit struct {
 	// merged into issueQueues.proposed, kept here so the curate clause can say
 	// approving them takes adding the gate label as well.
 	ungatedProposed []int
+	// held counts the rest outside the gate — holds and containers. Not
+	// listed, but still open, so a report with only these is not a cleared one.
+	held int
+}
+
+// open reports whether anything at all is open outside the gate.
+func (g gateSplit) open() bool {
+	return len(g.outside)+len(g.ungatedProposed)+g.held > 0
 }
 
 // statusQueues is openQueues for `status`: the same queues, plus what lies
@@ -75,7 +83,8 @@ func outsideTheGate(issues []ghIssue, gate string) gateSplit {
 		}
 	}
 	o := sortIssueQueues(outside)
-	split := gateSplit{label: gate, outside: o.ready, ungatedProposed: o.proposed}
+	split := gateSplit{label: gate, outside: o.ready, ungatedProposed: o.proposed,
+		held: len(o.blocked) + len(o.parked) + len(o.containers)}
 	for _, h := range o.heldBack {
 		split.outside = append(split.outside, h.number)
 	}
