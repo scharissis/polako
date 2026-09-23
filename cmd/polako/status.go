@@ -140,6 +140,10 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 	// After readStatus has returned, not inside it: nothing the GitHub read
 	// derives — queues, next, needs you — can see run data this way.
 	snap.lastShift = readLastShift(metricsDir, cfg.repo, now)
+	if m, ok := mergedMedian(metricsDir, cfg.repo, now); ok {
+		snap.readyMedian = &m
+	}
+	snap.parkReasons = readParkReasons(metricsDir, cfg.repo, now)
 	if opt.json {
 		return renderStatusJSON(out, cfg, snap)
 	}
@@ -355,10 +359,15 @@ type statusSnapshot struct {
 	// "" when the report is unscoped. Set by runStatus, read by statusScope
 	// (the header) and statusDocFrom (-json's scope.source).
 	labelSource string
-	// lastShift is the one fact here from run data rather than GitHub
-	// (statuslastshift.go) — nil with no local history or -metrics off. Set by
-	// runStatus after readStatus returns, so nothing above can depend on it.
+	// lastShift is run data rather than GitHub (statuslastshift.go) — nil
+	// with no local history or -metrics off. Set by runStatus after readStatus
+	// returns, so nothing above can depend on it.
 	lastShift *lastShift
+	// readyMedian and parkReasons are run data too, set in the same place and
+	// for the same reason: the ready row's price and the parked refs' reasons.
+	// nil with no local history, and the rows render as they would without it.
+	readyMedian *issueMedian
+	parkReasons map[int]string
 }
 
 // statusPR is one open PR on a branch the skill named, and what GitHub says
@@ -646,7 +655,11 @@ func queuePairs(snap statusSnapshot) [][2]string {
 	if len(q.open()) == 0 && !snap.gate.open() {
 		return [][2]string{{"queue", "nothing open — a shift starting now would find the backlog cleared"}}
 	}
-	pairs := [][2]string{{"ready", queueLine(q.ready)}}
+	ready := queueLine(q.ready)
+	if price := readyPrice(snap.readyMedian, len(q.ready)); price != "" {
+		ready += " — " + price
+	}
+	pairs := [][2]string{{"ready", ready}}
 	if len(q.heldBack) > 0 {
 		pairs = append(pairs, [2]string{"held back", heldBackLine(q.heldBack)})
 	}
@@ -663,9 +676,17 @@ func queuePairs(snap statusSnapshot) [][2]string {
 			fmt.Sprintf("%s — %s", plural(len(q.blocked), "issue"), strings.Join(refs, ", "))})
 	}
 	if len(q.parked) > 0 {
+		refs := make([]string, 0, len(q.parked))
+		for _, n := range q.parked {
+			ref := "#" + strconv.Itoa(n)
+			if why := snap.parkReasons[n]; why != "" {
+				ref += " (" + why + ")"
+			}
+			refs = append(refs, ref)
+		}
 		pairs = append(pairs, [2]string{"parked",
 			fmt.Sprintf("%s — %s, labelled %s", plural(len(q.parked), "issue"),
-				issueRefs(q.parked), needsHumanLabel)})
+				strings.Join(refs, ", "), needsHumanLabel)})
 	}
 	// The curation gate and the containers, said here rather than left to be
 	// inferred from an issue's absence: a batch of proposals nobody has looked at

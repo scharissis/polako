@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -133,10 +134,51 @@ func TestStatusMetricsFlag(t *testing.T) {
 	}
 }
 
-// The run data changes the report by that one line and nothing else: the same
-// GitHub snapshot rendered with and without a metrics directory differs only
-// in the last-shift line, text and JSON both.
-func TestStatusRunDataChangesOnlyTheLastShiftLine(t *testing.T) {
+// Only the newest record counts: #1 parked, then merged, says nothing; #5's
+// park is its newest; #11 parked with no reason recorded gets no suffix.
+func TestReadParkReasonsKeepsTheNewestPark(t *testing.T) {
+	t.Parallel()
+	const recs = `
+{"v":1,"kind":"issue","ts":"2026-02-01T00:00:00Z","repo":"example/repo","issue":1,"outcome":"needs_human","park_reason":"budget"}
+{"v":1,"kind":"issue","ts":"2026-02-02T00:00:00Z","repo":"example/repo","issue":1,"pr":10,"outcome":"merged"}
+{"v":1,"kind":"issue","ts":"2026-02-01T00:00:00Z","repo":"example/repo","issue":5,"pr":50,"outcome":"merged"}
+{"v":1,"kind":"issue","ts":"2026-02-03T00:00:00Z","repo":"example/repo","issue":5,"outcome":"needs_human","park_reason":"checks_remediation"}
+{"v":1,"kind":"issue","ts":"2026-02-03T00:00:00Z","repo":"example/repo","issue":11,"outcome":"needs_human"}
+`
+	dir := writePricingFixture(t, map[string]string{"example--repo.jsonl": recs})
+	got := readParkReasons(dir, "example/repo", statusNow)
+	if want := map[int]string{5: "checks_remediation"}; !maps.Equal(got, want) {
+		t.Errorf("reasons = %v, want %v", got, want)
+	}
+	if got := readParkReasons("", "example/repo", statusNow); got != nil {
+		t.Errorf("-metrics off: reasons = %v, want nil", got)
+	}
+}
+
+func TestReadyPrice(t *testing.T) {
+	t.Parallel()
+	m := &issueMedian{cost: 7.5, n: 2}
+	for _, c := range []struct {
+		m     *issueMedian
+		ready int
+		want  string
+	}{
+		{m, 5, "about $38 at your median"},
+		{m, 1, "about $7.50 at your median"},
+		{m, 0, ""},
+		{nil, 5, ""},
+	} {
+		if got := readyPrice(c.m, c.ready); got != c.want {
+			t.Errorf("readyPrice(%v, %d) = %q, want %q", c.m, c.ready, got, c.want)
+		}
+	}
+}
+
+// The run data changes the report by the last-shift line and the ready and
+// parked rows' suffixes, and nothing else: the same GitHub snapshot rendered
+// with and without a metrics directory differs only there — and -json only in
+// last_shift.
+func TestStatusRunDataChangesOnlyItsOwnDetails(t *testing.T) {
 	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
 		Issues: map[string]*fakeIssue{
@@ -148,7 +190,10 @@ func TestStatusRunDataChangesOnlyTheLastShiftLine(t *testing.T) {
 			"issue-3": {Number: 40, State: "OPEN", Mergeable: "MERGEABLE", Checks: []string{"SUCCESS"}},
 		},
 	})
-	metrics := writePricingFixture(t, map[string]string{"example--repo.jsonl": lastShiftFixture})
+	// #9's park sits in the older shift, so the last-shift line is unchanged.
+	const parkedNine = `{"v":1,"kind":"issue","ts":"2026-02-10T11:00:00Z","repo":"example/repo","shift":"aaaa0001","issue":9,"pr":0,"outcome":"needs_human","park_reason":"budget"}
+`
+	metrics := writePricingFixture(t, map[string]string{"example--repo.jsonl": lastShiftFixture + parkedNine})
 
 	render := func(dir string) (string, map[string]json.RawMessage) {
 		snap, err := readStatus(context.Background(), cfg, statusNow)
@@ -156,6 +201,10 @@ func TestStatusRunDataChangesOnlyTheLastShiftLine(t *testing.T) {
 			t.Fatalf("readStatus: %v", err)
 		}
 		snap.lastShift = readLastShift(dir, cfg.repo, statusNow)
+		if m, ok := mergedMedian(dir, cfg.repo, statusNow); ok {
+			snap.readyMedian = &m
+		}
+		snap.parkReasons = readParkReasons(dir, cfg.repo, statusNow)
 		var text, js strings.Builder
 		renderStatus(&text, report{}, cfg, snap)
 		if err := renderStatusJSON(&js, cfg, snap); err != nil {
@@ -170,13 +219,23 @@ func TestStatusRunDataChangesOnlyTheLastShiftLine(t *testing.T) {
 	with, withDoc := render(metrics)
 	without, withoutDoc := render("")
 
-	withLines, withoutLines := strings.Split(with, "\n"), strings.Split(without, "\n")
+	withLines := strings.Split(with, "\n")
 	i := slices.Index(withLines, wantLastShiftLine(metrics))
 	if i < 0 {
 		t.Fatalf("report with run data is missing %q\ngot:\n%s", wantLastShiftLine(metrics), with)
 	}
-	if !slices.Equal(slices.Delete(slices.Clone(withLines), i, i+1), withoutLines) {
-		t.Errorf("reports differ by more than the last-shift line\nwith:\n%s\nwithout:\n%s", with, without)
+	// Merged #1 ($5) and #3 ($10) make a $7.50 median; one issue is ready.
+	wantText := strings.NewReplacer(
+		"#3\n", "#3 — about $7.50 at your median\n",
+		"#9, labelled", "#9 (budget), labelled",
+	).Replace(without)
+	for _, s := range []string{"#3 — about $7.50 at your median", "#9 (budget), labelled"} {
+		if !strings.Contains(wantText, s) {
+			t.Fatalf("report with run data should carry %q\ngot:\n%s", s, with)
+		}
+	}
+	if got := strings.Join(slices.Delete(slices.Clone(withLines), i, i+1), "\n"); got != wantText {
+		t.Errorf("reports differ by more than the run-data details\nwith:\n%s\nwant (plus the last-shift line):\n%s", with, wantText)
 	}
 
 	if string(withoutDoc["last_shift"]) != "null" {

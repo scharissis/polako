@@ -1,15 +1,18 @@
 package main
 
-// The one line of `polako status` that comes from run data rather than
-// GitHub: the newest shift this machine recorded for this repository.
+// What `polako status` takes from run data rather than GitHub: the newest
+// shift this machine recorded for this repository, a price on the ready row,
+// and why each parked issue parked.
 //
 // This makes status the third reader of ~/.polako/metrics, beside `stats` and
 // proposalPricingLine, under the same terms CLAUDE.md gives the other two:
 // human-facing rendering, read after the GitHub snapshot is complete, feeding
-// nothing that snapshot decides — not a queue row, not `next`, not `needs
-// you`. Delete the directory and the line goes, nothing else. It says "here"
-// because a drain on another machine leaves no record on this one, and status
-// never claims to know about that drain. The shift log stays unread.
+// nothing that snapshot decides — which issues sit in which row, `next`,
+// `needs you`. The ready and parked rows gain a suffix; their membership is
+// GitHub's alone. Delete the directory and the line and the suffixes go,
+// nothing else. It says "here" because a drain on another machine leaves no
+// record on this one, and status never claims to know about that drain. The
+// shift log stays unread.
 
 import (
 	"fmt"
@@ -104,6 +107,41 @@ func readLastShift(metricsDir, repo string, now time.Time) *lastShift {
 		}
 	}
 	return ls
+}
+
+// readParkReasons is each issue's park_reason, where the newest local issue
+// record for it is a park — nil with no history. An older park the issue has
+// since been merged or closed past says nothing about why it's parked now, so
+// only the newest record counts; loadRecords' latest-wins dedupe is what makes
+// rollUpIssues' terminal that record.
+func readParkReasons(metricsDir, repo string, now time.Time) map[int]string {
+	if metricsDir == "" {
+		return nil
+	}
+	ds, err := loadRecords(metricsDir, statsOptions{repo: repo}, now)
+	if err != nil {
+		return nil
+	}
+	var reasons map[int]string
+	for _, is := range rollUpIssues(ds) {
+		if is.outcome() != issueNeedsHuman || is.terminal.ParkReason == "" {
+			continue
+		}
+		if reasons == nil {
+			reasons = map[int]string{}
+		}
+		reasons[is.key.issue] = is.terminal.ParkReason
+	}
+	return reasons
+}
+
+// readyPrice is the ready row's suffix: the ready count times the same median
+// proposalPricingLine prices with — "" with no history or nothing ready.
+func readyPrice(m *issueMedian, ready int) string {
+	if m == nil || ready == 0 {
+		return ""
+	}
+	return "about " + approxUSD(float64(ready)*m.cost) + " at your median"
 }
 
 // shiftHint is the stats command that opens shift id's records in dir.
