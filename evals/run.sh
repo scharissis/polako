@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Run the eval suite by hand, without the gated `plugin eval` command.
+# Run the eval suite by hand, without the CLI's `plugin eval` command.
 #
-# `plugin eval` needs an account-side early-access entitlement this project may
-# never get (evals/README.md, "Running it"). This runner reproduces what that
+# `plugin eval` has never run this suite — it was early-access, and its first
+# run is issue #77 (evals/README.md, "Running it"). Until then this is the
+# proven runner: the one a skill run calls under its fixed `Bash(evals/run.sh:*)`
+# grant, and the only one with a `no_leak` grader. It reproduces what that
 # command would do for this suite: scaffold each case into a fresh workspace,
 # run the case's prompt in a headless session with the plugin loaded, and grade
 # what the run left behind. Where it must differ from the real runner, it says

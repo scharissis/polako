@@ -314,8 +314,8 @@ retro checklist, the tagging rule, and the recipes for reading run data back.
   the release notes say when.
 - **It cannot tell a good issue from a bad one.** A vague issue produces either
   a question on the thread or a park, and both cost money to find out.
-- **The skill's eval suite has not had a green run yet.** Changes to the skill
-  are still verified by driving a real issue by hand. See
+- **The skills' eval suite has not had a green run yet.** Each skill change
+  runs the eval cases it touches, but no full pass has come back green. See
   [evals/README.md](evals/README.md).
 
 ## Flags
