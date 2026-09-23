@@ -81,10 +81,15 @@ func resolveRepoConfig(ctx context.Context, cfg config, dir, repoFlag, access st
 }
 
 // ghArgs names the repository on a call that would otherwise be resolved from
-// the working directory. Two spellings, because gh has two: every subcommand
-// here takes --repo, and `gh api` takes none — it substitutes {owner} and
-// {repo} into the path from the repository it resolved, so naming one means
-// doing that substitution here instead.
+// the working directory. Three shapes, because gh itself has three: most
+// subcommands here take --repo; `gh api` takes none — it substitutes {owner}
+// and {repo} into the path from the repository it resolved, so naming one
+// means doing that substitution here instead; and `gh repo view` takes
+// neither — its repository is a bare positional argument, and passing it
+// --repo the way every other subcommand accepts fails outright ("unknown
+// flag: --repo"), caught only by running the built binary against a real
+// repository — the fake gh the suite tests against had no cause to reject an
+// extra flag the same way.
 //
 // With no repo — the drain, always — the argv is handed back untouched, which
 // is the repo-implicit call every path here has always made.
@@ -92,16 +97,22 @@ func ghArgs(repo string, args []string) []string {
 	if repo == "" || len(args) == 0 {
 		return args
 	}
-	if args[0] != "api" {
+	switch {
+	case args[0] == "api":
+		owner, name, _ := strings.Cut(repo, "/")
+		sub := strings.NewReplacer("{owner}", owner, "{repo}", name)
+		out := slices.Clone(args)
+		for i := range out {
+			out[i] = sub.Replace(out[i])
+		}
+		return out
+	case len(args) >= 2 && args[0] == "repo" && args[1] == "view":
+		out := make([]string, 0, len(args)+1)
+		out = append(out, args[0], args[1], repo)
+		return append(out, args[2:]...)
+	default:
 		return append(slices.Clone(args), "--repo", repo)
 	}
-	owner, name, _ := strings.Cut(repo, "/")
-	sub := strings.NewReplacer("{owner}", owner, "{repo}", name)
-	out := slices.Clone(args)
-	for i := range out {
-		out[i] = sub.Replace(out[i])
-	}
-	return out
 }
 
 // ghReads is how many times a read-only GitHub lookup is attempted before its

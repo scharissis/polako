@@ -996,6 +996,19 @@ func TestGhArgsNamesTheRepository(t *testing.T) {
 	if got := ghArgs("o/n", api); !slices.Equal(got, want) {
 		t.Errorf("api args = %v, want %v", got, want)
 	}
+
+	// `gh repo view` is the one other exception: real gh rejects --repo on it
+	// outright ("unknown flag: --repo") — the repository is a bare
+	// positional argument instead. Caught only by running the built binary
+	// against a real repository (status's own repoVisibility, the first
+	// call site to reach this with a repo already resolved); the fake gh
+	// this suite otherwise tests against never rejected the extra flag the
+	// way real gh does.
+	view := []string{"repo", "view", "--json", "visibility", "--jq", ".visibility"}
+	wantView := []string{"repo", "view", "o/n", "--json", "visibility", "--jq", ".visibility"}
+	if got := ghArgs("o/n", view); !slices.Equal(got, wantView) {
+		t.Errorf("repo view args = %v, want %v", got, wantView)
+	}
 }
 
 // Shared by tidyConfig, statusConfig and setupConfig — each lets -repo name
