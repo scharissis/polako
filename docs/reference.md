@@ -5,8 +5,8 @@ defaults from the [environment](#setting-defaults-from-the-environment). See [se
 
 ## Flags
 
-These are `polako work`'s own; the other seven verbs take smaller sets —
-[`plan`](#planning-a-backlog-unattended-polako-plan), [`health`](#auditing-repository-health-unattended-polako-health), [`status`](#where-the-backlog-stands-polako-status), [`tidy`](#reclaiming-finished-issues-polako-tidy) and [`unpark`](#clearing-a-permission-park-polako-unpark) below,
+These are `polako work`'s own; the other eight verbs take smaller sets —
+[`plan`](#planning-a-backlog-unattended-polako-plan), [`health`](#auditing-repository-health-unattended-polako-health), [`design`](#designing-a-plan-document-polako-design), [`status`](#where-the-backlog-stands-polako-status), [`tidy`](#reclaiming-finished-issues-polako-tidy) and [`unpark`](#clearing-a-permission-park-polako-unpark) below,
 [`stats`](run-data.md#reading-it-back-polako-stats) and [`update`](install.md#update) beside what they describe.
 
 | Flag | Default | Meaning |
@@ -321,6 +321,45 @@ polako health -dir ~/code/some-repo            # the real thing
 | `-metrics` | `~/.polako/metrics` | Directory for the one `kind:"health"` record the run writes, or `off`. |
 | `-run-tag` | *(none)* | Label recorded with the `health` record, so one run can be compared against another in `polako stats`. |
 | `-notify` | *(none)* | Command run when the health run finishes with proposals to curate — the `proposed` event. Checked at preflight like `polako work`'s. |
+
+## Designing a plan document: `polako design`
+
+`polako design -issue N` runs the `design-plan` skill on one design request
+and waits for its PR — one new file under `docs/designs/` — to merge. It is
+`polako work`'s per-issue path on one named issue: restart safety, parks,
+PR supervision, the worktree sweep. No queue, so no `-label` gate, even on a
+public repo: naming the issue is the opt-in. Preflight adds the `design`
+label if it's missing, so `polako work` leaves the issue alone, and refuses
+an issue that is closed, a container, parked (`needs-human`) or still
+`proposed`, naming the fix.
+
+A question on the thread exits 0 with the flag left up:
+
+```
+issue #12 is waiting on your answer — reply on the thread, then rerun polako design -issue 12
+```
+
+`-wait` holds the process instead, polling the thread until someone replies,
+then runs again. On a merge it prints the hand-off — the doc lists as
+`draft` in `polako status`, and `polako plan -design <doc>` files its
+tickets. Never run for you: the merge is a human gate, not a trigger. Its
+records are `design-run` and `design-issue`, which `stats` skips.
+
+```bash
+polako design -issue 12 -dry-run
+polako design -issue 12            # the real thing
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `-issue` | *(required)* | The design request: an open issue number. `POLAKO_ISSUE` is ignored — a number left in a profile would start runs nobody typed. |
+| `-wait` | `false` | When the run asks a question, wait on the thread for a reply instead of exiting 0. |
+| `-model` / `-effort` | `opus` / *(CLI default)* | One design steers every ticket filed from it, so `-model` defaults to the strongest tier, as `plan` does. |
+| `-skill` | `polako:design-plan` | Slash command the run invokes. |
+| `-tools` / `-add-tools` | *(work's allowlist + two reads)* | `work`'s default plus `gh issue list` and `gh search issues`: a design cites the open backlog. |
+| `-max-issue-time` | `45m` | As `work`'s. Raise it for a design that measures a lot. |
+| `-dry-run` | `false` | Print the invocation `-issue` would get (or the PR it would wait on) and touch nothing. |
+| `-dir`, `-claude`, `-branch-prefix`, `-permission-mode`, `-poll`, `-retries`, `-retry-wait`, `-stall`, `-heartbeat`, `-max-cost`, `-notify`, `-remote`, `-run-tag`, `-post-summary`, `-metrics`, `-log`, `-verbose`, `-ignore-skew` | | Same meaning and default as `polako work`'s flags above. |
 
 ## Where the backlog stands: `polako status`
 

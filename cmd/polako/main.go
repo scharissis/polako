@@ -118,29 +118,41 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 	defer stop()
 
-	// Timestamps are the sinks' job, and every line carries one: the shift log
-	// is always stamped in full, a terminal that is not a TTY keeps the same
-	// full stamp the default flags used to add so redirected transcripts look
-	// like they always did, and a TTY gets a dim, time-only stamp instead of
-	// dropping it — worn quietly rather than shown or hidden outright, and
-	// deliberately not conditioned on whether a shift log exists this run —
-	// plus colour when the platform and NO_COLOR allow it.
-	sinks.verbose = cfg.verbose
+	useWorkSinks(cfg.verbose)
+	if err := run(ctx, cfg); err != nil {
+		exitOnRunError(err)
+	}
+}
+
+// useWorkSinks sets the process-wide sinks up the way a verb that opens a
+// shift log wants them: work, and design, which runs work's per-issue path.
+//
+// Timestamps are the sinks' job, and every line carries one: the shift log
+// is always stamped in full, a terminal that is not a TTY keeps the same
+// full stamp the default flags used to add so redirected transcripts look
+// like they always did, and a TTY gets a dim, time-only stamp instead of
+// dropping it — worn quietly rather than shown or hidden outright, and
+// deliberately not conditioned on whether a shift log exists this run —
+// plus colour when the platform and NO_COLOR allow it.
+func useWorkSinks(verbose bool) {
+	sinks.verbose = verbose
 	if isTerminal(os.Stderr) {
 		sinks.stamp = stampTTYDim
 		sinks.style = styleFor(true)
 	}
-	if err := run(ctx, cfg); err != nil {
-		if errors.Is(err, context.Canceled) {
-			// 130 for every shutdown signal, not only SIGINT. Telling them apart
-			// would mean hand-rolling NotifyContext to record which one arrived,
-			// and what an operator does about it — rerun, everything is on
-			// GitHub — is the same in all three cases.
-			sinks.logf("interrupted — state is on GitHub; rerun to resume")
-			os.Exit(130)
-		}
-		sinks.fatal("stopping: %v", err)
+}
+
+// exitOnRunError ends the process for an error out of work or design.
+func exitOnRunError(err error) {
+	if errors.Is(err, context.Canceled) {
+		// 130 for every shutdown signal, not only SIGINT. Telling them apart
+		// would mean hand-rolling NotifyContext to record which one arrived,
+		// and what an operator does about it — rerun, everything is on
+		// GitHub — is the same in all three cases.
+		sinks.logf("interrupted — state is on GitHub; rerun to resume")
+		os.Exit(130)
 	}
+	sinks.fatal("stopping: %v", err)
 }
 
 // dispatchVerb handles every verb but `work`: parses none of work's own
@@ -182,6 +194,10 @@ func dispatchVerb() bool {
 		runReport("plan", withShutdownContext(func(ctx context.Context) error {
 			return runPlan(ctx, os.Args[2:], os.Stdout)
 		}))
+	case "design":
+		// Not runReport: a design run is work's per-issue path, shift log and
+		// all, so it takes work's stamped sinks and work's exit codes.
+		runDesignVerb(os.Args[2:])
 	case "health":
 		runReport("health", withShutdownContext(func(ctx context.Context) error {
 			return runHealth(ctx, os.Args[2:], os.Stdout)

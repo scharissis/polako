@@ -531,6 +531,11 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			// Estimate: line).
 			fields = append(fields, fmt.Sprintf(`"body":%q`, is.Body))
 		}
+		if strings.Contains(want, "subIssuesSummary") {
+			// design's preflight read: a container is refused.
+			fields = append(fields, fmt.Sprintf(`"subIssuesSummary":{"total":%d,"completed":%d}`,
+				is.SubIssues, is.SubIssuesCompleted))
+		}
 		return "{" + strings.Join(fields, ",") + "}", changed, 0
 
 	case "api comments":
