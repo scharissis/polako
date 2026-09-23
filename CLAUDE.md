@@ -38,11 +38,13 @@ in the PR body rather than doing it quietly.
   drain loop never reads it back, and deleting the directory mid-drain changes
   no behavior. It has exactly three readers — `stats`, the proposal pricing
   line (`proposalPricingLine`, printed after `plan`'s and `health`'s label
-  pass), and `status`'s "last shift here" line (`readLastShift`, read after
-  its GitHub snapshot and feeding no queue row, `next` or `needs you`) — all
-  human-facing rendering, influencing nothing the supervisor does; deleting
-  the directory mid-run only drops the pricing line to its no-history form
-  and the last-shift line out of `status`. Records hold numbers, identifiers and
+  pass), and `status`'s "last shift here" line (`readLastShift`) plus the
+  price on its ready row and the reason beside each parked issue (all read
+  after its GitHub snapshot, deciding no row's membership, `next` or `needs
+  you`) — all human-facing rendering, influencing nothing the supervisor does;
+  deleting the directory mid-run only drops the pricing line to its
+  no-history form and the last-shift line and those two details out of
+  `status`. Records hold numbers, identifiers and
   operator-chosen labels only — never issue, comment or PR text. A read from
   these files anywhere else turns telemetry back into state.
   No run-data record leaves the machine except by explicit request:

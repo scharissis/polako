@@ -385,7 +385,7 @@ it: that's still polako's job. A parked issue's comment naming a category gets i
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how open PRs are matched back to issues. |
 | `-strict-order` | `false` | Report as a work run with `-strict-order` would: an issue awaiting an answer keeps its place, so `next` can name it rather than the ready issue behind it. |
 | `-json` | `false` | Print one JSON document to stdout instead of the text report — see [As JSON](#as-json--json) below. |
-| `-metrics` | `~/.polako/metrics` | Directory holding the run-data records the `last shift here` line reads, or `off` to read none and drop the line. Same directory `polako work` writes to. |
+| `-metrics` | `~/.polako/metrics` | Directory holding the run-data records the `last shift here` line, the ready row's price and the park reasons read, or `off` to read none and drop all three. Same directory `polako work` writes to. |
 
 They take environment defaults the same way `polako work`'s do — a
 `POLAKO_LABEL` that scopes your work scopes the report too, named on the
@@ -395,7 +395,7 @@ hatch typed on one invocation, not a property of the backlog.
 **Reads only.** Every call is a read subcommand polako itself re-derives
 state with at startup — `gh issue list`, `gh pr list`, `gh pr view`, the REST
 read of a thread's comments — so nothing moves an issue, label or PR. It
-prints no issue, PR or comment text. One line — `last shift here: …` — comes from this machine's run data, the records' third reader beside `stats` and the pricing line; nothing else in the report reads it. No local records, or `-metrics off`, and it's absent.
+prints no issue, PR or comment text. Three details come from this machine's run data, the records' third reader beside `stats` and the pricing line: the `last shift here: …` line; the `ready` row's price, `about $38 at your median` — the ready count times the median cost of a merged issue here, the same median `plan` prices with; and a parked issue's reason, `#77 (budget)`, when its newest local record is a park. Nothing else in the report reads it, and which issue sits in which row stays GitHub's call. No local records, or `-metrics off`, and all three are absent.
 
 Two things about the numbers. **Quiet** is the age of the newest comment on
 a thread, a proxy for how long a question has waited — which comment is the
