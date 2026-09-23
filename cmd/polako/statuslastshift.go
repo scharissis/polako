@@ -1,20 +1,26 @@
 package main
 
-// The one line of `polako status` that comes from run data rather than
-// GitHub: the newest shift this machine recorded for this repository.
+// What `polako status` takes from run data rather than GitHub: the newest
+// shift this machine recorded for this repository, a price on the ready row,
+// and why each parked issue parked.
 //
 // This makes status the third reader of ~/.polako/metrics, beside `stats` and
 // proposalPricingLine, under the same terms CLAUDE.md gives the other two:
 // human-facing rendering, read after the GitHub snapshot is complete, feeding
-// nothing that snapshot decides — not a queue row, not `next`, not `needs
-// you`. Delete the directory and the line goes, nothing else. It says "here"
-// because a drain on another machine leaves no record on this one, and status
-// never claims to know about that drain. The shift log stays unread.
+// nothing that snapshot decides — which issues sit in which row, `next`,
+// `needs you`. The ready and parked rows gain a suffix; their membership is
+// GitHub's alone. Delete the directory and the line and the suffixes go,
+// nothing else. It says "here" because a drain on another machine leaves no
+// record on this one, and status never claims to know about that drain. The
+// shift log stays unread.
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -104,6 +110,83 @@ func readLastShift(metricsDir, repo string, now time.Time) *lastShift {
 		}
 	}
 	return ls
+}
+
+// readParkReasons is each issue's park_reason, where the newest local issue
+// record for it is a park — nil with no history. An older park the issue has
+// since been merged or closed past says nothing about why it's parked now, so
+// only the newest record counts; loadRecords' latest-wins dedupe is what makes
+// rollUpIssues' terminal that record.
+func readParkReasons(metricsDir, repo string, now time.Time) map[int]string {
+	if metricsDir == "" {
+		return nil
+	}
+	ds, err := loadRecords(metricsDir, statsOptions{repo: repo}, now)
+	if err != nil {
+		return nil
+	}
+	var reasons map[int]string
+	for _, is := range rollUpIssues(ds) {
+		if is.outcome() != issueNeedsHuman || is.terminal.ParkReason == "" {
+			continue
+		}
+		if reasons == nil {
+			reasons = map[int]string{}
+		}
+		reasons[is.key.issue] = is.terminal.ParkReason
+	}
+	return reasons
+}
+
+// statusRunData is what status reads from run data. Every field is nil with
+// no local history or -metrics off, and the report renders as it would
+// without it.
+type statusRunData struct {
+	lastShift   *lastShift
+	readyMedian *issueMedian
+	parkReasons map[int]string
+}
+
+func readStatusRunData(metricsDir, repo string, now time.Time) statusRunData {
+	rd := statusRunData{
+		lastShift:   readLastShift(metricsDir, repo, now),
+		parkReasons: readParkReasons(metricsDir, repo, now),
+	}
+	if m, ok := mergedMedian(metricsDir, repo, now); ok {
+		rd.readyMedian = &m
+	}
+	return rd
+}
+
+// readySuffix prices the ready row: the same median proposalPricingLine
+// prices with, times the ready issues a drain would actually run the skill on
+// — "" with no history or none to run. A ready issue whose branch already has
+// an open PR is left out: restart safety means a drain waits on that PR rather
+// than paying for a fresh run.
+func (rd statusRunData) readySuffix(ready []int, prs []statusPR) string {
+	n := len(ready)
+	for _, pr := range prs {
+		if slices.Contains(ready, pr.issue) {
+			n--
+		}
+	}
+	if rd.readyMedian == nil || n <= 0 {
+		return ""
+	}
+	return " — about " + approxUSD(float64(n)*rd.readyMedian.cost) + " at your median"
+}
+
+// parkedRefs is issueRefs with each parked issue's recorded reason beside it,
+// where there is one: `#77 (budget)`.
+func (rd statusRunData) parkedRefs(parked []int) string {
+	refs := make([]string, len(parked))
+	for i, n := range parked {
+		refs[i] = "#" + strconv.Itoa(n)
+		if why := rd.parkReasons[n]; why != "" {
+			refs[i] += " (" + why + ")"
+		}
+	}
+	return strings.Join(refs, ", ")
 }
 
 // shiftHint is the stats command that opens shift id's records in dir.

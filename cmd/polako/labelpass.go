@@ -284,12 +284,45 @@ const noPricingHistory = "no run history to price against — work a few issues 
 // records, keyed on a merged outcome, so it is unaffected by which verb
 // proposed the batch it is pricing.
 func proposalPricingLine(metricsDir, repo string, workable, epics int, now time.Time) string {
+	m, ok := mergedMedian(metricsDir, repo, now)
+	if !ok {
+		return noPricingHistory
+	}
+	which := fmt.Sprintf("all %d", workable)
+	switch {
+	case epics > 0 && workable == 1:
+		which = "the 1 that isn't an epic"
+	case epics > 0:
+		which = fmt.Sprintf("the %d that aren't epics", workable)
+	case workable == 1:
+		which = "it"
+	}
+	return fmt.Sprintf("working %s would cost about %s and %s — a merged issue here runs %s and %s (median of your last %d)",
+		which,
+		approxUSD(float64(workable)*m.cost),
+		approxDur(time.Duration(workable)*m.wall),
+		usd(m.cost), medianDur(m.wall), m.n)
+}
+
+// issueMedian is what a merged issue in one repository costs and takes, as
+// the median over every priced one in the operator's records.
+type issueMedian struct {
+	cost float64
+	wall time.Duration
+	n    int
+}
+
+// mergedMedian is the median proposalPricingLine prices a batch with, and
+// status prices its ready row with — one function, so the two never disagree
+// about what a merged issue costs here. ok is false with no usable history:
+// -metrics off, no records, or no merged issue that was ever priced.
+func mergedMedian(metricsDir, repo string, now time.Time) (issueMedian, bool) {
 	if metricsDir == "" {
-		return noPricingHistory // -metrics off, or no home directory: nothing to read, no file opened to find out
+		return issueMedian{}, false // -metrics off, or no home directory: nothing to read, no file opened to find out
 	}
 	ds, err := loadRecords(metricsDir, statsOptions{repo: repo}, now)
 	if err != nil {
-		return noPricingHistory
+		return issueMedian{}, false
 	}
 	var costs []float64
 	var times []time.Duration
@@ -312,25 +345,9 @@ func proposalPricingLine(metricsDir, repo string, workable, epics int, now time.
 	// No merged issue that was ever priced: no history to project from, said as
 	// such rather than as a batch that costs $0.
 	if len(costs) == 0 {
-		return noPricingHistory
+		return issueMedian{}, false
 	}
-	n := len(costs)
-	costMedian := median(costs)
-	timeMedian := median(times)
-	which := fmt.Sprintf("all %d", workable)
-	switch {
-	case epics > 0 && workable == 1:
-		which = "the 1 that isn't an epic"
-	case epics > 0:
-		which = fmt.Sprintf("the %d that aren't epics", workable)
-	case workable == 1:
-		which = "it"
-	}
-	return fmt.Sprintf("working %s would cost about %s and %s — a merged issue here runs %s and %s (median of your last %d)",
-		which,
-		approxUSD(float64(workable)*costMedian),
-		approxDur(time.Duration(workable)*timeMedian),
-		usd(costMedian), medianDur(timeMedian), n)
+	return issueMedian{cost: median(costs), wall: median(times), n: len(costs)}, true
 }
 
 // medianDur renders the median run time at the resolution a basis figure

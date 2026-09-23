@@ -139,7 +139,7 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 	snap.labelSource = labelSource
 	// After readStatus has returned, not inside it: nothing the GitHub read
 	// derives — queues, next, needs you — can see run data this way.
-	snap.lastShift = readLastShift(metricsDir, cfg.repo, now)
+	snap.runData = readStatusRunData(metricsDir, cfg.repo, now)
 	if opt.json {
 		return renderStatusJSON(out, cfg, snap)
 	}
@@ -355,10 +355,10 @@ type statusSnapshot struct {
 	// "" when the report is unscoped. Set by runStatus, read by statusScope
 	// (the header) and statusDocFrom (-json's scope.source).
 	labelSource string
-	// lastShift is the one fact here from run data rather than GitHub
-	// (statuslastshift.go) — nil with no local history or -metrics off. Set by
-	// runStatus after readStatus returns, so nothing above can depend on it.
-	lastShift *lastShift
+	// runData is everything here from run data rather than GitHub
+	// (statuslastshift.go). Set by runStatus after readStatus returns, so
+	// nothing above can depend on it.
+	runData statusRunData
 }
 
 // statusPR is one open PR on a branch the skill named, and what GitHub says
@@ -595,7 +595,7 @@ func renderStatus(w io.Writer, rpt report, cfg config, snap statusSnapshot) {
 	printPairs(w, rpt, "", queuePairs(snap))
 	printStatusPRs(w, rpt, snap)
 	printPlanDocs(w, rpt, snap.plans)
-	if line := lastShiftLine(snap.lastShift); line != "" {
+	if line := lastShiftLine(snap.runData.lastShift); line != "" {
 		fmt.Fprintf(w, "%s\n", line)
 	}
 	if line := statusPlanLine(snap); line != "" {
@@ -646,7 +646,7 @@ func queuePairs(snap statusSnapshot) [][2]string {
 	if len(q.open()) == 0 && !snap.gate.open() {
 		return [][2]string{{"queue", "nothing open — a shift starting now would find the backlog cleared"}}
 	}
-	pairs := [][2]string{{"ready", queueLine(q.ready)}}
+	pairs := [][2]string{{"ready", queueLine(q.ready) + snap.runData.readySuffix(q.ready, snap.prs)}}
 	if len(q.heldBack) > 0 {
 		pairs = append(pairs, [2]string{"held back", heldBackLine(q.heldBack)})
 	}
@@ -665,7 +665,7 @@ func queuePairs(snap statusSnapshot) [][2]string {
 	if len(q.parked) > 0 {
 		pairs = append(pairs, [2]string{"parked",
 			fmt.Sprintf("%s — %s, labelled %s", plural(len(q.parked), "issue"),
-				issueRefs(q.parked), needsHumanLabel)})
+				snap.runData.parkedRefs(q.parked), needsHumanLabel)})
 	}
 	// The curation gate and the containers, said here rather than left to be
 	// inferred from an issue's absence: a batch of proposals nobody has looked at
