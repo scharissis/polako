@@ -11,10 +11,18 @@ import (
 // preflight fails fast on a misconfigured environment, so an unattended run
 // can't die on its first gh call an hour after being started.
 func preflight(ctx context.Context, cfg *config) error {
-	visibility, err := preflightShared(ctx, cfg)
-	if err != nil {
+	if err := preflightShared(ctx, cfg, func(visibility string) error { return workGates(ctx, cfg, visibility) }); err != nil {
 		return err
 	}
+	cfg.logf("%s — running /%s per issue, polling every %s", cfg.repo, cfg.skill, cfg.poll)
+	settingsBlock(*cfg, preflightPairs(*cfg))
+	return nil
+}
+
+// workGates is the part of work's preflight that exists because work drains
+// a queue: the public-repo and -label gates, and the label a queued run's
+// questions are flagged with.
+func workGates(ctx context.Context, cfg *config, visibility string) error {
 	// A dry run may still look past either gate below: it runs nothing and
 	// writes nothing, and seeing what a real run would refuse is how an
 	// operator decides what to change. refuseOrNote is that one carve-out,
@@ -66,38 +74,39 @@ func preflight(ctx context.Context, cfg *config) error {
 		l := labelByName(awaitingAnswerLabel)
 		_ = ensureLabel(ctx, *cfg, l.name, l.color, l.description)
 	}
-	cfg.logf("%s — running /%s per issue, polling every %s", cfg.repo, cfg.skill, cfg.poll)
-	settingsBlock(*cfg, preflightPairs(*cfg))
 	return nil
 }
 
 // preflightShared is the half of preflight that doesn't depend on which verb
 // is starting runs: tools, repository, shift log, versions and the gates on
-// them. It returns the repository's visibility and leaves the queue gates to
-// the caller — a verb that works one named issue has no queue to gate, and
-// would be refused on a public repo for no reason if this checked it.
-func preflightShared(ctx context.Context, cfg *config) (string, error) {
+// them. The caller's own gates go in gate, handed the repository's
+// visibility — a verb that works one named issue has no queue to gate, and
+// would be refused on a public repo for no reason if this checked it. gate
+// runs as soon as the repository is known, not after this returns, so a
+// refusal still lands before the version checks, usage probe and
+// published-version read instead of paying for them first. nil means none.
+func preflightShared(ctx context.Context, cfg *config, gate func(visibility string) error) error {
 	for _, bin := range []string{cfg.claudeBin, cfg.ghBin, "git"} {
 		if _, err := exec.LookPath(bin); err != nil {
-			return "", fmt.Errorf("%q not found on PATH: %w", bin, err)
+			return fmt.Errorf("%q not found on PATH: %w", bin, err)
 		}
 	}
 	if err := checkNotifyCommand(cfg.notifyCmd); err != nil {
-		return "", err
+		return err
 	}
 	if _, err := git(ctx, *cfg, "rev-parse", "--git-dir"); err != nil {
-		return "", fmt.Errorf("-dir %s is not a git checkout: %w", cfg.dir, err)
+		return fmt.Errorf("-dir %s is not a git checkout: %w", cfg.dir, err)
 	}
 	out, err := gh(ctx, *cfg, "repo", "view", "--json", "nameWithOwner,visibility")
 	if err != nil {
-		return "", fmt.Errorf("no GitHub repository reachable from %s (is gh authenticated?): %w", cfg.dir, err)
+		return fmt.Errorf("no GitHub repository reachable from %s (is gh authenticated?): %w", cfg.dir, err)
 	}
 	var repoView struct {
 		NameWithOwner string `json:"nameWithOwner"`
 		Visibility    string `json:"visibility"`
 	}
 	if err := json.Unmarshal(out, &repoView); err != nil {
-		return "", fmt.Errorf("unreadable `gh repo view` reply (is gh current?): %w", err)
+		return fmt.Errorf("unreadable `gh repo view` reply (is gh current?): %w", err)
 	}
 	cfg.repo = repoView.NameWithOwner
 	// As soon as the repository is known, because the file is named after it.
@@ -111,18 +120,23 @@ func preflightShared(ctx context.Context, cfg *config) (string, error) {
 			cfg.logPath = path
 		}
 	}
+	if gate != nil {
+		if err := gate(repoView.Visibility); err != nil {
+			return err
+		}
+	}
 	cfg.claudeVersion = claudeVersion(ctx, *cfg)
 	cfg.pluginVersion, _, _ = pluginVersion(ctx, *cfg)
 	warnClaudeModelEnv(*cfg)
 	if err := refuseOrNote(*cfg, effortFlagGate(ctx, *cfg), cfg.dryRun); err != nil {
-		return "", err
+		return err
 	}
 	if snap, ok := probeUsage(ctx, *cfg); ok {
 		cfg.usage = &snap
 	}
 	skewErr := versionSkewGate(polakoVersion(), *cfg)
 	if err := refuseOrNote(*cfg, skewErr, cfg.dryRun); err != nil {
-		return "", err
+		return err
 	}
 	if skewErr == nil {
 		if self, plugin, behind, ok := skewComparison(polakoVersion(), *cfg); cfg.ignoreSkew && ok && behind {
@@ -149,5 +163,5 @@ func preflightShared(ctx context.Context, cfg *config) (string, error) {
 	if line := updateNoticeLine(ctx, polakoVersion(), *cfg); line != "" {
 		cfg.narrate(sevWarning, "%s", line)
 	}
-	return repoView.Visibility, nil
+	return nil
 }
