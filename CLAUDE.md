@@ -8,6 +8,8 @@ turns a vision document into proposals behind the `proposed` gate. A third,
 `review-health`, fills that same backlog from the codebase itself: pointed at
 any repository it measures that repo's shape and files the outliers as
 `proposed` issues — the whole-repo pass that diff-scoped review cannot do.
+Where that repo has prompts, it runs Claude Code's own
+`/claude-api prompt-audit` over them too, and files the outcome the same way.
 Both have a supervisor verb: `plan` and `health`. The binary's other four
 verbs start no runs: `status` reads GitHub, `stats` reads the run data, `tidy`
 reclaims finished worktrees and branches, `update` moves both halves to the
@@ -269,7 +271,7 @@ every platform. `evals/` drives real runs against a scratch repo and grades
 what they leave behind:
 
 ```bash
-claude plugin eval . --scaffold --allow-tools Bash Write Edit
+claude plugin eval . --scaffold --allow-tools Bash Write Edit 'Skill(claude-api)'
 ```
 
 That command needs an account-side early-access entitlement; until it's

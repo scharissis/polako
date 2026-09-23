@@ -214,8 +214,10 @@ an epic, and files the lot as **proposals**:
 
 `health` runs `/review-health` the same way, but reads the codebase itself
 instead of a document — file and function sizes, duplicated helpers,
-abstractions nothing uses — and proposes the outliers. Point it at any
-repository; it is not polako-specific:
+abstractions nothing uses — and proposes the outliers. Where the repo has
+prompts (skills, `CLAUDE.md`, prompt code), it also runs Claude Code's own
+prompt audit over them and proposes fixes for text written for older models.
+Point it at any repository; it is not polako-specific:
 
 ```
 /polako:review-health .

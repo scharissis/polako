@@ -43,9 +43,16 @@ const defaultHealthSkill = "polako:" + healthSkillDir
 // create` — so the allowlist grants only those, plus the repo-reading and
 // scratch-file tools a measuring pass needs. No `gh issue view` or `gh search
 // issues`: review-health never spells either.
-const healthTools = "Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git branch:*)," +
+//
+// Skill(claude-api) is for Phase 1b's prompt audit, which runs Claude Code's
+// bundled `/claude-api prompt-audit` recipe instead of keeping a copy. It is
+// scoped because, unlike most skills, claude-api is denied under -p without a
+// grant. Probed by hand on CLI 2.1.280: with it granted, python3, curl and
+// WebFetch are still refused, so loading the skill adds no tool this list
+// doesn't name. git blame is the recipe's provenance step.
+const healthTools = "Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git branch:*),Bash(git blame:*)," +
 	"Bash(gh issue list:*),Bash(gh issue create:*)," +
-	"Read,Glob,Grep,TodoWrite,Write"
+	"Read,Glob,Grep,TodoWrite,Write,Skill(claude-api)"
 
 // healthVerb is the per-verb wording and defaults registerIntakeFlags takes for
 // `polako health`. healthOptions itself is the bare shared set — see intake.go.

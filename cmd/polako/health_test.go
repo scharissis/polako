@@ -165,6 +165,7 @@ func TestHealthDryRunWritesNothingAndPrintsTheInvocation(t *testing.T) {
 		`'/polako:review-health "" "only cmd/polako"'`,
 		"--model opus",
 		"Bash(gh issue create:*)",
+		"Skill(claude-api)",
 		"--output-format stream-json",
 	} {
 		if !strings.Contains(printed, want) {

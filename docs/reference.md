@@ -290,18 +290,18 @@ polako plan -design docs/VISION.md            # the real thing
 `polako health` runs the [`review-health`](../README.md#planning-a-backlog)
 skill the way `polako plan` runs `plan-backlog`: point it at a repository via
 `-dir` and it measures that repo's own shape (file and function sizes,
-duplicated helpers, abstractions nothing uses), filing what it finds as
-**proposals** under `plan`'s own curation gate and sizing contract.
+duplicated helpers, abstractions nothing uses). If it has prompts and the
+CLI ships `/claude-api prompt-audit`, it audits those too. Findings become
+**proposals** under `plan`'s curation gate and sizing contract; the audit's
+diff is never applied, and polako's own `CLAUDE.md` block is left out.
 
 It differs from `plan` only in what it plans from and what it attaches: no
-`-design` / `-brief` / `-milestone` — it reads the repository `-dir` already
-names, and attaches no milestone; `-focus` is the only free-text steer. The
-default `-tools` allowlist is narrower too: review-health's own SKILL.md
-bounds its `gh` surface to three call shapes — two `issue list` reads and
-one `issue create` — plus repo reads and the scratch body file. Otherwise
-the shape is identical to
-[`polako plan`](#planning-a-backlog-unattended-polako-plan)'s, cap and label
-pass included.
+`-design` / `-brief` / `-milestone`, no milestone; `-focus` is the only
+free-text steer. The default `-tools` allowlist is narrower: three `gh` call
+shapes (two `issue list` reads, one `issue create`), repo reads, `git blame`,
+the scratch body file and `Skill(claude-api)`. Otherwise the shape is
+identical to [`polako plan`](#planning-a-backlog-unattended-polako-plan)'s,
+cap and label pass included.
 
 ```bash
 polako health -dir ~/code/some-repo -dry-run
