@@ -50,8 +50,8 @@ To write nothing at all:
 polako work -metrics off
 ```
 
-Records are write-only, with exactly two readers — `stats`, and the cost
-line `polako plan` prints after its label pass. Deleting the directory
+Records are write-only, with exactly three readers — `stats`, the cost line
+`plan` and `health` print, and `status`'s "last shift here". Deleting the directory
 mid-shift changes nothing about what the supervisor does next. Writes are
 best-effort: a failure warns once and polako carries on.
 

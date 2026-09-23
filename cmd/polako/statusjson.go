@@ -46,6 +46,9 @@ type statusDoc struct {
 	// notice fires, since a caller may want to know the current release
 	// either way. Nil when the read failed, timed out, or could not run.
 	Published *string `json:"published,omitempty"`
+	// LastShift is the "last shift here" line's facts, from this machine's
+	// run data — null, never absent, when there is none or -metrics is off.
+	LastShift *statusDocLastShift `json:"last_shift"`
 }
 
 type statusDocScope struct {
@@ -257,6 +260,7 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 		Plans: statusDocPlans{
 			Docs: nonNilSlice(planDocs), Gone: nonNilSlice(gone), Truncated: snap.plans.truncated,
 		},
+		LastShift: toStatusDocLastShift(snap.lastShift),
 	}
 	if line := statusPlanLine(snap); line != "" {
 		doc.Plan = &line

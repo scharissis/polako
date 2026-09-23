@@ -41,7 +41,7 @@ lift — see [Planning a backlog](#planning-a-backlog).
 Four look after the shift, and run no model:
 
 - **`status`** — where the backlog stands and what is waiting on you, read
-  from GitHub.
+  from GitHub, plus the last shift run here.
 - **`stats`** — what your runs cost and how they went, read from local run
   data.
 - **`tidy`** — reclaims the worktrees and branches of finished issues. It only

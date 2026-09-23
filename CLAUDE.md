@@ -11,7 +11,8 @@ any repository it measures that repo's shape and files the outliers as
 Where that repo has prompts, it runs Claude Code's own
 `/claude-api prompt-audit` over them too, and files the outcome the same way.
 Both have a supervisor verb: `plan` and `health`. The binary's other four
-verbs start no runs: `status` reads GitHub, `stats` reads the run data, `tidy`
+verbs start no runs: `status` reads GitHub (plus one line of local run data),
+`stats` reads the run data, `tidy`
 reclaims finished worktrees and branches, `update` moves both halves to the
 published release.
 
@@ -35,11 +36,13 @@ in the PR body rather than doing it quietly.
 - **Write-only local artifacts are the one exception**, and two share it.
   The run-data recorder (`metrics.go`) appends JSONL under `~/.polako`; the
   drain loop never reads it back, and deleting the directory mid-drain changes
-  no behavior. It has exactly two readers — `stats`, and the proposal pricing
+  no behavior. It has exactly three readers — `stats`, the proposal pricing
   line (`proposalPricingLine`, printed after `plan`'s and `health`'s label
-  pass) — both human-facing rendering computed after the run ends, influencing
-  nothing the supervisor does; deleting the directory mid-run only drops that
-  line to its no-history form. Records hold numbers, identifiers and
+  pass), and `status`'s "last shift here" line (`readLastShift`, read after
+  its GitHub snapshot and feeding no queue row, `next` or `needs you`) — all
+  human-facing rendering, influencing nothing the supervisor does; deleting
+  the directory mid-run only drops the pricing line to its no-history form
+  and the last-shift line out of `status`. Records hold numbers, identifiers and
   operator-chosen labels only — never issue, comment or PR text. A read from
   these files anywhere else turns telemetry back into state.
   No run-data record leaves the machine except by explicit request:
