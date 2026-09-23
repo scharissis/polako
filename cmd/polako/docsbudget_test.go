@@ -85,8 +85,17 @@ const docsBudget = 500
 // slack, and documenting the `next shift` line and its stale-red-CI
 // warning — a genuinely new part of `unpark`'s output, not a reword of an
 // existing one — had no existing paragraph on offer to cut instead.
+//
+// reference.md moved again in issue #510: it was already at 559 with no
+// slack, and documenting the plans section's own fixes — sort order, a
+// closed container's `(closed)` rendering, the `gone` line's collapse of
+// all-closed documents, and the `done`-on-disk `needs you` clause — had no
+// existing paragraph on offer to cut instead. It moved once more within the
+// same PR, +3, once review caught `-json`'s `containers` schema missing the
+// new `closed` field entirely — the same distinction the text report just
+// gained had no way to reach a JSON reader.
 var docsDebt = map[string]int{
-	"reference.md": 559,
+	"reference.md": 574,
 	"behaviour.md": 531,
 }
 

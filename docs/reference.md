@@ -353,7 +353,17 @@ Below that table, `plan documents` adds one row per file under `docs/designs/`:
 state derived from the naming issues (`docs/designs/plan-conventions.md`'s
 table), their `(completed/total closed)` container epics and open children
 (shape in the JSON example below), and a `gone` line for a footer naming a
-deleted document. One capped `gh issue list` call for the section.
+deleted document. Rows sort `active`, `proposed`, `draft`, `done`, then path.
+A closed container renders `#321 (closed)`, not the open-container wording.
+The `gone` line names only a deleted document with an open issue still
+naming it, by that issue; the rest collapse into `(N deleted plans, every
+issue closed)` — `-json` always keeps the full issue list plus a
+per-document `open` count. One capped `gh issue list` call for the section.
+A `done` document still on disk gets its own `needs you` clause: `retire
+docs/designs/foo.md (done — move what's still true into docs/, delete the
+file)` — the same nudge a closing container already gives automatically
+(`docs/designs/plan-conventions.md`'s "Retire on close"), for a document
+whose issues were never a container.
 
 What it prints is what a shift starting right now would do next, the same
 thing a running shift is already doing. It reports **state, not liveness** —
@@ -406,7 +416,7 @@ polako status -json | jq .
     "blocked": [{ "issue": 9, "quiet_seconds": 93600 }],
     "parked": [{ "issue": 5, "entries": ["Bash(echo:*)"], "category": "permission_refused" }],
     "proposed": [27, 28],
-    "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false, "held": false }]
+    "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false, "held": false, "closed": false }]
   },
   "next": {
     "issue": 14,
@@ -426,7 +436,7 @@ polako status -json | jq .
     "grant Bash(echo:*) or fix the skill, then polako unpark #5",
     "curate #27, #28 (drop proposed to queue them)"
   ], "notes": [],
-  "plans": { "docs": [{ "path": "docs/designs/backlog-fill.md", "state": "active", "open_children": 4, "containers": [{ "issue": 101, "total": 6, "completed": 2, "finished": false, "held": false }] }], "gone": [], "truncated": false },
+  "plans": { "docs": [{ "path": "docs/designs/backlog-fill.md", "state": "active", "open_children": 4, "containers": [{ "issue": 101, "total": 6, "completed": 2, "finished": false, "held": false, "closed": false }] }, { "path": "docs/designs/epic.md", "state": "done", "open_children": 0, "containers": [{ "issue": 202, "total": 3, "completed": 3, "finished": true, "held": false, "closed": true }] }], "gone": [{ "path": "docs/designs/dropped.md", "issues": [88, 91], "open": 1 }], "truncated": false },
   "plan": "plan: session 42%, week 52% (resets Sep 2, 6pm) — polako was 29% of the last 24h", "published": "0.24.0"
 }
 ```
@@ -438,13 +448,18 @@ up and why, `prs` matches the text columns exactly (`not read` for a PR past
 the eight-PR cap; `unknown` means gh doesn't know), and `needs_you` is the
 closing line's clauses as an array; `notes` names a missing `-label`.
 `plans` (plural — distinct from `plan`, the usage line below it) mirrors the
-plan documents table row for row; its `gone` is `{ "path", "issues" }`.
+plan documents table row for row; its `gone` is `{ "path", "issues", "open"
+}` — `issues` is every naming issue, open or closed, unlike the text
+report's own `gone` line, which only names the open ones; `open` is that count.
 
 `queue.containers`, and `plans.docs[].containers` the same way, is objects,
-not bare numbers — `{ "issue", "total", "completed", "finished", "held" }` —
-so a caller can tell a finished container from one in progress without a
-second call. For a finished one, `held: false` means the next shift is about
-to close it, `held: true` means it's the caller's. `queue.parked` is `{ "issue", "entries", "category" }` the same way — `polako unpark`'s own read; `category` is one of the fixed identifiers in `metrics.go`, or `""` for a hand-labelled park.
+not bare numbers — `{ "issue", "total", "completed", "finished", "held",
+"closed" }` — so a caller can tell a finished container from one in
+progress without a second call. For a finished, unclosed one, `held: false`
+means the next shift is about to close it, `held: true` means it's the
+caller's. `closed` is only ever true under `plans.docs[]` — `queue.containers`
+is open issues alone — and means exactly that: already closed, nothing left
+for anyone to do. `queue.parked` is `{ "issue", "entries", "category" }` the same way — `polako unpark`'s own read; `category` is one of the fixed identifiers in `metrics.go`, or `""` for a hand-labelled park.
 Every array field is always `[]`, never `null`; `quiet_seconds`, `plan` and
 `published` can be *absent* instead of a fake zero or empty string. Same
 rule as the text report: no issue, PR or comment text, only numbers,

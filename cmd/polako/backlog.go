@@ -147,6 +147,12 @@ type containerInfo struct {
 	// same exclusion precedence selectableIssues uses everywhere else — a label
 	// a human wrote outranks what the drain would otherwise do.
 	held bool
+	// closed is true when the container issue itself is closed. Only
+	// plans.go ever sets this: openQueues lists open issues alone, so a
+	// queue's own containers never carry it. A plan document's containers can
+	// be closed — the document's history, not something still to close — and
+	// containerRefs renders that case first, before finished/held even apply.
+	closed bool
 }
 
 // heldBackInfo is one otherwise-ready issue put down for this pass because at
