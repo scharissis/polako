@@ -438,7 +438,7 @@ func TestStatusJSONKeepsArraysEmptyNotNull(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		`"ready": []`, `"blocked": []`, `"prs": []`, `"needs_you": []`, `"notes": []`,
+		`"ready": []`, `"blocked": []`, `"prs": []`, `"needs_you": []`, `"notes": []`, `"outside_gate": []`,
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output is missing %q\n%s", want, out.String())
