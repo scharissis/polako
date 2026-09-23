@@ -395,7 +395,7 @@ hatch typed on one invocation, not a property of the backlog.
 **Reads only.** Every call is a read subcommand polako itself re-derives
 state with at startup — `gh issue list`, `gh pr list`, `gh pr view`, the REST
 read of a thread's comments — so nothing moves an issue, label or PR. It
-prints no issue, PR or comment text. Three details come from this machine's run data, the records' third reader beside `stats` and the pricing line: the `last shift here: …` line; the `ready` row's price, `about $38 at your median` — the ready count times the median cost of a merged issue here, the same median `plan` prices with; and a parked issue's reason, `#77 (budget)`, when its newest local record is a park. Nothing else in the report reads it, and which issue sits in which row stays GitHub's call. No local records, or `-metrics off`, and all three are absent.
+prints no issue, PR or comment text. Three details come from this machine's run data, the records' third reader beside `stats` and the pricing line: the `last shift here: …` line; the `ready` row's price, `about $38 at your median` — the median cost of a merged issue here times the ready issues with no open PR yet, the same median `plan` prices with; and a parked issue's reason, `#77 (budget)`, when its newest local record is a park. Nothing else in the report reads it, and which issue sits in which row stays GitHub's call. No local records, or `-metrics off`, and all three are absent.
 
 Two things about the numbers. **Quiet** is the age of the newest comment on
 a thread, a proxy for how long a question has waited — which comment is the
