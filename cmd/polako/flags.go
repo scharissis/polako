@@ -553,8 +553,9 @@ const envUsage = "Any flag below can take its default from the environment:\n" +
 // and a forgotten export would make every future setup run silent.
 // POLAKO_ISSUE would be `design -issue` left in a profile: every later bare
 // `polako design`, in any -dir, labels and runs opus on that one number
-// instead of refusing for want of one.
-var envExempt = map[string]bool{"version": true, "dry-run": true, "apply": true, "yes": true, "issue": true}
+// instead of refusing for want of one. POLAKO_BRIEF is the same risk one
+// step worse: a bare `polako design` would file a new issue every time.
+var envExempt = map[string]bool{"version": true, "dry-run": true, "apply": true, "yes": true, "issue": true, "brief": true}
 
 // applyEnvDefaults lets an operator set a per-machine default for any flag, so
 // a preference they always want lives in a shell profile instead of being
