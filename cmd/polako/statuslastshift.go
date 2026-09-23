@@ -40,6 +40,9 @@ type lastShift struct {
 	merged int
 	parked int
 	cost   float64
+	// otherYear is set when the shift started in a year other than now's, so
+	// the line names the year rather than passing last September for this one.
+	otherYear bool
 	// hint is the stats command that opens this shift, -metrics included
 	// when the records came from somewhere stats wouldn't look by default.
 	hint string
@@ -83,6 +86,7 @@ func readLastShift(metricsDir, repo string, now time.Time) *lastShift {
 	ls.span = end.Sub(ls.start)
 	// now's zone — the reader's own clock, not the UTC the records carry.
 	ls.start = ls.start.In(now.Location())
+	ls.otherYear = ls.start.Year() != now.Year()
 	for _, is := range rollUpIssues(ds) {
 		ls.cost += is.cost
 		switch is.outcome() {
@@ -116,8 +120,12 @@ func lastShiftLine(ls *lastShift) string {
 	if span >= time.Minute {
 		span = span.Round(time.Minute)
 	}
+	layout := "Jan 2 15:04"
+	if ls.otherYear {
+		layout = "Jan 2 2006 15:04"
+	}
 	return fmt.Sprintf("last shift here: %s, %s — %d merged, %d parked, %s — %s",
-		ls.start.Format("Jan 2 15:04"), dur(span),
+		ls.start.Format(layout), dur(span),
 		ls.merged, ls.parked, usd(ls.cost), ls.hint)
 }
 

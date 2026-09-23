@@ -74,6 +74,16 @@ func TestLastShiftLineUsesTheLocalZone(t *testing.T) {
 	}
 }
 
+// A shift from another year says so, rather than reading as a recent one.
+func TestLastShiftLineNamesAnOlderYear(t *testing.T) {
+	t.Parallel()
+	dir := writePricingFixture(t, map[string]string{"example--repo.jsonl": lastShiftFixture})
+	got := lastShiftLine(readLastShift(dir, "example/repo", statusNow.AddDate(1, 0, 0)))
+	if !strings.HasPrefix(got, "last shift here: Feb 21 2026 02:10, 6h12m") {
+		t.Errorf("line = %q, want the year named", got)
+	}
+}
+
 func TestLastShiftAbsentWithoutHistory(t *testing.T) {
 	t.Parallel()
 	const idless = `
