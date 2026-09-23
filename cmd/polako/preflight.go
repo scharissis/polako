@@ -46,7 +46,7 @@ func workGates(ctx context.Context, cfg *config, visibility string) error {
 	// A -label the repository has never defined would otherwise pass the gate
 	// above and drain an empty queue all shift, reported as success. A real
 	// lookup failure (not a definitive "no") is not this gate's business — it
-	// fails preflight outright, the same as any other gh call above.
+	// fails preflight outright, the same as preflightShared's `gh repo view`.
 	if cfg.label != "" {
 		exists, err := labelExists(ctx, *cfg, cfg.label)
 		if err != nil {
