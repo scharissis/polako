@@ -2,8 +2,8 @@
 
 Both halves install separately: the skill as a Claude Code plugin, the binary
 with `go install` or a prebuilt release. The binary is one install for all
-seven verbs — `work`, `plan`, `health`, `status`, `stats`, `tidy`, `update` —
-nothing here repeats per verb. The
+ten verbs — `work`, `plan`, `health`, `design`, `status`, `stats`, `tidy`,
+`unpark`, `update`, `setup` — nothing here repeats per verb. The
 [README](../README.md#install) has the short version of the first two.
 
 ## Install

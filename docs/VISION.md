@@ -35,8 +35,9 @@ Everything between those two decisions is the machine's job.
 
 ## How a direction becomes work
 
-One document per initiative under [`docs/designs/`](designs/). `polako plan
--design docs/designs/<doc>.md` turns it into proposals. Lift the gate on what
+One document per initiative under [`docs/designs/`](designs/). `polako
+design` writes that document from a request issue, behind a PR a human
+merges. `polako plan -design docs/designs/<doc>.md` turns it into proposals. Lift the gate on what
 survives review, and `polako work` does the rest. A plan is done when the
 issues it proposed are closed, and `polako status` says so. This document
 sets direction and says what will not change. It does not have a status.

@@ -228,10 +228,10 @@ applies it automatically. It's applied by hand, with this:
 
 ```bash
 gh repo edit scharissis/polako \
-  --description "Works a GitHub issue backlog to zero, unattended: work drives one issue at a time to a pull request, plan and health propose the backlog behind a label, and status, stats, tidy and update look after the shift. Never merges anything itself." \
+  --description "Works a GitHub issue backlog to zero, unattended: work drives one issue at a time to a pull request, design writes the plan document first, plan and health propose the backlog behind a label, and status, stats, tidy, unpark, update and setup look after the shift. Never merges anything itself." \
   --add-topic claude-code --add-topic claude-code-plugin --add-topic github-issues \
   --add-topic backlog --add-topic automation --add-topic ai-agents --add-topic golang --add-topic cli
 ```
 
 Keep the description matching the README's opening line, and naming all
-seven verbs, whenever either changes.
+ten verbs, whenever either changes.

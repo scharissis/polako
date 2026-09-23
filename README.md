@@ -16,7 +16,7 @@ anything itself. The Github issues and pull requests are reviewed by humans.
 
 *Polako* is Croatian for "take it easy" or "slow and steady", which is the philosophy we follow here. We have engineered for correctness over speed. Polako takes its time so reviewers don't waste theirs.
 
-![A bare polako printing its seven verbs, polako status printing the state of a backlog, then polako plan -dry-run and polako work -dry-run each printing the exact claude invocation they would run](docs/demo.gif)
+![A bare polako printing its verbs, polako status printing the state of a backlog, then polako plan -dry-run and polako work -dry-run each printing the exact claude invocation they would run](docs/demo.gif)
 
 ## How it works
 
@@ -28,17 +28,20 @@ from research to a plan to a pull request, on its own or driven by the
 PR, repairs it when CI goes red, advances when you merge. Stdlib-only Go, no
 dependencies.
 
-Seven verbs. Three start Claude runs:
+Ten verbs. Four start Claude runs:
 
 - **`work`** — works the backlog to zero, one issue at a time, never merging.
 - **`plan`** — turns a design document into a curated backlog of proposals.
 - **`health`** — reads the repository itself and files what looks off as
   proposals.
+- **`design`** — works one design request into the design document `plan`
+  reads, behind a PR you merge.
 
 `plan` and `health` file everything behind a `proposed` label a human has to
-lift — see [Planning a backlog](#planning-a-backlog).
+lift; `design` writes the document first — see
+[Planning a backlog](#planning-a-backlog).
 
-Four look after the shift, and run no model:
+Six look after the shift, and run no model:
 
 - **`status`** — where the backlog stands and what is waiting on you, read
   from GitHub, plus the last shift run here.
@@ -46,7 +49,11 @@ Four look after the shift, and run no model:
   data.
 - **`tidy`** — reclaims the worktrees and branches of finished issues. It only
   previews until you pass `-apply`.
+- **`unpark`** — lists issues parked on a permission refusal and clears the
+  ones you approve.
 - **`update`** — brings the plugin and the binary to the published release.
+- **`setup`** — reports whether a repository is ready for polako, and fixes
+  what it can with `-apply`.
 
 A bare `polako` prints this table; `polako <verb> -h` prints that verb's flags.
 
@@ -70,8 +77,9 @@ wait for merge (-poll)               ← rebases if GitHub reports CONFLICTING,
 close the issue, remove the worktree, advance to the next
 ```
 
-That is `work`'s loop. `plan` and `health` are simpler: one `claude` run,
-filing proposals, then done — no PR, no polling.
+That is `work`'s loop. `design` is the same loop on one issue you name,
+ending at a merged plan document instead of code. `plan` and `health` are
+simpler: one `claude` run, filing proposals, then done — no PR, no polling.
 
 You have two jobs, both on GitHub: answer a question when a run asks one on an
 issue thread, and merge the pull requests. Neither is on a clock, and nothing
@@ -226,6 +234,26 @@ Point it at any repository; it is not polako-specific:
 Both are documented alongside `work`'s own flags: [`plan`](docs/reference.md#planning-a-backlog-unattended-polako-plan),
 [`health`](docs/reference.md#auditing-repository-health-unattended-polako-health).
 
+### Designing first
+
+`plan` decomposes a document; it does not write one. When the idea is still
+a paragraph, `design` runs `/design-plan` on it: it asks its questions on the
+issue thread, then opens a PR adding one document under `docs/designs/`, and
+the PR review is where the design gets argued. Name an open issue, or hand it
+the text and it files the issue for you:
+
+```
+polako design -issue 31
+polako design -brief "a dating app for horses"
+```
+
+The hand-off is the merge. Once you merge the PR, `polako status` lists the
+new document as `draft`, and `polako plan -design docs/designs/<doc>.md`
+turns it into proposals — printed at the end of the run, never run for you.
+`work` skips anything labelled `design`, so a request never gets coded
+before it's designed. Flags in
+[`design`](docs/reference.md#designing-a-plan-document-polako-design).
+
 Every proposal carries a `proposed` label, and that label is the point:
 `polako work` skips every issue that has one, so nothing a machine proposed
 can reach an unattended run until you have looked at it. Each proposal
@@ -320,9 +348,9 @@ retro checklist, the tagging rule, and the recipes for reading run data back.
 
 ## Flags
 
-`polako work` takes around two dozen flags, and the other seven verbs have
+`polako work` takes around two dozen flags, and the other nine verbs have
 their own smaller sets. [docs/reference.md](docs/reference.md) has `work`,
-`plan`, `health`, `status` and `tidy`, together with `-dry-run`, `-notify`,
+`plan`, `health`, `design`, `status`, `tidy` and `unpark`, together with `-dry-run`, `-notify`,
 `-remote` and the `POLAKO_*` environment defaults; `stats` is in
 [docs/run-data.md](docs/run-data.md), `setup` in
 [docs/setup.md](docs/setup.md), and `update` in

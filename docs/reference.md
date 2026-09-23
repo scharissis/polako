@@ -5,9 +5,9 @@ defaults from the [environment](#setting-defaults-from-the-environment). See [se
 
 ## Flags
 
-These are `polako work`'s own; the other eight verbs take smaller sets —
+These are `polako work`'s own; the other nine verbs take smaller sets —
 [`plan`](#planning-a-backlog-unattended-polako-plan), [`health`](#auditing-repository-health-unattended-polako-health), [`design`](#designing-a-plan-document-polako-design), [`status`](#where-the-backlog-stands-polako-status), [`tidy`](#reclaiming-finished-issues-polako-tidy) and [`unpark`](#clearing-a-permission-park-polako-unpark) below,
-[`stats`](run-data.md#reading-it-back-polako-stats) and [`update`](install.md#update) beside what they describe.
+[`stats`](run-data.md#reading-it-back-polako-stats), [`update`](install.md#update) and [`setup`](setup.md) beside what they describe.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
