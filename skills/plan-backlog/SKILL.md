@@ -120,7 +120,7 @@ become the `## Pointers` section, and they are what make the difference between
 an issue an unattended run can start on and one it has to go discover first.
 
 ## Phase 2 — Shape the work
-**Spend your thinking here.** Decomposition is the whole product: a wrong cut
+Decomposition is the whole product: a wrong cut
 costs every run downstream, and no amount of careful wording later recovers
 from it.
 

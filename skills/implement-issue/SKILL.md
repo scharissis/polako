@@ -26,42 +26,19 @@ Waiting is not the same as going quiet, though. A supervisor kills and resumes
 a run that emits nothing for `-stall` — fifteen minutes by default — so a wait
 longer than that is polled from here, in repeated calls that keep the run
 visibly alive, rather than spent inside one call a watchdog cannot tell from a
-hang. Poll it slowly, though: a check every minute or two is already an order
-of magnitude inside that fifteen, and each one is a fresh turn that reloads the
-whole late-session context — the most expensive turns in a run, not a free
-keepalive. A check every second or two buys nothing over that, and is how one
-run spent an eighth of its tool calls on `sleep` and status polls (issue #217).
-Backgrounding the slow thing is fine; what is not is the turn ending while it
-is still outstanding.
+hang. Poll it slowly — a check every minute or two. Each check is a fresh
+turn that reloads the whole late-session context, so polling faster costs a
+lot and buys nothing. Backgrounding the slow thing is fine; what is not is
+the turn ending while it is still outstanding.
 
-That polling is only for work still running when you look — a
-`run_in_background` job you started, or a `Skill` call whose return didn't
-actually carry the result. Most `Skill` calls are the first case already
-solved: the call runs as a forked agent whose own activity keeps the run
-alive, and the harness holds the turn until it returns with the result in
-hand — nothing to keep alive, nothing to check on, so `ListAgents` or a
-`Bash: true` heartbeat beside a call that hasn't returned yet is pure waste.
-Issues #217 and #372 are both runs that hand-polled the review gate mid-call
-that way.
-
-But a return is not proof the work behind it is done, and reading its prose
-for "does this sound finished" is not a safe way to decide — #472 is the
-opposite failure on the same gate, and it is exactly this gap: the review
-call returned at once, control handed back to this run, with the review
-itself still fanning out finder subagents in the background. What came back
-read like a status, not a final report ("I'll wait for their completion
-notifications"), and taking that at face value is what lost the run: eight
-completion notifications later it ended its turn on an unfinished ninth, with
-the review's own verification pass still running per `ListAgents`, and
-nothing was ever written down. A return that instead reads as finished is no
-safer to trust on its own — the same verification pass can still be running
-behind a report that looks complete. So a `Skill` call whose return might be
-backgrounding work gets a ground-truth check before its result is trusted:
-`ListAgents`. Nothing related still running means done, whatever the return
-said. Anything still running is backgrounded work by another name, whatever
-tool started it — switch to the polling rule above, slowly, and check again
-once the wait is up rather than trusting the next thing that arrives either.
-Phase 3 step 2c says how the review gate specifically checkpoints what
+Polling is only for work still running when you look. A `Skill` call that
+hasn't returned yet needs none: the harness holds the turn until it returns,
+so a `ListAgents` or `Bash: true` heartbeat beside it is waste. But a return
+is not proof the work behind it is done, however finished its prose reads —
+the skill may still have subagents running in the background. So before
+trusting a `Skill` call's result, check `ListAgents`: nothing related still
+running means done; anything still running is backgrounded work, polled
+slowly as above. Phase 3 step 2c says how the review gate checkpoints what
 arrives while it waits.
 
 Stopping on purpose is a different thing from stopping to wait. An unanswered
@@ -625,14 +602,8 @@ don't post again, and stop.
       the worktree after the merge. Tell it too to launch its finder and
       verifier subagents in the foreground — `run_in_background: false`, all
       in one message — so every report comes back inside that same call.
-      Backgrounded, none of it reaches the review agent on its own: #418 saw
-      it launch 8 finders backgrounded, then burn most of a 45-minute budget
-      busy-polling (`Bash: true`, `ListAgents`, `sleep`) for reports that
-      never arrived that way, then `SendMessage` each finder and the two
-      verifiers asking them to restate what they'd already finished — real
-      work still unopened at the cap. Foreground removes that one loop — no
-      `Bash: true`, no `sleep`, no restate `SendMessage`, because there is
-      nothing left to poll for at the finder/verifier level. It does not
+      Backgrounded, the reports never reach the review agent on their own,
+      and it burns the run's budget polling for them. Foreground does not
       remove the wait below for the review's own separate verification
       pass (issue #472): that still needs its own `ListAgents` check once
       the review returns. `medium` asks the review for "fewer, high-confidence findings"
@@ -675,10 +646,6 @@ don't post again, and stop.
       own — this run neither starts nor awaits nor watches them directly —
       and a `Bash: true` filler or a `Monitor` heartbeat beside any of this is
       still waste; the wait is on `ListAgents` clearing, nothing faster.
-      Issue #217 is a run that hand-polled a call that was always going to
-      block; issue #372 polled every few seconds between `Monitor` timers
-      after #217's floor landed — neither was ever waiting on anything real,
-      which a slow, `ListAgents`-gated wait here does not reopen.
       Leaving `--fix` off is deliberate: applying fixes is the slow part after
       the review itself is done, and a run that dies during it is exactly
       what left issue #216's gate with nothing to resume from. So once
