@@ -334,7 +334,7 @@ func TestDesignDryRunWritesNothing(t *testing.T) {
 // A gh that stops answering is fatal, and a fatal exit tells the operator.
 func TestDesignFatalFiresStopped(t *testing.T) {
 	t.Parallel()
-	captureLog(t)
+	buf := captureLog(t)
 	cfg, _ := designTestConfig(t, "design", &ghState{
 		Issues:    map[string]*fakeIssue{"1": {Open: true, Labels: []string{designLabel}}},
 		FailReads: map[string]int{"pr list": 100},
@@ -346,5 +346,9 @@ func TestDesignFatalFiresStopped(t *testing.T) {
 	}
 	if got := told(); len(got) != 1 || !strings.Contains(got[0], notifyPrefix+"EVENT="+notifyStopped) {
 		t.Errorf("notifications = %v, want exactly one %s", got, notifyStopped)
+	}
+	// Unfinished is not an outcome: no summary calls it merged.
+	if strings.Contains(buf.String(), "summary:") {
+		t.Errorf("a fatal exit printed a summary\ngot:\n%s", buf.String())
 	}
 }

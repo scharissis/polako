@@ -20,7 +20,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // designSkillDir is the skill under skills/ a design run invokes.
@@ -264,44 +263,40 @@ func designPairs(cfg config) [][2]string {
 
 // designRun is processIssue once, wrapped in the four exits drain gives it.
 // Only the fatal one returns an error; a question or a park is this verb
-// finishing, not failing.
+// finishing, not failing. The summary and the stopped notification go
+// through drain's own shift.finish, so an unfinished issue is left out of
+// the summary here exactly as it is there.
 func designRun(ctx context.Context, cfg config, issue int) error {
-	started := time.Now()
+	s := newShift(cfg)
 	// Before the pickup, as drain does: a design issue merged by hand since
 	// the last run left a worktree nothing else revisits.
 	tidySweep(ctx, cfg, 0)
 	cfg.narrate(sevSection, "=== issue #%d ===", issue)
 	st := &issueState{}
 	err := processIssue(ctx, cfg, issue, st)
-	result := issueResult{issue: issue}
 	reason, parked := parkReason(err)
-	if _, deferred := deferReason(err); deferred {
-		result.awaiting = true
+	if deferred, ok := deferReason(err); ok {
+		// Held in states rather than results: finish reads it back through
+		// stillWaiting, the same as a drain's put-down issue.
+		st.awaiting, st.baseline = true, deferred.baseline
+		s.states[issue] = st
 		cfg.logf("issue #%d is waiting on your answer — reply on the thread, then rerun polako design -issue %d",
 			issue, issue)
 		err = nil
 	} else if parked {
-		result.parked, result.reason, result.parkEntries = true, reason, parkEntriesOf(err)
+		s.results = append(s.results, spend(st, issueResult{
+			issue: issue, parked: true, reason: reason, parkEntries: parkEntriesOf(err),
+		}))
 		parkAndMoveOn(ctx, cfg, issue, st, reason, err)
 		err = nil
 	} else if err != nil {
 		resumeHint(cfg, issue, st)
 		err = fmt.Errorf("issue #%d: %w", issue, err)
 	} else {
-		result.closedNoChange = st.closedNoChange
+		s.results = append(s.results, spend(st, issueResult{issue: issue, closedNoChange: st.closedNoChange}))
 		designHandOff(ctx, cfg, issue, st)
 	}
-	if lines := drainSummary([]issueResult{spend(st, result)}, nil, nil, nil, time.Since(started)); len(lines) > 0 {
-		cfg.narrate(sevSection, "%s", lines[0])
-		for _, line := range lines[1:] {
-			cfg.logf("%s", line)
-		}
-	}
-	// Ctrl+C is left out for drain's reason: whoever pressed it is here.
-	if err != nil && !errors.Is(err, context.Canceled) {
-		notify(ctx, cfg, notification{event: notifyStopped, reason: err.Error()})
-	}
-	return err
+	return s.finish(ctx, err)
 }
 
 // designHandOff is the success line: which PR landed the document, and the
