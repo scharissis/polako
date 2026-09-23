@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -88,6 +89,24 @@ func TestLastShiftAbsentWithoutHistory(t *testing.T) {
 		if ls := readLastShift(dir, "example/repo", statusNow); ls != nil {
 			t.Errorf("%s: got %+v, want nil", name, ls)
 		}
+	}
+}
+
+// -metrics goes through runStatus's own flag parse: off reads nothing, and a
+// path naming a record file is refused before any GitHub read, with the fix.
+func TestStatusMetricsFlag(t *testing.T) {
+	t.Parallel()
+	if dir, err := statusMetricsDir("off"); dir != "" || err != nil {
+		t.Errorf("off: dir %q, err %v; want nothing to read", dir, err)
+	}
+	dir := writePricingFixture(t, map[string]string{"example--repo.jsonl": lastShiftFixture})
+	if got, err := statusMetricsDir(dir); got != dir || err != nil {
+		t.Errorf("directory: got %q, %v; want %q", got, err, dir)
+	}
+	file := filepath.Join(dir, "example--repo.jsonl")
+	err := runStatus(context.Background(), []string{"-metrics", file}, &strings.Builder{}, statusNow, report{})
+	if err == nil || !strings.Contains(err.Error(), "is a file, not a directory") {
+		t.Errorf("-metrics <file>: err = %v, want the is-a-file refusal", err)
 	}
 }
 
