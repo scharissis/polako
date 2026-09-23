@@ -1284,6 +1284,27 @@ func TestResolveStatusScopeAnExplicitLabelSkipsTheLookup(t *testing.T) {
 	}
 }
 
+// An explicitly empty -label (fs.Visit sees it typed, but its value is "")
+// names no source: cfg.label stays "" and the marker lookup finds nothing
+// to widen to, so this must report as unscoped, not as "flag"/"env" with an
+// empty label.
+func TestResolveStatusScopeExplicitlyEmptyLabelStaysUnscoped(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{})
+
+	got, source, _ := resolveStatusScope(context.Background(), cfg, true, false)
+	if got.label != "" || source != "" {
+		t.Errorf("resolveStatusScope() = (label %q, source %q), want both empty on an explicitly empty -label",
+			got.label, source)
+	}
+
+	got, source, _ = resolveStatusScope(context.Background(), cfg, false, true)
+	if got.label != "" || source != "" {
+		t.Errorf("resolveStatusScope() = (label %q, source %q), want both empty on an explicitly empty POLAKO_LABEL",
+			got.label, source)
+	}
+}
+
 // More than one label carrying the marker is ambiguous — scoping to a guess
 // would be worse than not scoping at all, so status stays unscoped and says
 // why.

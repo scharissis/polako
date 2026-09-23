@@ -148,11 +148,17 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 // statusLabelNote already is — without needing a real flag parse or a
 // resolvable repository.
 func resolveStatusScope(ctx context.Context, cfg config, labelFromFlag, labelFromEnv bool) (config, string, []string) {
+	// cfg.label != "" as well as labelFromFlag/labelFromEnv: an explicitly
+	// empty -label (or an env var interpolated empty) still trips fs.Visit,
+	// but names nothing to report a source for — leaving labelSource set
+	// here would print {"label":"","source":"flag"}, contradicting
+	// statusDocScope's own doc comment that Source is omitted when Label is
+	// "".
 	labelSource := ""
 	switch {
-	case labelFromFlag:
+	case labelFromFlag && cfg.label != "":
 		labelSource = "flag"
-	case labelFromEnv:
+	case labelFromEnv && cfg.label != "":
 		labelSource = "env"
 	}
 
