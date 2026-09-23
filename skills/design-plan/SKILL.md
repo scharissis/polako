@@ -236,8 +236,10 @@ strands the worktree after the merge until a human clears it by hand.
 
 ## Phase 2 — Measure what exists today
 Test whether PLAN.md exists by Read-ing `<worktree>/PLAN.md` directly —
-never `ls`, `test -f` or `[ -f ]`, none of which are granted. If it has a
-`## Measured` section already, this phase is done; go to Phase 3.
+never `ls`, `test -f` or `[ -f ]`, none of which are granted. If its
+`## Measured` section ends with the line `Measured: done`, this phase is
+done; go to Phase 3. A `## Measured` without that line is a run that died
+mid-measurement — pick up where its findings stop.
 
 A design written from the issue alone proposes work that is already merged
 and misses what's half there. So measure first:
@@ -253,8 +255,9 @@ and misses what's half there. So measure first:
   A finding with neither is a guess; drop it or go measure it.
 
 Write the findings into PLAN.md under `## Measured` as you go — the sha
-you measured at and the date first — before moving on. That's the resume
-point if this session dies, and Phase 4 lifts it into the document.
+you measured at and the date first — and once the last one is in, end the
+section with `Measured: done`. That's the resume point if this session
+dies, and Phase 4 lifts it into the document.
 
 ## Phase 3 — Decide, or ask once
 List the decisions the design turns on: the shape of the change, what it
