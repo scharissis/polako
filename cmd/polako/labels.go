@@ -42,11 +42,10 @@ type labelDef struct {
 // given: the marker, not the name, is what makes a label "the" gate label.
 const gateLabelDescription = "gate label for `polako work -label`"
 
-// labelTable is every label polako applies to an issue, each orchestration
+// labelTable is every label polako manages on an issue, each orchestration
 // state the queue logic reads (see the consts in main.go), not decoration.
 // The first three are required. designLabel is not: a repo with no design
-// requests loses nothing by lacking it, and nothing applies it without
-// ensuring it first.
+// requests loses nothing by lacking it.
 var labelTable = []labelDef{
 	{name: needsHumanLabel, color: "D93F0B", description: "polako parked this issue for a human", required: true},
 	{name: proposedLabel, color: "1D76DB", description: "proposed by polako — a human removes this label to queue it", required: true},

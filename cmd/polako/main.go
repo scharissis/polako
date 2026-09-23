@@ -85,7 +85,7 @@ const proposedLabel = "proposed"
 // plan document rather than one `implement-issue` works into code. The queue
 // excludes it, so `work` never runs the wrong skill on it, and the exclusion
 // ships before anything applies the label, the same order proposedLabel took.
-// Only a human or `polako design` puts it on.
+// Today only a human puts it on; nothing in the binary does.
 const designLabel = "design"
 
 // awaitingAnswerLabel says a run stopped to ask something. It is the only
