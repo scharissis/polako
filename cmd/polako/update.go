@@ -654,7 +654,7 @@ func updateAvailableLine(binary, plugin, published string) string {
 		published, self, pluginDisplay)
 }
 
-// updateNoticeLine is the notice as work's preflight calls it: the read and
+// updateNoticeLine is the notice as preflightShared calls it: the read and
 // the comparison together, both best-effort — nothing here refuses or
 // blocks a shift over a release notice, the same tolerance probeUsage has.
 func updateNoticeLine(ctx context.Context, binary string, cfg config) string {
