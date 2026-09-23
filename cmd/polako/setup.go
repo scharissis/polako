@@ -301,7 +301,7 @@ func readSetupRepoView(ctx context.Context, cfg config) (setupRepoViewResult, er
 // never refuses anything itself.
 func setupRepoOKRow(view setupRepoView, label string) setupRow {
 	detail := view.Visibility
-	if err := queueGate(view.Visibility, label, false); err != nil {
+	if err := queueGate(view.Visibility, label, false, ""); err != nil {
 		detail += " — " + err.Error()
 	}
 	return setupRow{name: "gh repo view", status: setupOK, detail: detail}

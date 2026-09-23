@@ -738,10 +738,15 @@ func TestStatusMakesOnlyReadCalls(t *testing.T) {
 		t.Fatalf("reading fake gh state: %v", err)
 	}
 
+	// resolveStatusScope's own marker lookup — exercised here too, since a
+	// bare status (no -label, no POLAKO_LABEL) always makes it, and it must
+	// hold to the same read-only rule as every other call this test proves.
+	cfg, labelSource, notes := resolveStatusScope(context.Background(), cfg, false, false)
 	snap, err := readStatus(context.Background(), cfg, statusNow)
 	if err != nil {
 		t.Fatalf("readStatus: %v", err)
 	}
+	snap.notes, snap.labelSource = notes, labelSource
 	renderStatus(&strings.Builder{}, report{}, cfg, snap)
 
 	after, err := os.ReadFile(path)
@@ -774,8 +779,11 @@ func TestStatusMakesOnlyReadCalls(t *testing.T) {
 			// ghViewerLogin (unpark.go), reused for the parked issue's own
 			// park-comment read — reached only because #3 above is parked.
 			isViewer := fields[1] == "user"
-			if !isComments && !isMarketplace && !isViewer {
-				t.Errorf("status called `gh %s`, which is not the comments, marketplace or viewer-login read", line)
+			// markedGateLabel's own call, made because this cfg has no
+			// -label: the one new read this feature adds to status.
+			isLabels := strings.HasSuffix(fields[1], "/labels")
+			if !isComments && !isMarketplace && !isViewer && !isLabels {
+				t.Errorf("status called `gh %s`, which is not the comments, marketplace, viewer-login or labels read", line)
 			}
 			continue
 		}
@@ -987,6 +995,19 @@ func TestGhArgsNamesTheRepository(t *testing.T) {
 	want := []string{"api", "repos/o/n/issues/9/comments?per_page=100", "--paginate"}
 	if got := ghArgs("o/n", api); !slices.Equal(got, want) {
 		t.Errorf("api args = %v, want %v", got, want)
+	}
+
+	// `gh repo view` is the one other exception: real gh rejects --repo on it
+	// outright ("unknown flag: --repo") — the repository is a bare
+	// positional argument instead. Caught only by running the built binary
+	// against a real repository (status's own repoVisibility, the first
+	// call site to reach this with a repo already resolved); the fake gh
+	// this suite otherwise tests against never rejected the extra flag the
+	// way real gh does.
+	view := []string{"repo", "view", "--json", "visibility", "--jq", ".visibility"}
+	wantView := []string{"repo", "view", "o/n", "--json", "visibility", "--jq", ".visibility"}
+	if got := ghArgs("o/n", view); !slices.Equal(got, wantView) {
+		t.Errorf("repo view args = %v, want %v", got, wantView)
 	}
 }
 
@@ -1230,6 +1251,220 @@ func TestStatusLabelNotePrintsUnderTheHeaderOnStdout(t *testing.T) {
 	// the label note itself never reached the narration stream.
 	if strings.Contains(logged.String(), "gh label create") {
 		t.Errorf("status wrote the label note to its narration stream: %s", logged.String())
+	}
+}
+
+// --- resolveStatusScope: status scoping itself from setup's own marker ---
+
+// With no -label and no POLAKO_LABEL, status finds the one label carrying
+// setup's marker and scopes itself to it — labelSource "github" says so.
+func TestResolveStatusScopeFindsTheMarkedLabel(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{
+		Labels:            []string{"ready"},
+		LabelDescriptions: map[string]string{"ready": gateLabelDescription},
+	})
+
+	got, source, notes := resolveStatusScope(context.Background(), cfg, false, false)
+
+	if got.label != "ready" || source != "github" {
+		t.Errorf("resolveStatusScope() = (label %q, source %q), want (\"ready\", \"github\")", got.label, source)
+	}
+	if len(notes) != 0 {
+		t.Errorf("notes = %v, want none — a found marker needs no note", notes)
+	}
+}
+
+// An explicit -label (or POLAKO_LABEL) never triggers the marker lookup at
+// all — a scope the operator typed is never overridden by GitHub's own
+// discovery, and the flag/env source is reported honestly.
+func TestResolveStatusScopeAnExplicitLabelSkipsTheLookup(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{
+		Labels:            []string{"ready", "typed"},
+		LabelDescriptions: map[string]string{"ready": gateLabelDescription},
+	})
+	cfg.label = "typed"
+
+	got, source, _ := resolveStatusScope(context.Background(), cfg, true, false)
+	if got.label != "typed" || source != "flag" {
+		t.Errorf("resolveStatusScope() = (label %q, source %q), want (\"typed\", \"flag\")", got.label, source)
+	}
+
+	got, source, _ = resolveStatusScope(context.Background(), cfg, false, true)
+	if got.label != "typed" || source != "env" {
+		t.Errorf("resolveStatusScope() = (label %q, source %q), want (\"typed\", \"env\")", got.label, source)
+	}
+}
+
+// An explicitly empty -label (fs.Visit sees it typed, but its value is "")
+// names no source: cfg.label stays "" and the marker lookup finds nothing
+// to widen to, so this must report as unscoped, not as "flag"/"env" with an
+// empty label.
+func TestResolveStatusScopeExplicitlyEmptyLabelStaysUnscoped(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{})
+
+	got, source, _ := resolveStatusScope(context.Background(), cfg, true, false)
+	if got.label != "" || source != "" {
+		t.Errorf("resolveStatusScope() = (label %q, source %q), want both empty on an explicitly empty -label",
+			got.label, source)
+	}
+
+	got, source, _ = resolveStatusScope(context.Background(), cfg, false, true)
+	if got.label != "" || source != "" {
+		t.Errorf("resolveStatusScope() = (label %q, source %q), want both empty on an explicitly empty POLAKO_LABEL",
+			got.label, source)
+	}
+}
+
+// More than one label carrying the marker is ambiguous — scoping to a guess
+// would be worse than not scoping at all, so status stays unscoped and says
+// why.
+func TestResolveStatusScopeAmbiguousMarkerStaysUnscoped(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{
+		Labels: []string{"ready", "ready-2"},
+		LabelDescriptions: map[string]string{
+			"ready":   gateLabelDescription,
+			"ready-2": gateLabelDescription,
+		},
+	})
+
+	got, source, notes := resolveStatusScope(context.Background(), cfg, false, false)
+
+	if got.label != "" || source != "" {
+		t.Errorf("resolveStatusScope() = (label %q, source %q), want both empty on an ambiguous marker", got.label, source)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0], "more than one label") {
+		t.Errorf("notes = %v, want one note about the ambiguous marker", notes)
+	}
+}
+
+// No label carries the marker, and the repository is public: the same
+// refusal work's own preflight would make, downgraded to a note — status
+// reads only, so it carries on unscoped.
+func TestResolveStatusScopeStillUnscopedOnAPublicRepoNotesTheGate(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{Visibility: "PUBLIC"})
+
+	got, source, notes := resolveStatusScope(context.Background(), cfg, false, false)
+
+	if got.label != "" || source != "" {
+		t.Errorf("resolveStatusScope() = (label %q, source %q), want both empty — nothing to scope to", got.label, source)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0], "-label <name>") {
+		t.Errorf("notes = %v, want one note carrying queueGate's own refusal", notes)
+	}
+}
+
+// No label carries the marker, and the repository is private: nothing to
+// scope to and nothing to warn about either.
+func TestResolveStatusScopeStillUnscopedOnAPrivateRepoIsSilent(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{})
+
+	got, source, notes := resolveStatusScope(context.Background(), cfg, false, false)
+
+	if got.label != "" || source != "" {
+		t.Errorf("resolveStatusScope() = (label %q, source %q), want both empty", got.label, source)
+	}
+	if len(notes) != 0 {
+		t.Errorf("notes = %v, want none on a private, unscoped repository", notes)
+	}
+}
+
+// The text header names a github-sourced label as the gate label, read from
+// GitHub — distinct from one the operator typed, which gets no such
+// parenthetical.
+func TestStatusScopeNamesAGitHubSourcedLabel(t *testing.T) {
+	t.Parallel()
+	cfg := config{label: "ready"}
+	if got := statusScope(cfg, "github"); !strings.Contains(got, "issues labelled ready (gate label, read from GitHub)") {
+		t.Errorf("statusScope() = %q, want the gate-label parenthetical", got)
+	}
+	if got := statusScope(cfg, "flag"); strings.Contains(got, "read from GitHub") {
+		t.Errorf("statusScope() = %q, an operator-typed -label should not claim to be read from GitHub", got)
+	}
+}
+
+// -json's scope.source carries the same fact the text header's parenthetical
+// does — "github" only when the label was discovered, omitted for one the
+// operator typed or left unscoped entirely.
+func TestStatusDocScopeCarriesTheSource(t *testing.T) {
+	t.Parallel()
+	cfg := config{label: "ready"}
+	doc := statusDocFrom(cfg, statusSnapshot{labelSource: "github"})
+	if doc.Scope.Source != "github" {
+		t.Errorf("Scope.Source = %q, want %q", doc.Scope.Source, "github")
+	}
+
+	b, err := json.Marshal(doc.Scope)
+	if err != nil {
+		t.Fatalf("marshalling scope: %v", err)
+	}
+	if !strings.Contains(string(b), `"source":"github"`) {
+		t.Errorf("json = %s, want a source field", b)
+	}
+
+	unscoped := statusDocFrom(config{}, statusSnapshot{})
+	b, err = json.Marshal(unscoped.Scope)
+	if err != nil {
+		t.Fatalf("marshalling scope: %v", err)
+	}
+	if strings.Contains(string(b), "source") {
+		t.Errorf("json = %s, want source omitted when unscoped", b)
+	}
+}
+
+// A bare `status` on a repository whose gate label is marked reports the
+// same queue an explicit `-label ready` would, differing only in the
+// header's own parenthetical — the acceptance criteria's own example.
+func TestBareStatusMatchesAnExplicitLabelOnAMarkedRepo(t *testing.T) {
+	t.Parallel()
+	st := &ghState{
+		Labels:            []string{"ready"},
+		LabelDescriptions: map[string]string{"ready": gateLabelDescription},
+		Issues: map[string]*fakeIssue{
+			"1": {Open: true, Labels: []string{"ready"}},
+			"2": {Open: true}, // unlabelled — excluded once scoped, either way
+		},
+	}
+	bareCfg, _ := statusConfigFor(t, st)
+	explicitCfg, _ := statusConfigFor(t, st)
+	explicitCfg.label = "ready"
+
+	bareCfg, bareSource, bareNotes := resolveStatusScope(context.Background(), bareCfg, false, false)
+	bareSnap, err := readStatus(context.Background(), bareCfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus (bare): %v", err)
+	}
+	bareSnap.notes, bareSnap.labelSource = bareNotes, bareSource
+
+	explicitCfg, explicitSource, explicitNotes := resolveStatusScope(context.Background(), explicitCfg, true, false)
+	explicitSnap, err := readStatus(context.Background(), explicitCfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus (explicit): %v", err)
+	}
+	explicitSnap.notes, explicitSnap.labelSource = explicitNotes, explicitSource
+
+	var bareOut, explicitOut strings.Builder
+	renderStatus(&bareOut, report{}, bareCfg, bareSnap)
+	renderStatus(&explicitOut, report{}, explicitCfg, explicitSnap)
+
+	bareLines := strings.SplitN(bareOut.String(), "\n", 2)
+	explicitLines := strings.SplitN(explicitOut.String(), "\n", 2)
+	if len(bareLines) < 2 || len(explicitLines) < 2 {
+		t.Fatalf("expected at least a header and a body:\nbare: %s\nexplicit: %s", bareOut.String(), explicitOut.String())
+	}
+	if bareLines[1] != explicitLines[1] {
+		t.Errorf("bodies differ:\nbare:     %s\nexplicit: %s", bareLines[1], explicitLines[1])
+	}
+	if bareLines[0] == explicitLines[0] {
+		t.Errorf("headers should differ — bare should say the label was read from GitHub: %s", bareLines[0])
+	}
+	if !strings.Contains(bareLines[0], "read from GitHub") {
+		t.Errorf("bare header = %q, want the gate-label parenthetical", bareLines[0])
 	}
 }
 

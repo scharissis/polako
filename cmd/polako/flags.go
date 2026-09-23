@@ -546,6 +546,22 @@ func envVarName(flagName string) string {
 	return envPrefix + strings.ToUpper(strings.ReplaceAll(flagName, "-", "_"))
 }
 
+// flagWasSet reports whether name was typed on this invocation's argv —
+// fs.Visit only reports flags Parse actually set from args, unlike
+// applyEnvDefaults's f.Value.Set, which never touches that set. Shared by
+// stats's -since/-window collision check and status's -label source, both of
+// which need "was this flag typed" rather than "is its value non-zero" — an
+// explicit zero-ish value (-since 0s) is a real, if odd, one to type.
+func flagWasSet(fs *flag.FlagSet, name string) bool {
+	set := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
+}
+
 // parseBySize reads one of the policy-by-size flags: comma-separated
 // SIZE=VALUE pairs, SIZE one of S/M/L. example is a valid spec in that flag's
 // own flavor, shown in the malformed-entry error — S=medium,L=max for

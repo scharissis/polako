@@ -29,7 +29,7 @@ func TestQueueGateRefusesOnlyThePublicUnlabelledQueue(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := queueGate(tc.visibility, tc.label, tc.ungated)
+			err := queueGate(tc.visibility, tc.label, tc.ungated, "")
 			if tc.refused && err == nil {
 				t.Fatal("gate let an unfiltered public queue through")
 			}
@@ -46,6 +46,25 @@ func TestQueueGateRefusesOnlyThePublicUnlabelledQueue(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// markedLabel, when the caller knows it, replaces the generic "-label <name>"
+// placeholder with the real name — so a refusal on a repo setup already
+// marked a gate label on says "pass -label ready" rather than making the
+// operator guess a name to type.
+func TestQueueGateNamesTheMarkedLabelWhenKnown(t *testing.T) {
+	t.Parallel()
+	generic := queueGate("PUBLIC", "", false, "")
+	if generic == nil || !strings.Contains(generic.Error(), "-label <name>") {
+		t.Fatalf("queueGate with no marked label = %v, want the generic -label <name> placeholder", generic)
+	}
+	named := queueGate("PUBLIC", "", false, "ready")
+	if named == nil || !strings.Contains(named.Error(), "-label ready") {
+		t.Fatalf("queueGate with a marked label = %v, want it to say -label ready", named)
+	}
+	if strings.Contains(named.Error(), "<name>") {
+		t.Errorf("refusal = %q, should not still carry the generic placeholder once a name is known", named.Error())
 	}
 }
 
@@ -73,6 +92,35 @@ func TestPreflightRefusesAnUngatedPublicQueue(t *testing.T) {
 	consented.ungated = true
 	if err := preflight(context.Background(), &consented); err != nil {
 		t.Fatalf("-ungated should satisfy preflight: %v", err)
+	}
+}
+
+// A public repository whose gate label is already marked gets a refusal
+// naming it — "pass -label ready" — rather than the generic placeholder, and
+// cfg.label itself stays empty: work still never scopes itself, only the
+// message changes.
+func TestPreflightNamesTheMarkedGateLabelInItsRefusal(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Visibility:        "PUBLIC",
+		Labels:            []string{"ready"},
+		LabelDescriptions: map[string]string{"ready": gateLabelDescription},
+	})
+	cfg.dir = checkout
+
+	err := preflight(context.Background(), &cfg)
+	if err == nil {
+		t.Fatal("preflight started an unfiltered drain on a public repository")
+	}
+	if !strings.Contains(err.Error(), "-label ready") {
+		t.Errorf("refusal = %v, want it to name the marked label", err)
+	}
+	if strings.Contains(err.Error(), "<name>") {
+		t.Errorf("refusal = %v, should not still carry the generic placeholder once a marked label was found", err)
+	}
+	if cfg.label != "" {
+		t.Errorf("cfg.label = %q, want it left empty — work never scopes itself from the marker", cfg.label)
 	}
 }
 

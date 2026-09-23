@@ -381,7 +381,7 @@ it: that's still polako's job. A parked issue's comment naming a category gets i
 | --- | --- | --- |
 | `-repo` | *(whatever `-dir` is a checkout of)* | Repository to report on, `owner/name`. Naming it is what lets the command run from anywhere — no checkout needed, just a `gh` authenticated for the repo. |
 | `-dir` | `.` | Path to the repository's main checkout, used to resolve the repository when `-repo` is not given. |
-| `-label` | *(none)* | Only count issues carrying this label, the same scoping `polako work`'s `-label` applies. `status` never refuses — it reads only — so a label the repository has never defined prints the same note `work`'s preflight would refuse with, on stdout under the header, and carries on. |
+| `-label` | *(none)* | Only count issues carrying this label, the same scoping `polako work`'s `-label` applies. `status` never refuses — it reads only — so a label the repository has never defined prints the same note `work`'s preflight would refuse with, on stdout under the header, and carries on. With neither this nor `POLAKO_LABEL` set, `status` looks for the one label carrying `setup`'s own gate-label marker and scopes itself to it, saying so in the header ("gate label, read from GitHub"); more than one marked label leaves it unscoped, with a note; still unscoped on a public repository notes the same refusal a real `work` run would make. |
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how open PRs are matched back to issues. |
 | `-strict-order` | `false` | Report as a work run with `-strict-order` would: an issue awaiting an answer keeps its place, so `next` can name it rather than the ready issue behind it. |
 | `-json` | `false` | Print one JSON document to stdout instead of the text report — see [As JSON](#as-json--json) below. |
@@ -452,6 +452,9 @@ you:` line — the same snapshot the text report renders, field for field:
 up and why, `prs` matches the text columns exactly (`not read` for a PR past
 the eight-PR cap; `unknown` means gh doesn't know), and `needs_you` is the
 closing line's clauses as an array; `notes` names a missing `-label`.
+`scope.source` is `"flag"`, `"env"` or `"github"` — where `scope.label` came
+from, the last one meaning `status` found it itself via `setup`'s
+gate-label marker; absent when the report is unscoped.
 `queue.held_back` is `{ "issue", "blockers" }`, the `held back` row's own
 issues with their still-open `blockedBy` dependencies.
 `plans` (plural — distinct from `plan`, the usage line below it) mirrors the

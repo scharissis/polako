@@ -35,6 +35,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -107,20 +108,106 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 	// this asks by name (pluginName) rather than manufacturing a -skill value
 	// just to satisfy pluginVersion's own cfg.skill-driven lookup.
 	cfg.pluginVersion, _, _ = statusPluginVersion(ctx, cfg)
+
+	// labelFromFlag/labelFromEnv say where opt.label (now cfg.label) came
+	// from, if it's set at all — flagWasSet, not applyEnvDefaults's own
+	// f.Value.Set, which never touches fs.Visit's set, so a flag left at an
+	// env-supplied value is not mistaken for one typed on this invocation.
+	labelFromFlag := flagWasSet(fs, "label")
+	labelFromEnv := !labelFromFlag && os.Getenv(envVarName("label")) != ""
+
+	var labelSource string
 	var notes []string
-	if note := statusLabelNote(ctx, cfg); note != "" {
-		notes = append(notes, note)
-	}
+	cfg, labelSource, notes = resolveStatusScope(ctx, cfg, labelFromFlag, labelFromEnv)
+
 	snap, err := readStatus(ctx, cfg, now)
 	if err != nil {
 		return err
 	}
 	snap.notes = notes
+	snap.labelSource = labelSource
 	if opt.json {
 		return renderStatusJSON(out, cfg, snap)
 	}
 	renderStatus(out, rpt, cfg, snap)
 	return nil
+}
+
+// resolveStatusScope decides what scopes this status report and where that
+// scope came from, and the notes that decision itself produces. cfg.label
+// is already whatever the flag or environment set (labelFromFlag/labelFromEnv
+// say which, or neither); this only widens it further, from GitHub's own
+// marked gate label, and only when neither of those named one. Split out of
+// runStatus so it's testable against a hand-built cfg — the same way
+// statusLabelNote already is — without needing a real flag parse or a
+// resolvable repository.
+func resolveStatusScope(ctx context.Context, cfg config, labelFromFlag, labelFromEnv bool) (config, string, []string) {
+	// cfg.label != "" as well as labelFromFlag/labelFromEnv: an explicitly
+	// empty -label (or an env var interpolated empty) still trips fs.Visit,
+	// but names nothing to report a source for — leaving labelSource set
+	// here would print {"label":"","source":"flag"}, contradicting
+	// statusDocScope's own doc comment that Source is omitted when Label is
+	// "".
+	labelSource := ""
+	switch {
+	case labelFromFlag && cfg.label != "":
+		labelSource = "flag"
+	case labelFromEnv && cfg.label != "":
+		labelSource = "env"
+	}
+
+	var notes []string
+	if cfg.label == "" {
+		// No -label and no POLAKO_LABEL: the one case status tries to scope
+		// itself, from the same marker setup -apply stamps. Best-effort like
+		// every other probe here — a lookup gh cannot answer just leaves the
+		// report unscoped, the same as no label carrying the marker at all.
+		switch found, ambiguous, mErr := markedGateLabel(ctx, cfg); {
+		case mErr == nil && found != "":
+			cfg.label = found
+			labelSource = "github"
+		case mErr == nil && ambiguous:
+			notes = append(notes, "note: more than one label carries setup's gate-label marker, "+
+				"so status can't scope itself to one — pass -label, or see `polako setup`")
+		}
+	}
+	switch {
+	case cfg.label == "":
+		// Still unscoped: the same note a real run would refuse on, on a
+		// public repository — statusLabelNote's own shape, but for "no label
+		// at all" rather than "-label names one the repository never
+		// defined". One extra best-effort `gh repo view` read, made only
+		// here — a label-scoped report never pays for it.
+		if vis, vErr := repoVisibility(ctx, cfg); vErr == nil {
+			if gateErr := queueGate(vis, "", false, ""); gateErr != nil {
+				notes = append(notes, fmt.Sprintf("note: a real run would refuse to start here — %v", gateErr))
+			}
+		}
+	case labelSource != "github":
+		// A github-sourced label was just read off a listing, so it exists
+		// by construction — asking labelExists again would be a second,
+		// redundant read of the same fact.
+		if note := statusLabelNote(ctx, cfg); note != "" {
+			notes = append(notes, note)
+		}
+	}
+	return cfg, labelSource, notes
+}
+
+// repoVisibility is the one extra `gh repo view` read resolveStatusScope
+// makes when it is still unscoped after the marker lookup above: whether
+// the repository is public, so the same queueGate wording work's own
+// preflight would refuse on can appear here as a note. Best-effort like
+// every other probe in this file: a read that fails just leaves the note
+// out, rather than failing the whole snapshot.
+func repoVisibility(ctx context.Context, cfg config) (string, error) {
+	return retryRead(ctx, cfg, "repo visibility", func() (string, error) {
+		out, err := gh(ctx, cfg, "repo", "view", "--json", "visibility", "--jq", ".visibility")
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(out)), nil
+	})
 }
 
 // statusLabelNote calls out a -label the repository has never defined —
@@ -248,6 +335,11 @@ type statusSnapshot struct {
 	// instead, so `polako status > file` carries the whole report and a
 	// terminal reads it in order rather than above the header it explains.
 	notes []string
+	// labelSource says where cfg.label came from: "flag", "env", "github"
+	// (found via markedGateLabel with no -label or POLAKO_LABEL given), or
+	// "" when the report is unscoped. Set by runStatus, read by statusScope
+	// (the header) and statusDocFrom (-json's scope.source).
+	labelSource string
 }
 
 // statusPR is one open PR on a branch the skill named, and what GitHub says
@@ -474,7 +566,7 @@ func issueForBranch(branch, prefix string) (int, bool) {
 // --- rendering ---
 
 func renderStatus(w io.Writer, rpt report, cfg config, snap statusSnapshot) {
-	fmt.Fprintf(w, "%s\n", rpt.bold(fmt.Sprintf("%s%s", cfg.repo, statusScope(cfg))))
+	fmt.Fprintf(w, "%s\n", rpt.bold(fmt.Sprintf("%s%s", cfg.repo, statusScope(cfg, snap.labelSource))))
 	if line := updateAvailableLine(snap.selfVersion, cfg.pluginVersion, snap.published); line != "" {
 		fmt.Fprintf(w, "%s\n", line)
 	}
@@ -506,11 +598,17 @@ func statusPlanLine(snap statusSnapshot) string {
 // statusScope names what narrowed or reordered the report, so a snapshot that
 // covers less than the whole backlog cannot be read as one that covers all of
 // it — the flags are settable from the environment, and one forgotten in a
-// profile is otherwise invisible here.
-func statusScope(cfg config) string {
+// profile is otherwise invisible here. source is snap.labelSource: a label
+// this run discovered itself (source == "github") is named as such, since
+// that's a fact about the repository nobody typed on this invocation.
+func statusScope(cfg config, source string) string {
 	var parts []string
 	if cfg.label != "" {
-		parts = append(parts, "issues labelled "+cfg.label)
+		label := "issues labelled " + cfg.label
+		if source == "github" {
+			label += " (gate label, read from GitHub)"
+		}
+		parts = append(parts, label)
 	}
 	if cfg.strictOrder {
 		parts = append(parts, "-strict-order")

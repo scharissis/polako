@@ -97,8 +97,11 @@ in the PR body rather than doing it quietly.
   swap over a `gh release download`; nothing under `-dir`, nothing written
   to GitHub.
 - **`setup`'s write surface is labels, plus one PR from `polako-setup`.**
-  `-apply` creates the labels the report found missing (`gh label create`)
-  and proposes repo files (issues #416 and #417) through one commit on a
+  `-apply` creates the labels the report found missing (`gh label create`),
+  marks an existing-but-unmarked gate label with `gh label edit` (issue
+  #512 — the marker `status` reads back to scope itself with no `-label`
+  given, `gateLabelDescription` in `labels.go`), and proposes repo files
+  (issues #416 and #417) through one commit on a
   `polako-setup` branch, built in a worktree
   at `.worktrees/polako-setup`, pushed, behind one PR a human merges — the
   first commit the binary itself authors, and still never a direct commit

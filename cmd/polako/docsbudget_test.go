@@ -98,8 +98,12 @@ const docsBudget = 500
 // slack, and documenting the status queue's new held-back row — text sample,
 // JSON sample and schema prose — had no existing paragraph on offer to cut
 // instead.
+//
+// reference.md moved again in issue #512: it was already at 581 with no
+// slack, and documenting -json's new scope.source field — genuinely new,
+// not a reword — had no existing paragraph on offer to cut instead.
 var docsDebt = map[string]int{
-	"reference.md": 581,
+	"reference.md": 584,
 	"behaviour.md": 531,
 }
 

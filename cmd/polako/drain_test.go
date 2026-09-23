@@ -40,6 +40,12 @@ type ghState struct {
 	Issues     map[string]*fakeIssue `json:"issues"`
 	PRs        map[string]*fakePR    `json:"prs"`    // keyed by head branch
 	Labels     []string              `json:"labels"` // labels the repo has defined
+	// LabelDescriptions holds each label's own description, keyed by name —
+	// `label create --description` and `label edit --description` both
+	// write it, `gh api .../labels/<name>` and `gh api .../labels` both read
+	// it. Absent for a label with no recorded description (the empty
+	// string, same as a real one that was never given one).
+	LabelDescriptions map[string]string `json:"label_descriptions"`
 	// Milestones are the titles the repo has defined, which is all `plan`
 	// preflight's ensureMilestone reads or appends to.
 	Milestones []string `json:"milestones"`
@@ -378,6 +384,12 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			call = "api compare"
 		} else if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "/labels/") }) {
 			call = "api label"
+		} else if slices.ContainsFunc(args, func(a string) bool { return strings.HasSuffix(a, "/labels") }) {
+			// markedGateLabel's own call: repos/{owner}/{repo}/labels, no
+			// name past it — checked after the /labels/<name> case above,
+			// since that path also ends in a name that could (in principle)
+			// itself be "labels", and Contains would then wrongly match here.
+			call = "api labels"
 		} else if slices.ContainsFunc(args, apiIsBareRepoPath) {
 			// unpark's own default-branch read (unparkDefaultBranch):
 			// repos/{owner}/{repo}, nothing past it.
@@ -413,10 +425,19 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 		return answerReleaseDownload(st, args)
 
 	case "repo view":
-		// Three shapes: status resolves the name alone through --jq, preflight
-		// asks for plain JSON so visibility comes back with it, and setup adds
-		// hasIssuesEnabled to that same pair.
-		if flagVal("--jq") != "" {
+		// Four shapes: status resolves the name alone through --jq
+		// .nameWithOwner, status's own repoVisibility resolves visibility
+		// alone through --jq .visibility, preflight asks for plain JSON so
+		// visibility comes back with it, and setup adds hasIssuesEnabled to
+		// that same pair.
+		if jq := flagVal("--jq"); jq != "" {
+			if jq == ".visibility" {
+				vis := st.Visibility
+				if vis == "" {
+					vis = "PRIVATE"
+				}
+				return vis + "\n", false, 0
+			}
 			return st.Repo + "\n", false, 0
 		}
 		fields := flagVal("--json")
@@ -601,7 +622,17 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			fmt.Fprintf(os.Stderr, "gh: Label not found (HTTP 404)\n")
 			return "", false, 1
 		}
-		return fmt.Sprintf(`{"name":%q}`, name), false, 0
+		return fmt.Sprintf(`{"name":%q,"description":%q}`, name, st.LabelDescriptions[name]), false, 0
+
+	case "api labels":
+		// markedGateLabel's own call: every label the repository has
+		// defined, name and description — status reads this with no -label
+		// given to find the one, if any, carrying setup's gate-label marker.
+		var rows []string
+		for _, name := range st.Labels {
+			rows = append(rows, fmt.Sprintf(`{"name":%q,"description":%q}`, name, st.LabelDescriptions[name]))
+		}
+		return "[" + strings.Join(rows, ",") + "]", false, 0
 
 	case "issue create":
 		// `plan` preflight makes the `--parent` capability probe; a real plan
@@ -702,6 +733,27 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			return "", false, 1
 		}
 		st.Labels = append(st.Labels, at(2))
+		if d := flagVal("--description"); d != "" {
+			if st.LabelDescriptions == nil {
+				st.LabelDescriptions = map[string]string{}
+			}
+			st.LabelDescriptions[at(2)] = d
+		}
+		return "", true, 0
+
+	case "label edit":
+		// ensureLabelMarked's own call: -apply's remedy for a gate label
+		// that exists but predates setup's own marker.
+		if !slices.Contains(st.Labels, at(2)) {
+			fmt.Fprintf(os.Stderr, "label not found: %s\n", at(2))
+			return "", false, 1
+		}
+		if d := flagVal("--description"); d != "" {
+			if st.LabelDescriptions == nil {
+				st.LabelDescriptions = map[string]string{}
+			}
+			st.LabelDescriptions[at(2)] = d
+		}
 		return "", true, 0
 
 	case "pr list":

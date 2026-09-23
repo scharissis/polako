@@ -49,7 +49,11 @@ type statusDoc struct {
 }
 
 type statusDocScope struct {
-	Label       string `json:"label"`
+	Label string `json:"label"`
+	// Source is where Label came from: "flag", "env", or "github" (found
+	// via markedGateLabel with no -label or POLAKO_LABEL given) — omitted
+	// when Label is "" and the report is unscoped.
+	Source      string `json:"source,omitempty"`
 	StrictOrder bool   `json:"strict_order"`
 }
 
@@ -228,7 +232,7 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 
 	doc := statusDoc{
 		Repo:  cfg.repo,
-		Scope: statusDocScope{Label: cfg.label, StrictOrder: cfg.strictOrder},
+		Scope: statusDocScope{Label: cfg.label, Source: snap.labelSource, StrictOrder: cfg.strictOrder},
 		Queue: statusDocQueue{
 			Ready:      nonNilSlice(snap.queues.ready),
 			HeldBack:   nonNilSlice(heldBack),
