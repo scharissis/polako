@@ -26,7 +26,12 @@ const lastShiftOtherRepo = `
 {"v":1,"kind":"run","ts":"2026-02-25T09:00:00Z","ended":"2026-02-25T10:00:00Z","repo":"example/other","shift":"cccc0003","issue":9,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":99.00,"wall_ms":3600000,"tokens":{"in":1,"out":1}}
 `
 
-const wantLastShiftLine = "last shift here: Feb 21 02:10, 6h12m — 1 merged, 1 parked, $31.20 — polako stats -shift bbbb0002"
+// wantLastShiftLine is the fixture's line read from dir — a test directory,
+// never the default, so the hint always carries -metrics.
+func wantLastShiftLine(dir string) string {
+	return "last shift here: Feb 21 02:10, 6h12m — 1 merged, 1 parked, $31.20 — " +
+		"polako stats -shift bbbb0002 -metrics " + dir
+}
 
 func TestLastShiftLineFromRunData(t *testing.T) {
 	t.Parallel()
@@ -34,8 +39,26 @@ func TestLastShiftLineFromRunData(t *testing.T) {
 		"example--repo.jsonl":  lastShiftFixture,
 		"example--other.jsonl": lastShiftOtherRepo,
 	})
-	if got := lastShiftLine(readLastShift(dir, "example/repo", statusNow)); got != wantLastShiftLine {
-		t.Errorf("line:\n got %q\nwant %q", got, wantLastShiftLine)
+	if got, want := lastShiftLine(readLastShift(dir, "example/repo", statusNow)), wantLastShiftLine(dir); got != want {
+		t.Errorf("line:\n got %q\nwant %q", got, want)
+	}
+}
+
+// Records in the default directory need no -metrics to find again; anywhere
+// else, the hint says where, or stats would look in the wrong place.
+func TestLastShiftHintNamesOnlyANonDefaultDirectory(t *testing.T) {
+	t.Parallel()
+	def, err := defaultMetricsDir()
+	if err != nil {
+		t.Skipf("no home directory: %v", err)
+	}
+	for dir, want := range map[string]string{
+		def:         "polako stats -shift bbbb0002",
+		"/elsewhere": "polako stats -shift bbbb0002 -metrics /elsewhere",
+	} {
+		if got := shiftHint("bbbb0002", dir); got != want {
+			t.Errorf("hint for %s = %q, want %q", dir, got, want)
+		}
 	}
 }
 
@@ -106,9 +129,9 @@ func TestStatusRunDataChangesOnlyTheLastShiftLine(t *testing.T) {
 	without, withoutDoc := render("")
 
 	withLines, withoutLines := strings.Split(with, "\n"), strings.Split(without, "\n")
-	i := slices.Index(withLines, wantLastShiftLine)
+	i := slices.Index(withLines, wantLastShiftLine(metrics))
 	if i < 0 {
-		t.Fatalf("report with run data is missing %q\ngot:\n%s", wantLastShiftLine, with)
+		t.Fatalf("report with run data is missing %q\ngot:\n%s", wantLastShiftLine(metrics), with)
 	}
 	if !slices.Equal(slices.Delete(slices.Clone(withLines), i, i+1), withoutLines) {
 		t.Errorf("reports differ by more than the last-shift line\nwith:\n%s\nwithout:\n%s", with, without)

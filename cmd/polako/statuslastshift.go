@@ -25,6 +25,9 @@ type lastShift struct {
 	merged int
 	parked int
 	cost   float64
+	// hint is the stats command that opens this shift, -metrics included
+	// when the records came from somewhere stats wouldn't look by default.
+	hint string
 }
 
 // readLastShift loads this repository's records and keeps the newest shift.
@@ -42,7 +45,7 @@ func readLastShift(metricsDir, repo string, now time.Time) *lastShift {
 	if err != nil || ds.shift == noneGroup || (len(ds.runs) == 0 && len(ds.issues) == 0) {
 		return nil
 	}
-	ls := &lastShift{id: ds.shift}
+	ls := &lastShift{id: ds.shift, hint: shiftHint(ds.shift, metricsDir)}
 	var end time.Time
 	widen := func(from, to time.Time) {
 		if !from.IsZero() && (ls.start.IsZero() || from.Before(ls.start)) {
@@ -77,6 +80,15 @@ func readLastShift(metricsDir, repo string, now time.Time) *lastShift {
 	return ls
 }
 
+// shiftHint is the stats command that opens shift id's records in dir.
+func shiftHint(id, dir string) string {
+	hint := "polako stats -shift " + id
+	if def, err := defaultMetricsDir(); err != nil || def != dir {
+		hint += " -metrics " + dir
+	}
+	return hint
+}
+
 // lastShiftLine renders the line. The span is rounded to the minute, since
 // seconds on a multi-hour shift are noise. The hint names the id rather than
 // `-shift last`: without -repo, stats' "last" is the newest shift across every
@@ -89,9 +101,9 @@ func lastShiftLine(ls *lastShift) string {
 	if span >= time.Minute {
 		span = span.Round(time.Minute)
 	}
-	return fmt.Sprintf("last shift here: %s, %s — %d merged, %d parked, %s — polako stats -shift %s",
+	return fmt.Sprintf("last shift here: %s, %s — %d merged, %d parked, %s — %s",
 		ls.start.Format("Jan 2 15:04"), dur(span),
-		ls.merged, ls.parked, usd(ls.cost), ls.id)
+		ls.merged, ls.parked, usd(ls.cost), ls.hint)
 }
 
 // statusDocLastShift is last_shift in `status -json`. Started is RFC 3339 in
