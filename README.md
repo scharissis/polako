@@ -49,7 +49,7 @@ Six look after the shift, and run no model:
   data.
 - **`tidy`** — reclaims the worktrees and branches of finished issues. It only
   previews until you pass `-apply`.
-- **`unpark`** — lists issues parked on a permission refusal and clears the
+- **`unpark`** — lists parked issues with why each stopped, and clears the
   ones you approve.
 - **`update`** — brings the plugin and the binary to the published release.
 - **`setup`** — reports whether a repository is ready for polako, and fixes

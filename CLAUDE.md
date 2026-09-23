@@ -16,8 +16,9 @@ request into a plan document under `docs/designs/`, behind a PR a human
 merges; its verb is `design`. Four skills, ten verbs. The binary's other six
 verbs start no runs: `status` reads GitHub (plus one line of local run data),
 `stats` reads the run data, `tidy`
-reclaims finished worktrees and branches, `unpark` clears permission parks
-the operator approves, `update` moves both halves to the published release,
+reclaims finished worktrees and branches, `unpark` lists parked issues and
+clears the ones the operator approves, `update` moves both halves to the
+published release,
 and `setup` reports whether a repository is ready.
 
 ## Invariants
