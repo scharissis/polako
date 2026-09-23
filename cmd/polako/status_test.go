@@ -54,6 +54,7 @@ func TestStatusReportsWhereTheBacklogStands(t *testing.T) {
 			"7":  {Open: true, Labels: []string{awaitingAnswerLabel}, Comments: 2, CommentedAt: statusNow.Add(-26 * time.Hour).Format(time.RFC3339)},
 			"9":  {Open: true, Labels: []string{needsHumanLabel}},
 			"11": {Open: false},
+			"13": {Open: true, BlockedBy: []int{3}},
 		},
 		PRs: map[string]*fakePR{
 			"issue-3": {Number: 40, State: "OPEN", Mergeable: "MERGEABLE", Checks: []string{"SUCCESS"}},
@@ -78,6 +79,9 @@ func TestStatusReportsWhereTheBacklogStands(t *testing.T) {
 	if want := []int{9}; !slices.Equal(snap.queues.parked, want) {
 		t.Errorf("parked = %v, want %v", snap.queues.parked, want)
 	}
+	if want := []heldBackInfo{{number: 13, blockers: []int{3}}}; !heldBackEqual(snap.queues.heldBack, want) {
+		t.Errorf("heldBack = %+v, want %+v", snap.queues.heldBack, want)
+	}
 	if snap.next != 3 {
 		t.Errorf("next = %d, want the lowest ready issue #3", snap.next)
 	}
@@ -91,6 +95,7 @@ func TestStatusReportsWhereTheBacklogStands(t *testing.T) {
 	for _, want := range []string{
 		"example/repo",
 		"ready         2 issues — #3, #5",
+		"held back     1 issue — #13 (behind #3)",
 		"awaiting you  1 issue — #7 (quiet 26h)",
 		"parked        1 issue — #9, labelled needs-human",
 		"next          #3 — its branch already has PR #40",
@@ -119,6 +124,7 @@ func TestStatusReportsWhereTheBacklogStands(t *testing.T) {
 	// follows for its own report.
 	want := `example/repo
   ready         2 issues — #3, #5
+  held back     1 issue — #13 (behind #3)
   awaiting you  1 issue — #7 (quiet 26h)
   parked        1 issue — #9, labelled needs-human
   next          #3 — its branch already has PR #40, so it would wait on that rather than run the skill again
@@ -147,6 +153,7 @@ func TestStatusJSONMatchesTheTextReport(t *testing.T) {
 			"7":  {Open: true, Labels: []string{awaitingAnswerLabel}, Comments: 2, CommentedAt: statusNow.Add(-26 * time.Hour).Format(time.RFC3339)},
 			"9":  {Open: true, Labels: []string{needsHumanLabel}},
 			"11": {Open: false},
+			"13": {Open: true, BlockedBy: []int{3}},
 		},
 		PRs: map[string]*fakePR{
 			"issue-3":  {Number: 40, State: "OPEN", Mergeable: "MERGEABLE", Checks: []string{"SUCCESS"}},
@@ -174,12 +181,16 @@ func TestStatusJSONMatchesTheTextReport(t *testing.T) {
 	}
 	want := statusDocQueue{
 		Ready:      []int{3, 5},
+		HeldBack:   []statusDocHeldBack{{Issue: 13, Blockers: []int{3}}},
 		Blocked:    []statusDocBlocked{{Issue: 7, QuietSeconds: ptrInt64(26 * 3600)}},
 		Parked:     []statusDocParked{{Issue: 9, Entries: []string{}}},
 		Proposed:   []int{},
 		Containers: []statusDocContainer{},
 	}
 	if !slices.Equal(doc.Queue.Ready, want.Ready) ||
+		!slices.EqualFunc(doc.Queue.HeldBack, want.HeldBack, func(a, b statusDocHeldBack) bool {
+			return a.Issue == b.Issue && slices.Equal(a.Blockers, b.Blockers)
+		}) ||
 		!slices.EqualFunc(doc.Queue.Parked, want.Parked, func(a, b statusDocParked) bool {
 			return a.Issue == b.Issue && slices.Equal(a.Entries, b.Entries)
 		}) ||
@@ -216,6 +227,79 @@ func TestStatusJSONMatchesTheTextReport(t *testing.T) {
 }
 
 func ptrInt64(n int64) *int64 { return &n }
+
+// Issue #511: every open issue GitHub reports has to land in exactly one
+// queue bucket — ready, held back, awaiting you, parked, proposed or
+// containers — and every non-empty bucket has to have its own row in the
+// rendered report. The second half is the regression this guards against:
+// heldBack existed and was already counted by q.open() before this issue,
+// but queuePairs never rendered it, so a held-back issue was computed and
+// then silently dropped on the way to the terminal.
+func TestQueuePairsNameEveryOpenIssueExactlyOnce(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues: map[string]*fakeIssue{
+			"101": {Open: true},                                        // ready
+			"102": {Open: true, BlockedBy: []int{101}},                 // held back
+			"103": {Open: true, Labels: []string{awaitingAnswerLabel}}, // awaiting you
+			"104": {Open: true, Labels: []string{needsHumanLabel}},     // parked
+			"105": {Open: true, Labels: []string{proposedLabel}},       // proposed
+			"106": {Open: true, SubIssues: 2, SubIssuesCompleted: 1},   // container
+		},
+	})
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	q := snap.queues
+
+	buckets := map[int]int{}
+	for _, n := range q.ready {
+		buckets[n]++
+	}
+	for _, h := range q.heldBack {
+		buckets[h.number]++
+	}
+	for _, n := range q.blocked {
+		buckets[n]++
+	}
+	for _, n := range q.parked {
+		buckets[n]++
+	}
+	for _, n := range q.proposed {
+		buckets[n]++
+	}
+	for _, c := range q.containers {
+		buckets[c.number]++
+	}
+	for _, n := range q.open() {
+		if buckets[n] != 1 {
+			t.Errorf("#%d is in %d queue buckets, want exactly 1", n, buckets[n])
+		}
+	}
+
+	pairs := queuePairs(snap)
+	hasRow := func(label string) bool {
+		for _, p := range pairs {
+			if p[0] == label {
+				return true
+			}
+		}
+		return false
+	}
+	for label, nonEmpty := range map[string]bool{
+		"ready":        len(q.ready) > 0,
+		"held back":    len(q.heldBack) > 0,
+		"awaiting you": len(q.blocked) > 0,
+		"parked":       len(q.parked) > 0,
+		"proposed":     len(q.proposed) > 0,
+		"containers":   len(q.containers) > 0,
+	} {
+		if nonEmpty && !hasRow(label) {
+			t.Errorf("bucket %q is non-empty but queuePairs has no %q row\nrows: %+v", label, label, pairs)
+		}
+	}
+}
 
 // Issue #435: a parked issue whose own park comment named entries gets its
 // own needs-you clause naming them and pointing at `polako unpark`; one with

@@ -527,6 +527,9 @@ func queuePairs(snap statusSnapshot) [][2]string {
 		return [][2]string{{"queue", "nothing open — a shift starting now would find the backlog cleared"}}
 	}
 	pairs := [][2]string{{"ready", queueLine(q.ready)}}
+	if len(q.heldBack) > 0 {
+		pairs = append(pairs, [2]string{"held back", heldBackLine(q.heldBack)})
+	}
 	if len(q.blocked) > 0 {
 		refs := make([]string, 0, len(q.blocked))
 		for _, n := range q.blocked {
@@ -586,6 +589,18 @@ func containerRefs(containers []containerInfo) string {
 	return strings.Join(refs, ", ")
 }
 
+// heldBackLine renders the held-back row: every otherwise-ready issue this
+// pass put down for an open blockedBy dependency, and what's holding each
+// one — the same wording logHeldBack (drain.go) narrates per-issue, folded
+// into one row here.
+func heldBackLine(heldBack []heldBackInfo) string {
+	refs := make([]string, len(heldBack))
+	for i, h := range heldBack {
+		refs[i] = fmt.Sprintf("#%d (behind %s)", h.number, issueRefs(h.blockers))
+	}
+	return fmt.Sprintf("%s — %s", plural(len(heldBack), "issue"), strings.Join(refs, ", "))
+}
+
 func queueLine(ready []int) string {
 	if len(ready) == 0 {
 		return "no issue is workable right now"
@@ -609,6 +624,9 @@ func nextLine(snap statusSnapshot) string {
 		// released differently — and naming the wrong one sends an operator to
 		// take off a label the issues do not carry.
 		var held []string
+		if len(snap.queues.heldBack) > 0 {
+			held = append(held, "held back")
+		}
 		if len(snap.queues.parked) > 0 {
 			held = append(held, "parked")
 		}
