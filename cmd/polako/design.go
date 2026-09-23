@@ -164,6 +164,21 @@ func designPreflight(ctx context.Context, cfg *config, issue int) error {
 	if err != nil {
 		return err
 	}
+	if !labelled {
+		// Unlabelled but already holding a PR on its branch means work opened
+		// it, and restart safety would supervise that code PR as if it were the
+		// design. Every design run labels its issue before it starts, so a
+		// labelled issue's PR is safe to take over.
+		pr, err := prForBranch(ctx, *cfg, fmt.Sprintf("%s%d", cfg.branchPrefix, issue))
+		if err != nil {
+			return err
+		}
+		if pr != nil {
+			return fmt.Errorf("issue #%d already has PR #%d (%s) from a run without the %s label — "+
+				"that's implementation work, not a design; open a separate issue for the design",
+				issue, pr.Number, pr.State, designLabel)
+		}
+	}
 	// Declared before the run for the reason workGates gives awaiting-answer:
 	// the run that applies it holds no grant that could create it. Not on a
 	// dry run, which declares nothing.

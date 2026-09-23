@@ -172,6 +172,35 @@ func TestDesignPreflightRefusesWithTheRemedy(t *testing.T) {
 	}
 }
 
+// An unlabelled issue whose branch already has a PR is work's, and a design
+// run must not take that PR over. A labelled one's PR is a design run's own.
+func TestDesignPreflightRefusesAWorkPR(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	for name, labels := range map[string][]string{"unlabelled": nil, "labelled": {designLabel}} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			captureLog(t)
+			cfg, path := designTestConfig(t, "design", &ghState{
+				Issues: map[string]*fakeIssue{"1": {Open: true, Labels: labels}},
+				PRs:    map[string]*fakePR{"issue-1": {Number: 40, State: "OPEN"}},
+			})
+			cfg.dir = checkout
+			err := designPreflight(context.Background(), &cfg, 1)
+			if labels == nil {
+				if err == nil || !strings.Contains(err.Error(), "PR #40") {
+					t.Fatalf("designPreflight = %v, want a refusal naming PR #40", err)
+				}
+				if st := finalGhState(t, path); len(st.Labels) != 0 || len(st.Issues["1"].Labels) != 0 {
+					t.Errorf("refusal wrote labels: repo %v, issue %v", st.Labels, st.Issues["1"].Labels)
+				}
+			} else if err != nil {
+				t.Fatalf("designPreflight refused a design issue's own PR: %v", err)
+			}
+		})
+	}
+}
+
 // Naming an issue is the human act; preflight labels it so work stays off it,
 // and declares both labels a run can write. A dry run does neither.
 func TestDesignPreflightLabelsAnUnlabelledIssue(t *testing.T) {
