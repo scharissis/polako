@@ -102,9 +102,14 @@ const docsBudget = 500
 // reference.md moved again in issue #512: it was already at 581 with no
 // slack, and documenting -json's new scope.source field — genuinely new,
 // not a reword — had no existing paragraph on offer to cut instead.
+//
+// behaviour.md moved again in issue #546 (2026-09-23), +1: it was already at
+// 531 with no slack, and the new `design` exclusion is a gate the queue
+// section has to name — folded into the existing proposed/container
+// paragraph, one line was all it cost.
 var docsDebt = map[string]int{
 	"reference.md": 584,
-	"behaviour.md": 531,
+	"behaviour.md": 532,
 }
 
 func TestDocsStayWithinLineBudget(t *testing.T) {

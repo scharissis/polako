@@ -671,6 +671,9 @@ func queuePairs(snap statusSnapshot) [][2]string {
 			fmt.Sprintf("%s — %s, labelled %s", plural(len(q.proposed), "issue"),
 				annotatedRefs(q.proposed, snap.idleNote), proposedLabel)})
 	}
+	if len(q.design) > 0 {
+		pairs = append(pairs, [2]string{"design", designLine(q.design)})
+	}
 	if len(q.containers) > 0 {
 		pairs = append(pairs, [2]string{"containers",
 			fmt.Sprintf("%s — %s", plural(len(q.containers), "issue"), containerRefs(q.containers))})
@@ -732,6 +735,9 @@ func nextLine(snap statusSnapshot) string {
 		}
 		if len(snap.queues.proposed) > 0 {
 			held = append(held, "awaiting curation")
+		}
+		if len(snap.queues.design) > 0 {
+			held = append(held, "a design request")
 		}
 		if len(snap.queues.containers) > 0 {
 			held = append(held, "a tracking container")
@@ -943,6 +949,7 @@ func needsYouParts(snap statusSnapshot) []string {
 	// Curation is a person's job by construction — nothing else takes the label
 	// off — so a backlog of proposals is one of the things only a person moves.
 	parts = append(parts, curateClauses(snap)...)
+	parts = append(parts, designClauses(snap.queues.design)...)
 	// A finished container polako would close itself, so it is not yours — but
 	// one a human has held with needs-human or proposed it will not touch, and
 	// that one is now the operator's to close.

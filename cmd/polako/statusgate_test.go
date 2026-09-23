@@ -28,6 +28,8 @@ func gatedBacklog() *ghState {
 			"13": {Open: true},
 			// proposed outranks awaiting-answer, outside the gate as inside it
 			"14": {Open: true, Labels: []string{proposedLabel, awaitingAnswerLabel}},
+			// `polako design` never reads the gate, so a request outside it still lists
+			"15": {Open: true, Labels: []string{designLabel}},
 		},
 	}
 }
@@ -62,6 +64,12 @@ func TestGatedStatusQueuesMatchALabelledListing(t *testing.T) {
 	}
 	if want := []int{7, 14}; !slices.Equal(split.ungatedProposed, want) {
 		t.Errorf("ungatedProposed = %v, want %v", split.ungatedProposed, want)
+	}
+	if len(labelled.design) != 0 {
+		t.Errorf("labelled design = %+v, want none in the gate", labelled.design)
+	}
+	if want := []designInfo{{number: 15}}; !slices.Equal(gated.design, want) {
+		t.Errorf("gated design = %+v, want %+v", gated.design, want)
 	}
 	// #8 is a container, #10 and #11 are held: none of them is triage.
 	if want := []int{3, 13}; !slices.Equal(split.outside, want) {

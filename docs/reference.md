@@ -339,6 +339,7 @@ scharissis/polako
   awaiting you  1 issue — #9 (quiet 26h)
   parked        1 issue — #5 (quiet 12d), labelled needs-human
   proposed      2 issues — #27 (quiet 3d), #28 (quiet 3d), labelled proposed
+  design        1 issue — #31, labelled design
   containers    1 issue — #12 (2/5 closed)
   next          #14 — its branch already has PR #61, so it would wait on that rather than run the skill again
 
@@ -347,11 +348,11 @@ open prs on issue branches
   #61  issue-14  #14    mergeable  failing (test-mac)  clear                        https://github.com/scharissis/polako/pull/61
   #58  issue-19  #19    mergeable  passing             answered, awaiting re-review  https://github.com/scharissis/polako/pull/58
 
-needs you: reply on #9; review and merge PR #58; grant Bash(echo:*) or fix the skill, then polako unpark #5; curate #27, #28 (drop proposed to queue them)
+needs you: reply on #9; review and merge PR #58; grant Bash(echo:*) or fix the skill, then polako unpark #5; curate #27, #28 (drop proposed to queue them); run polako design -issue 31
 ```
 
 `held back` names an otherwise-ready issue behind an open `blockedBy`
-dependency — recomputed every pass, so it clears itself once that blocker closes. Scoped to a gate label, the queues come from the same `--label` listing `work -label` drains, and one more unscoped listing finds what's outside it. Two things reach past the gate. `proposed` stays repo-wide, and a proposal without the gate label gets a clause naming both moves — `curate #7 (drop proposed, add ready)`. An `outside the gate` row lists open issues with neither the gate label nor a hold (`needs-human`, `proposed`, `awaiting-answer`): numbers only, the first ten, then `and N more`, absent when empty. Out-of-gate containers are left out.
+dependency — recomputed every pass, so it clears itself once that blocker closes. Scoped to a gate label, the queues come from the same `--label` listing `work -label` drains, and one more unscoped listing finds what's outside it. Three things reach past the gate. `proposed` stays repo-wide, and a proposal without the gate label gets a clause naming both moves — `curate #7 (drop proposed, add ready)`. `design` stays repo-wide too, one clause per request: `run polako design -issue N`, or `reply on #N, then polako design -issue N` when it's awaiting an answer. An `outside the gate` row lists open issues with neither the gate label nor a hold (`needs-human`, `proposed`, `design`, `awaiting-answer`): numbers only, the first ten, then `and N more`, absent when empty. Out-of-gate containers are left out.
 
 Below that table, `plan documents` adds one row per file under `docs/designs/`:
 state derived from the naming issues (`docs/designs/plan-conventions.md`'s
@@ -419,7 +420,7 @@ polako status -json | jq .
     "held_back": [{ "issue": 33, "blockers": [30] }],
     "blocked": [{ "issue": 9, "quiet_seconds": 93600 }],
     "parked": [{ "issue": 5, "entries": ["Bash(echo:*)"], "category": "permission_refused" }],
-    "proposed": [27, 28],
+    "proposed": [27, 28], "design": [{ "issue": 31, "awaiting_answer": false }],
     "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false, "held": false, "closed": false }], "outside_gate": [], "ungated_proposed": [], "details": [{ "issue": 5, "idle_seconds": 1036800 }, { "issue": 14, "model": "opus", "effort": "high" }, { "issue": 27, "idle_seconds": 259200 }, { "issue": 28, "idle_seconds": 259200 }, { "issue": 33, "effort": "max" }]
   },
   "next": {
@@ -438,7 +439,7 @@ polako status -json | jq .
     "reply on #9",
     "review and merge PR #58",
     "grant Bash(echo:*) or fix the skill, then polako unpark #5",
-    "curate #27, #28 (drop proposed to queue them)"
+    "curate #27, #28 (drop proposed to queue them)", "run polako design -issue 31"
   ], "notes": [],
   "plans": { "docs": [{ "path": "docs/designs/backlog-fill.md", "state": "active", "open_children": 4, "containers": [{ "issue": 101, "total": 6, "completed": 2, "finished": false, "held": false, "closed": false }] }, { "path": "docs/designs/epic.md", "state": "done", "open_children": 0, "containers": [{ "issue": 202, "total": 3, "completed": 3, "finished": true, "held": false, "closed": true }] }], "gone": [{ "path": "docs/designs/dropped.md", "issues": [88, 91], "open": 1 }], "truncated": false },
   "plan": "plan: session 42%, week 52% (resets Sep 2, 6pm) — polako was 29% of the last 24h", "published": "0.24.0", "last_shift": { "shift": "3f9a1c20", "started": "2026-09-21T02:10:00Z", "span_seconds": 22320, "merged": 4, "parked": 1, "cost_usd": 31.2 }
@@ -455,7 +456,7 @@ closing line's clauses as an array; `notes` names a missing `-label`.
 from, the last one meaning `status` found it itself via `setup`'s
 gate-label marker; absent when the report is unscoped.
 `queue.held_back` is `{ "issue", "blockers" }`, the `held back` row's own
-issues with their still-open `blockedBy` dependencies. `queue.outside_gate` is the `outside the gate` row uncapped; `queue.ungated_proposed` is the part of `proposed` lacking the gate label; both `[]` when unscoped. `queue.details` is `{ "issue", "idle_seconds", "model", "effort" }`, one per issue the text rows annotate, ascending — a sidecar, so `ready` and `proposed` stay bare numbers; each of the last three is absent with nothing to say, and `model` is `"default"` for `model:default`. `idle_seconds` is the `updatedAt` span, named apart from `quiet_seconds`, the newest comment's.
+issues with their still-open `blockedBy` dependencies. `queue.outside_gate` is the `outside the gate` row uncapped; `queue.ungated_proposed` is the part of `proposed` lacking the gate label; both `[]` when unscoped. `queue.design` is `{ "issue", "awaiting_answer" }`, the `design` row's issues. `queue.details` is `{ "issue", "idle_seconds", "model", "effort" }`, one per issue the text rows annotate, ascending — a sidecar, so `ready` and `proposed` stay bare numbers; each of the last three is absent with nothing to say, and `model` is `"default"` for `model:default`. `idle_seconds` is the `updatedAt` span, named apart from `quiet_seconds`, the newest comment's.
 `plans` (plural — distinct from `plan`, the usage line below it) mirrors the
 plan documents table row for row; its `gone` is `{ "path", "issues", "open"
 }` — `issues` is every naming issue, open or closed, unlike the text

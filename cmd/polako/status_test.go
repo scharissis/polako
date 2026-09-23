@@ -245,6 +245,7 @@ func TestQueuePairsNameEveryOpenIssueExactlyOnce(t *testing.T) {
 			"104": {Open: true, Labels: []string{needsHumanLabel}},     // parked
 			"105": {Open: true, Labels: []string{proposedLabel}},       // proposed
 			"106": {Open: true, SubIssues: 2, SubIssuesCompleted: 1},   // container
+			"107": {Open: true, Labels: []string{designLabel}},         // design
 		},
 	})
 	snap, err := readStatus(context.Background(), cfg, statusNow)
@@ -268,6 +269,9 @@ func TestQueuePairsNameEveryOpenIssueExactlyOnce(t *testing.T) {
 	}
 	for _, n := range q.proposed {
 		buckets[n]++
+	}
+	for _, d := range q.design {
+		buckets[d.number]++
 	}
 	for _, c := range q.containers {
 		buckets[c.number]++
@@ -293,6 +297,7 @@ func TestQueuePairsNameEveryOpenIssueExactlyOnce(t *testing.T) {
 		"awaiting you": len(q.blocked) > 0,
 		"parked":       len(q.parked) > 0,
 		"proposed":     len(q.proposed) > 0,
+		"design":       len(q.design) > 0,
 		"containers":   len(q.containers) > 0,
 	} {
 		if nonEmpty && !hasRow(label) {
@@ -401,6 +406,56 @@ func TestStatusNamesTheParkCategoryClause(t *testing.T) {
 	}
 }
 
+// Issue #546: a design request gets its own row and one needs-you clause
+// each, worded by whether a design run is waiting on a reply, and -json
+// carries the same split.
+func TestStatusListsDesignRequests(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues: map[string]*fakeIssue{
+			"8": {Open: true, Labels: []string{designLabel, awaitingAnswerLabel}},
+			"9": {Open: true, Labels: []string{designLabel}},
+		},
+	})
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	var row string
+	for _, p := range queuePairs(snap) {
+		if p[0] == "design" {
+			row = p[1]
+		}
+	}
+	if want := "2 issues — #8, #9, labelled design"; row != want {
+		t.Errorf("design row = %q, want %q", row, want)
+	}
+	got := needsYou(snap)
+	for _, want := range []string{"reply on #8, then polako design -issue 8", "run polako design -issue 9"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("needsYou = %q, want it to contain %q", got, want)
+		}
+	}
+	if len(snap.queues.blocked) != 0 {
+		t.Errorf("blocked = %v, want #8 only in design, not also given the plain reply clause", snap.queues.blocked)
+	}
+	if want := "nothing — every open issue is a design request"; nextLine(snap) != want {
+		t.Errorf("next = %q, want %q", nextLine(snap), want)
+	}
+
+	var out strings.Builder
+	if err := renderStatusJSON(&out, cfg, snap); err != nil {
+		t.Fatalf("renderStatusJSON: %v", err)
+	}
+	var doc statusDoc
+	if err := json.Unmarshal([]byte(out.String()), &doc); err != nil {
+		t.Fatalf("output did not parse as JSON: %v\n%s", err, out.String())
+	}
+	if want := []statusDocDesign{{Issue: 8, AwaitingAnswer: true}, {Issue: 9}}; !slices.Equal(doc.Queue.Design, want) {
+		t.Errorf("queue.design = %+v, want %+v", doc.Queue.Design, want)
+	}
+}
+
 // A category missing from parkNeedsYouClause is a bug the same way a
 // category missing from parkNextStepTable is (TestParkNextStepCoversEvery
 // Category, unpark_nextstep_test.go): the needs-you line would silently
@@ -430,7 +485,7 @@ func TestStatusJSONKeepsArraysEmptyNotNull(t *testing.T) {
 		t.Fatalf("renderStatusJSON: %v", err)
 	}
 	for _, unwanted := range []string{
-		`"ready":null`, `"parked":null`, `"proposed":null`, `"containers":null`,
+		`"ready":null`, `"parked":null`, `"proposed":null`, `"design":null`, `"containers":null`,
 		`"blocked":null`, `"prs":null`, `"undetailed_prs":null`, `"needs_you":null`, `"notes":null`,
 	} {
 		if strings.Contains(out.String(), unwanted) {
@@ -438,7 +493,7 @@ func TestStatusJSONKeepsArraysEmptyNotNull(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		`"ready": []`, `"blocked": []`, `"prs": []`, `"needs_you": []`, `"notes": []`, `"outside_gate": []`, `"ungated_proposed": []`,
+		`"ready": []`, `"blocked": []`, `"design": []`, `"prs": []`, `"needs_you": []`, `"notes": []`, `"outside_gate": []`, `"ungated_proposed": []`,
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output is missing %q\n%s", want, out.String())

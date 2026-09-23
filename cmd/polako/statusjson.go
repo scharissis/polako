@@ -66,6 +66,7 @@ type statusDocQueue struct {
 	Blocked    []statusDocBlocked   `json:"blocked"`
 	Parked     []statusDocParked    `json:"parked"`
 	Proposed   []int                `json:"proposed"`
+	Design     []statusDocDesign    `json:"design"`
 	Containers []statusDocContainer `json:"containers"`
 	// OutsideGate is gateSplit.outside in full — the text row stops at ten.
 	// Always `[]` on an unscoped report.
@@ -86,6 +87,13 @@ type statusDocQueue struct {
 type statusDocHeldBack struct {
 	Issue    int   `json:"issue"`
 	Blockers []int `json:"blockers"`
+}
+
+// statusDocDesign is one design request — designInfo, in JSON shape.
+// AwaitingAnswer says a reply is owed before `polako design` runs it again.
+type statusDocDesign struct {
+	Issue          int  `json:"issue"`
+	AwaitingAnswer bool `json:"awaiting_answer"`
 }
 
 // statusDocParked is one parked issue with the entries and category its own
@@ -201,6 +209,11 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 		blocked = append(blocked, b)
 	}
 
+	design := make([]statusDocDesign, 0, len(snap.queues.design))
+	for _, d := range snap.queues.design {
+		design = append(design, statusDocDesign{Issue: d.number, AwaitingAnswer: d.awaiting})
+	}
+
 	containers := make([]statusDocContainer, 0, len(snap.queues.containers))
 	for _, c := range snap.queues.containers {
 		containers = append(containers, toStatusDocContainer(c))
@@ -252,6 +265,7 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 			Blocked:         blocked,
 			Parked:          parked,
 			Proposed:        nonNilSlice(snap.queues.proposed),
+			Design:          design,
 			Containers:      nonNilSlice(containers),
 			OutsideGate:     nonNilSlice(snap.gate.outside),
 			UngatedProposed: nonNilSlice(snap.gate.ungatedProposed),
