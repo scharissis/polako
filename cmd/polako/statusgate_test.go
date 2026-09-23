@@ -125,6 +125,9 @@ func TestGatedStatusKeepsProposalsAndOutsideIssues(t *testing.T) {
 	if want := []int{6, 7, 14}; !slices.Equal(doc.Queue.Proposed, want) {
 		t.Errorf("queue.proposed = %v, want %v", doc.Queue.Proposed, want)
 	}
+	if want := []int{7, 14}; !slices.Equal(doc.Queue.UngatedProposed, want) {
+		t.Errorf("queue.ungated_proposed = %v, want %v", doc.Queue.UngatedProposed, want)
+	}
 }
 
 // A gate with nothing behind it, on a repository that isn't empty, is not a

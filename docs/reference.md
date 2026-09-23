@@ -421,7 +421,7 @@ polako status -json | jq .
     "blocked": [{ "issue": 9, "quiet_seconds": 93600 }],
     "parked": [{ "issue": 5, "entries": ["Bash(echo:*)"], "category": "permission_refused" }],
     "proposed": [27, 28],
-    "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false, "held": false, "closed": false }], "outside_gate": []
+    "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false, "held": false, "closed": false }], "outside_gate": [], "ungated_proposed": []
   },
   "next": {
     "issue": 14,
@@ -448,7 +448,7 @@ polako status -json | jq .
 
 With `-json`, stdout carries exactly one document — no header, no `needs
 you:` line — the same snapshot the text report renders, field for field:
-`queue` holds the same seven lists, `next` names the issue a shift would pick
+`queue` holds the same lists, `next` names the issue a shift would pick
 up and why, `prs` matches the text columns exactly (`not read` for a PR past
 the eight-PR cap; `unknown` means gh doesn't know), and `needs_you` is the
 closing line's clauses as an array; `notes` names a missing `-label`.
@@ -456,7 +456,7 @@ closing line's clauses as an array; `notes` names a missing `-label`.
 from, the last one meaning `status` found it itself via `setup`'s
 gate-label marker; absent when the report is unscoped.
 `queue.held_back` is `{ "issue", "blockers" }`, the `held back` row's own
-issues with their still-open `blockedBy` dependencies. `queue.outside_gate` is the `outside the gate` row uncapped, `[]` when unscoped.
+issues with their still-open `blockedBy` dependencies. `queue.outside_gate` is the `outside the gate` row uncapped; `queue.ungated_proposed` is the part of `proposed` lacking the gate label; both `[]` when unscoped.
 `plans` (plural — distinct from `plan`, the usage line below it) mirrors the
 plan documents table row for row; its `gone` is `{ "path", "issues", "open"
 }` — `issues` is every naming issue, open or closed, unlike the text
