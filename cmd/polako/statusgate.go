@@ -40,6 +40,9 @@ type gateSplit struct {
 	// held counts the rest outside the gate — holds and containers. Not
 	// listed, but still open, so a report with only these is not a cleared one.
 	held int
+	// detail is the unscoped listing's per-issue detail, for the
+	// ungatedProposed statusQueues folds into the queues.
+	detail map[int]issueDetail
 }
 
 // open reports whether anything at all is open outside the gate.
@@ -72,12 +75,7 @@ func statusQueues(ctx context.Context, cfg config) (issueQueues, gateSplit, erro
 	// The ungated proposals just joined q.proposed, so their age comes from
 	// this listing: the gated one never saw them.
 	for _, n := range split.ungatedProposed {
-		if i := slices.IndexFunc(issues, func(is ghIssue) bool { return is.Number == n }); i >= 0 {
-			if q.detail == nil {
-				q.detail = map[int]issueDetail{}
-			}
-			q.detail[n] = issueDetail{updated: recTime(issues[i].UpdatedAt)}
-		}
+		q.detail[n] = split.detail[n]
 	}
 	return q, split, nil
 }
@@ -94,7 +92,7 @@ func outsideTheGate(issues []ghIssue, gate string) gateSplit {
 	}
 	o := sortIssueQueues(outside)
 	split := gateSplit{label: gate, outside: o.ready, ungatedProposed: o.proposed,
-		held: len(o.blocked) + len(o.parked) + len(o.containers)}
+		held: len(o.blocked) + len(o.parked) + len(o.containers), detail: o.detail}
 	for _, h := range o.heldBack {
 		split.outside = append(split.outside, h.number)
 	}
