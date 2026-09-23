@@ -84,6 +84,19 @@ func TestLastShiftLineNamesAnOlderYear(t *testing.T) {
 	}
 }
 
+// A shift that only saw a PR merge wrote no run: no span to claim.
+func TestLastShiftWithNoRunsDropsTheSpan(t *testing.T) {
+	t.Parallel()
+	const mergeOnly = `
+{"v":1,"kind":"issue","ts":"2026-02-22T04:00:00Z","repo":"example/repo","shift":"dddd0004","issue":3,"pr":40,"outcome":"merged"}
+`
+	dir := writePricingFixture(t, map[string]string{"example--repo.jsonl": mergeOnly})
+	got := lastShiftLine(readLastShift(dir, "example/repo", statusNow))
+	if want := "last shift here: Feb 22 04:00 — 1 merged, 0 parked, $0.00 — polako stats -shift dddd0004 -metrics " + dir; got != want {
+		t.Errorf("line:\n got %q\nwant %q", got, want)
+	}
+}
+
 func TestLastShiftAbsentWithoutHistory(t *testing.T) {
 	t.Parallel()
 	const idless = `

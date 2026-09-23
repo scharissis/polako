@@ -43,6 +43,11 @@ type lastShift struct {
 	// otherYear is set when the shift started in a year other than now's, so
 	// the line names the year rather than passing last September for this one.
 	otherYear bool
+	// ran is false for a shift that recorded no run — one that only waited
+	// on a PR an earlier shift opened, say. Its start is just its first
+	// terminal record and it has no span worth printing: it began whenever
+	// it began, and wrote nothing until the merge.
+	ran bool
 	// hint is the stats command that opens this shift, -metrics included
 	// when the records came from somewhere stats wouldn't look by default.
 	hint string
@@ -63,7 +68,7 @@ func readLastShift(metricsDir, repo string, now time.Time) *lastShift {
 	if err != nil || ds.shift == noneGroup || (len(ds.runs) == 0 && len(ds.issues) == 0) {
 		return nil
 	}
-	ls := &lastShift{id: ds.shift, hint: shiftHint(ds.shift, metricsDir)}
+	ls := &lastShift{id: ds.shift, hint: shiftHint(ds.shift, metricsDir), ran: len(ds.runs) > 0}
 	var end time.Time
 	widen := func(from, to time.Time) {
 		if !from.IsZero() && (ls.start.IsZero() || from.Before(ls.start)) {
@@ -83,7 +88,9 @@ func readLastShift(metricsDir, repo string, now time.Time) *lastShift {
 	if ls.start.IsZero() {
 		return nil // no record whose time would parse: nothing to date the line by
 	}
-	ls.span = end.Sub(ls.start)
+	if ls.ran {
+		ls.span = end.Sub(ls.start)
+	}
 	// now's zone — the reader's own clock, not the UTC the records carry.
 	ls.start = ls.start.In(now.Location())
 	ls.otherYear = ls.start.Year() != now.Year()
@@ -124,9 +131,12 @@ func lastShiftLine(ls *lastShift) string {
 	if ls.otherYear {
 		layout = "Jan 2 2006 15:04"
 	}
-	return fmt.Sprintf("last shift here: %s, %s — %d merged, %d parked, %s — %s",
-		ls.start.Format(layout), dur(span),
-		ls.merged, ls.parked, usd(ls.cost), ls.hint)
+	when := ls.start.Format(layout)
+	if ls.ran {
+		when += ", " + dur(span)
+	}
+	return fmt.Sprintf("last shift here: %s — %d merged, %d parked, %s — %s",
+		when, ls.merged, ls.parked, usd(ls.cost), ls.hint)
 }
 
 // statusDocLastShift is last_shift in `status -json`. Started is RFC 3339 in
