@@ -1,0 +1,8 @@
+{
+  "number": 1,
+  "title": "design: greet several names and pick a language",
+  "state": "OPEN",
+  "body": "## Request\n\n`greet.sh` greets exactly one name, in English. We want it to greet several\nnames in one call and to greet in a language the caller picks.\n\nDesign this before anyone builds it: write the plan document, with tickets\nsmall enough to hand to an unattended run.\n\n## What we already know\n\n- Several names means each positional argument gets its own line, in order.\n- The language is picked with a `--lang <code>` flag. English stays the\n  default. Start with English, Spanish and French; an unknown code is an\n  error that names the codes it does know.\n- `./test.sh` is the only check the repo has, and it has to keep passing.\n\n## Out of scope\n\nConfig files, environment variables and translations beyond those three.\n",
+  "comments": [],
+  "blockedBy": {"nodes": [], "totalCount": 0}
+}

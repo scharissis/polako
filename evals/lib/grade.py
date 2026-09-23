@@ -32,6 +32,10 @@ import subprocess
 import sys
 
 EVIDENCE_FILE_CAP = 4000  # chars per quoted artifact, plenty for this suite
+# Recorded by every `gh pr create`, but quoted only for a case whose graders
+# name them, so the other cases' judges see what they always saw. The diff
+# gets its own cap: design-plan's whole deliverable is one plan document.
+ON_REQUEST_CAPS = {".eval/pr-diff.txt": 16000, ".eval/pr-files.txt": EVIDENCE_FILE_CAP}
 RESULT_HEAD = 200         # chars of each tool result kept in the timeline
 
 
@@ -121,14 +125,14 @@ def parse_case(path):
 
 # --- evidence --------------------------------------------------------------
 
-def quote_file(ws, rel):
+def quote_file(ws, rel, cap=EVIDENCE_FILE_CAP):
     p = os.path.join(ws, rel)
     try:
         body = open(p, errors="replace").read()
     except OSError:
         return f"### {rel}\n(missing)\n"
-    if len(body) > EVIDENCE_FILE_CAP:
-        body = body[:EVIDENCE_FILE_CAP] + "\n…(truncated)"
+    if len(body) > cap:
+        body = body[:cap] + "\n…(truncated)"
     return f"### {rel}\n```\n{body}\n```\n"
 
 
@@ -286,13 +290,16 @@ def build_evidence(ws, case):
     events, stream_note = load_events(os.path.join(ws, "run.stream.jsonl"))
     parts = ["## Recorded artifacts (.eval/)"]
     seen = set()
+    wanted = grader_paths(case["graders"])
     for root, _dirs, files in os.walk(os.path.join(ws, ".eval")):
         for f in sorted(files):
             rel = os.path.relpath(os.path.join(root, f), ws)
+            if rel in ON_REQUEST_CAPS and rel not in wanted:
+                continue
             if f.endswith((".md", ".log", ".txt")):
-                parts.append(quote_file(ws, rel))
+                parts.append(quote_file(ws, rel, ON_REQUEST_CAPS.get(rel, EVIDENCE_FILE_CAP)))
                 seen.add(rel)
-    for rel in sorted(grader_paths(case["graders"])):
+    for rel in sorted(wanted):
         if rel not in seen and not os.path.exists(os.path.join(ws, rel)):
             parts.append(f"### {rel}\n(never created — the run performed no "
                          "operation that writes it)\n")
