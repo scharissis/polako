@@ -286,9 +286,12 @@ question.
 Path: `<worktree>/docs/designs/<topic>.md`. `<topic>` is the issue title,
 lower-cased and kebab-cased after dropping a leading `design:` prefix, at
 most 40 characters, cut at a word boundary. If that file already exists on
-the default branch, the request overlaps a plan someone already wrote: ask
-whether to extend it or write a separate one, and stop. If it exists only on
-`issue-$issue`, an earlier run of this issue wrote it — resume from it.
+the default branch, the request overlaps a plan someone already wrote.
+`## Decided` settles it once the human has: "extend" means this run edits
+that file in place; "separate" means `<topic>` gets a `-2` suffix (or the
+next free number). With neither decided yet, ask which, the way Phase 3
+batches questions, and stop. If the file exists only on `issue-$issue`, an
+earlier run of this issue wrote it — resume from it.
 
 The template, in full. Every heading here is required; a design with
 something extra to say may add a section after `## Considered and not
