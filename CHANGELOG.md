@@ -13,6 +13,24 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.33.0]
+
+### What's Changed
+* fix: status's plans section says only what someone can act on by @scharissis in https://github.com/scharissis/polako/pull/580 (closes #510)
+* feat: status gets a held-back row for issues behind a blocker by @scharissis in https://github.com/scharissis/polako/pull/582 (closes #511)
+* fix: prompt-audit cleanup of the skills and the eval judge by @scharissis in https://github.com/scharissis/polako/pull/588
+* feat: health audits the repo's prompts with Claude Code's own recipe by @scharissis in https://github.com/scharissis/polako/pull/591
+* feat: setup marks the gate label, and status scopes itself to it by @scharissis in https://github.com/scharissis/polako/pull/585 (closes #512)
+* feat: status under a gate label keeps proposals and outside issues by @scharissis in https://github.com/scharissis/polako/pull/592 (closes #513)
+* feat: status shows the last shift here, from run data by @scharissis in https://github.com/scharissis/polako/pull/593 (closes #514)
+* feat: the design-plan skill, its contract tests and its eval case by @scharissis in https://github.com/scharissis/polako/pull/594 (closes #547)
+* refactor: split the verb-neutral half out of work's preflight by @scharissis in https://github.com/scharissis/polako/pull/596 (closes #548)
+* feat: status prices the ready queue and names park reasons by @scharissis in https://github.com/scharissis/polako/pull/597 (closes #515)
+* feat: status shows issue age and model/effort labels from the listing by @scharissis in https://github.com/scharissis/polako/pull/598 (closes #516)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.32.0...v0.33.0
+
 ## [0.32.0]
 
 ### What's Changed
