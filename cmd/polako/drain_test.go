@@ -4707,6 +4707,87 @@ func TestSelectableIssuesDropsProposals(t *testing.T) {
 	}
 }
 
+// A design request wants a plan, not code, so it is in neither queue a drain
+// reads — even mid-question, where awaiting-answer alone would put it in
+// blocked. Parked and proposed still outrank it.
+func TestSelectableIssuesDropsDesignRequests(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`[{"number":4,"labels":[{"name":"Design"}]},
+		{"number":5,"labels":[{"name":"design"},{"name":"awaiting-answer"}]},
+		{"number":6,"labels":[{"name":"design"},{"name":"needs-human"}]},
+		{"number":7,"labels":[{"name":"design"},{"name":"proposed"}]},
+		{"number":8}]`)
+
+	q, err := selectableIssues(raw)
+	if err != nil {
+		t.Fatalf("selectableIssues: %v", err)
+	}
+	if want := []int{8}; !slices.Equal(q.ready, want) {
+		t.Errorf("ready = %v, want %v", q.ready, want)
+	}
+	if len(q.blocked) != 0 {
+		t.Errorf("blocked = %v, want a design request mid-question out of it", q.blocked)
+	}
+	if want := []designInfo{{number: 4}, {number: 5, awaiting: true}}; !slices.Equal(q.design, want) {
+		t.Errorf("design = %+v, want %+v", q.design, want)
+	}
+	if want := []int{6}; !slices.Equal(q.parked, want) {
+		t.Errorf("parked = %v, want %v", q.parked, want)
+	}
+	if want := []int{7}; !slices.Equal(q.proposed, want) {
+		t.Errorf("proposed = %v, want %v", q.proposed, want)
+	}
+	if want := []int{8, 6, 7, 4, 5}; !slices.Equal(q.open(), want) {
+		t.Errorf("open() = %v, want %v", q.open(), want)
+	}
+}
+
+// The design gate, end to end, with and without -strict-order: the fold that
+// puts awaiting-answer back in ready must not reach a design request, or the
+// drain would sit waiting on #2's thread and then run implement-issue on it.
+func TestDrainWorksNoDesignRequest(t *testing.T) {
+	t.Parallel()
+	for _, strict := range []bool{false, true} {
+		t.Run(fmt.Sprintf("strict=%v", strict), func(t *testing.T) {
+			t.Parallel()
+			buf := captureLog(t)
+			cfg, path := drainConfig(t, "stream", &ghState{
+				Issues: map[string]*fakeIssue{
+					"1": {Open: true, Labels: []string{designLabel}},
+					"2": {Open: true, Labels: []string{designLabel, awaitingAnswerLabel}},
+					// Its PR is already merged, so the shift closes it without a
+					// claude run and then finds nothing else workable.
+					"3": {Open: true},
+				},
+				Labels: []string{awaitingAnswerLabel},
+				PRs:    map[string]*fakePR{"issue-3": {Number: 9, State: "MERGED"}},
+			})
+			cfg.strictOrder = strict
+
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := drain(ctx, cfg); err != nil {
+				t.Fatalf("drain: %v", err)
+			}
+
+			st := finalGhState(t, path)
+			for n, labels := range map[string][]string{"1": {designLabel}, "2": {designLabel, awaitingAnswerLabel}} {
+				is := st.Issues[n]
+				if !is.Open || is.Comments != 0 || !slices.Equal(is.Labels, labels) {
+					t.Errorf("issue %s = %+v, want it untouched with labels %v", n, is, labels)
+				}
+			}
+			if st.Issues["3"].Open {
+				t.Error("issue 3 should have been closed once its merged PR was seen")
+			}
+			out := buf.String()
+			if strings.Contains(out, "session started") || strings.Contains(out, "#2 is labelled") {
+				t.Errorf("the drain touched a design request\n%s", out)
+			}
+		})
+	}
+}
+
 // An issue with sub-issues is a tracking container rather than a work item, and
 // what makes it one is its shape rather than anything written on it — which is
 // what also protects a parent somebody made by hand.

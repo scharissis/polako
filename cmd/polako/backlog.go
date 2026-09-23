@@ -1,7 +1,8 @@
 package main
 
 // Reading the open backlog off GitHub and sorting it into the queues a drain
-// acts on: ready now, waiting on a human answer, parked, proposed, held back by
+// acts on: ready now, waiting on a human answer, parked, proposed, a design
+// request, held back by
 // an unmerged dependency, or a container that is never worked at all. Both
 // readers — the drain and `status` — come through selectableIssues, so an
 // exclusion added here reaches every one of them at once.
@@ -135,6 +136,7 @@ type issueQueues struct {
 	blocked    []int
 	parked     []int
 	proposed   []int
+	design     []designInfo
 	containers []containerInfo
 	heldBack   []heldBackInfo
 	// detail is what the listing said about each issue beyond its queue, keyed
@@ -172,6 +174,14 @@ type containerInfo struct {
 	closed bool
 }
 
+// designInfo is one design request, and whether it also carries
+// awaiting-answer — which decides what `status` tells the operator to do
+// next: reply first, or just run `polako design` on it.
+type designInfo struct {
+	number   int
+	awaiting bool
+}
+
 // heldBackInfo is one otherwise-ready issue put down for this pass because at
 // least one of its blockedBy dependencies is still open, and the open ones
 // among them, ascending — what the skip log names.
@@ -194,9 +204,12 @@ func (c containerInfo) finished() bool {
 // work it", so an exclusion must not shorten it.
 func (q issueQueues) open() []int {
 	all := make([]int, 0, len(q.ready)+len(q.blocked)+len(q.parked)+len(q.proposed)+
-		len(q.containers)+len(q.heldBack))
+		len(q.design)+len(q.containers)+len(q.heldBack))
 	for _, list := range [][]int{q.ready, q.blocked, q.parked, q.proposed} {
 		all = append(all, list...)
+	}
+	for _, d := range q.design {
+		all = append(all, d.number)
 	}
 	for _, c := range q.containers {
 		all = append(all, c.number)
@@ -211,25 +224,31 @@ func (q issueQueues) open() []int {
 // --json number,labels,subIssuesSummary,blockedBy` payload and sorts it into
 // the queues: issues ready now, issues already waiting on a human answer,
 // issues a previous drain parked, issues a machine proposed that nobody has
-// approved, and issues put down for this pass because a dependency has not
-// merged. Only the first two are worth working, which is what stops the queue
-// handing back the same unimplementable issue on every pass. Labels are
-// matched case-insensitively, the way GitHub itself treats them.
+// approved, design requests, and issues put down for this pass because a
+// dependency has not merged. Only the first two are worth working, which is
+// what stops the queue handing back the same unimplementable issue on every
+// pass. Labels are matched case-insensitively, the way GitHub itself treats
+// them.
 //
-// The order of the cases is the precedence, and three of them are decisions.
+// The order of the cases is the precedence, and four of them are decisions.
 // A container is dropped ahead of every label, because "never a work item" is
 // structural and outranks anything written on it. Needs-human beats proposed,
 // because parking is a judgement a human has already made about that issue —
 // which also keeps the ignoring-proposals line honest, since every issue it
-// counts really would queue if the label came off. And an open blockedBy
-// dependency is checked last, only against what the switch would otherwise
-// call ready: a needs-human, proposed or awaiting-answer classification wins
+// counts really would queue if the label came off. Design sits below both —
+// a parked design request still lists as parked, and a proposed one is still
+// nobody's to act on, since exclusion beats inclusion — and above
+// awaiting-answer, so a design request mid-question is never handed to
+// implement-issue, neither by awaitAnswer nor by -strict-order folding
+// blocked back into ready. And an open blockedBy dependency is checked last,
+// only against what the switch would otherwise call ready: a needs-human,
+// proposed, design or awaiting-answer classification wins
 // outright regardless of any blocker. Awaiting-answer in particular keeps its
 // own dedicated poll for a reply (awaitAnswer) running whether or not some
 // unrelated dependency has merged — demoting it to held-back on a blocker
 // would silently stop that poll with nothing to say so. Held-back is also the
 // one exclusion here that is not a durable, labelled judgement: it is
-// recomputed from this same listing every pass, so it sits below all four.
+// recomputed from this same listing every pass, so it sits below all five.
 //
 // Every list comes back ascending because the drain works them lowest first,
 // and `gh issue list` guarantees no order of its own.
@@ -286,6 +305,8 @@ func sortIssueQueues(issues []ghIssue) issueQueues {
 			q.parked = append(q.parked, is.Number)
 		case is.hasLabel(proposedLabel):
 			q.proposed = append(q.proposed, is.Number)
+		case is.hasLabel(designLabel):
+			q.design = append(q.design, designInfo{number: is.Number, awaiting: is.hasLabel(awaitingAnswerLabel)})
 		case is.hasLabel(awaitingAnswerLabel):
 			q.blocked = append(q.blocked, is.Number)
 		default:
@@ -300,6 +321,7 @@ func sortIssueQueues(issues []ghIssue) issueQueues {
 	slices.Sort(q.blocked)
 	slices.Sort(q.parked)
 	slices.Sort(q.proposed)
+	slices.SortFunc(q.design, func(a, b designInfo) int { return a.number - b.number })
 	slices.SortFunc(q.containers, func(a, b containerInfo) int { return a.number - b.number })
 	slices.SortFunc(q.heldBack, func(a, b heldBackInfo) int { return a.number - b.number })
 	return q

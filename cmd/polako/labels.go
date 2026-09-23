@@ -30,7 +30,7 @@ type labelDef struct {
 	// isGateLabel marks the one def built from -label (setupLabelDefs,
 	// applySetup's public-repo prompt) — the only one checkLabelDef compares
 	// against gateLabelDescription rather than merely checking existence.
-	// The three labelTable entries and the policy-label set never carry
+	// The labelTable entries and the policy-label set never carry
 	// this: their own descriptions are fixed and unrelated to the marker.
 	isGateLabel bool
 }
@@ -42,14 +42,16 @@ type labelDef struct {
 // given: the marker, not the name, is what makes a label "the" gate label.
 const gateLabelDescription = "gate label for `polako work -label`"
 
-// labelTable is every label polako applies to an issue. All three are
-// required: each is orchestration state the queue logic reads (see
-// needsHumanLabel, proposedLabel, awaitingAnswerLabel in main.go), not
-// decoration a repo could do without.
+// labelTable is every label polako applies to an issue, each orchestration
+// state the queue logic reads (see the consts in main.go), not decoration.
+// The first three are required. designLabel is not: a repo with no design
+// requests loses nothing by lacking it, and nothing applies it without
+// ensuring it first.
 var labelTable = []labelDef{
 	{name: needsHumanLabel, color: "D93F0B", description: "polako parked this issue for a human", required: true},
 	{name: proposedLabel, color: "1D76DB", description: "proposed by polako — a human removes this label to queue it", required: true},
 	{name: awaitingAnswerLabel, color: "FBCA04", description: "polako is waiting for an answer on this issue", required: true},
+	{name: designLabel, color: "C5DEF5", description: "a design request — polako work skips it; polako design works it into a plan"},
 }
 
 // labelTableNames is every name labelTable holds, in table order — the one
@@ -65,7 +67,7 @@ func labelTableNames() []string {
 }
 
 // labelByName looks up one label's definition. Every call site names one of
-// the three consts above, so a miss means this table fell out of sync with
+// the consts above, so a miss means this table fell out of sync with
 // main.go, not bad input — hence the panic rather than a second error path
 // every caller would have to handle for a case that can't happen.
 func labelByName(name string) labelDef {
