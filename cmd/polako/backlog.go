@@ -54,8 +54,7 @@ const (
 
 // openQueues reads the open backlog off GitHub and sorts it. Every reader of
 // the queue comes through here — the drain and `-dry-run` by way of openIssues,
-// an unscoped `status` directly, a gated one through statusQueues' own
-// partition of the same listing — so an exclusion added to sortIssueQueues
+// `status` by way of statusQueues — so an exclusion added to sortIssueQueues
 // reaches every one of them at once and cannot drift between two copies of the
 // same argv.
 func openQueues(ctx context.Context, cfg config) (issueQueues, error) {
@@ -235,8 +234,8 @@ func parseIssueList(raw []byte) ([]ghIssue, error) {
 }
 
 // sortIssueQueues is selectableIssues on an already-parsed listing, so
-// `status` can hand it the in-gate subset of an unscoped listing and get the
-// same queues a `--label` listing would (statusgate.go).
+// `status` can sort the issues outside its gate label by the same rules
+// (statusgate.go).
 func sortIssueQueues(issues []ghIssue) issueQueues {
 	// The state a blockedBy node names is what settles openness. A gh whose
 	// node carries no state at all falls back to this — presence among the

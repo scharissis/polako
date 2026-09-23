@@ -26,6 +26,8 @@ func gatedBacklog() *ghState {
 			"11": {Open: true, Labels: []string{awaitingAnswerLabel}},
 			"12": {Open: false, Labels: []string{gate}},
 			"13": {Open: true},
+			// proposed outranks awaiting-answer, outside the gate as inside it
+			"14": {Open: true, Labels: []string{proposedLabel, awaitingAnswerLabel}},
 		},
 	}
 }
@@ -55,10 +57,10 @@ func TestGatedStatusQueuesMatchALabelledListing(t *testing.T) {
 	if want := []int{6}; !slices.Equal(labelled.proposed, want) {
 		t.Errorf("labelled proposed = %v, want %v", labelled.proposed, want)
 	}
-	if want := []int{6, 7}; !slices.Equal(gated.proposed, want) {
+	if want := []int{6, 7, 14}; !slices.Equal(gated.proposed, want) {
 		t.Errorf("gated proposed = %v, want %v", gated.proposed, want)
 	}
-	if want := []int{7}; !slices.Equal(split.ungatedProposed, want) {
+	if want := []int{7, 14}; !slices.Equal(split.ungatedProposed, want) {
 		t.Errorf("ungatedProposed = %v, want %v", split.ungatedProposed, want)
 	}
 	// #8 is a container, #10 and #11 are held: none of them is triage.
@@ -95,9 +97,9 @@ func TestGatedStatusKeepsProposalsAndOutsideIssues(t *testing.T) {
 	renderStatus(&out, report{}, cfg, snap)
 	printed := out.String()
 	for _, want := range []string{
-		"proposed          2 issues — #6, #7, labelled proposed",
+		"proposed          3 issues — #6, #7, #14, labelled proposed",
 		"outside the gate  2 issues — #3, #13",
-		"curate #6 (drop proposed to queue them); curate #7 (drop proposed, add ready)",
+		"curate #6 (drop proposed to queue them); curate #7, #14 (drop proposed, add ready)",
 	} {
 		if !strings.Contains(printed, want) {
 			t.Errorf("report is missing %q\ngot:\n%s", want, printed)
@@ -120,7 +122,7 @@ func TestGatedStatusKeepsProposalsAndOutsideIssues(t *testing.T) {
 	if want := []int{3, 13}; !slices.Equal(doc.Queue.OutsideGate, want) {
 		t.Errorf("queue.outside_gate = %v, want %v", doc.Queue.OutsideGate, want)
 	}
-	if want := []int{6, 7}; !slices.Equal(doc.Queue.Proposed, want) {
+	if want := []int{6, 7, 14}; !slices.Equal(doc.Queue.Proposed, want) {
 		t.Errorf("queue.proposed = %v, want %v", doc.Queue.Proposed, want)
 	}
 }

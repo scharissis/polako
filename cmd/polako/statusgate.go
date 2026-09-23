@@ -6,13 +6,17 @@ import (
 	"slices"
 )
 
-// A gated `status` lists the whole repository once and partitions it here,
-// rather than passing `--label` the way `work` does. Scoped to the gate on
-// GitHub's side, a `proposed` issue nobody has added the gate label to yet
-// drops out of the report — and so does the curate clause that would have
-// told an operator it's waiting — and an outside issue waiting for triage is
-// invisible. Only the in-gate subset goes through sortIssueQueues, so the
-// queue `status` reports is still exactly the one `work -label` would drain.
+// Scoped to the gate on GitHub's side, a `proposed` issue nobody has added the
+// gate label to yet drops out of the report — and so does the curate clause
+// that would have told an operator it's waiting — and an outside issue waiting
+// for triage is invisible. So a gated `status` makes one more listing,
+// unscoped, for what lies outside the gate.
+//
+// The queues themselves still come from `work`'s own `--label` listing, not
+// from partitioning the unscoped one. Both are capped at --limit 200, and on a
+// repository with more open issues than that, the unscoped listing's newest
+// 200 can crowd out an old in-gate issue — the one the queue must not lose.
+// The extras are context; losing a few of those past the cap costs little.
 
 // outsideGateShown caps the `outside the gate` row: on a public repository
 // that row is everyone's untriaged issues, and it is context, not the queue.
@@ -24,9 +28,10 @@ const outsideGateShown = 10
 type gateSplit struct {
 	// label is the gate label itself, so the curate clause can name it.
 	label string
-	// outside is every open issue with neither the gate label nor a hold
-	// (needs-human, proposed, awaiting-answer), ascending. Containers are left
-	// out too: never worked, so never gated.
+	// outside is every open issue without the gate label that the gate label
+	// alone would queue — what sortIssueQueues calls ready or held back —
+	// ascending. A hold (needs-human, proposed, awaiting-answer) or a
+	// container is not triage, so it isn't here.
 	outside []int
 	// ungatedProposed is the proposed issues lacking the gate label — already
 	// merged into issueQueues.proposed, kept here so the curate clause can say
@@ -37,13 +42,13 @@ type gateSplit struct {
 // statusQueues is openQueues for `status`: the same queues, plus what lies
 // outside the gate when there is one.
 func statusQueues(ctx context.Context, cfg config) (issueQueues, gateSplit, error) {
-	if cfg.label == "" {
-		q, err := openQueues(ctx, cfg)
+	q, err := openQueues(ctx, cfg)
+	if err != nil || cfg.label == "" {
 		return q, gateSplit{}, err
 	}
 	all := cfg
 	all.label = ""
-	raw, err := retryRead(ctx, cfg, "listing open issues", func() ([]byte, error) {
+	raw, err := retryRead(ctx, cfg, "listing issues outside the gate", func() ([]byte, error) {
 		return listOpenIssues(ctx, all)
 	})
 	if err != nil {
@@ -53,33 +58,29 @@ func statusQueues(ctx context.Context, cfg config) (issueQueues, gateSplit, erro
 	if err != nil {
 		return issueQueues{}, gateSplit{}, err
 	}
-	q, split := partitionByGate(issues, cfg.label)
+	split := outsideTheGate(issues, cfg.label)
+	q.proposed = append(q.proposed, split.ungatedProposed...)
+	slices.Sort(q.proposed)
 	return q, split, nil
 }
 
-// partitionByGate splits one unscoped listing at the gate label. The label
-// checks for the out-of-gate rows follow sortIssueQueues' own precedence: a
-// container first, then needs-human over proposed.
-func partitionByGate(issues []ghIssue, gate string) (issueQueues, gateSplit) {
-	var inGate []ghIssue
-	split := gateSplit{label: gate}
+// outsideTheGate sorts the issues without the gate label through the same
+// sortIssueQueues the queue uses, so an exclusion added there reaches this
+// row too, precedence and all.
+func outsideTheGate(issues []ghIssue, gate string) gateSplit {
+	var outside []ghIssue
 	for _, is := range issues {
-		switch {
-		case is.hasLabel(gate):
-			inGate = append(inGate, is)
-		case is.SubIssues.Total > 0, is.hasLabel(needsHumanLabel), is.hasLabel(awaitingAnswerLabel):
-		case is.hasLabel(proposedLabel):
-			split.ungatedProposed = append(split.ungatedProposed, is.Number)
-		default:
-			split.outside = append(split.outside, is.Number)
+		if !is.hasLabel(gate) {
+			outside = append(outside, is)
 		}
 	}
-	q := sortIssueQueues(inGate)
+	o := sortIssueQueues(outside)
+	split := gateSplit{label: gate, outside: o.ready, ungatedProposed: o.proposed}
+	for _, h := range o.heldBack {
+		split.outside = append(split.outside, h.number)
+	}
 	slices.Sort(split.outside)
-	slices.Sort(split.ungatedProposed)
-	q.proposed = append(q.proposed, split.ungatedProposed...)
-	slices.Sort(q.proposed)
-	return q, split
+	return split
 }
 
 // curateClauses is the needs-you line's curation half. A proposal already

@@ -351,7 +351,7 @@ needs you: reply on #9; review and merge PR #58; grant Bash(echo:*) or fix the s
 ```
 
 `held back` names an otherwise-ready issue behind an open `blockedBy`
-dependency — recomputed every pass, so it clears itself once that blocker closes. Scoped to a gate label, `status` lists every open issue once and splits them itself; the queues come from the in-gate ones only, so they match what `work -label` would drain. Two things reach past the gate. `proposed` stays repo-wide, and a proposal without the gate label gets a clause naming both moves — `curate #7 (drop proposed, add ready)`. An `outside the gate` row lists open issues with neither the gate label nor a hold (`needs-human`, `proposed`, `awaiting-answer`): numbers only, the first ten, then `and N more`, absent when empty. Out-of-gate containers are left out.
+dependency — recomputed every pass, so it clears itself once that blocker closes. Scoped to a gate label, the queues come from the same `--label` listing `work -label` drains, and one more unscoped listing finds what's outside it. Two things reach past the gate. `proposed` stays repo-wide, and a proposal without the gate label gets a clause naming both moves — `curate #7 (drop proposed, add ready)`. An `outside the gate` row lists open issues with neither the gate label nor a hold (`needs-human`, `proposed`, `awaiting-answer`): numbers only, the first ten, then `and N more`, absent when empty. Out-of-gate containers are left out.
 
 Below that table, `plan documents` adds one row per file under `docs/designs/`:
 state derived from the naming issues (`docs/designs/plan-conventions.md`'s
