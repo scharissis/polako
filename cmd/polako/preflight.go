@@ -165,3 +165,111 @@ func preflightShared(ctx context.Context, cfg *config, gate func(visibility stri
 	}
 	return nil
 }
+
+// preflightPairs builds the startup recap as row pairs: what used to be a
+// run of full sentences becomes one fact per row, aligned like status and
+// stats. Every row but "queue" is gated by the exact condition its sentence
+// used before this — reshaping what preflight already said, not changing
+// what those rows disclose. "queue" (-label) is new disclosure, not a
+// reshape; its own comment below says why. Row order inside the block
+// matches the old sentence order, but warnOnVersionSkew (called in
+// preflightShared) now always prints ahead of the whole block rather than
+// being interleaved with -dry-run the way the two sentences used to be — a
+// real, if cosmetic, reordering worth knowing about before trusting this
+// comment too literally.
+func preflightPairs(cfg config) [][2]string {
+	var pairs [][2]string
+	// Unconditional, unlike every row below it: a shift closes a finished
+	// container (every child closed) on its own, writing to human-curated state
+	// without being asked, which is the class of thing -post-summary and -remote
+	// disclose at startup. Held with needs-human or proposed, it is left alone.
+	pairs = append(pairs, [2]string{"epics",
+		"a finished container (every sub-issue closed) is closed with a comment saying so — " +
+			"put needs-human on one to hold it open"})
+	if cfg.label != "" {
+		// Not said at all before this: the issue asks for -label to surface
+		// here. Unset (the default, unfiltered queue) says nothing, the same
+		// way an off flag elsewhere earns no row — there is nothing to
+		// disclose about it that -ungated's own warning does not already say.
+		pairs = append(pairs, [2]string{"queue", fmt.Sprintf("label %q", cfg.label)})
+	}
+	if line := modelEffortLine(cfg); line != "" {
+		// One row for both dispatch knobs. The environment can set either
+		// (POLAKO_MODEL, POLAKO_EFFORT), so an operator who forgot the export
+		// should not have to work out why every run is on a model they did not
+		// type — the same reason -post-summary earns a row.
+		pairs = append(pairs, [2]string{"model", line})
+	}
+	if cfg.dryRun {
+		pairs = append(pairs, [2]string{"dry-run",
+			"resolving the next issue only — no claude run, no GitHub write, no run data"})
+	}
+	if notes := capNotes(cfg); notes != "" {
+		pairs = append(pairs, [2]string{"caps", notes})
+	}
+	if cfg.usage != nil {
+		if line := usageLine(*cfg.usage); line != "" {
+			pairs = append(pairs, [2]string{"plan", line})
+		}
+	}
+	if cfg.postSummary {
+		// The environment can set this, so say it out loud: an operator who
+		// forgot the variable is in their profile should not have to work out
+		// where the PR comments are coming from.
+		pairs = append(pairs, [2]string{"post-summary", "on — each merged PR gets one comment of run numbers"})
+	}
+	if cfg.notifyCmd != "" {
+		pairs = append(pairs, [2]string{"notify", fmt.Sprintf(
+			"on — `%s` runs when an issue parks, an issue asks a question, the backlog clears, or the shift stops early",
+			cfg.notifyCmd)})
+	}
+	if cfg.remote {
+		// Said every time, unprompted, like the recorder's line and for the same
+		// reason: this is the one thing a shift does that makes its sessions
+		// visible somewhere other than this terminal, and it is on by default.
+		pairs = append(pairs, [2]string{"remote",
+			"on — each run registers with Remote Control under the operator's own claude.ai account, " +
+				"watchable and typeable from claude.ai/code or the app (-remote=false keeps runs to this machine)"})
+	}
+	if cfg.rec.enabled() {
+		// Say where the data goes, every time, unprompted: it is the whole of
+		// the answer to "what does this tool record".
+		pairs = append(pairs, [2]string{"run data",
+			fmt.Sprintf("%s — numbers only, never leaves this machine (-metrics off to disable)", cfg.rec.dir)})
+		// The one place the id is ever shown. Nothing reads it back, so a
+		// report on this drain alone is unaskable unless this line is where an
+		// operator finds it — including while the drain is still running.
+		pairs = append(pairs, [2]string{"shift",
+			fmt.Sprintf("%s — `polako stats -shift %s` reports on it alone", cfg.shiftID, cfg.shiftID)})
+	}
+	if cfg.logPath != "" {
+		// The disclosure, said every time like the recorder's line: unlike the
+		// run-data records this file holds transcript text, so where it lives
+		// and that it stays local is worth a line per shift.
+		pairs = append(pairs, [2]string{"shift log",
+			fmt.Sprintf("%s — the whole claude transcript stream, kept on this machine (-log off to disable)", cfg.logPath)})
+	}
+	return pairs
+}
+
+// modelEffortLine renders the settings-block value for -model, -effort,
+// -model-by-size and -effort-by-size: whichever were set, "" when none were
+// so the row is skipped. "inherit" is not spelled — an omitted flag adds
+// nothing to disclose. The by-size specs are shown verbatim since
+// POLAKO_MODEL_BY_SIZE / POLAKO_EFFORT_BY_SIZE can set them silently.
+func modelEffortLine(cfg config) string {
+	var parts []string
+	if cfg.model != "" {
+		parts = append(parts, "model "+cfg.model)
+	}
+	if cfg.effort != "" {
+		parts = append(parts, "effort "+cfg.effort)
+	}
+	if cfg.modelBySize != "" {
+		parts = append(parts, "model-by-size "+cfg.modelBySize)
+	}
+	if cfg.effortBySize != "" {
+		parts = append(parts, "effort-by-size "+cfg.effortBySize)
+	}
+	return strings.Join(parts, ", ")
+}
