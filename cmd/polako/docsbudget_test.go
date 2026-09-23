@@ -107,8 +107,12 @@ const docsBudget = 500
 // 531 with no slack, and the new `design` exclusion is a gate the queue
 // section has to name — folded into the existing proposed/container
 // paragraph, one line was all it cost.
+//
+// reference.md moved again in issue #550 (2026-09-23), +39: a whole new
+// verb, `polako design`, needed its own section with a flag table, the way
+// #434 added `unpark`'s — no existing paragraph to cut in its place.
 var docsDebt = map[string]int{
-	"reference.md": 584,
+	"reference.md": 623,
 	"behaviour.md": 532,
 }
 
