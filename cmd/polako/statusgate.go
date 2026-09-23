@@ -69,6 +69,16 @@ func statusQueues(ctx context.Context, cfg config) (issueQueues, gateSplit, erro
 	split := outsideTheGate(issues, cfg.label)
 	q.proposed = append(q.proposed, split.ungatedProposed...)
 	slices.Sort(q.proposed)
+	// The ungated proposals just joined q.proposed, so their age comes from
+	// this listing: the gated one never saw them.
+	for _, n := range split.ungatedProposed {
+		if i := slices.IndexFunc(issues, func(is ghIssue) bool { return is.Number == n }); i >= 0 {
+			if q.detail == nil {
+				q.detail = map[int]issueDetail{}
+			}
+			q.detail[n] = issueDetail{updated: recTime(issues[i].UpdatedAt)}
+		}
+	}
 	return q, split, nil
 }
 

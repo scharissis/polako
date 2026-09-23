@@ -309,7 +309,10 @@ type statusSnapshot struct {
 	// quiet is how long each blocked issue's thread has been silent, keyed by
 	// issue. Absent for a thread whose age could not be read.
 	quiet map[int]time.Duration
-	prs   []statusPR
+	// idle is how long each parked and proposed issue has gone untouched
+	// (idleSpans, statusdetail.go) — from the listing, no comment read.
+	idle map[int]time.Duration
+	prs  []statusPR
 	// undetailed is how many open PRs on issue branches were left as numbers
 	// alone because statusPRs was reached.
 	undetailed []int
@@ -386,6 +389,7 @@ func readStatus(ctx context.Context, cfg config, now time.Time) (statusSnapshot,
 		return snap, err
 	}
 	snap.queues, snap.gate = queues, gate
+	snap.idle = idleSpans(queues, now)
 	// The drain's own rule, in dryRun's words: the lowest ready issue, and with
 	// none, the lowest issue waiting on an answer. -strict-order is the one
 	// thing that changes it — openIssues folds the two queues into one there, so
@@ -646,9 +650,9 @@ func queuePairs(snap statusSnapshot) [][2]string {
 	if len(q.open()) == 0 && !snap.gate.open() {
 		return [][2]string{{"queue", "nothing open — a shift starting now would find the backlog cleared"}}
 	}
-	pairs := [][2]string{{"ready", queueLine(q.ready) + snap.runData.readySuffix(q.ready, snap.prs)}}
+	pairs := [][2]string{{"ready", queueLine(q) + snap.runData.readySuffix(q.ready, snap.prs)}}
 	if len(q.heldBack) > 0 {
-		pairs = append(pairs, [2]string{"held back", heldBackLine(q.heldBack)})
+		pairs = append(pairs, [2]string{"held back", heldBackLine(q)})
 	}
 	if len(q.blocked) > 0 {
 		refs := make([]string, 0, len(q.blocked))
@@ -665,7 +669,7 @@ func queuePairs(snap statusSnapshot) [][2]string {
 	if len(q.parked) > 0 {
 		pairs = append(pairs, [2]string{"parked",
 			fmt.Sprintf("%s — %s, labelled %s", plural(len(q.parked), "issue"),
-				snap.runData.parkedRefs(q.parked), needsHumanLabel)})
+				annotatedRefs(q.parked, snap.runData.parkReason, snap.idleNote), needsHumanLabel)})
 	}
 	// The curation gate and the containers, said here rather than left to be
 	// inferred from an issue's absence: a batch of proposals nobody has looked at
@@ -673,7 +677,7 @@ func queuePairs(snap statusSnapshot) [][2]string {
 	if len(q.proposed) > 0 {
 		pairs = append(pairs, [2]string{"proposed",
 			fmt.Sprintf("%s — %s, labelled %s", plural(len(q.proposed), "issue"),
-				issueRefs(q.proposed), proposedLabel)})
+				annotatedRefs(q.proposed, snap.idleNote), proposedLabel)})
 	}
 	if len(q.containers) > 0 {
 		pairs = append(pairs, [2]string{"containers",
@@ -710,25 +714,6 @@ func containerRefs(containers []containerInfo) string {
 		refs[i] = ref + ")"
 	}
 	return strings.Join(refs, ", ")
-}
-
-// heldBackLine renders the held-back row: every otherwise-ready issue this
-// pass put down for an open blockedBy dependency, and what's holding each
-// one — the same wording logHeldBack (drain.go) narrates per-issue, folded
-// into one row here.
-func heldBackLine(heldBack []heldBackInfo) string {
-	refs := make([]string, len(heldBack))
-	for i, h := range heldBack {
-		refs[i] = fmt.Sprintf("#%d (behind %s)", h.number, issueRefs(h.blockers))
-	}
-	return fmt.Sprintf("%s — %s", plural(len(heldBack), "issue"), strings.Join(refs, ", "))
-}
-
-func queueLine(ready []int) string {
-	if len(ready) == 0 {
-		return "no issue is workable right now"
-	}
-	return fmt.Sprintf("%s — %s", plural(len(ready), "issue"), issueRefs(ready))
 }
 
 // nextLine says what a drain starting now would do first. The cases are the

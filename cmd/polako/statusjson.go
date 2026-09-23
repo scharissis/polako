@@ -73,6 +73,10 @@ type statusDocQueue struct {
 	// UngatedProposed is the part of Proposed lacking the gate label, which
 	// takes adding it as well as dropping proposed to queue.
 	UngatedProposed []int `json:"ungated_proposed"`
+	// Details is the per-issue age and model/effort the text rows annotate
+	// (statusdetail.go) — a sidecar rather than widening Ready and Proposed
+	// from bare numbers, so no existing field changes shape.
+	Details []statusDocDetail `json:"details"`
 }
 
 // statusDocHeldBack is one otherwise-ready issue put down this pass because
@@ -251,6 +255,7 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 			Containers:      nonNilSlice(containers),
 			OutsideGate:     nonNilSlice(snap.gate.outside),
 			UngatedProposed: nonNilSlice(snap.gate.ungatedProposed),
+			Details:         statusDocDetails(snap),
 		},
 		Next:          statusDocNext{Issue: snap.next, Reason: nextLine(snap)},
 		PRs:           prs,

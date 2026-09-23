@@ -121,33 +121,45 @@ var modelLabelValue = regexp.MustCompile(`^[A-Za-z0-9._\[\]-]+$`)
 // maintainer meant. "Falls through" then means the epic's own label if the
 // issue has a parent that carries one, and the -model/-effort flags otherwise.
 func labelPolicy(u *ui, labels []ghLabel) labelChoice {
+	lc, warnings := parseLabelPolicy(labels)
+	for _, w := range warnings {
+		u.narrate(sevWarning, "%s", w)
+	}
+	return lc
+}
+
+// parseLabelPolicy is labelPolicy without the narration: the choice, and the
+// warnings a pickup says out loud. `status` reads every listed issue's labels
+// through it and says nothing — a malformed value just shows no detail there.
+func parseLabelPolicy(labels []ghLabel) (labelChoice, []string) {
 	var lc labelChoice
+	var warnings []string
 
 	switch model := labelValues(labels, "model:"); {
 	case len(model) == 0:
 	case len(model) > 1:
-		u.narrate(sevWarning, "issue carries %d model: labels (%s) — model falls through",
-			len(model), strings.Join(model, ", "))
+		warnings = append(warnings, fmt.Sprintf("issue carries %d model: labels (%s) — model falls through",
+			len(model), strings.Join(model, ", ")))
 	case strings.EqualFold(model[0], "default"):
 		lc.modelSet = true // set, but empty: the account default
 	case modelLabelValue.MatchString(model[0]):
 		lc.model, lc.modelSet = model[0], true
 	default:
-		u.narrate(sevWarning, "model:%s is not a valid model name — model falls through", model[0])
+		warnings = append(warnings, fmt.Sprintf("model:%s is not a valid model name — model falls through", model[0]))
 	}
 
 	switch effort := labelValues(labels, "effort:"); {
 	case len(effort) == 0:
 	case len(effort) > 1:
-		u.narrate(sevWarning, "issue carries %d effort: labels (%s) — effort falls through",
-			len(effort), strings.Join(effort, ", "))
+		warnings = append(warnings, fmt.Sprintf("issue carries %d effort: labels (%s) — effort falls through",
+			len(effort), strings.Join(effort, ", ")))
 	case slices.Contains(effortLevels, effort[0]):
 		lc.effort, lc.effortSet = effort[0], true
 	default:
-		u.narrate(sevWarning, "effort:%s is not a claude effort level — effort falls through", effort[0])
+		warnings = append(warnings, fmt.Sprintf("effort:%s is not a claude effort level — effort falls through", effort[0]))
 	}
 
-	return lc
+	return lc, warnings
 }
 
 // labelValues returns the suffix of every label whose name begins with prefix,

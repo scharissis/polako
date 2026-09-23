@@ -19,8 +19,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -176,17 +174,10 @@ func (rd statusRunData) readySuffix(ready []int, prs []statusPR) string {
 	return " — about " + approxUSD(float64(n)*rd.readyMedian.cost) + " at your median"
 }
 
-// parkedRefs is issueRefs with each parked issue's recorded reason beside it,
-// where there is one: `#77 (budget)`.
-func (rd statusRunData) parkedRefs(parked []int) string {
-	refs := make([]string, len(parked))
-	for i, n := range parked {
-		refs[i] = "#" + strconv.Itoa(n)
-		if why := rd.parkReasons[n]; why != "" {
-			refs[i] += " (" + why + ")"
-		}
-	}
-	return strings.Join(refs, ", ")
+// parkReason is one parked issue's recorded reason, "" with none — the first
+// note beside it on the parked row: `#77 (budget)`.
+func (rd statusRunData) parkReason(n int) string {
+	return rd.parkReasons[n]
 }
 
 // shiftHint is the stats command that opens shift id's records in dir.
