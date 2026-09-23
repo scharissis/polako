@@ -334,11 +334,11 @@ polako status
 
 ```
 scharissis/polako
-  ready         3 issues — #14, #19, #23
-  held back     1 issue — #33 (behind #30)
+  ready         3 issues — #14 (opus, high), #19, #23
+  held back     1 issue — #33 (behind #30, max)
   awaiting you  1 issue — #9 (quiet 26h)
-  parked        1 issue — #5, labelled needs-human
-  proposed      2 issues — #27, #28, labelled proposed
+  parked        1 issue — #5 (quiet 12d), labelled needs-human
+  proposed      2 issues — #27 (quiet 3d), #28 (quiet 3d), labelled proposed
   containers    1 issue — #12 (2/5 closed)
   next          #14 — its branch already has PR #61, so it would wait on that rather than run the skill again
 
@@ -402,7 +402,7 @@ a thread, a proxy for how long a question has waited — which comment is the
 skill's own can't be told apart from here, since polako asks under your own
 credentials. The PR table details the first eight PRs on issue branches —
 normally one, since one issue is in flight at a time — anything past that
-listed by number rather than dropped.
+listed by number rather than dropped. Two more come free with the listing: a parked or proposed issue's `quiet` is GitHub's `updatedAt`, so any edit resets it, not only a comment; a ready or held-back issue shows its own `model:` and `effort:` labels, `#14 (opus, high)` — a malformed or doubled one shows nothing, the way a run falls through it, and an epic's inherited labels aren't shown, since that's a read per issue.
 
 ### As JSON: `-json`
 
@@ -420,7 +420,7 @@ polako status -json | jq .
     "blocked": [{ "issue": 9, "quiet_seconds": 93600 }],
     "parked": [{ "issue": 5, "entries": ["Bash(echo:*)"], "category": "permission_refused" }],
     "proposed": [27, 28],
-    "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false, "held": false, "closed": false }], "outside_gate": [], "ungated_proposed": []
+    "containers": [{ "issue": 12, "total": 5, "completed": 2, "finished": false, "held": false, "closed": false }], "outside_gate": [], "ungated_proposed": [], "details": [{ "issue": 5, "quiet_seconds": 1036800 }, { "issue": 14, "model": "opus", "effort": "high" }, { "issue": 27, "quiet_seconds": 259200 }, { "issue": 28, "quiet_seconds": 259200 }, { "issue": 33, "effort": "max" }]
   },
   "next": {
     "issue": 14,
@@ -455,7 +455,7 @@ closing line's clauses as an array; `notes` names a missing `-label`.
 from, the last one meaning `status` found it itself via `setup`'s
 gate-label marker; absent when the report is unscoped.
 `queue.held_back` is `{ "issue", "blockers" }`, the `held back` row's own
-issues with their still-open `blockedBy` dependencies. `queue.outside_gate` is the `outside the gate` row uncapped; `queue.ungated_proposed` is the part of `proposed` lacking the gate label; both `[]` when unscoped.
+issues with their still-open `blockedBy` dependencies. `queue.outside_gate` is the `outside the gate` row uncapped; `queue.ungated_proposed` is the part of `proposed` lacking the gate label; both `[]` when unscoped. `queue.details` is `{ "issue", "quiet_seconds", "model", "effort" }`, one per issue the text rows annotate, ascending — a sidecar, so `ready` and `proposed` stay bare numbers; each of the last three is absent with nothing to say, and `model` is `"default"` for `model:default`.
 `plans` (plural — distinct from `plan`, the usage line below it) mirrors the
 plan documents table row for row; its `gone` is `{ "path", "issues", "open"
 }` — `issues` is every naming issue, open or closed, unlike the text
