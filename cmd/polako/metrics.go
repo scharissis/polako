@@ -427,11 +427,26 @@ func summaryComment(t issueTally) string {
 		dur(time.Duration(t.wallMS)*time.Millisecond), tool, caveat)
 }
 
+// designVerb is config.verb for a design run. Its records get their own kinds
+// so a merged design issue never prices as a merged issue.
+const designVerb = "design"
+
+// recordKind returns base, or "design-"+base for a design run. Readers drop
+// kinds they don't know, so `stats` and proposalPricingLine skip design
+// records without a change of their own — the reason this was picked over
+// filtering by skill name, which a hand-set -skill would misfile.
+func recordKind(cfg config, base string) string {
+	if cfg.verb == designVerb {
+		return designVerb + "-" + base
+	}
+	return base
+}
+
 // newRunRecord folds one run's report together with the supervisor's context.
 func newRunRecord(cfg config, rc runContext, rep runReport) runRecord {
 	rec := runRecord{
 		V:     recordVersion,
-		Kind:  "run",
+		Kind:  recordKind(cfg, "run"),
 		TS:    stamp(rc.started),
 		Ended: stamp(rc.ended),
 
@@ -814,7 +829,7 @@ func (r *recorder) recordIssue(cfg config, issue, pr int, outcome, why string, f
 	}
 	rec := issueRecord{
 		V:          recordVersion,
-		Kind:       "issue",
+		Kind:       recordKind(cfg, "issue"),
 		TS:         stamp(time.Now()),
 		Shift:      cfg.shiftID,
 		Repo:       cfg.repo,

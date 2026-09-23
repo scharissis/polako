@@ -53,7 +53,12 @@ type config struct {
 	// production (parseFlags leaves it nil and the wrappers below fall back
 	// to sinks), a test's own capturing ui under the suite. Threaded rather
 	// than global so parallel tests do not share one logger. See ui.go.
-	ui           *ui
+	ui *ui
+	// verb is the supervisor verb driving this config: parseFlags sets "work",
+	// designVerb marks a design run, and intake leaves it empty since its
+	// records carry their own kinds. It only picks record kinds (recordKind)
+	// and gates resumeHint's stats pointer — never what a run does.
+	verb         string
 	skill        string
 	branchPrefix string
 	label        string
@@ -431,6 +436,7 @@ func parseFlags() config {
 	cfg.rec = newRecorder(metrics)
 	cfg.logDir = resolveLogDir(logSpec)
 	cfg.shiftID = newShiftID()
+	cfg.verb = "work"
 	cfg.queue = new(queueMemo)
 	cfg.ghBin = "gh"
 	cfg.ghRetryWait = ghRetryDelay
