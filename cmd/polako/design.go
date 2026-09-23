@@ -217,8 +217,8 @@ func checkDesignIssue(ctx context.Context, cfg *config, issue int) error {
 		return fmt.Errorf("issue #%d has sub-issues, so it's a container — a design request has no sub-issues; "+
 			"open a separate issue for the design", issue)
 	case slices.Contains(labels, needsHumanLabel):
-		return fmt.Errorf("issue #%d is parked (%s) — run `polako unpark %d` or remove the label first",
-			issue, needsHumanLabel, issue)
+		return fmt.Errorf("issue #%d is parked (%s) — `polako unpark %d` says why; "+
+			"clear it with `polako unpark -apply %d` first", issue, needsHumanLabel, issue, issue)
 	case slices.Contains(labels, proposedLabel):
 		return fmt.Errorf("issue #%d still carries %s — drop %s first; exclusion beats inclusion",
 			issue, proposedLabel, proposedLabel)

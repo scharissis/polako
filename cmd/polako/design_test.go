@@ -149,7 +149,7 @@ func TestDesignPreflightRefusesWithTheRemedy(t *testing.T) {
 	}{
 		"closed":      {fakeIssue{Open: false}, "reopen it"},
 		"container":   {fakeIssue{Open: true, SubIssues: 2}, "a design request has no sub-issues"},
-		"needs-human": {fakeIssue{Open: true, Labels: []string{needsHumanLabel}}, "polako unpark 1"},
+		"needs-human": {fakeIssue{Open: true, Labels: []string{needsHumanLabel}}, "polako unpark -apply 1"},
 		"proposed":    {fakeIssue{Open: true, Labels: []string{proposedLabel}}, "drop proposed first"},
 	} {
 		t.Run(name, func(t *testing.T) {
