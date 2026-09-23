@@ -25,7 +25,7 @@ func setupLabelDefs(cfg config, policyLabels bool) []labelDef {
 	defs := slices.Clone(labelTable)
 	if cfg.label != "" {
 		defs = append(defs, labelDef{name: cfg.label, color: "ededed",
-			description: "gate label for `polako work -label`", required: true})
+			description: gateLabelDescription, required: true, isGateLabel: true})
 	}
 	if policyLabels {
 		defs = append(defs, policyLabelDefs()...)
@@ -73,13 +73,38 @@ func policyLabelDefs() []labelDef {
 	return defs
 }
 
+// unmarkedGateLabelDetail is checkLabelDef's row detail for a gate label
+// that exists but predates setup's own marker — an operator's own -label
+// value, hand-created before this feature, or one made outside `polako
+// setup` entirely. applySetup reads this same string back to decide which
+// rows to offer marking for; a test holds both to the same wording.
+const unmarkedGateLabelDetail = "exists, not marked as the gate label"
+
 // checkLabelDef reads one label's row — ok, missing, or "couldn't tell" —
 // shared by setupLabelRows and applySetup's own gate-label-name prompt, so
 // the two can never disagree about what "missing" means for the same label.
+// A gate-label def (isGateLabel) is checked against gateLabelDescription
+// too, since an existing-but-unmarked one is exactly what `-apply`'s
+// marking pass exists to fix, and reading it here means setupLabelRows (the
+// read-only report) shows the same row `-apply` acts on.
 func checkLabelDef(ctx context.Context, cfg config, reposOK bool, l labelDef) setupRow {
 	if !reposOK {
 		return setupRow{name: l.name, status: setupUnknown, required: l.required,
 			detail: "the repository could not be read"}
+	}
+	if l.isGateLabel {
+		desc, exists, err := labelDescription(ctx, cfg, l.name)
+		switch {
+		case err != nil:
+			return setupRow{name: l.name, status: setupUnknown, required: l.required, detail: err.Error()}
+		case !exists:
+			return setupRow{name: l.name, status: setupMissing, required: l.required,
+				detail: fmt.Sprintf("gh label create %s --color %s --description %q", l.name, l.color, l.description)}
+		case desc != gateLabelDescription:
+			return setupRow{name: l.name, status: setupOK, required: l.required, detail: unmarkedGateLabelDetail}
+		default:
+			return setupRow{name: l.name, status: setupOK, required: l.required}
+		}
 	}
 	exists, err := labelExists(ctx, cfg, l.name)
 	switch {
@@ -200,9 +225,9 @@ func applySetup(ctx context.Context, prompt *setupPrompt, cfg config, rows []set
 	// note can never drift from what a real `polako work` run would refuse
 	// on. cfg.label is always "" here (the branch below only widens it), so
 	// this is exactly "public, no gate label, not -ungated".
-	if cfg.label == "" && queueGate(cfg.visibility, cfg.label, false) != nil {
+	if cfg.label == "" && queueGate(cfg.visibility, cfg.label, false, "") != nil {
 		gateLabel = prompt.name("this repository is public and has no gate label — name one to create", "ready")
-		def := labelDef{name: gateLabel, color: "ededed", description: "gate label for `polako work -label`", required: true}
+		def := labelDef{name: gateLabel, color: "ededed", description: gateLabelDescription, required: true, isGateLabel: true}
 		defs = append(defs, def)
 		rows = append(rows, checkLabelDef(ctx, cfg, true, def))
 	}
@@ -235,6 +260,25 @@ func applySetup(ctx context.Context, prompt *setupPrompt, cfg config, rows []set
 		}
 		rows[ri] = setupRow{name: def.name, status: setupOK, required: def.required}
 		fmt.Fprintf(prompt.out, "  created %q\n", def.name)
+	}
+	// A second pass, not folded into the loop above: this one acts on rows
+	// the create loop skips outright (status is setupOK, not setupMissing) —
+	// a gate label that already exists but predates setup's own marker, on
+	// this run or an earlier one that named -label without -apply.
+	for i, def := range defs {
+		if !def.isGateLabel || rows[start+i].detail != unmarkedGateLabelDetail {
+			continue
+		}
+		ri := start + i
+		if !prompt.confirm(fmt.Sprintf("mark %q as the gate label?", def.name)) {
+			continue
+		}
+		if err := ensureLabelMarked(ctx, cfg, def.name); err != nil {
+			fmt.Fprintf(prompt.out, "  could not mark %q — needs write access to %s\n", def.name, cfg.repo)
+			continue
+		}
+		rows[ri] = setupRow{name: def.name, status: setupOK, required: def.required}
+		fmt.Fprintf(prompt.out, "  marked %q as the gate label\n", def.name)
 	}
 	return rows, gateLabel
 }

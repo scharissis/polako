@@ -25,7 +25,7 @@ import (
 func TestSetupRepoOKRowNotesTheQueueGate(t *testing.T) {
 	t.Parallel()
 	row := setupRepoOKRow(setupRepoView{Visibility: "PUBLIC"}, "")
-	gateErr := queueGate("PUBLIC", "", false)
+	gateErr := queueGate("PUBLIC", "", false, "")
 	if !strings.Contains(row.detail, gateErr.Error()) {
 		t.Errorf("detail = %q, want it to contain queueGate's own message %q", row.detail, gateErr.Error())
 	}
@@ -234,6 +234,105 @@ func TestReadSetupChecksTheGateLabelToo(t *testing.T) {
 	}
 	if !setupFailed(rows) {
 		t.Error("setupFailed(rows) = false, want true with the named gate label missing")
+	}
+}
+
+// The gate-label row compares an existing label's own description against
+// setup's marker — an operator's hand-made "ready" from before this feature
+// existed reads as "exists, not marked as the gate label", not plain ok.
+func TestReadSetupReportsAnUnmarkedGateLabel(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	cfg := setupCfg(t, &ghState{
+		Labels: []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel, "ready"},
+	}, checkout)
+	cfg.label = "ready"
+
+	_, rows, _ := readSetup(context.Background(), cfg, false)
+
+	r := findSetupRow(t, rows, "ready")
+	if r.status != setupOK || r.detail != unmarkedGateLabelDetail {
+		t.Errorf("row %q = %+v, want ok with detail %q", "ready", r, unmarkedGateLabelDetail)
+	}
+	if setupFailed(rows) {
+		t.Error("setupFailed(rows) = true, an existing-but-unmarked gate label must not fail the report")
+	}
+}
+
+// A gate label that already carries the marker — created by a previous
+// `setup -apply`, or marked by an earlier one — reads as plain ok, with
+// nothing more to do.
+func TestReadSetupGateLabelAlreadyMarkedIsPlainOK(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	cfg := setupCfg(t, &ghState{
+		Labels:            []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel, "ready"},
+		LabelDescriptions: map[string]string{"ready": gateLabelDescription},
+	}, checkout)
+	cfg.label = "ready"
+
+	_, rows, _ := readSetup(context.Background(), cfg, false)
+
+	r := findSetupRow(t, rows, "ready")
+	if r.status != setupOK || r.detail != "" {
+		t.Errorf("row %q = %+v, want plain ok", "ready", r)
+	}
+}
+
+// -apply -yes on an unmarked existing gate label marks it with exactly one
+// `gh label edit` call — the acceptance criteria's own example.
+func TestApplySetupMarksAnExistingUnmarkedGateLabel(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	cfg := setupCfg(t, &ghState{
+		Labels: []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel, "ready"},
+	}, checkout)
+	cfg.label = "ready"
+
+	logPath := filepath.Join(t.TempDir(), "gh.log")
+	setFakeEnv(&cfg, fakeGhLogEnv, logPath)
+
+	cfg, rows, defs := readSetup(context.Background(), cfg, false)
+	var out strings.Builder
+	rows, _ = applySetup(context.Background(), newSetupPrompt(strings.NewReader(""), &out, true), cfg, rows, defs)
+
+	r := findSetupRow(t, rows, "ready")
+	if r.status != setupOK || r.detail != "" {
+		t.Errorf("row %q = %+v after -apply -yes, want plain ok", "ready", r)
+	}
+
+	b, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("reading %s: %v", logPath, err)
+	}
+	edits := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		if strings.HasPrefix(line, "label edit ") {
+			edits++
+		}
+	}
+	if edits != 1 {
+		t.Errorf("label edit calls = %d, want exactly 1:\n%s", edits, b)
+	}
+}
+
+// Declining the mark prompt leaves the label unmarked — applySetup must not
+// call `gh label edit` when the operator says no.
+func TestApplySetupDecliningTheMarkPromptLeavesItUnmarked(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	cfg := setupCfg(t, &ghState{
+		Labels: []string{needsHumanLabel, proposedLabel, awaitingAnswerLabel, "ready"},
+	}, checkout)
+	cfg.label = "ready"
+
+	cfg, rows, defs := readSetup(context.Background(), cfg, false)
+	var out strings.Builder
+	rows, _ = applySetup(context.Background(), newSetupPrompt(strings.NewReader("n\n"), &out, false), cfg, rows, defs)
+
+	r := findSetupRow(t, rows, "ready")
+	if r.detail != unmarkedGateLabelDetail {
+		t.Errorf("row %q = %+v after declining, want it to stay unmarked", "ready", r)
 	}
 }
 

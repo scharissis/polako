@@ -311,7 +311,17 @@ func preflight(ctx context.Context, cfg *config) error {
 	// operator decides what to change. refuseOrNote is that one carve-out,
 	// shared so a real refusal and its dry-run preview can never say it two
 	// different ways.
-	if err := refuseOrNote(*cfg, queueGate(repoView.Visibility, cfg.label, cfg.ungated), cfg.dryRun); err != nil {
+	//
+	// The marked-label lookup below only runs in the one shape that is about
+	// to refuse (or, on -dry-run, note the refusal) — every other run of
+	// this preflight costs nothing extra for it. Best-effort, and cfg.label
+	// itself is never set from it: work still never scopes itself, this only
+	// changes what the message names.
+	var markedLabel string
+	if cfg.label == "" && !cfg.ungated && strings.EqualFold(repoView.Visibility, "PUBLIC") {
+		markedLabel, _, _ = markedGateLabel(ctx, *cfg)
+	}
+	if err := refuseOrNote(*cfg, queueGate(repoView.Visibility, cfg.label, cfg.ungated, markedLabel), cfg.dryRun); err != nil {
 		return err
 	}
 	// A -label the repository has never defined would otherwise pass the gate

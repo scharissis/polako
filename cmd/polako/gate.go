@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -23,13 +22,25 @@ import (
 // Anything but PUBLIC passes: on a private or internal repo, everyone who can
 // open an issue was let in by name, and an unknown visibility from a future gh
 // should not strand an operator whose repo the gate was never about.
-func queueGate(visibility, label string, ungated bool) error {
+//
+// markedLabel names the label setup's own marker already identifies as the
+// gate label (markedGateLabel), when the caller happens to know it — preflight
+// looks it up only in the one branch that is about to refuse, so a real run
+// can say "pass -label ready" instead of the generic "-label <name>" placeholder.
+// Empty is always safe: every other call site (setup's own advisory row,
+// applySetup's boolean check, every existing test) passes "" and gets that
+// placeholder back, unchanged from before this parameter existed.
+func queueGate(visibility, label string, ungated bool, markedLabel string) error {
 	if !strings.EqualFold(visibility, "PUBLIC") || label != "" || ungated {
 		return nil
 	}
-	return errors.New("this repository is public, so anyone who can open an issue can queue work for an unattended agent — " +
-		"pass -label <name> to work only issues a maintainer labelled (see docs/security.md), " +
-		"or -ungated to work every open issue anyway")
+	suggestion := "-label <name>"
+	if markedLabel != "" {
+		suggestion = "-label " + markedLabel
+	}
+	return fmt.Errorf("this repository is public, so anyone who can open an issue can queue work for an unattended agent — "+
+		"pass %s to work only issues a maintainer labelled (see docs/security.md), "+
+		"or -ungated to work every open issue anyway", suggestion)
 }
 
 // labelGate refuses a -label the repository has never defined. Without it,
