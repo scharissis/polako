@@ -335,6 +335,7 @@ polako status
 ```
 scharissis/polako
   ready         3 issues — #14, #19, #23
+  held back     1 issue — #33 (behind #30)
   awaiting you  1 issue — #9 (quiet 26h)
   parked        1 issue — #5, labelled needs-human
   proposed      2 issues — #27, #28, labelled proposed
@@ -348,6 +349,9 @@ open prs on issue branches
 
 needs you: reply on #9; review and merge PR #58; grant Bash(echo:*) or fix the skill, then polako unpark #5; curate #27, #28 (drop proposed to queue them)
 ```
+
+`held back` names an otherwise-ready issue behind an open `blockedBy`
+dependency — recomputed every pass, so it clears itself once that blocker closes.
 
 Below that table, `plan documents` adds one row per file under `docs/designs/`:
 state derived from the naming issues (`docs/designs/plan-conventions.md`'s
@@ -413,6 +417,7 @@ polako status -json | jq .
   "scope": { "label": "", "strict_order": false },
   "queue": {
     "ready": [14, 19, 23],
+    "held_back": [{ "issue": 33, "blockers": [30] }],
     "blocked": [{ "issue": 9, "quiet_seconds": 93600 }],
     "parked": [{ "issue": 5, "entries": ["Bash(echo:*)"], "category": "permission_refused" }],
     "proposed": [27, 28],
@@ -443,10 +448,12 @@ polako status -json | jq .
 
 With `-json`, stdout carries exactly one document — no header, no `needs
 you:` line — the same snapshot the text report renders, field for field:
-`queue` holds the same five lists, `next` names the issue a shift would pick
+`queue` holds the same six lists, `next` names the issue a shift would pick
 up and why, `prs` matches the text columns exactly (`not read` for a PR past
 the eight-PR cap; `unknown` means gh doesn't know), and `needs_you` is the
 closing line's clauses as an array; `notes` names a missing `-label`.
+`queue.held_back` is `{ "issue", "blockers" }`, the `held back` row's own
+issues with their still-open `blockedBy` dependencies.
 `plans` (plural — distinct from `plan`, the usage line below it) mirrors the
 plan documents table row for row; its `gone` is `{ "path", "issues", "open"
 }` — `issues` is every naming issue, open or closed, unlike the text

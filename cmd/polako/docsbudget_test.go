@@ -94,8 +94,12 @@ const docsBudget = 500
 // same PR, +3, once review caught `-json`'s `containers` schema missing the
 // new `closed` field entirely — the same distinction the text report just
 // gained had no way to reach a JSON reader.
+// reference.md moved again in issue #511: it was already at 574 with no
+// slack, and documenting the status queue's new held-back row — text sample,
+// JSON sample and schema prose — had no existing paragraph on offer to cut
+// instead.
 var docsDebt = map[string]int{
-	"reference.md": 574,
+	"reference.md": 581,
 	"behaviour.md": 531,
 }
 

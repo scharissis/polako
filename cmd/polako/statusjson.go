@@ -55,10 +55,20 @@ type statusDocScope struct {
 
 type statusDocQueue struct {
 	Ready      []int                `json:"ready"`
+	HeldBack   []statusDocHeldBack  `json:"held_back"`
 	Blocked    []statusDocBlocked   `json:"blocked"`
 	Parked     []statusDocParked    `json:"parked"`
 	Proposed   []int                `json:"proposed"`
 	Containers []statusDocContainer `json:"containers"`
+}
+
+// statusDocHeldBack is one otherwise-ready issue put down this pass because
+// at least one blockedBy dependency is still open — heldBackInfo, in JSON
+// shape. Blockers is always `[]`, never null, the same rule every array
+// field here holds to.
+type statusDocHeldBack struct {
+	Issue    int   `json:"issue"`
+	Blockers []int `json:"blockers"`
 }
 
 // statusDocParked is one parked issue with the entries and category its own
@@ -159,6 +169,11 @@ func renderStatusJSON(w io.Writer, cfg config, snap statusSnapshot) error {
 }
 
 func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
+	heldBack := make([]statusDocHeldBack, 0, len(snap.queues.heldBack))
+	for _, h := range snap.queues.heldBack {
+		heldBack = append(heldBack, statusDocHeldBack{Issue: h.number, Blockers: nonNilSlice(h.blockers)})
+	}
+
 	blocked := make([]statusDocBlocked, 0, len(snap.queues.blocked))
 	for _, issue := range snap.queues.blocked {
 		b := statusDocBlocked{Issue: issue}
@@ -216,6 +231,7 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 		Scope: statusDocScope{Label: cfg.label, StrictOrder: cfg.strictOrder},
 		Queue: statusDocQueue{
 			Ready:      nonNilSlice(snap.queues.ready),
+			HeldBack:   nonNilSlice(heldBack),
 			Blocked:    blocked,
 			Parked:     parked,
 			Proposed:   nonNilSlice(snap.queues.proposed),
