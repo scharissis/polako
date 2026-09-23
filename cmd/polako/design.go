@@ -50,13 +50,13 @@ type designOptions struct {
 // with work's help strings, and -model/-effort. The queue, session and policy
 // flags are not registered — there is no queue to gate, skip or order, and
 // one issue is not a session.
-func designFlagSet(out io.Writer, cfg *config, opt *designOptions, metrics, logSpec *string) *flag.FlagSet {
+func designFlagSet(out io.Writer, cfg *config, opt *designOptions, local *localFlags) *flag.FlagSet {
 	fs := flag.NewFlagSet("design", flag.ContinueOnError)
 	fs.SetOutput(out)
 	fs.IntVar(&opt.issue, "issue", 0, "the design request to work: an open issue number (required)")
 	fs.BoolVar(&opt.wait, "wait", false,
 		"when the run asks a question, wait on the thread for a reply instead of exiting")
-	registerIssueFlags(fs, cfg, defaultDesignSkill, designTools, metrics, logSpec)
+	registerIssueFlags(fs, cfg, defaultDesignSkill, designTools, local)
 	registerModelFlags(fs, cfg, designModel)
 	fs.BoolVar(&cfg.dryRun, "dry-run", false,
 		"print the claude invocation -issue would get, and exit without running or writing anything")
@@ -76,8 +76,8 @@ func designFlagSet(out io.Writer, cfg *config, opt *designOptions, metrics, logS
 func parseDesignFlags(args []string, out io.Writer) (config, designOptions, error) {
 	var cfg config
 	var opt designOptions
-	var metrics, logSpec string
-	fs := designFlagSet(out, &cfg, &opt, &metrics, &logSpec)
+	var local localFlags
+	fs := designFlagSet(out, &cfg, &opt, &local)
 	if err := applyEnvDefaults(fs); err != nil {
 		return config{}, opt, err
 	}
@@ -96,14 +96,14 @@ func parseDesignFlags(args []string, out io.Writer) (config, designOptions, erro
 	if err := validateEffort("-effort", cfg.effort); err != nil {
 		return config{}, opt, err
 	}
-	cfg, err := designConfig(cfg, opt, metrics, logSpec)
+	cfg, err := designConfig(cfg, opt, local)
 	return cfg, opt, err
 }
 
 // designConfig pins what parseFlags pins for work, then the three things that
 // make processIssue a design run.
-func designConfig(cfg config, opt designOptions, metrics, logSpec string) (config, error) {
-	if err := pinConfig(&cfg, metrics, logSpec); err != nil {
+func designConfig(cfg config, opt designOptions, local localFlags) (config, error) {
+	if err := pinConfig(&cfg, local); err != nil {
 		return config{}, err
 	}
 	// Record kinds: design-run and design-issue, which stats and the pricing

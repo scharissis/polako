@@ -339,11 +339,12 @@ func verbUsage(w io.Writer) {
 
 func parseFlags() config {
 	var cfg config
-	var skip, metrics, logSpec string
+	var skip string
+	var local localFlags
 	var showVersion bool
 	fs := flag.CommandLine
 	fs.BoolVar(&showVersion, "version", false, "print the version of this binary and exit")
-	registerIssueFlags(fs, &cfg, defaultSkill, defaultTools, &metrics, &logSpec)
+	registerIssueFlags(fs, &cfg, defaultSkill, defaultTools, &local)
 	fs.StringVar(&cfg.label, "label", "", "only process issues carrying this label (empty = all)")
 	fs.BoolVar(&cfg.ungated, "ungated", false,
 		"work a public repository without a -label gate (anyone who can open an issue can feed the queue)")
@@ -394,7 +395,7 @@ func parseFlags() config {
 		os.Exit(0)
 	}
 
-	if err := pinConfig(&cfg, metrics, logSpec); err != nil {
+	if err := pinConfig(&cfg, local); err != nil {
 		sinks.fatal("%v", err)
 	}
 	cfg.verb = "work"
@@ -402,12 +403,21 @@ func parseFlags() config {
 	return cfg
 }
 
+// localFlags holds -metrics and -log as typed, until pinConfig turns them
+// into the recorder and the shift log's directory. Fields rather than two
+// bare pointers so the registrations keep the `&x.y` shape declaredFlags
+// (notify_test.go) scans for.
+type localFlags struct {
+	metrics string
+	log     string
+}
+
 // registerIssueFlags registers the flags that steer one issue's runs — every
 // one processIssue reads — shared by work and design so the two verbs spell
 // and explain each the same way. skill and tools are the only defaults that
-// differ between them. metrics and logSpec land in the caller's locals for
-// pinConfig; -dry-run stays with each verb, since what it previews differs.
-func registerIssueFlags(fs *flag.FlagSet, cfg *config, skill, tools string, metrics, logSpec *string) {
+// differ between them. -dry-run stays with each verb, since what it previews
+// differs.
+func registerIssueFlags(fs *flag.FlagSet, cfg *config, skill, tools string, local *localFlags) {
 	fs.StringVar(&cfg.dir, "dir", ".", "path to the repository's main checkout")
 	fs.StringVar(&cfg.claudeBin, "claude", "claude", "claude binary to invoke")
 	fs.StringVar(&cfg.skill, "skill", skill, "skill to run per issue")
@@ -436,9 +446,9 @@ func registerIssueFlags(fs *flag.FlagSet, cfg *config, skill, tools string, metr
 	fs.StringVar(&cfg.tag, "run-tag", "", "label recorded with every run, for comparing one batch against another")
 	fs.BoolVar(&cfg.postSummary, "post-summary", false,
 		"comment one line of run numbers on each merged PR (runs, tokens, dollars, wall time)")
-	fs.StringVar(metrics, "metrics", "",
+	fs.StringVar(&local.metrics, "metrics", "",
 		`directory for run-data records, or "off" (default ~/.polako/metrics)`)
-	fs.StringVar(logSpec, "log", "",
+	fs.StringVar(&local.log, "log", "",
 		`directory for the full per-shift log, or "off" (default ~/.polako/logs)`)
 	fs.BoolVar(&cfg.verbose, "verbose", false,
 		"mirror the full claude event stream and its stderr to the terminal, not only the shift log")
@@ -447,7 +457,8 @@ func registerIssueFlags(fs *flag.FlagSet, cfg *config, skill, tools string, metr
 // pinConfig fills in everything no flag sets, once the flags are parsed: the
 // recorder and shift log, the shift id, and the seams tests override. Shared
 // by work and design so a design run is given exactly what a work run is.
-func pinConfig(cfg *config, metrics, logSpec string) error {
+func pinConfig(cfg *config, local localFlags) error {
+	metrics, logSpec := local.metrics, local.log
 	// A dry run writes nothing, run data and shift log included. Both are
 	// preferences an operator may well have set in their environment and
 	// forgotten, and a record of a run that never happened is worse than no

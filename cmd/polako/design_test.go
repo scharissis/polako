@@ -41,8 +41,8 @@ func TestDesignRegistersOnlyPerIssueFlags(t *testing.T) {
 	t.Parallel()
 	var cfg config
 	var opt designOptions
-	var metrics, logSpec string
-	fs := designFlagSet(io.Discard, &cfg, &opt, &metrics, &logSpec)
+	var local localFlags
+	fs := designFlagSet(io.Discard, &cfg, &opt, &local)
 
 	for name, def := range map[string]string{
 		"skill": defaultDesignSkill, "tools": designTools, "model": "opus",
