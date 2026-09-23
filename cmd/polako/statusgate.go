@@ -30,13 +30,18 @@ type gateSplit struct {
 	label string
 	// outside is every open issue without the gate label that the gate label
 	// alone would queue — what sortIssueQueues calls ready or held back —
-	// ascending. A hold (needs-human, proposed, awaiting-answer) or a
+	// ascending. A hold (needs-human, proposed, design, awaiting-answer) or a
 	// container is not triage, so it isn't here.
 	outside []int
 	// ungatedProposed is the proposed issues lacking the gate label — already
 	// merged into issueQueues.proposed, kept here so the curate clause can say
 	// approving them takes adding the gate label as well.
 	ungatedProposed []int
+	// design is the design requests lacking the gate label, merged into
+	// issueQueues.design the same way. `polako design` never reads -label, so
+	// a design request is the operator's to run whichever side of the gate it
+	// sits — and it would rarely carry a label that means "work this".
+	design []designInfo
 	// held counts the rest outside the gate — holds and containers. Not
 	// listed, but still open, so a report with only these is not a cleared one.
 	held int
@@ -47,7 +52,7 @@ type gateSplit struct {
 
 // open reports whether anything at all is open outside the gate.
 func (g gateSplit) open() bool {
-	return len(g.outside)+len(g.ungatedProposed)+g.held > 0
+	return len(g.outside)+len(g.ungatedProposed)+len(g.design)+g.held > 0
 }
 
 // statusQueues is openQueues for `status`: the same queues, plus what lies
@@ -77,6 +82,8 @@ func statusQueues(ctx context.Context, cfg config) (issueQueues, gateSplit, erro
 	for _, n := range split.ungatedProposed {
 		q.detail[n] = split.detail[n]
 	}
+	q.design = append(q.design, split.design...)
+	slices.SortFunc(q.design, func(a, b designInfo) int { return a.number - b.number })
 	return q, split, nil
 }
 
@@ -91,7 +98,7 @@ func outsideTheGate(issues []ghIssue, gate string) gateSplit {
 		}
 	}
 	o := sortIssueQueues(outside)
-	split := gateSplit{label: gate, outside: o.ready, ungatedProposed: o.proposed,
+	split := gateSplit{label: gate, outside: o.ready, ungatedProposed: o.proposed, design: o.design,
 		held: len(o.blocked) + len(o.parked) + len(o.containers), detail: o.detail}
 	for _, h := range o.heldBack {
 		split.outside = append(split.outside, h.number)

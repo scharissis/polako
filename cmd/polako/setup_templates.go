@@ -92,7 +92,7 @@ func leakedTemplateLabel(lines []string, forbidden []string) string {
 }
 
 // setupTemplatesRow scans cfg.dir's issue templates for a labels: key naming
-// the gate label or one of the three labelTable manages. Required: a leaky
+// the gate label or one of the labels labelTable manages. Required: a leaky
 // template defeats -label's own point, that only a maintainer can queue work
 // on a gated repo — see docs/security.md.
 func setupTemplatesRow(cfg config) setupRow {

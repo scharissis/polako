@@ -33,6 +33,7 @@ setup
   needs-human         missing        gh label create needs-human --color D93F0B --description "polako parked this issue for a human"
   proposed            missing        gh label create proposed --color 1D76DB --description "proposed by polako — a human removes this label to queue it"
   awaiting-answer     missing        gh label create awaiting-answer --color FBCA04 --description "polako is waiting for an answer on this issue"
+  design              missing        gh label create design --color C5DEF5 --description "a design request — polako work skips it; polako design works it into a plan"
 
 polako work -dir ../my-project -add-tools "Bash(just:*)" -dry-run
 ```
@@ -62,8 +63,9 @@ in a script.
 - Whether this `gh` can file a sub-issue (`gh issue create --parent`).
   Advisory only: without it, `polako plan` and `polako health` still run,
   filing epics flat instead.
-- Every label polako manages — `needs-human`, `proposed`, `awaiting-answer` —
-  plus `-label`'s own gate label when one is given and isn't already in that
+- Every label polako manages — `needs-human`, `proposed`, `awaiting-answer`,
+  and `design`, the one optional among them, since a repo with no design
+  requests loses nothing by lacking it — plus `-label`'s own gate label when one is given and isn't already in that
   set. A missing one prints the exact `gh label create` command to fix it.
   The gate label is also checked against the marker `setup -apply` stamps on
   it (its description): one that exists but predates this feature, or was
@@ -101,7 +103,7 @@ in a script.
   removing labels on the single issue a run was dispatched for, which is how
   it raises `awaiting-answer`.
 - Every `.github/ISSUE_TEMPLATE/*` for a `labels:` key naming `-label`'s own
-  gate label or one of the three labels above. Required: a template applies
+  gate label or one of the labels above. Required: a template applies
   its labels to whoever files the issue, so this defeats the whole point of
   `-label` — only a maintainer opting an issue in. See
   [docs/security.md](security.md).

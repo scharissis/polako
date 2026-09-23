@@ -178,13 +178,14 @@ const unparkReasonWidth = 100
 // local field at its zero value — the same best-effort, read-only-unless-asked
 // shape as the gh reads above it.
 func readParkedIssues(ctx context.Context, cfg config, only int, localWork bool) ([]parkListItem, error) {
-	// openQueues names the proposals the curation gate is holding, for a
-	// shift's sake. They aren't this verb's subject, so the line is marked
-	// said before it can be.
+	// openQueues names the proposals and design requests the queue is
+	// ignoring, for a shift's sake. They aren't this verb's subject, so each
+	// line is marked said before it can be.
 	if cfg.queue == nil {
 		cfg.queue = new(queueMemo)
 	}
 	cfg.queue.saidProposed.Store(true)
+	cfg.queue.saidDesign.Store(true)
 	q, err := openQueues(ctx, cfg)
 	if err != nil {
 		return nil, err

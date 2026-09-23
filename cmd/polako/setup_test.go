@@ -127,6 +127,11 @@ func TestReadSetupNamesMissingLabelsAndFails(t *testing.T) {
 			t.Errorf("row %q = %+v, want a required missing row", name, r)
 		}
 	}
+	// design is offered but optional: a repo with no design requests loses
+	// nothing by lacking it.
+	if r := findSetupRow(t, rows, designLabel); r.status != setupMissing || r.required {
+		t.Errorf("row %q = %+v, want missing and not required", designLabel, r)
+	}
 	if !setupFailed(rows) {
 		t.Error("setupFailed(rows) = false, want true with every label missing")
 	}

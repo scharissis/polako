@@ -187,7 +187,8 @@ ignoring 3 proposed issue(s) awaiting curation — remove the proposed label to 
 worked** — whatever their labels, which also protects hand-made epics. This
 is structural, read off GitHub's sub-issue rollup, not a label. A `gh` too
 old to report it treats containers as ordinary work after one warning; the
-`proposed` exclusion is label-only and never depends on it.
+`proposed` exclusion is label-only and never depends on it. So is `design`'s:
+a design request wants a plan, not code, so `work` skips it and `status` lists it.
 
 **A container whose sub-issues have all closed gets closed by the drain
 that notices**, with a comment first saying why:
