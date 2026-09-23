@@ -77,6 +77,47 @@ func TestStatusShowsListingDetails(t *testing.T) {
 	}
 }
 
+// Gated, a proposal without the gate label comes from the second, unscoped
+// listing — so its age has to come from there too.
+func TestStatusGatedProposalShowsItsAge(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues: map[string]*fakeIssue{
+			"4": {Open: true, Labels: []string{"gate"}},
+			"8": {Open: true, Labels: []string{proposedLabel}, UpdatedAt: statusNow.Add(-5 * 24 * time.Hour).Format(time.RFC3339)},
+		},
+	})
+	cfg.label = "gate"
+	snap, err := readStatus(context.Background(), cfg, statusNow)
+	if err != nil {
+		t.Fatalf("readStatus: %v", err)
+	}
+	var out strings.Builder
+	renderStatus(&out, report{}, cfg, snap)
+	if want := "1 issue — #8 (quiet 5d), labelled proposed"; !strings.Contains(out.String(), want) {
+		t.Errorf("report is missing %q\ngot:\n%s", want, out.String())
+	}
+}
+
+// A parked issue's recorded reason comes first, its age after.
+func TestParkedRowPutsTheReasonBeforeTheAge(t *testing.T) {
+	t.Parallel()
+	snap := statusSnapshot{
+		queues:  issueQueues{parked: []int{9}},
+		idle:    map[int]time.Duration{9: 12 * 24 * time.Hour},
+		runData: statusRunData{parkReasons: map[int]string{9: "budget"}},
+	}
+	for _, p := range queuePairs(snap) {
+		if p[0] == "parked" {
+			if want := "1 issue — #9 (budget, quiet 12d), labelled needs-human"; p[1] != want {
+				t.Errorf("parked row = %q, want %q", p[1], want)
+			}
+			return
+		}
+	}
+	t.Fatal("no parked row")
+}
+
 // model:default is a real choice — the account default — so it shows as one.
 func TestPolicyNoteNamesTheDefaultModel(t *testing.T) {
 	t.Parallel()
