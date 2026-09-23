@@ -115,17 +115,13 @@ func shiftHint(id, dir string) string {
 	return hint
 }
 
-// lastShiftLine renders the line. The span is rounded to the minute, since
-// seconds on a multi-hour shift are noise. The hint names the id rather than
-// `-shift last`: without -repo, stats' "last" is the newest shift across every
-// repository, which need not be this one.
+// lastShiftLine renders the line. The span takes medianDur's minute
+// resolution, since seconds on a multi-hour shift are noise. The hint names
+// the id rather than `-shift last`: without -repo, stats' "last" is the newest
+// shift across every repository, which need not be this one.
 func lastShiftLine(ls *lastShift) string {
 	if ls == nil {
 		return ""
-	}
-	span := ls.span
-	if span >= time.Minute {
-		span = span.Round(time.Minute)
 	}
 	layout := "Jan 2 15:04"
 	if ls.otherYear {
@@ -133,7 +129,7 @@ func lastShiftLine(ls *lastShift) string {
 	}
 	when := ls.start.Format(layout)
 	if ls.ran {
-		when += ", " + dur(span)
+		when += ", " + medianDur(ls.span)
 	}
 	return fmt.Sprintf("last shift here: %s — %d merged, %d parked, %s — %s",
 		when, ls.merged, ls.parked, usd(ls.cost), ls.hint)
