@@ -181,11 +181,14 @@ supervisor to carry on without an answer.
    not yet raised on the thread: ask about it (scratch file under
    `<main-checkout>/.polako-scratch/` for this one call, since no issue
    worktree exists yet — `<main-checkout>` is the first line of `git worktree
-   list`), naming every open blocker, and stop. One already raised, with
-   `awaiting-answer` still up and nothing else outstanding: leave it and
-   stop. Every blocker a run named now closed, none other open: clear the
-   flag with `gh issue edit $issue --remove-label awaiting-answer` and carry
-   on. Say which applied in the final message.
+   list`), naming every open blocker, and stop. One already raised —
+   `awaiting-answer` still up, the thread's question names this same
+   blocker, and nothing else outstanding: leave it and stop. An open blocker
+   the thread doesn't name yet counts as not yet raised. Every blocker a run
+   named now closed, none other open: clear the flag with
+   `gh issue edit $issue --remove-label awaiting-answer` and carry on; if that command
+   fails, say so in your final message and stop. Decide from every node in
+   this fresh read, and say which case applied in the final message.
 Use commands native to this session's shell (PowerShell on Windows, bash
 elsewhere); do any text extraction yourself — no awk/sed/head pipelines.
 Detect the current phase from the worktree and PLAN.md, and resume from
