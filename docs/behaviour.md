@@ -264,10 +264,10 @@ does an awaiting-answer one.
 ## `plan` and `health`: proposing work, never doing it
 
 `polako plan` and `polako health` fill the same backlog `work` drains —
-`plan` from a vision document, `health` from the repository's own shape.
-Both create issues behind the `proposed` label above and do nothing else:
-no commits, no pushes, no PRs, no edits to threads that already exist. The
-whole write surface is `gh issue create` plus a scratch body file the run
+`plan` from a vision document, `health` from the repository's own shape and
+prompts. Both create issues behind the `proposed` label above and do nothing
+else: no commits, no pushes, no PRs, no edits to threads that already exist.
+The whole write surface is `gh issue create` plus a scratch body file the run
 deletes — a fully subverted run's blast radius is spam behind a label.
 
 The gate doesn't depend on the model remembering it. A shared label pass

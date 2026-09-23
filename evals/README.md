@@ -41,7 +41,10 @@ description of the failure.
 code at all. `plan-vision` seeds a `VISION.md` and an open backlog that already
 covers one of the document's four gaps; `review-health` seeds structural
 problems into the repo itself — three near-duplicate functions, an oversized
-file, no size gate — and an open issue already covering one of them. Both grade
+file, no size gate — and an open issue already covering one of them. It also
+seeds a deploy skill written for an older model, holding one rule that has to
+survive the audit, and the same cruft inside polako's own CLAUDE.md block,
+which has to be left alone. Both grade
 what got created — labels, parenting, body sections, sizes — plus the one thing
 these runs must never do, which is write anything but issues.
 
@@ -51,7 +54,7 @@ From the repository root — `.` is the plugin, not this directory, and the
 manifest it needs is `.claude-plugin/plugin.json` one level up:
 
 ```bash
-claude plugin eval . --scaffold --allow-tools Bash Write Edit
+claude plugin eval . --scaffold --allow-tools Bash Write Edit 'Skill(claude-api)'
 ```
 
 `plugin eval` is itself in early access. Without the entitlement it prints one
@@ -68,7 +71,10 @@ Both flags are required and neither is defaulted on:
   you. Read it before you run it — that is exactly why the CLI makes you ask.
 - `--allow-tools` grants the gated tools the skill needs. Without them a run
   stalls on the first `git` call. Only `Bash`, `Write`, `Edit`, `WebFetch` and
-  `mcp__*` are gated, so the read-only file tools need no grant.
+  `mcp__*` are gated, so the read-only file tools need no grant. One skill is
+  gated too: `claude-api`, which review-health runs for its prompt audit. A
+  `claude -p` probe on CLI 2.1.280 refused it without the grant. Nobody has
+  checked the `plugin eval` path yet.
 
 ### Three defaults worth knowing before you spend
 
@@ -95,7 +101,7 @@ sends something somewhere if you meet it by surprise.
 So a first debugging run, under a ceiling, is:
 
 ```bash
-claude plugin eval . --scaffold --allow-tools Bash Write Edit \
+claude plugin eval . --scaffold --allow-tools Bash Write Edit 'Skill(claude-api)' \
   --case clear-issue --ablation none --no-publish --keep-temp --max-cost-usd 40
 ```
 

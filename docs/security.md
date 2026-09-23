@@ -100,6 +100,14 @@ allowlist of their own (`planTools`, `healthTools`): no `git push`, no `gh
 pr`, no interpreters. The whole write surface is `gh issue create` plus a
 scratch body file — no PR, no thread, nothing shaped like `-label`'s gate.
 
+`healthTools` also grants `Skill(claude-api)`, scoped to that one skill, for
+the prompt audit. Loading it grants no tool of its own. A `claude -p` probe
+on CLI 2.1.280, with the grant in place, still refused `python3`, `curl` and
+WebFetch. That probe also showed that `--allowedTools` bounds tools, not
+skills: most skills, `polako:implement-issue` included, load under `-p`
+with no grant at all. Loading one widens nothing, because every tool it
+reaches for is still checked against the list.
+
 What replaces it: every issue such a run creates must carry `proposed`
 before it's workable, enforced supervisor-side, not left to the model
 remembering `--label`. A label pass runs after the skill exits — always,

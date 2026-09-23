@@ -164,11 +164,12 @@ for c in "${cases[@]}"; do
   # The exec matters: it makes $pid the claude process itself, so the timeout
   # kill below reaches the session rather than orphaning it inside a dead
   # wrapper — an orphan keeps spending money and keeps writing the very stream
-  # grading is about to read.
+  # grading is about to read. Skill(claude-api) is review-health's prompt
+  # audit: unlike most skills, claude-api is denied under -p without a grant.
   (
     cd "$ws" && exec env PATH="$ws/.eval/bin:$PATH" claude -p "$prompt" \
       --plugin-dir "$plugin_dir" \
-      --allowedTools Bash Write Edit \
+      --allowedTools Bash Write Edit 'Skill(claude-api)' \
       --max-turns "$max_turns" \
       --output-format stream-json --verbose \
       > run.stream.jsonl 2> run.err
