@@ -54,7 +54,7 @@ func TestLastShiftHintNamesOnlyANonDefaultDirectory(t *testing.T) {
 		t.Skipf("no home directory: %v", err)
 	}
 	for dir, want := range map[string]string{
-		def:         "polako stats -shift bbbb0002",
+		def:          "polako stats -shift bbbb0002",
 		"/elsewhere": "polako stats -shift bbbb0002 -metrics /elsewhere",
 	} {
 		if got := shiftHint("bbbb0002", dir); got != want {
