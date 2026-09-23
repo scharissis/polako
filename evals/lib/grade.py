@@ -318,9 +318,8 @@ skill against its eval criteria. The evidence below is everything the run \
 left behind. Judge only from the evidence; where it is silent, say so rather \
 than guessing.
 
-For each grader, answer with a verdict. Respond with ONLY a JSON object, no \
-prose around it:
-{"verdicts": [{"name": "<grader name>", "pass": true, "reason": "<one sentence citing evidence>"}, ...]}
+For each grader, give a verdict: its name, whether it passed, and one \
+sentence citing the evidence.
 
 # Graders
 %s
@@ -328,6 +327,14 @@ prose around it:
 # Evidence
 %s
 """
+
+VERDICT_SCHEMA = json.dumps({
+    "type": "object", "additionalProperties": False, "required": ["verdicts"],
+    "properties": {"verdicts": {"type": "array", "items": {
+        "type": "object", "additionalProperties": False,
+        "required": ["name", "pass", "reason"],
+        "properties": {"name": {"type": "string"}, "pass": {"type": "boolean"},
+                       "reason": {"type": "string"}}}}}})
 
 RETRY_HINT = ("the run's evidence.md is intact — rerun grading with judge "
               "'none' and score the llm graders yourself, or rerun this "
@@ -343,38 +350,21 @@ def judge(llm_graders, evidence, model, ws):
         # prompt past the per-argument exec limit, and the expensive runs are
         # exactly the ones that must not die at the grading step.
         out = subprocess.run(
-            ["claude", "-p", "--model", model, "--output-format", "json"],
+            ["claude", "-p", "--model", model, "--output-format", "json",
+             "--json-schema", VERDICT_SCHEMA],
             input=JUDGE_PROMPT % (spec, evidence),
             capture_output=True, text=True, timeout=600)
     except subprocess.TimeoutExpired:
         die(f"judge session took over 600s — {RETRY_HINT}")
     if out.returncode != 0:
         die(f"judge session failed: {out.stderr.strip()[:500]} — {RETRY_HINT}")
-    text = json.loads(out.stdout).get("result", "")
-    # Kept for the human who has to audit a salvaged or refused verdict.
-    open(os.path.join(ws, "judge-raw.txt"), "w").write(text)
-    m = re.search(r"\{.*\}", text, re.DOTALL)
-    if not m:
-        die(f"judge returned no JSON (saved to judge-raw.txt) — {RETRY_HINT}")
-    try:
-        return {v["name"]: v for v in json.loads(m.group(0))["verdicts"]}
-    except (json.JSONDecodeError, KeyError, TypeError):
-        # Judges sometimes break their own JSON mid-reason (an unescaped
-        # quote, usually). The name/pass pairs are what the score needs, and
-        # those survive; the reason is salvaged best-effort. cmd_grade only
-        # consults expected grader names, so a mangled stray can't score.
-        verdicts = {}
-        for vm in re.finditer(
-                r'"name":\s*"([^"]+)"\s*,\s*"pass":\s*(true|false)'
-                r'(?:\s*,\s*"reason":\s*"((?:[^"\\]|\\.)*)")?',
-                m.group(0)):
-            verdicts[vm.group(1)] = {
-                "name": vm.group(1), "pass": vm.group(2) == "true",
-                "reason": vm.group(3) or "(reason lost to malformed JSON — "
-                                         "see judge-raw.txt)"}
-        if not verdicts:
-            die(f"judge JSON unusable (saved to judge-raw.txt) — {RETRY_HINT}")
-        return verdicts
+    reply = json.loads(out.stdout)
+    # Kept for the human who has to audit a refused or empty verdict.
+    open(os.path.join(ws, "judge-raw.txt"), "w").write(str(reply.get("result", "")))
+    verdicts = (reply.get("structured_output") or {}).get("verdicts")
+    if not verdicts:
+        die(f"judge returned no verdicts (saved to judge-raw.txt) — {RETRY_HINT}")
+    return {v["name"]: v for v in verdicts}
 
 
 # --- entry points ----------------------------------------------------------
