@@ -3,7 +3,8 @@
 An unattended run is a Claude session with `--permission-mode acceptEdits`
 whose only input is issue bodies and comments — attacker-controlled on any
 repo that takes outside issues. `polako work` bounds that at two layers,
-below; `plan` and `health` run a narrower allowlist of their own, below too.
+below; `plan` and `health` run a narrower allowlist of their own, below too,
+and `design` runs `work`'s on one issue.
 
 ## `polako work`
 
@@ -117,6 +118,29 @@ So a fully subverted run's worst case is spam behind a label a human
 lifts — the same prefix-not-signature, narrowing-not-sandbox caveats above
 still apply. See [`plan`](reference.md#planning-a-backlog-unattended-polako-plan)
 and [`health`](reference.md#auditing-repository-health-unattended-polako-health).
+
+## `polako design`
+
+`design` is `work`'s per-issue path on one issue, so its allowlist is
+`work`'s plus two reads (`gh issue list`, `gh search issues` — a design
+cites the open backlog), and every caveat above holds: prefix not signature,
+narrowing not sandbox. Its write surface is `work`'s on that one issue —
+the `issue-N` branch, one PR adding a file under `docs/designs/`, the
+thread's question and pinned label edits — plus two label writes of its
+own: preflight adds `design` to a `-issue N` that lacks it, and `-brief`
+files the request issue itself. That issue is the one the binary creates
+without `proposed`: you typed it at the command line, and the `design`
+label already keeps `work` off it. The skill never creates an issue and
+never touches the evidence ref.
+
+**No queue, so no public-repo gate.** `work` refuses an unfiltered public
+backlog because anyone who can open an issue can feed it. `design` works
+the one issue you named, or the one it filed from your `-brief` — the same
+opt-in `-label` stands for, one issue at a time — so the refusal has nothing
+to guard. Its body and thread are still data, not instructions, on any
+repo that takes outside issues: naming an issue opts its text in, and the
+skill carries the same posture paragraph `implement-issue` does. See
+[`design`](reference.md#designing-a-plan-document-polako-design).
 
 ## What leaves the machine
 

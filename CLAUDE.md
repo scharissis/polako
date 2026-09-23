@@ -10,11 +10,16 @@ any repository it measures that repo's shape and files the outliers as
 `proposed` issues — the whole-repo pass that diff-scoped review cannot do.
 Where that repo has prompts, it runs Claude Code's own
 `/claude-api prompt-audit` over them too, and files the outcome the same way.
-Both have a supervisor verb: `plan` and `health`. The binary's other four
+Both have a supervisor verb: `plan` and `health`. A fourth skill,
+`design-plan`, writes the document `plan` consumes: it works one design
+request into a plan document under `docs/designs/`, behind a PR a human
+merges; its verb is `design`. Four skills, ten verbs. The binary's other six
 verbs start no runs: `status` reads GitHub (plus one line of local run data),
 `stats` reads the run data, `tidy`
-reclaims finished worktrees and branches, `update` moves both halves to the
-published release.
+reclaims finished worktrees and branches, `unpark` lists parked issues and
+clears the ones the operator approves, `update` moves both halves to the
+published release,
+and `setup` reports whether a repository is ready.
 
 ## Invariants
 
@@ -145,6 +150,34 @@ in the PR body rather than doing it quietly.
   exclusion beats inclusion: an issue carrying both labels stays out.
   `plan-backlog` and `review-health` apply `proposed` today; the shared
   enforcing pass (`labelpass.go`) runs behind both `plan` and `health`.
+- **The `design` label is orchestration state**, the third hold beside
+  `needs-human` and `proposed`: it marks a design request, an issue that
+  wants a plan document rather than code. The `work` queue excludes it;
+  `status` lists it with the command that works it; only `polako design`
+  works it, and only that verb or a human applies it. Precedence: `design`
+  alone is a request waiting for its run; `needs-human` on top means parked,
+  and `unpark -apply` clears it; a `design` issue still carrying `proposed`
+  or holding sub-issues is refused by the verb, naming the fix. `work`'s
+  exclusion is label-only, never structural, so a `gh` too old for the
+  sub-issue rollup still keeps `work` off every design request.
+- **`design`'s write surface is `work`'s on one issue, plus one filed
+  issue.** A design run is `processIssue` on the issue the operator named:
+  the `issue-N` worktree and branch, commits adding one file under
+  `docs/designs/`, a push, one PR, thread comments and the pinned
+  `awaiting-answer` edits — nothing `work` can't already do, on one issue.
+  The skill never runs `gh issue create` (the document is the deliverable;
+  `plan` files the tickets later) and never touches the evidence ref (there
+  is nothing to screenshot). The binary adds two writes `work` lacks, both
+  label-shaped. Preflight puts `design` on a `-issue N` named without it
+  (`labelDesignIssue`), so `work` leaves the issue alone from then on —
+  naming it at the command line is the human act, the label only records
+  it. And `-brief` files the request issue itself, labelled `design` and
+  never `proposed` — the only issue the binary files without `proposed`.
+  The operator authored it at the command line, so it is opted in the way
+  `-issue N` opts a thread in, and `design` already keeps `work` off it; a
+  `proposed` label there would gate the operator's own request behind the
+  operator. That is the whole amendment to the previous invariant:
+  everything else that creates issues still applies `proposed`.
 - **A plan or health run creates issues and nothing else.** No commits, no
   pushes, no PRs, no edits to threads that already exist — a command that can
   add `proposed` can strip it too, which is self-approval. The whole

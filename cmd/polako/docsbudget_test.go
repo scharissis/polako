@@ -111,9 +111,15 @@ const docsBudget = 500
 // reference.md moved again in issue #550 (2026-09-23), +39: a whole new
 // verb, `polako design`, needed its own section with a flag table, the way
 // #434 added `unpark`'s — no existing paragraph to cut in its place.
+//
+// behaviour.md moved again in issue #552 (2026-09-23), +34: `design` is a
+// verb with behaviour of its own — the question exit, `-wait`, the PR review
+// as the design conversation, `draft` after the merge — and every other verb
+// that runs a model has a section here; no existing paragraph to cut in its
+// place.
 var docsDebt = map[string]int{
 	"reference.md": 623,
-	"behaviour.md": 532,
+	"behaviour.md": 566,
 }
 
 func TestDocsStayWithinLineBudget(t *testing.T) {

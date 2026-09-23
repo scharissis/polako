@@ -286,6 +286,40 @@ plan`](reference.md#planning-a-backlog-unattended-polako-plan) and
 health`](reference.md#auditing-repository-health-unattended-polako-health)
 for the flags each takes.
 
+## `design`: one request to a plan document
+
+`polako design -issue N` is `work`'s per-issue path on one issue you name,
+running the `design-plan` skill instead of `implement-issue`: same restart
+safety, same parks, same PR supervision, same worktree sweep. What it
+delivers is one file under `docs/designs/` behind a PR. `-brief "text"`
+files the request issue first, then works it. There is no queue, so no
+`-label` gate: naming the issue is the opt-in.
+
+**A question ends the run, exit 0, flag up.** The skill asks on the issue
+thread and labels it `awaiting-answer`, the way a `work` run does; the
+process then stops and says what to do:
+
+```
+issue #12 is waiting on your answer — reply on the thread, then rerun polako design -issue 12
+```
+
+There is nothing else to advance to, which is why it exits rather than
+puts the issue down. `-wait` holds the process instead, polling the thread
+the way `-strict-order` does until a person replies, then runs again.
+
+**The PR review is the design conversation.** The document lands as a PR,
+so a "requested changes" review is a remediation run, the same repair loop
+`work` gives a red PR: the run answers on the PR thread and pushes a revised
+document. The issue thread is for the run's questions; the PR is where the
+design gets argued and, when it's merged, decided.
+
+**After the merge, `status` lists the document as `draft`**, since no issue
+names it yet. The run prints the hand-off — `polako plan -design <doc>`
+files its tickets — and never runs it: the merge is a human gate, and a
+merge that triggered a proposal run would be state the binary watches for.
+A `design` issue the request left behind stays out of `work`'s queue for
+good; `status` names the command that works it.
+
 ## Questions on the thread
 
 **A run that has to ask something labels the issue `awaiting-answer`**,
