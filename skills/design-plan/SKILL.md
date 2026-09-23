@@ -351,6 +351,10 @@ Rules the template doesn't show:
   from PLAN.md's `## Measured`. No pasted transcripts.
 - Money never appears. Sizes are S, M or L.
 
+Then commit it, before Phase 5 looks at it — the gate reviews a commit, not
+a working tree: `git -C <worktree> add docs/designs/<topic>.md`, then commit
+with the subject `docs: design <topic>`.
+
 ## Phase 5 — Self-review gate (mandatory, before any PR)
 Re-read the document against this checklist and write the result into
 PLAN.md under `## Review`: "Reviewed through: <the commit issue-$issue's
@@ -367,14 +371,15 @@ HEAD resolves to right now>", then one line per check, "ok" or what failed.
    lists only files under `docs/designs/`, and only one of them.
 6. The document is inside its ten-minute budget. Cut before you commit.
 
-Fix what failed, commit the fix, and rerun the checklist. A resumed run
-whose `Reviewed through` sha is an ancestor of HEAD (`git -C <worktree>
-merge-base --is-ancestor <sha> HEAD`) and whose lines all read "ok" skips
-straight to Phase 6. PLAN.md itself is never committed.
+Fix what failed, commit the fix, and rerun the checklist, which rewrites
+`Reviewed through` to the new HEAD. A resumed run whose `Reviewed through`
+sha equals HEAD (`git -C <worktree> rev-parse HEAD`) and whose lines all
+read "ok" skips straight to Phase 6; any commit since means the checklist
+runs again. PLAN.md itself is never committed.
 
-## Phase 6 — Commit, push, PR
-1. Commit the document: `git -C <worktree> add docs/designs/<topic>.md`,
-   then commit with the subject `docs: design <topic>`.
+## Phase 6 — Push, PR
+1. Confirm `git -C <worktree> status --porcelain` shows nothing but
+   PLAN.md: every edit to the document is committed and reviewed.
 2. Push: `git -C <worktree> push -u origin issue-$issue`. A failed push is
    a question for the thread, described in this run's own words — never the
    rejection's raw text.
