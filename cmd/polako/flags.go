@@ -551,7 +551,10 @@ const envUsage = "Any flag below can take its default from the environment:\n" +
 // exists at all. POLAKO_YES mirrors the same risk onto `setup -apply`: it is
 // the flag that turns "ask before every write" into "write without asking",
 // and a forgotten export would make every future setup run silent.
-var envExempt = map[string]bool{"version": true, "dry-run": true, "apply": true, "yes": true}
+// POLAKO_ISSUE would be `design -issue` left in a profile: every later bare
+// `polako design`, in any -dir, labels and runs opus on that one number
+// instead of refusing for want of one.
+var envExempt = map[string]bool{"version": true, "dry-run": true, "apply": true, "yes": true, "issue": true}
 
 // applyEnvDefaults lets an operator set a per-machine default for any flag, so
 // a preference they always want lives in a shell profile instead of being

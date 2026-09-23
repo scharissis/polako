@@ -110,6 +110,9 @@ func TestDesignConfigPinsVerbEvidenceAndWait(t *testing.T) {
 			t.Errorf("parseDesignFlags(%v) accepted it", bad)
 		}
 	}
+	if !envExempt["issue"] {
+		t.Error("POLAKO_ISSUE would pick the issue for a bare `polako design` — -issue must be in envExempt")
+	}
 	if _, _, err := parseDesignFlags([]string{"-h"}, io.Discard); !errors.Is(err, flag.ErrHelp) {
 		t.Errorf("-h = %v, want flag.ErrHelp", err)
 	}

@@ -352,7 +352,7 @@ polako design -issue 12            # the real thing
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `-issue` | *(required)* | The design request: an open issue number. |
+| `-issue` | *(required)* | The design request: an open issue number. `POLAKO_ISSUE` is ignored — a number left in a profile would start runs nobody typed. |
 | `-wait` | `false` | When the run asks a question, wait on the thread for a reply instead of exiting 0. |
 | `-model` / `-effort` | `opus` / *(CLI default)* | One design steers every ticket filed from it, so `-model` defaults to the strongest tier, as `plan` does. |
 | `-skill` | `polako:design-plan` | Slash command the run invokes. |
