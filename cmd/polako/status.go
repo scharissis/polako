@@ -14,10 +14,12 @@ package main
 //   - Reads only. Every call it makes is one of the read subcommands the drain
 //     itself re-derives state with at startup, so nothing here can move an
 //     issue, a label or a PR.
-//   - No run data. The metrics files are read only by `stats` and `plan`'s
-//     pricing line, and a status that read them would be wrong anyway: the
-//     drain being asked about is quite possibly running on somebody else's
-//     machine.
+//   - One line of run data, and nothing else from it. status is the third
+//     reader of the metrics files, beside `stats` and `plan`'s pricing line:
+//     the "last shift here" line (statuslastshift.go), read after the GitHub
+//     snapshot and feeding no queue row, `next` or `needs you`. It says
+//     "here" because the drain being asked about may be running on somebody
+//     else's machine, which leaves no record on this one.
 //   - State, not liveness. It never asks whether a drain is running, and says
 //     the same thing whether one is or not. What it prints is what a drain
 //     starting now would do next — which is the same thing a running drain is
@@ -57,6 +59,7 @@ type statusOptions struct {
 	branchPrefix string
 	strictOrder  bool
 	json         bool
+	metrics      string
 }
 
 // runStatus is the `status` subcommand: parse its own flags, read GitHub, print
@@ -75,12 +78,15 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 		"report as a work run with -strict-order would: an issue awaiting an answer keeps its place in the queue")
 	fs.BoolVar(&opt.json, "json", false,
 		"print one JSON document to stdout instead of the text report — see docs/reference.md for the schema")
+	fs.StringVar(&opt.metrics, "metrics", "",
+		`directory holding the run-data records the last-shift line reads, or "off" (default ~/.polako/metrics)`)
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako status [flags]\n\n"+
 			"Prints where the backlog stands, derived from GitHub: the queue in the\n"+
 			"order `polako work` would take it, what is waiting on you, and any open PR on\n"+
 			"a branch the skill named. Reads only — nothing here changes anything,\n"+
-			"and it says the same thing whether or not a shift is running.\n\n"+envUsage+"\nFlags:\n")
+			"and it says the same thing whether or not a shift is running. One line,\n"+
+			"the last shift here, comes from this machine's run data instead.\n\n"+envUsage+"\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	// The same environment defaults the drain honours, so a POLAKO_LABEL
@@ -126,6 +132,10 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 	}
 	snap.notes = notes
 	snap.labelSource = labelSource
+	// After readStatus has returned, not inside it: nothing the GitHub read
+	// derives — queues, next, needs you — can see run data this way.
+	snap.lastShift = readLastShift(resolveDataDir(opt.metrics, "metrics", "metrics", "to read run data from"),
+		cfg.repo, now)
 	if opt.json {
 		return renderStatusJSON(out, cfg, snap)
 	}
@@ -341,6 +351,10 @@ type statusSnapshot struct {
 	// "" when the report is unscoped. Set by runStatus, read by statusScope
 	// (the header) and statusDocFrom (-json's scope.source).
 	labelSource string
+	// lastShift is the one fact here from run data rather than GitHub
+	// (statuslastshift.go) — nil with no local history or -metrics off. Set by
+	// runStatus after readStatus returns, so nothing above can depend on it.
+	lastShift *lastShift
 }
 
 // statusPR is one open PR on a branch the skill named, and what GitHub says
@@ -577,6 +591,9 @@ func renderStatus(w io.Writer, rpt report, cfg config, snap statusSnapshot) {
 	printPairs(w, rpt, "", queuePairs(snap))
 	printStatusPRs(w, rpt, snap)
 	printPlanDocs(w, rpt, snap.plans)
+	if line := lastShiftLine(snap.lastShift); line != "" {
+		fmt.Fprintf(w, "%s\n", line)
+	}
 	if line := statusPlanLine(snap); line != "" {
 		fmt.Fprintf(w, "%s\n", line)
 	}
