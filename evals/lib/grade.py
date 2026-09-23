@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Grade one hand-run eval case against its case.yaml.
 
-Half of evals/run.sh, the by-hand stand-in for the gated `plugin eval` command
-(see "Running it by hand" in evals/README.md). This half owns everything that
+Half of evals/run.sh, the by-hand stand-in for the CLI's `plugin eval` command
+(see "Running it" in evals/README.md). This half owns everything that
 wants a real parser: reading case.yaml, checking the mechanical graders,
 condensing the run's event stream into judgeable evidence, and asking a judge
 session to score the llm graders.

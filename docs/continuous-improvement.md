@@ -39,26 +39,24 @@ the backlog, never through the supervisor reading its own telemetry.
 ## Pillar 1 — the eval suite's first green run
 
 The highest-leverage item in this plan is not new; it is finishing one that
-exists. `evals/` grades what a real `/polako:implement-issue` run leaves
-behind, and it has **never been executed** — its README says to expect the
-first run to be a debugging session and lists five likely corrections. Until
-it is green, every change to `SKILL.md` is verified by hand against one real
-issue, which measures nothing and does not repeat.
+exists. `evals/` grades what a real skill run leaves behind — ten cases now,
+across all four shipped skills. It has run in full once, by hand through
+`evals/run.sh` on 2026-08-28 (32/34, both reds genuine skill findings), and
+never green. `claude plugin eval`, the CLI's own runner, has never run it at
+all.
 
 The work, in order:
 
-- One budgeted debugging session: `--case clear-issue` first, then the other
-  three. Fix what the run finds; delete the "Known-unverified" section.
+- One budgeted `plugin eval` session (issue #77): `--case clear-issue` first,
+  then the rest. Settle the seven CLI unknowns listed at the bottom of
+  `evals/README.md`, fix what the run finds, and delete that section.
 - Record the baseline: scores and cost per case, in the PR body of whatever
   change the first green run rides on — the same "the PR body says what was
   verified" convention skill changes already follow.
-- Then the standing rule this plan proposes for CLAUDE.md's checking section:
-  **a PR that changes a skill's `SKILL.md` runs the suite — or at minimum the
-  cases its change touches — and its body quotes the scores.** `--runs 3`
-  when a case wobbles, because a flaky grader is worse than none: it teaches
-  the habit of ignoring red.
-- When `/plan-backlog` lands (issue #66), its `plan-vision/` eval case joins
-  the suite under the same rule.
+- The standing rule, now in CLAUDE.md's checking section: **a PR that changes
+  a skill's `SKILL.md` runs the cases its change touches, and its body quotes
+  the scores.** `--runs 3` when a case wobbles, because a flaky grader is
+  worse than none: it teaches the habit of ignoring red.
 
 Issue #311 landed the enforcement half of that standing rule: `evals/run.sh`
 takes `--plugin-dir` and `--max-cost`, `Bash(evals/run.sh:*)` is granted in
@@ -69,8 +67,8 @@ inside one case), when its commits change a shipped `SKILL.md`. What is still
 owed is the first green run itself — the budgeted debugging session above.
 
 The suite stays opt-in and out of CI, per the agreement on issue #9 — it
-needs network, a real `claude` and money. The gate is the release ritual, not
-the push.
+needs network, a real `claude` and money. The gate is the skill PR, not the
+push or the release; `evals/README.md`, "When to run it", has the full list.
 
 ## Pillar 2 — sums you can trust: the resume probe *(settled)*
 
@@ -169,7 +167,7 @@ of the house.
 | When | Do | Artifact |
 | --- | --- | --- |
 | After each shift | The retro: `stats -by shift`, reopen parked/outlier sessions, classify | Issues on this repo |
-| Before a PR that changes skill text | Eval suite (affected cases at least), fresh `-run-tag` on the next batch | Scores in the PR body, a ledger row |
+| Before a PR that changes skill text | The eval cases it touches (`evals/README.md`, "When to run it"), fresh `-run-tag` on the next batch | Scores in the PR body, a ledger row |
 | After changing a knob or model | Fresh `-run-tag` | A ledger row with the verdict |
 | After a `claude` CLI upgrade | The per-version recipe | A finding, or nothing |
 | Occasionally | The post-merge audit recipe; `stats -since 168h` | Findings become issues |
@@ -252,8 +250,8 @@ Each lands independently green — gofmt, vet, full suite, README rows for any
 flag, `claude plugin validate .` — per the standing convention.
 
 **Phase 1 — verification, no production code.** The eval suite's first green
-run (a budgeted debugging session; fixes to `evals/` as they surface; the
-"Known-unverified" section deleted). The resume question is already closed
+run (issue #77: a budgeted debugging session; fixes to `evals/` as they
+surface; the CLI-unknowns section of `evals/README.md` deleted). The resume question is already closed
 (issue #78), so what remains of this phase is the eval suite alone.
 
 **Phase 2 — the one schema addition.** `park_reason` on terminal issue
