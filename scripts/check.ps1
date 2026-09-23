@@ -23,7 +23,9 @@ go vet ./...
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host '==> go test'
-go test ./...
+# -count=1 -vet=off, as in ci.yml, which says why: on Windows a cacheable run
+# spends longer checking the files the suite touched than running it.
+go test -count=1 -vet=off ./...
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host 'all checks passed'
