@@ -93,12 +93,16 @@ func queueLine(q issueQueues) string {
 // heldBackLine renders the held-back row: every otherwise-ready issue this
 // pass put down for an open blockedBy dependency, and what's holding each
 // one — the same wording logHeldBack (drain.go) narrates per-issue, folded
-// into one row here.
+// into one row here. A semicolon, not a comma, before the labels: the blocker
+// list is itself comma-separated, and `behind #3, #4, high` reads as three.
 func heldBackLine(q issueQueues) string {
 	refs := make([]string, len(q.heldBack))
 	for i, h := range q.heldBack {
-		behind := "behind " + issueRefs(h.blockers)
-		refs[i] = annotatedRef(h.number, func(int) string { return behind }, q.policyNote)
+		note := "behind " + issueRefs(h.blockers)
+		if policy := q.policyNote(h.number); policy != "" {
+			note += "; " + policy
+		}
+		refs[i] = fmt.Sprintf("#%d (%s)", h.number, note)
 	}
 	return fmt.Sprintf("%s — %s", plural(len(q.heldBack), "issue"), strings.Join(refs, ", "))
 }

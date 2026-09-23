@@ -20,7 +20,7 @@ func TestStatusShowsListingDetails(t *testing.T) {
 			"5":  {Open: true, Labels: []string{"effort:turbo"}},
 			"9":  {Open: true, Labels: []string{needsHumanLabel}, UpdatedAt: ago(12 * 24 * time.Hour)},
 			"12": {Open: true, Labels: []string{proposedLabel}, UpdatedAt: ago(3 * 24 * time.Hour)},
-			"13": {Open: true, Labels: []string{"effort:high"}, BlockedBy: []int{3}},
+			"13": {Open: true, Labels: []string{"effort:high"}, BlockedBy: []int{3, 5}},
 			// Parked with no date: shown bare rather than as fresh.
 			"15": {Open: true, Labels: []string{needsHumanLabel}},
 		},
@@ -36,7 +36,7 @@ func TestStatusShowsListingDetails(t *testing.T) {
 	printed := out.String()
 	for _, want := range []string{
 		"ready      2 issues — #3 (opus, max), #5\n",
-		"held back  1 issue — #13 (behind #3, high)\n",
+		"held back  1 issue — #13 (behind #3, #5; high)\n",
 		"parked     2 issues — #9 (quiet 12d), #15, labelled needs-human\n",
 		"proposed   1 issue — #12 (quiet 3d), labelled proposed\n",
 	} {

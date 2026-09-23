@@ -335,7 +335,7 @@ polako status
 ```
 scharissis/polako
   ready         3 issues — #14 (opus, high), #19, #23
-  held back     1 issue — #33 (behind #30, max)
+  held back     1 issue — #33 (behind #30; max)
   awaiting you  1 issue — #9 (quiet 26h)
   parked        1 issue — #5 (quiet 12d), labelled needs-human
   proposed      2 issues — #27 (quiet 3d), #28 (quiet 3d), labelled proposed
