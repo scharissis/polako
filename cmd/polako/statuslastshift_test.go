@@ -155,7 +155,7 @@ func TestReadParkReasonsKeepsTheNewestPark(t *testing.T) {
 	}
 }
 
-func TestReadyPrice(t *testing.T) {
+func TestReadySuffix(t *testing.T) {
 	t.Parallel()
 	m := &issueMedian{cost: 7.5, n: 2}
 	for _, c := range []struct {
@@ -163,13 +163,13 @@ func TestReadyPrice(t *testing.T) {
 		ready int
 		want  string
 	}{
-		{m, 5, "about $38 at your median"},
-		{m, 1, "about $7.50 at your median"},
+		{m, 5, " — about $38 at your median"},
+		{m, 1, " — about $7.50 at your median"},
 		{m, 0, ""},
 		{nil, 5, ""},
 	} {
-		if got := readyPrice(c.m, c.ready); got != c.want {
-			t.Errorf("readyPrice(%v, %d) = %q, want %q", c.m, c.ready, got, c.want)
+		if got := (statusRunData{readyMedian: c.m}).readySuffix(c.ready); got != c.want {
+			t.Errorf("readySuffix(%v, %d) = %q, want %q", c.m, c.ready, got, c.want)
 		}
 	}
 }
@@ -200,11 +200,7 @@ func TestStatusRunDataChangesOnlyItsOwnDetails(t *testing.T) {
 		if err != nil {
 			t.Fatalf("readStatus: %v", err)
 		}
-		snap.lastShift = readLastShift(dir, cfg.repo, statusNow)
-		if m, ok := mergedMedian(dir, cfg.repo, statusNow); ok {
-			snap.readyMedian = &m
-		}
-		snap.parkReasons = readParkReasons(dir, cfg.repo, statusNow)
+		snap.runData = readStatusRunData(dir, cfg.repo, statusNow)
 		var text, js strings.Builder
 		renderStatus(&text, report{}, cfg, snap)
 		if err := renderStatusJSON(&js, cfg, snap); err != nil {

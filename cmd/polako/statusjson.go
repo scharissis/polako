@@ -260,7 +260,7 @@ func statusDocFrom(cfg config, snap statusSnapshot) statusDoc {
 		Plans: statusDocPlans{
 			Docs: nonNilSlice(planDocs), Gone: nonNilSlice(gone), Truncated: snap.plans.truncated,
 		},
-		LastShift: toStatusDocLastShift(snap.lastShift),
+		LastShift: toStatusDocLastShift(snap.runData.lastShift),
 	}
 	if line := statusPlanLine(snap); line != "" {
 		doc.Plan = &line

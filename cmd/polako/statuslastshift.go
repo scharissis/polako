@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -135,13 +137,46 @@ func readParkReasons(metricsDir, repo string, now time.Time) map[int]string {
 	return reasons
 }
 
-// readyPrice is the ready row's suffix: the ready count times the same median
+// statusRunData is what status reads from run data. Every field is nil with
+// no local history or -metrics off, and the report renders as it would
+// without it.
+type statusRunData struct {
+	lastShift   *lastShift
+	readyMedian *issueMedian
+	parkReasons map[int]string
+}
+
+func readStatusRunData(metricsDir, repo string, now time.Time) statusRunData {
+	rd := statusRunData{
+		lastShift:   readLastShift(metricsDir, repo, now),
+		parkReasons: readParkReasons(metricsDir, repo, now),
+	}
+	if m, ok := mergedMedian(metricsDir, repo, now); ok {
+		rd.readyMedian = &m
+	}
+	return rd
+}
+
+// readySuffix prices the ready row: the ready count times the same median
 // proposalPricingLine prices with — "" with no history or nothing ready.
-func readyPrice(m *issueMedian, ready int) string {
-	if m == nil || ready == 0 {
+func (rd statusRunData) readySuffix(ready int) string {
+	if rd.readyMedian == nil || ready == 0 {
 		return ""
 	}
-	return "about " + approxUSD(float64(ready)*m.cost) + " at your median"
+	return " — about " + approxUSD(float64(ready)*rd.readyMedian.cost) + " at your median"
+}
+
+// parkedRefs is issueRefs with each parked issue's recorded reason beside it,
+// where there is one: `#77 (budget)`.
+func (rd statusRunData) parkedRefs(parked []int) string {
+	refs := make([]string, len(parked))
+	for i, n := range parked {
+		refs[i] = "#" + strconv.Itoa(n)
+		if why := rd.parkReasons[n]; why != "" {
+			refs[i] += " (" + why + ")"
+		}
+	}
+	return strings.Join(refs, ", ")
 }
 
 // shiftHint is the stats command that opens shift id's records in dir.
