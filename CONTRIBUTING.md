@@ -91,7 +91,7 @@ closing the issue. Whether a run *keeps* those promises is what
 [`evals/`](evals) is for:
 
 ```bash
-claude plugin eval . --scaffold --allow-tools Bash Write Edit
+claude plugin eval . --scaffold --allow-tools Bash Write Edit 'Skill(claude-api)'
 ```
 
 Read [`evals/README.md`](evals/README.md) before you run that, not after: as

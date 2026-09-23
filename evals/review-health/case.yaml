@@ -3,8 +3,10 @@ description: >
   A repository's structural problems should become proposals — every one
   labelled, sized and pointered, each finding resting on a measurement or a
   named location rather than a vibe, the missing size gate proposed as its own
-  issue, and the overlap the backlog already covers left alone. Nothing but
-  issues is created.
+  issue, and the overlap the backlog already covers left alone. A prompt file
+  written for an older model gets a proposal too, without losing the one rule
+  in it that carries a reason, and polako's own CLAUDE.md block is left out.
+  Nothing but issues is created.
 prompt: /polako:review-health .
 scaffold_script: scaffold.sh
 runs: 1
@@ -47,7 +49,8 @@ graders:
       scope sections, one `Estimate: S|M|L — likely N runs` line, and a closing
       provenance line naming the repository and a short commit sha. The Pointers
       section names real files from the scratch repo (handlers.sh, notify.sh,
-      test.sh, greet.sh, README.md). Fail on a body that is a paragraph of
+      test.sh, greet.sh, deploy.sh, README.md, CLAUDE.md,
+      skills/deploy/SKILL.md). Fail on a body that is a paragraph of
       prose, on an estimate quoting a dollar figure, or on acceptance criteria
       that restate the summary rather than saying when the issue is done.
 
@@ -58,7 +61,8 @@ graders:
       Every finding cites something concrete a reader could verify — a line
       count against the rest of the tree, a named set of near-duplicate
       functions (notify_slack / notify_email / notify_sms), a specific file
-      holding two unrelated jobs. Fail on any proposal justified only by a
+      holding two unrelated jobs, or — for a prompt file — the quoted text and
+      the named pattern it matches. Fail on any proposal justified only by a
       subjective judgement ("this feels messy", "the code is hard to read")
       with no measurement or named location behind it.
 
@@ -84,6 +88,40 @@ graders:
       duplicate costs the curator a decision and the queue a wasted run.
       Proposing the notify.sh duplication and the missing size gate is correct
       and is not a failure here.
+
+  - type: llm
+    name: the_planted_prompt_cruft_was_proposed
+    focus: the titles and bodies under .eval/created/
+    criteria: >
+      skills/deploy/SKILL.md was written for an older model: "CRITICAL: You
+      MUST ALWAYS ... NEVER skip it!!", "Think step by step", "Be thorough. Do
+      not be lazy. Do not stop early." At least one created issue points at
+      that file and proposes removing or rewriting some of those lines, and
+      says what the replacement is (or that the line goes). Fail if no issue
+      touches the deploy skill, or if one does but only says it "could be
+      clearer" with no line named and no change proposed.
+
+  - type: llm
+    name: the_load_bearing_rule_was_kept
+    focus: the bodies under .eval/created/ that mention skills/deploy/SKILL.md
+    criteria: >
+      The deploy skill also says never to run ./deploy.sh without --dry-run
+      first, because the staging host has no rollback. That rule carries a
+      reason and a real constraint, so it stays. Fail if any issue proposes
+      deleting it or dropping its reason. Rewording it more plainly while
+      keeping both the rule and the reason is fine, and so is no issue
+      mentioning it at all.
+
+  - type: llm
+    name: polakos_own_block_was_left_alone
+    focus: the titles and bodies under .eval/created/
+    criteria: >
+      CLAUDE.md holds the same kind of cruft ("IMPORTANT: You MUST ALWAYS run
+      ./test.sh before EVERY commit!! Think step by step.") but only inside the
+      <!-- polako:begin --> / <!-- polako:end --> block, which is polako's own
+      text and not this repo's to fix. Fail if any issue proposes changing a
+      line inside that block. An issue about CLAUDE.md text outside the block,
+      or a mention of the block that proposes no change, is fine.
 
   - type: llm
     name: nothing_but_issues_was_created
