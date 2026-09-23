@@ -68,6 +68,7 @@ happened; if that is most of the batch, the comparison is not one.
 | `evidence-preview` | Shots from `build` plus `preview` are steadier than shots from `dev`. | Skill wording: prefer `preview` when the script exists, against today's `dev`-only wording. | *pending* — compare the shot failure/retry rate between the two tags. | *open* |
 | `evidence-webserver` | Where the repo has Playwright, a scratch `webServer` config beats background-and-stop. | Skill wording for that rung, against today's background-and-stop lifecycle. | *pending* — compare the shot failure/retry rate and turns spent in the capture step between the two tags. | *open* |
 | `setup-claude-md` | In a repo with no CLAUDE.md, the block that `polako setup -apply` proposes cuts median turns per `implement-issue` run and the permission-refused park rate. | The CLAUDE.md block merged vs not, same repo, consecutive batches. | *pending* — compare median turns per run and the permission-refused park rate between the two. | *open* |
+| `opus-5-5-epoch` | Opus 5.5 costs less than 1.5× what Sonnet 5 did per merged PR, and parks no more, despite twice the per-token price. Early PR-opening runs: $4.81 mean (n=6) against $6.47 (n=68). | None by polako. Claude Code 2.1.280 moved the inherited model from `claude-sonnet-5` to `claude-opus-5-5[1m]` on 2026-09-23. No tag: `stats -by model` splits the two. | *pending* — `stats -by model` once Opus 5.5 has ~70 merged issues, the size that sees a 1.5× gap. polako ships almost daily, so skill versions differ too; read only a big gap. | *open* — 1.5× or more per merged PR with no fewer parks means `-model sonnet`; otherwise keep inheriting. |
 
 The `remediation-sonnet` and `stall-30m` rows come from
 `docs/continuous-improvement.md`, pillar 4, which chose them because the
@@ -108,3 +109,8 @@ already lives in `docs/setup.md`, `docs/behaviour.md` and CLAUDE.md's own
 `setup` invariant; this row is the only part of the plan the tickets
 explicitly deferred — "left out, on purpose" until the CLAUDE.md block it
 measures shipped (#417), which it now has.
+
+The `opus-5-5-epoch` row comes from `docs/designs/model-selection.md`. Nobody
+chose its change: a Claude Code release moved the inherited model. It's
+written down the day that happened, because a hypothesis stated afterwards
+always fits. Its "tag" is the model split rather than a `-run-tag`.
