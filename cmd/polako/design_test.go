@@ -46,7 +46,7 @@ func TestDesignRegistersOnlyPerIssueFlags(t *testing.T) {
 
 	for name, def := range map[string]string{
 		"skill": defaultDesignSkill, "tools": designTools, "model": "opus",
-		"issue": "0", "wait": "false", "max-issue-time": defaultMaxIssueTime.String(),
+		"issue": "0", "brief": "", "wait": "false", "max-issue-time": defaultMaxIssueTime.String(),
 	} {
 		f := fs.Lookup(name)
 		if f == nil {
@@ -100,18 +100,32 @@ func TestDesignConfigPinsVerbEvidenceAndWait(t *testing.T) {
 	}
 
 	for _, bad := range [][]string{
-		{},                             // no -issue
-		{"-issue", "0"},                // not an issue
-		{"-issue", "7", "extra"},       // stray argument
-		{"-issue", "7", "-label", "x"}, // a queue flag
+		{},               // neither -issue nor -brief
+		{"-issue", "0"},  // not an issue
+		{"-brief", "  "}, // not a brief
+		{"-issue", "7", "-brief", "a dating app for horses"},
+		{"-brief", strings.Repeat("x ", planBriefMax)}, // an issue's worth, not a brief's
+		{"-issue", "7", "extra"},                       // stray argument
+		{"-issue", "7", "-label", "x"},                 // a queue flag
 		{"-issue", "7", "-effort", "ultracode"},
 	} {
 		if _, _, err := parseDesignFlags(bad, io.Discard); err == nil {
 			t.Errorf("parseDesignFlags(%v) accepted it", bad)
 		}
 	}
-	if !envExempt["issue"] {
-		t.Error("POLAKO_ISSUE would pick the issue for a bare `polako design` — -issue must be in envExempt")
+	_, _, err := parseDesignFlags([]string{"-brief", strings.Repeat("x ", planBriefMax), "-metrics", "off", "-log", "off"}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "put it in an issue") {
+		t.Errorf("an over-long -brief = %v, want a refusal saying to put it in an issue", err)
+	}
+	_, opt, err := parseDesignFlags([]string{"-brief", "  a dating app for horses \n", "-metrics", "off", "-log", "off"}, io.Discard)
+	if err != nil || opt.issue != 0 || opt.brief != "a dating app for horses" {
+		t.Errorf("-brief alone: err %v, issue %d, brief %q", err, opt.issue, opt.brief)
+	}
+	for _, name := range []string{"issue", "brief"} {
+		if !envExempt[name] {
+			t.Errorf("POLAKO_%s would pick the request for a bare `polako design` — -%s must be in envExempt",
+				strings.ToUpper(name), name)
+		}
 	}
 	if _, _, err := parseDesignFlags([]string{"-h"}, io.Discard); !errors.Is(err, flag.ErrHelp) {
 		t.Errorf("-h = %v, want flag.ErrHelp", err)
@@ -157,7 +171,7 @@ func TestDesignPreflightRefusesWithTheRemedy(t *testing.T) {
 			is := tc.issue
 			cfg, path := designTestConfig(t, "design", &ghState{Issues: map[string]*fakeIssue{"1": &is}})
 			cfg.dir = checkout
-			err := designPreflight(context.Background(), &cfg, 1)
+			_, err := designPreflight(context.Background(), &cfg, designOptions{issue: 1})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("designPreflight = %v, want a refusal saying %q", err, tc.want)
 			}
@@ -186,7 +200,7 @@ func TestDesignPreflightRefusesAWorkPR(t *testing.T) {
 				PRs:    map[string]*fakePR{"issue-1": {Number: 40, State: "OPEN"}},
 			})
 			cfg.dir = checkout
-			err := designPreflight(context.Background(), &cfg, 1)
+			_, err := designPreflight(context.Background(), &cfg, designOptions{issue: 1})
 			if labels == nil {
 				if err == nil || !strings.Contains(err.Error(), "PR #40") {
 					t.Fatalf("designPreflight = %v, want a refusal naming PR #40", err)
@@ -213,7 +227,7 @@ func TestDesignPreflightLabelsAnUnlabelledIssue(t *testing.T) {
 			cfg, path := designTestConfig(t, "design", &ghState{Issues: map[string]*fakeIssue{"1": {Open: true}}})
 			cfg.dir = checkout
 			cfg.dryRun = dry
-			if err := designPreflight(context.Background(), &cfg, 1); err != nil {
+			if _, err := designPreflight(context.Background(), &cfg, designOptions{issue: 1}); err != nil {
 				t.Fatalf("designPreflight: %v", err)
 			}
 			st := finalGhState(t, path)
@@ -276,6 +290,106 @@ func TestDesignRunsALabelledIssueToMerge(t *testing.T) {
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
+	}
+}
+
+// -brief files exactly one issue — open, labelled `design` and nothing else,
+// the brief plus the trailer as its body — and then works it to merge the
+// way -issue does. The repository starts with no labels at all, so the create
+// goes through fileDesignIssue's declare-and-retry. The run data carries the
+// number and never the brief's text.
+func TestDesignBriefFilesOneIssueAndWorksIt(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	_, checkout := upstream(t)
+	cfg, path := designTestConfig(t, "design", &ghState{})
+	cfg.dir = checkout
+	metrics := t.TempDir()
+	cfg.rec = newRecorder(metrics)
+	const brief = "a dating app for horses, with a paddock-side pickup flow"
+
+	if err := runDesign(context.Background(), cfg, designOptions{brief: brief}, io.Discard); err != nil {
+		t.Fatalf("runDesign -brief: %v", err)
+	}
+	st := finalGhState(t, path)
+	if len(st.Issues) != 1 {
+		t.Fatalf("issues after the run = %d, want exactly the one -brief filed: %v", len(st.Issues), st.Issues)
+	}
+	is := st.Issues["1"]
+	if is == nil {
+		t.Fatalf("no issue #1 filed: %v", st.Issues)
+	}
+	if !slices.Equal(is.Labels, []string{designLabel}) {
+		t.Errorf("filed issue labels = %v, want exactly [%s] — never proposed", is.Labels, designLabel)
+	}
+	if want := "design: a dating app for horses, with a paddock-side"; is.Title != want {
+		t.Errorf("filed issue title = %q, want %q", is.Title, want)
+	}
+	if !strings.HasPrefix(is.Body, brief) || !strings.HasSuffix(is.Body, designTrailer) {
+		t.Errorf("filed issue body = %q, want the brief then the trailer %q", is.Body, designTrailer)
+	}
+	if is.Open {
+		t.Error("the filed issue is still open after its PR merged")
+	}
+	for _, line := range readRecords(t, metrics, cfg.repo) {
+		if strings.Contains(line, "horses") {
+			t.Errorf("a run-data record carries the brief's text:\n%s", line)
+		}
+		if !strings.Contains(line, `"issue":1`) && strings.Contains(line, `"kind":"design-issue"`) {
+			t.Errorf("the design-issue record does not name the filed issue:\n%s", line)
+		}
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"filed issue #1 for the brief, labelled design",
+		"issue #1: PR #42 merged",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log is missing %q\ngot:\n%s", want, out)
+		}
+	}
+}
+
+// A dry run from a brief says what it would file and files nothing: no
+// issue, no label, no claude run.
+func TestDesignBriefDryRunFilesNothing(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	_, checkout := upstream(t)
+	cfg, path := designTestConfig(t, "design", &ghState{})
+	cfg.dir = checkout
+	cfg.dryRun = true
+	ghLog := filepath.Join(t.TempDir(), "gh.log")
+	setFakeEnv(&cfg, fakeGhLogEnv, ghLog)
+	args := watchClaudeArgs(t, &cfg)
+
+	var out bytes.Buffer
+	if err := runDesign(context.Background(), cfg, designOptions{brief: "a dating app for horses"}, &out); err != nil {
+		t.Fatalf("runDesign -brief -dry-run: %v", err)
+	}
+	if want := `would file an issue titled "design: a dating app for horses"`; !strings.Contains(buf.String(), want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, buf.String())
+	}
+	if out.Len() != 0 {
+		t.Errorf("a brief dry run printed an invocation with no issue to name: %q", out.String())
+	}
+	st := finalGhState(t, path)
+	if len(st.Issues) != 0 || len(st.Labels) != 0 {
+		t.Errorf("dry run wrote to GitHub: issues %v, labels %v", st.Issues, st.Labels)
+	}
+	b, err := os.ReadFile(ghLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, write := range []string{"issue create", "label create", "issue edit"} {
+		if strings.Contains(string(b), write) {
+			t.Errorf("dry run made a %q call:\n%s", write, b)
+		}
+	}
+	for _, a := range args() {
+		if strings.Contains(a, "design-plan") {
+			t.Errorf("dry run started a claude run: %s", a)
 		}
 	}
 }
@@ -366,7 +480,7 @@ func TestDesignDryRunWritesNothing(t *testing.T) {
 	args := watchClaudeArgs(t, &cfg)
 
 	var out bytes.Buffer
-	if err := runDesign(context.Background(), cfg, 1, &out); err != nil {
+	if err := runDesign(context.Background(), cfg, designOptions{issue: 1}, &out); err != nil {
 		t.Fatalf("runDesign -dry-run: %v", err)
 	}
 	if !strings.Contains(out.String(), "'/polako:design-plan 1'") {

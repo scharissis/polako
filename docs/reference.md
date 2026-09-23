@@ -326,33 +326,33 @@ polako health -dir ~/code/some-repo            # the real thing
 
 `polako design -issue N` runs the `design-plan` skill on one design request
 and waits for its PR — one new file under `docs/designs/` — to merge. It is
-`polako work`'s per-issue path on one named issue: restart safety, parks,
-PR supervision, the worktree sweep. No queue, so no `-label` gate, even on a
-public repo: naming the issue is the opt-in. Preflight adds the `design`
-label if it's missing, so `polako work` leaves the issue alone, and refuses
-an issue that is closed, a container, parked (`needs-human`) or still
-`proposed`, naming the fix.
-
-A question on the thread exits 0 with the flag left up:
+`polako work`'s per-issue path on one named issue: restart safety, parks, PR
+supervision, the worktree sweep. No queue, so no `-label` gate, even on a
+public repo: naming the issue, or writing it in `-brief`, is the opt-in.
+Preflight adds the `design` label if it's missing, so `polako work` leaves
+the issue alone, and refuses a closed, container, parked (`needs-human`) or
+still-`proposed` issue, naming the fix. `-brief "text"` files that issue
+first — `design: ` plus its opening words, the text plus a trailer, labelled
+`design` and never `proposed` — then works it. A question exits 0, flag up:
 
 ```
 issue #12 is waiting on your answer — reply on the thread, then rerun polako design -issue 12
 ```
 
 `-wait` holds the process instead, polling the thread until someone replies,
-then runs again. On a merge it prints the hand-off — the doc lists as
-`draft` in `polako status`, and `polako plan -design <doc>` files its
-tickets. Never run for you: the merge is a human gate, not a trigger. Its
-records are `design-run` and `design-issue`, which `stats` skips.
+then runs again. On a merge it prints the hand-off — the doc lists as `draft`
+in `polako status`; `polako plan -design <doc>` files its tickets — never run
+for you: the merge is a human gate. Records `design-run`/`design-issue`; `stats` skips them.
 
 ```bash
 polako design -issue 12 -dry-run
-polako design -issue 12            # the real thing
+polako design -brief "a dating app for horses"   # files the issue, then works it
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `-issue` | *(required)* | The design request: an open issue number. `POLAKO_ISSUE` is ignored — a number left in a profile would start runs nobody typed. |
+| `-issue` | *(none)* | The design request: an open issue number. Exactly one of `-issue` / `-brief` is required. `POLAKO_ISSUE` and `POLAKO_BRIEF` are ignored — a request left in a profile would start runs nobody typed. |
+| `-brief` | *(none)* | Inline request text in place of `-issue`, filed as a new `design` issue and worked. Past ~2000 characters, put it in an issue. A dry run says what it would file and files nothing. |
 | `-wait` | `false` | When the run asks a question, wait on the thread for a reply instead of exiting 0. |
 | `-model` / `-effort` | `opus` / *(CLI default)* | One design steers every ticket filed from it, so `-model` defaults to the strongest tier, as `plan` does. |
 | `-skill` | `polako:design-plan` | Slash command the run invokes. |

@@ -40,11 +40,17 @@ const designTools = defaultTools + ",Bash(gh issue list:*),Bash(gh search issues
 // reasoning. A tier alias, never an id.
 const designModel = "opus"
 
-// designOptions are the two flags that are design's alone.
+// designOptions are the three flags that are design's alone. Exactly one of
+// issue and brief is set once parseDesignFlags returns.
 type designOptions struct {
 	issue int
+	brief string
 	wait  bool
 }
+
+// designTrailer ends every issue -brief files: it tells whoever opens the
+// thread what the thread is for, since nobody wrote the issue by hand.
+const designTrailer = "Filed by polako design — reply on this thread when the run asks something."
 
 // designFlagSet registers design's flags: its own two, work's per-issue ones
 // with work's help strings, and -model/-effort. The queue, session and policy
@@ -53,17 +59,20 @@ type designOptions struct {
 func designFlagSet(out io.Writer, cfg *config, opt *designOptions, local *localFlags) *flag.FlagSet {
 	fs := flag.NewFlagSet("design", flag.ContinueOnError)
 	fs.SetOutput(out)
-	fs.IntVar(&opt.issue, "issue", 0, "the design request to work: an open issue number (required)")
+	fs.IntVar(&opt.issue, "issue", 0, "the design request to work: an open issue number")
+	fs.StringVar(&opt.brief, "brief", "",
+		"inline request text, filed as a new design issue and then worked — exactly one of -issue / -brief is required")
 	fs.BoolVar(&opt.wait, "wait", false,
 		"when the run asks a question, wait on the thread for a reply instead of exiting")
 	registerIssueFlags(fs, cfg, defaultDesignSkill, designTools, local)
 	registerModelFlags(fs, cfg, designModel)
 	fs.BoolVar(&cfg.dryRun, "dry-run", false,
-		"print the claude invocation -issue would get, and exit without running or writing anything")
+		"print the claude invocation -issue would get, or the issue -brief would file, and exit without running or writing anything")
 	fs.Usage = func() {
-		fmt.Fprint(fs.Output(), "Usage: polako design -issue N [flags]\n\n"+
+		fmt.Fprint(fs.Output(), "Usage: polako design (-issue N | -brief \"<text>\") [flags]\n\n"+
 			"Work one design request into a plan document: run the design-plan skill on\n"+
 			"issue N unattended and wait for its PR to merge — or park it for a human.\n"+
+			"-brief files that issue first, labelled design, then works it the same way.\n"+
 			"A question on the thread exits 0; reply there and rerun. Nothing here merges.\n\n"+
 			envUsage+"\nFlags:\n")
 		fs.PrintDefaults()
@@ -90,14 +99,35 @@ func parseDesignFlags(args []string, out io.Writer) (config, designOptions, erro
 	if rest := fs.Args(); len(rest) > 0 {
 		return config{}, opt, fmt.Errorf("unexpected argument %q — design takes flags only; name the issue with -issue N", rest[0])
 	}
-	if opt.issue <= 0 {
-		return config{}, opt, errors.New("design needs -issue N — the number of the issue asking for the design")
+	if err := validateDesignSource(&opt); err != nil {
+		return config{}, opt, err
 	}
 	if err := validateEffort("-effort", cfg.effort); err != nil {
 		return config{}, opt, err
 	}
 	cfg, err := designConfig(cfg, opt, local)
 	return cfg, opt, err
+}
+
+// validateDesignSource is planConfig's either/or on -issue and -brief: exactly
+// one, and a brief short enough to be a request rather than a document. It
+// trims the brief in place, so the filed body never starts or ends with the
+// shell's stray whitespace.
+func validateDesignSource(opt *designOptions) error {
+	opt.brief = strings.TrimSpace(opt.brief)
+	haveIssue := opt.issue > 0
+	haveBrief := opt.brief != ""
+	switch {
+	case haveIssue && haveBrief:
+		return errors.New("-issue and -brief are mutually exclusive — pass an issue number or inline text, not both")
+	case !haveIssue && !haveBrief:
+		return errors.New("design needs something to design from — pass -issue N (an open issue) " +
+			"or -brief \"<one sentence>\"")
+	case len(opt.brief) > planBriefMax:
+		return fmt.Errorf("-brief is %d characters — past %d that is a design document's worth: "+
+			"put it in an issue and pass -issue", len(opt.brief), planBriefMax)
+	}
+	return nil
 }
 
 // designConfig pins what parseFlags pins for work, then the three things that
@@ -135,15 +165,17 @@ func runDesignVerb(args []string) {
 	useWorkSinks(cfg.verbose)
 	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 	defer stop()
-	if err := runDesign(ctx, cfg, opt.issue, os.Stdout); err != nil {
+	if err := runDesign(ctx, cfg, opt, os.Stdout); err != nil {
 		exitOnRunError(err)
 	}
 }
 
 // runDesign is the verb after parsing: preflight, then either the dry-run
-// invocation or the run itself.
-func runDesign(ctx context.Context, cfg config, issue int, out io.Writer) error {
-	if err := designPreflight(ctx, &cfg, issue); err != nil {
+// invocation or the run itself. A dry run from a brief ends in preflight —
+// there is no issue number to print an invocation for.
+func runDesign(ctx context.Context, cfg config, opt designOptions, out io.Writer) error {
+	issue, err := designPreflight(ctx, &cfg, opt)
+	if err != nil || issue == 0 {
 		return err
 	}
 	if cfg.dryRun {
@@ -153,16 +185,35 @@ func runDesign(ctx context.Context, cfg config, issue int, out io.Writer) error 
 }
 
 // designPreflight is preflightShared with no queue gate — the operator named
-// the issue on the command line, the same opt-in -label stands for — then the
-// two labels a design run can write, then the one issue itself.
-func designPreflight(ctx context.Context, cfg *config, issue int) error {
+// the issue on the command line, or wrote it in -brief, the same opt-in
+// -label stands for — then the issue -brief files, then the two labels a
+// design run can write, then the one issue itself. It returns the issue the
+// run works: -issue's, or the number -brief just filed. 0 with a nil error is
+// a dry run from a brief, which files nothing and so has no issue to work.
+func designPreflight(ctx context.Context, cfg *config, opt designOptions) (int, error) {
 	if err := preflightShared(ctx, cfg, nil); err != nil {
-		return err
+		return 0, err
+	}
+	issue := opt.issue
+	if opt.brief != "" {
+		// Before the label declarations below: the create's own retry declares
+		// the one label it needs, and a dry run declares nothing.
+		if cfg.dryRun {
+			cfg.logf("would file an issue titled %q, labelled %s, and work it — nothing filed on a dry run",
+				designIssueTitle(opt.brief), designLabel)
+			return 0, nil
+		}
+		n, err := fileDesignIssue(ctx, *cfg, opt.brief)
+		if err != nil {
+			return 0, fmt.Errorf("could not file the design issue: %w — open it by hand and pass -issue", err)
+		}
+		cfg.logf("filed issue #%d for the brief, labelled %s — rerun with -issue %d if this run stops early", n, designLabel, n)
+		issue = n
 	}
 	// The issue first, so a refusal leaves the repository as it found it.
 	labelled, err := checkDesignIssue(ctx, *cfg, issue)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if !labelled {
 		// Unlabelled but already holding a PR on its branch means work opened
@@ -171,10 +222,10 @@ func designPreflight(ctx context.Context, cfg *config, issue int) error {
 		// labelled issue's PR is safe to take over.
 		pr, err := prForBranch(ctx, *cfg, fmt.Sprintf("%s%d", cfg.branchPrefix, issue))
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if pr != nil {
-			return fmt.Errorf("issue #%d already has PR #%d (%s) from a run without the %s label — "+
+			return 0, fmt.Errorf("issue #%d already has PR #%d (%s) from a run without the %s label — "+
 				"that's implementation work, not a design; open a separate issue for the design",
 				issue, pr.Number, pr.State, designLabel)
 		}
@@ -193,7 +244,36 @@ func designPreflight(ctx context.Context, cfg *config, issue int) error {
 	}
 	cfg.logf("%s — running /%s on issue #%d, polling every %s", cfg.repo, cfg.skill, issue, cfg.poll)
 	settingsBlock(*cfg, designPairs(*cfg))
-	return nil
+	return issue, nil
+}
+
+// designIssueTitle is the title -brief files under: the brief's opening
+// words, cut the way plan cuts a milestone title from one.
+func designIssueTitle(brief string) string {
+	return "design: " + briefTitle(brief)
+}
+
+// fileDesignIssue files the request -brief carries as a design issue and
+// returns its number — the one issue the binary creates without `proposed`:
+// the operator authored it at the command line, and the design label already
+// keeps work off it. Same shape as fileRetireIssue, retry included.
+func fileDesignIssue(ctx context.Context, cfg config, brief string) (int, error) {
+	title := designIssueTitle(brief)
+	body := brief + "\n\n" + designTrailer
+	raw, err := gh(ctx, cfg, "issue", "create", "--title", title, "--body", body, "--label", designLabel)
+	if err != nil {
+		// A repository that has never had a design run has no `design` label
+		// yet, and GitHub refuses to attach one that doesn't exist. Declare it
+		// and retry the one call that failed, as fileRetireIssue does.
+		l := labelByName(designLabel)
+		if cerr := ensureLabel(ctx, cfg, l.name, l.color, l.description); cerr == nil {
+			raw, err = gh(ctx, cfg, "issue", "create", "--title", title, "--body", body, "--label", designLabel)
+		}
+	}
+	if err != nil {
+		return 0, err
+	}
+	return issueNumberFromCreateOutput(raw)
 }
 
 // designIssueView is the one read designPreflight makes of the issue.
