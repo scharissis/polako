@@ -1,0 +1,94 @@
+name: design-plan
+description: >
+  A design request specific enough to need no question should become one plan
+  document under docs/designs/, behind one PR — every claim about the repo
+  resting on a pointer or a run, every drafted ticket carrying all four parts
+  and an estimate, every rejected alternative a reason — and no issue filed.
+prompt: /polako:design-plan 1
+scaffold_script: scaffold.sh
+runs: 1
+max_turns: 80
+timeout_seconds: 1800
+tags:
+  - skill
+  - planning
+graders:
+  - type: file_exists
+    name: pr_opened
+    path: .eval/pr-body.md
+
+  - type: llm
+    name: one_design_doc_and_nothing_else
+    focus: .eval/pr-files.txt
+    criteria: >
+      The PR's branch adds exactly one file, and it sits directly under
+      docs/designs/ with a .md extension. Fail if it changes greet.sh,
+      test.sh, README.md or any other file, adds a second file, or if
+      .eval/pr-files.txt was never created.
+
+  - type: llm
+    name: the_doc_has_the_template
+    focus: the added file in .eval/pr-diff.txt
+    criteria: >
+      The document has a title line, a `Scope: … · Behavior change: …` line
+      under it, and these sections in this order: What exists today, The
+      answer in one paragraph, What this may read and write, Drafted tickets,
+      Considered and not proposed. Fail if a section is missing, or if the
+      document carries a `Status:` or `Tracking:` line.
+
+  - type: llm
+    name: exists_today_rests_on_pointers_or_runs
+    focus: the What exists today section of the added file in .eval/pr-diff.txt
+    criteria: >
+      Every claim about the current repo names greet.sh, test.sh or
+      README.md (a file, a line or a function), or describes a command the
+      run executed and what it showed. Fail on a claim with neither behind
+      it, or on a pasted terminal transcript rather than a described result.
+
+  - type: llm
+    name: tickets_are_complete
+    focus: the Drafted tickets section of the added file in .eval/pr-diff.txt
+    criteria: >
+      Every ticket has a numbered imperative title and all of Problem, Shape,
+      Done when and an `Estimate: S`, `M` or `L` line, and its Shape names the
+      files it changes. Fail if any ticket misses a part, quotes money, or is
+      plainly too big for one PR (for example "implement all of it").
+
+  - type: llm
+    name: alternatives_have_reasons
+    focus: the Considered and not proposed section of the added file in .eval/pr-diff.txt
+    criteria: >
+      The section lists at least one alternative, and every one says why it
+      wasn't chosen. Fail on a bare list of alternatives with no reasons.
+
+  - type: llm
+    name: pr_body_hands_off
+    focus: the recorded PR body at .eval/pr-body.md
+    criteria: >
+      The body has Measured, Decided and Next sections (Left open is optional
+      when nothing is left open). Next names `polako plan -design
+      docs/designs/<file>` with the same file the PR adds per
+      .eval/pr-files.txt. The last line is exactly "Closes #1". Fail if any of
+      those is missing or wrong.
+
+  - type: llm
+    name: write_surface_held
+    focus: .eval/gh-calls.log
+    criteria: >
+      The log holds reads (`gh issue view`, `gh issue list`, `gh search
+      issues`, `gh pr list`), at most `gh issue comment` and `gh issue edit`
+      for a question, and one `gh pr create`. Fail on any `gh issue create`,
+      `gh pr merge` or `gh api` call: a design run files no issues and merges
+      nothing.
+
+  - type: llm
+    name: no_question_was_asked
+    focus: whether the run stopped to ask anything, per .eval/labels.log
+    criteria: >
+      The request settles every decision a design of this size needs, so the
+      run should not have applied the awaiting-answer label. Fail if
+      labels.log records "add awaiting-answer" without a matching "remove
+      awaiting-answer".
+
+  - type: tool_used
+    tool: Skill

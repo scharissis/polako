@@ -19,13 +19,13 @@ claude plugin install polako@scharissis
 `polako` is the plugin, `scharissis` the marketplace it came from — the name
 declared in [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json),
 not the GitHub username, though here they happen to match. The plugin ships
-three skills — `implement-issue`, `plan-backlog` and `review-health` — for a
-few dozen tokens of always-on context; a skill's body loads only when it
-fires.
+four skills — `implement-issue`, `plan-backlog`, `review-health` and
+`design-plan` — for a few dozen tokens of always-on context; a skill's body
+loads only when it fires.
 
 Restart Claude Code, and `/polako:implement-issue 48`,
-`/polako:plan-backlog docs/VISION.md` and `/polako:review-health .` are
-available.
+`/polako:plan-backlog docs/VISION.md`, `/polako:review-health .` and
+`/polako:design-plan 52` are available.
 
 Note the namespace. Claude prefixes plugin skills with the plugin name, so the
 command is *not* `/implement-issue` on this path. The supervisor's `-skill`
@@ -182,14 +182,14 @@ commands with `--scope project` inside that project and commit the resulting
 
 If you'd rather not involve the plugin system at all, copy the skill
 directories in. They behave identically; they just won't update themselves.
-Take all three, or only `implement-issue` if you don't want the planning half.
+Take all four, or only `implement-issue` if you don't want the planning half.
 
 ```bash
-cp -r skills/implement-issue skills/plan-backlog skills/review-health ~/.claude/skills/
+cp -r skills/implement-issue skills/plan-backlog skills/review-health skills/design-plan ~/.claude/skills/
 ```
 
 ```powershell
-Copy-Item -Recurse skills\implement-issue,skills\plan-backlog,skills\review-health $HOME\.claude\skills\
+Copy-Item -Recurse skills\implement-issue,skills\plan-backlog,skills\review-health,skills\design-plan $HOME\.claude\skills\
 ```
 
 A skill installed this way is invoked bare, with no plugin prefix — so

@@ -1,6 +1,6 @@
 # Eval suite for the shipped skills
 
-Nine cases that grade what a run *does*, not what a `SKILL.md` says. Each one
+Ten cases that grade what a run *does*, not what a `SKILL.md` says. Each one
 scaffolds a scratch git repo, points a stand-in `gh` at fixtures, runs a real
 skill invocation, and scores the artifacts left behind.
 
@@ -15,6 +15,7 @@ skill invocation, and scores the artifacts left behind.
 | `push-blocked` | implement-issue | a rejected push is described in the run's own words, in a question on the thread — never with the rejection's raw text, which names a key, a home path and a username |
 | `plan-vision` | plan-backlog | a vision document becomes labelled, sized, parented proposals — and the gap the backlog already covers is not re-proposed |
 | `review-health` | review-health | a repo's planted structural problems become labelled, sized proposals, each resting on a measurement or a named location, the missing size gate proposed as its own issue, and the overlap the backlog already covers left alone |
+| `design-plan` | design-plan | a design request becomes one plan document under `docs/designs/` behind one PR — template complete, every claim pointered or measured, every ticket sized — and no issue filed |
 
 `one-turn` is the slow one, and knowingly so: its issue asks for before and
 after numbers from a benchmark that takes a minute and a quarter each time, and
@@ -47,6 +48,11 @@ survive the audit, and the same cruft inside polako's own CLAUDE.md block,
 which has to be left alone. Both grade
 what got created — labels, parenting, body sections, sizes — plus the one thing
 these runs must never do, which is write anything but issues.
+
+`design-plan` is the reverse: its deliverable is a file on a branch, not an
+issue. The stand-in `gh pr create` records the PR's changed files and diff
+(`.eval/pr-files.txt`, `.eval/pr-diff.txt`), since the judge reads only
+`.eval/`, and the graders read the plan document from there.
 
 ## Running it
 

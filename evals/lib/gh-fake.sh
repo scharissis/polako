@@ -163,6 +163,10 @@ sys.exit(1)
       echo "$out" >&2
       exit 1
     fi
+    # What a reviewer would see on the PR. The judge reads only .eval/, and a
+    # design-plan run's whole deliverable is a file on this branch.
+    git -C "$repo" diff --name-status "main...$head" > "$record/pr-files.txt" 2>&1 || true
+    git -C "$repo" diff "main...$head" > "$record/pr-diff.txt" 2>&1 || true
   fi
   # Same reasoning as body_of: record whatever was given, including nothing, and
   # let the graders be the ones to object.

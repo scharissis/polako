@@ -31,7 +31,9 @@ import re
 import subprocess
 import sys
 
-EVIDENCE_FILE_CAP = 4000  # chars per quoted artifact, plenty for this suite
+# chars per quoted artifact. 4000 was plenty until design-plan, whose whole
+# deliverable is one plan document the judge reads from pr-diff.txt.
+EVIDENCE_FILE_CAP = 16000
 RESULT_HEAD = 200         # chars of each tool result kept in the timeline
 
 
