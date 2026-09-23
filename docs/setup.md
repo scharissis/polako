@@ -65,6 +65,13 @@ in a script.
 - Every label polako manages — `needs-human`, `proposed`, `awaiting-answer` —
   plus `-label`'s own gate label when one is given and isn't already in that
   set. A missing one prints the exact `gh label create` command to fix it.
+  The gate label is also checked against the marker `setup -apply` stamps on
+  it (its description): one that exists but predates this feature, or was
+  made outside `setup` entirely, reads `exists, not marked as the gate
+  label` rather than plain `ok` — the same description `gh label edit`
+  fixes below. `polako status` reads this marker back to scope itself with
+  no `-label` given at all, so a gate label `setup` never touched is
+  invisible to it until marked.
 - `.gitignore` covers `/.worktrees/`, `/PLAN.md` and `/.polako-scratch/` —
   where `implement-issue` puts its own worktree, resume note and scratch
   files, so a fresh repo can't accidentally commit them. Not required: a
@@ -148,6 +155,13 @@ above never checked a label nobody named yet.
 
 A create that fails says it needs write access to the repository, never the
 raw `gh` error.
+
+A gate label that already exists but isn't marked — `exists, not marked as
+the gate label` above — gets its own question after the create pass: `mark
+"ready" as the gate label? [Y/n]`. Answering yes runs `gh label edit` to
+stamp the same marker a fresh create gets, so `polako status` can find it
+too. `-apply -yes` on an unmarked gate label makes exactly one `gh label
+edit` call.
 
 ## Proposing repo files: `-apply`
 
