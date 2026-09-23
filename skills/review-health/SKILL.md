@@ -146,7 +146,7 @@ one it has to go rediscover.
 
 ## Phase 2 — Shape the work
 
-**Spend your thinking here.** Decomposition is the whole product: a wrong cut
+Decomposition is the whole product: a wrong cut
 costs every run downstream, and no amount of careful wording later recovers
 from it.
 

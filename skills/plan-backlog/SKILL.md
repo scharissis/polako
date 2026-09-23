@@ -120,7 +120,7 @@ become the `## Pointers` section, and they are what make the difference between
 an issue an unattended run can start on and one it has to go discover first.
 
 ## Phase 2 — Shape the work
-**Spend your thinking here.** Decomposition is the whole product: a wrong cut
+Decomposition is the whole product: a wrong cut
 costs every run downstream, and no amount of careful wording later recovers
 from it.
 
@@ -200,13 +200,13 @@ earlier in this same run:
 
 Creation order already guarantees a blocker exists by the time it is named, so
 nothing forward-references. That spelling is the only issue-creating form to
-use — it is what a future unattended `plan` verb will grant, and nothing wider —
-and `--label proposed` is in every single invocation: an unlabelled proposal is
-one an unattended run will pick up without anybody having chosen it. The `gh`
-write surface widens by exactly this one flag: `--blocked-by` on
-`gh issue create` and nothing else. No call that revisits an issue already
-created — none that could clear a dependency as easily as set one — which is
-the same reason a plan run never edits a thread it did not just open. Delete
+use — it is what `polako plan` grants, and nothing wider — and `--label
+proposed` is in every single invocation: an unlabelled proposal is one an
+unattended run will pick up without anybody having chosen it. The `gh` write
+surface widens by exactly the two flags named above and nothing that revisits
+an issue already created — none that could clear a dependency as easily as set
+one — which is the same reason a plan run never edits a thread it did not just
+open. Delete
 `ISSUE_BODY.md` when you are done; it is a scratch file and never belongs in a
 commit.
 
