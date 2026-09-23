@@ -166,14 +166,17 @@ in the PR body rather than doing it quietly.
   `awaiting-answer` edits — nothing `work` can't already do, on one issue.
   The skill never runs `gh issue create` (the document is the deliverable;
   `plan` files the tickets later) and never touches the evidence ref (there
-  is nothing to screenshot). `-brief` adds the one write `work` lacks: it
-  files the request issue itself, labelled `design` and never `proposed` —
-  the only issue the binary files without `proposed`. The operator authored
-  it at the command line, so it is opted in the way `-issue N` opts a thread
-  in, and `design` already keeps `work` off it; a `proposed` label there
-  would gate the operator's own request behind the operator. That is the
-  whole amendment to the previous invariant: everything else that creates
-  issues still applies `proposed`.
+  is nothing to screenshot). The binary adds two writes `work` lacks, both
+  label-shaped. Preflight puts `design` on a `-issue N` named without it
+  (`labelDesignIssue`), so `work` leaves the issue alone from then on —
+  naming it at the command line is the human act, the label only records
+  it. And `-brief` files the request issue itself, labelled `design` and
+  never `proposed` — the only issue the binary files without `proposed`.
+  The operator authored it at the command line, so it is opted in the way
+  `-issue N` opts a thread in, and `design` already keeps `work` off it; a
+  `proposed` label there would gate the operator's own request behind the
+  operator. That is the whole amendment to the previous invariant:
+  everything else that creates issues still applies `proposed`.
 - **A plan or health run creates issues and nothing else.** No commits, no
   pushes, no PRs, no edits to threads that already exist — a command that can
   add `proposed` can strip it too, which is self-approval. The whole

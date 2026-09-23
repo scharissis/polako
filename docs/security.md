@@ -126,11 +126,12 @@ and [`health`](reference.md#auditing-repository-health-unattended-polako-health)
 cites the open backlog), and every caveat above holds: prefix not signature,
 narrowing not sandbox. Its write surface is `work`'s on that one issue —
 the `issue-N` branch, one PR adding a file under `docs/designs/`, the
-thread's question and pinned label edits — plus, under `-brief`, the request
-issue it files itself. That issue is the one the binary creates without
-`proposed`: you typed it at the command line, and the `design` label already
-keeps `work` off it. The skill never creates an issue and never touches the
-evidence ref.
+thread's question and pinned label edits — plus two label writes of its
+own: preflight adds `design` to a `-issue N` that lacks it, and `-brief`
+files the request issue itself. That issue is the one the binary creates
+without `proposed`: you typed it at the command line, and the `design`
+label already keeps `work` off it. The skill never creates an issue and
+never touches the evidence ref.
 
 **No queue, so no public-repo gate.** `work` refuses an unfiltered public
 backlog because anyone who can open an issue can feed it. `design` works
