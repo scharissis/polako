@@ -153,6 +153,8 @@ func toStatusDocLastShift(ls *lastShift) *statusDocLastShift {
 	}
 	return &statusDocLastShift{
 		Shift: ls.id, Started: ls.start.UTC().Format(time.RFC3339), SpanSeconds: int64(ls.span.Seconds()),
-		Merged: ls.merged, Parked: ls.parked, CostUSD: ls.cost,
+		// Cents, as the text line prints it: a float sum of per-run costs
+		// otherwise leaks 0.30000000000000004 into the schema.
+		Merged: ls.merged, Parked: ls.parked, CostUSD: round2(ls.cost),
 	}
 }
