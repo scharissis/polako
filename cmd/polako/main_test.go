@@ -860,6 +860,34 @@ func fakeClaude(mode string) int {
 			return 1
 		}
 		return fakeClaude("stream")
+	case "design", "designasks":
+		// A `polako design` run. The prompt has to be the bare slash command —
+		// no `no-evidence`, which design-plan doesn't declare — so anything else
+		// fails the run loudly. "design" ships straight to a merged PR;
+		// "designasks" asks first and ships on the rerun, the "asks" shape.
+		want := "/" + defaultDesignSkill + " " + promptIssue()
+		if got := promptText(); got != want {
+			fmt.Fprintf(os.Stderr, "fake claude: prompt %q, want exactly %q\n", got, want)
+			return 1
+		}
+		var err error
+		if mode == "design" {
+			err = plantPR("MERGED")
+		} else {
+			err = fakeSkillEffect("asks")
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		// The session has to list design-plan, or the missing-skill tripwire
+		// kills the run before it starts.
+		emit(`{"type":"system","subtype":"init","session_id":"sess-design","model":"claude-opus-5",` +
+			`"slash_commands":["polako:design-plan","design-plan"]}`)
+		emit(`{"type":"result","subtype":"success","session_id":"sess-design","duration_ms":1000,` +
+			`"num_turns":3,"total_cost_usd":0.5,"result":"Opened a PR for the design.",` +
+			`"usage":{"input_tokens":100,"output_tokens":200}}`)
+		return 0
 	case "fixci":
 		// A CI remediation that found the cause and pushed.
 		if err := fakeCIFix(); err != nil {

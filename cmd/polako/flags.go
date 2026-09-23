@@ -327,6 +327,7 @@ func verbUsage(w io.Writer) {
 			"  work    work the backlog: run the skill per issue, wait for each merge, unattended\n"+
 			"  plan    propose a backlog from a design document, behind the `proposed` label, unattended\n"+
 			"  health  propose a backlog from the repository's own shape, behind the `proposed` label, unattended\n"+
+			"  design  work one design request into a plan document behind a PR, and wait for its merge, unattended\n"+
 			"  status  print where the backlog stands, from GitHub (read-only)\n"+
 			"  stats   report on the run data already recorded (local, read-only)\n"+
 			"  tidy    reclaim the worktrees and branches of finished issues (dry-run by default)\n"+
@@ -340,60 +341,28 @@ func parseFlags() config {
 	var cfg config
 	var skip, metrics, logSpec string
 	var showVersion bool
-	flag.BoolVar(&showVersion, "version", false, "print the version of this binary and exit")
-	flag.StringVar(&cfg.dir, "dir", ".", "path to the repository's main checkout")
-	flag.StringVar(&cfg.claudeBin, "claude", "claude", "claude binary to invoke")
-	flag.StringVar(&cfg.skill, "skill", defaultSkill, "skill to run per issue")
-	flag.StringVar(&cfg.branchPrefix, "branch-prefix", "issue-", "branch name prefix the skill uses")
-	flag.StringVar(&cfg.label, "label", "", "only process issues carrying this label (empty = all)")
-	flag.BoolVar(&cfg.ungated, "ungated", false,
+	fs := flag.CommandLine
+	fs.BoolVar(&showVersion, "version", false, "print the version of this binary and exit")
+	registerIssueFlags(fs, &cfg, defaultSkill, defaultTools, &metrics, &logSpec)
+	fs.StringVar(&cfg.label, "label", "", "only process issues carrying this label (empty = all)")
+	fs.BoolVar(&cfg.ungated, "ungated", false,
 		"work a public repository without a -label gate (anyone who can open an issue can feed the queue)")
-	flag.BoolVar(&cfg.ignoreSkew, "ignore-skew", false,
-		"start even when the installed skill is an older release than this binary (default: refuse — see docs/install.md)")
-	flag.StringVar(&cfg.tools, "tools", defaultTools,
-		"comma-separated --allowedTools for unattended runs")
-	flag.StringVar(&cfg.addTools, "add-tools", "",
-		"extra --allowedTools entries, appended to -tools instead of replacing it")
-	flag.StringVar(&cfg.permissionMode, "permission-mode", "acceptEdits", "claude --permission-mode")
-	registerPolicyFlags(&cfg)
-	flag.DurationVar(&cfg.poll, "poll", 5*time.Minute, "interval between GitHub checks while waiting")
-	flag.IntVar(&cfg.retries, "retries", 3, "resume attempts after a crashed claude run (nonzero exit)")
-	flag.DurationVar(&cfg.retryWait, "retry-wait", 30*time.Second, "wait before each resume attempt")
-	flag.DurationVar(&cfg.stall, "stall", 15*time.Minute, "kill and resume a run with no output events for this long (0 disables)")
-	flag.DurationVar(&cfg.heartbeat, "heartbeat", 5*time.Minute,
-		"say a one-line note while a run is quiet on the terminal, repeated every interval of continued silence (0 disables)")
-	flag.Float64Var(&cfg.maxCost, "max-cost", 0,
-		"park an issue once this shift's runs on it have cost this many dollars (0 disables)")
-	flag.DurationVar(&cfg.maxIssueTime, "max-issue-time", defaultMaxIssueTime,
-		"park an issue once this shift's runs on it have taken this much run time (0 disables)")
-	flag.Float64Var(&cfg.maxSessionCost, "max-session-cost", 0,
+	registerPolicyFlags(fs, &cfg)
+	fs.Float64Var(&cfg.maxSessionCost, "max-session-cost", 0,
 		"end the shift between issues once its runs have cost this many dollars (0 disables)")
-	flag.IntVar(&cfg.maxSessionUsage, "max-session-usage", 0,
+	fs.IntVar(&cfg.maxSessionUsage, "max-session-usage", 0,
 		"pause the shift between issues while the plan's current-session usage is at or over this percent, waiting the pool's own reset out then carrying on (0 disables)")
-	flag.IntVar(&cfg.maxWeekUsage, "max-week-usage", 0,
+	fs.IntVar(&cfg.maxWeekUsage, "max-week-usage", 0,
 		"pause the shift between issues while the plan's current-week usage is at or over this percent, waited out the same way — a weekly reset can be days off (0 disables)")
-	flag.StringVar(&skip, "skip", "", "comma-separated issue numbers to skip (head-of-line escape hatch)")
-	flag.BoolVar(&cfg.once, "once", false,
+	fs.StringVar(&skip, "skip", "", "comma-separated issue numbers to skip (head-of-line escape hatch)")
+	fs.BoolVar(&cfg.once, "once", false,
 		"process a single issue to a merge, a park or a question, then exit")
-	flag.BoolVar(&cfg.strictOrder, "strict-order", false,
+	fs.BoolVar(&cfg.strictOrder, "strict-order", false,
 		"work issues in strict ascending order: wait on one that asked a question instead of moving past it")
-	flag.BoolVar(&cfg.dryRun, "dry-run", false,
+	fs.BoolVar(&cfg.dryRun, "dry-run", false,
 		"resolve the next issue, print the claude invocation it would get, and exit without running or writing anything")
-	flag.StringVar(&cfg.notifyCmd, "notify", "",
-		"command to run when polako needs a human, with context in "+notifyPrefix+"* (see docs/reference.md)")
-	flag.BoolVar(&cfg.remote, "remote", true,
-		"register each run with Remote Control, watchable and typeable from claude.ai/code or the phone")
-	flag.BoolVar(&cfg.visualEvidence, "visual-evidence", true,
+	fs.BoolVar(&cfg.visualEvidence, "visual-evidence", true,
 		"let the skill publish before/after screenshots to the polako-evidence ref (false appends no-evidence to the skill invocation)")
-	flag.StringVar(&cfg.tag, "run-tag", "", "label recorded with every run, for comparing one batch against another")
-	flag.BoolVar(&cfg.postSummary, "post-summary", false,
-		"comment one line of run numbers on each merged PR (runs, tokens, dollars, wall time)")
-	flag.StringVar(&metrics, "metrics", "",
-		`directory for run-data records, or "off" (default ~/.polako/metrics)`)
-	flag.StringVar(&logSpec, "log", "",
-		`directory for the full per-shift log, or "off" (default ~/.polako/logs)`)
-	flag.BoolVar(&cfg.verbose, "verbose", false,
-		"mirror the full claude event stream and its stderr to the terminal, not only the shift log")
 	flag.Usage = func() {
 		fmt.Fprint(flag.CommandLine.Output(),
 			"Usage: polako work [flags]\n\n"+
@@ -425,6 +394,60 @@ func parseFlags() config {
 		os.Exit(0)
 	}
 
+	if err := pinConfig(&cfg, metrics, logSpec); err != nil {
+		sinks.fatal("%v", err)
+	}
+	cfg.verb = "work"
+	cfg.skip = parseSkip(skip)
+	return cfg
+}
+
+// registerIssueFlags registers the flags that steer one issue's runs — every
+// one processIssue reads — shared by work and design so the two verbs spell
+// and explain each the same way. skill and tools are the only defaults that
+// differ between them. metrics and logSpec land in the caller's locals for
+// pinConfig; -dry-run stays with each verb, since what it previews differs.
+func registerIssueFlags(fs *flag.FlagSet, cfg *config, skill, tools string, metrics, logSpec *string) {
+	fs.StringVar(&cfg.dir, "dir", ".", "path to the repository's main checkout")
+	fs.StringVar(&cfg.claudeBin, "claude", "claude", "claude binary to invoke")
+	fs.StringVar(&cfg.skill, "skill", skill, "skill to run per issue")
+	fs.StringVar(&cfg.branchPrefix, "branch-prefix", "issue-", "branch name prefix the skill uses")
+	fs.BoolVar(&cfg.ignoreSkew, "ignore-skew", false,
+		"start even when the installed skill is an older release than this binary (default: refuse — see docs/install.md)")
+	fs.StringVar(&cfg.tools, "tools", tools,
+		"comma-separated --allowedTools for unattended runs")
+	fs.StringVar(&cfg.addTools, "add-tools", "",
+		"extra --allowedTools entries, appended to -tools instead of replacing it")
+	fs.StringVar(&cfg.permissionMode, "permission-mode", "acceptEdits", "claude --permission-mode")
+	fs.DurationVar(&cfg.poll, "poll", 5*time.Minute, "interval between GitHub checks while waiting")
+	fs.IntVar(&cfg.retries, "retries", 3, "resume attempts after a crashed claude run (nonzero exit)")
+	fs.DurationVar(&cfg.retryWait, "retry-wait", 30*time.Second, "wait before each resume attempt")
+	fs.DurationVar(&cfg.stall, "stall", 15*time.Minute, "kill and resume a run with no output events for this long (0 disables)")
+	fs.DurationVar(&cfg.heartbeat, "heartbeat", 5*time.Minute,
+		"say a one-line note while a run is quiet on the terminal, repeated every interval of continued silence (0 disables)")
+	fs.Float64Var(&cfg.maxCost, "max-cost", 0,
+		"park an issue once this shift's runs on it have cost this many dollars (0 disables)")
+	fs.DurationVar(&cfg.maxIssueTime, "max-issue-time", defaultMaxIssueTime,
+		"park an issue once this shift's runs on it have taken this much run time (0 disables)")
+	fs.StringVar(&cfg.notifyCmd, "notify", "",
+		"command to run when polako needs a human, with context in "+notifyPrefix+"* (see docs/reference.md)")
+	fs.BoolVar(&cfg.remote, "remote", true,
+		"register each run with Remote Control, watchable and typeable from claude.ai/code or the phone")
+	fs.StringVar(&cfg.tag, "run-tag", "", "label recorded with every run, for comparing one batch against another")
+	fs.BoolVar(&cfg.postSummary, "post-summary", false,
+		"comment one line of run numbers on each merged PR (runs, tokens, dollars, wall time)")
+	fs.StringVar(metrics, "metrics", "",
+		`directory for run-data records, or "off" (default ~/.polako/metrics)`)
+	fs.StringVar(logSpec, "log", "",
+		`directory for the full per-shift log, or "off" (default ~/.polako/logs)`)
+	fs.BoolVar(&cfg.verbose, "verbose", false,
+		"mirror the full claude event stream and its stderr to the terminal, not only the shift log")
+}
+
+// pinConfig fills in everything no flag sets, once the flags are parsed: the
+// recorder and shift log, the shift id, and the seams tests override. Shared
+// by work and design so a design run is given exactly what a work run is.
+func pinConfig(cfg *config, metrics, logSpec string) error {
 	// A dry run writes nothing, run data and shift log included. Both are
 	// preferences an operator may well have set in their environment and
 	// forgotten, and a record of a run that never happened is worse than no
@@ -436,19 +459,26 @@ func parseFlags() config {
 	cfg.rec = newRecorder(metrics)
 	cfg.logDir = resolveLogDir(logSpec)
 	cfg.shiftID = newShiftID()
-	cfg.verb = "work"
 	cfg.queue = new(queueMemo)
 	cfg.ghBin = "gh"
 	cfg.ghRetryWait = ghRetryDelay
 	cfg.resumeCeiling = defaultResumeCeiling
 	cfg.usageTimeout = defaultUsageProbeTimeout
-	cfg.skip = parseSkip(skip)
 	abs, err := filepath.Abs(cfg.dir)
 	if err != nil {
-		sinks.fatal("resolving -dir: %v", err)
+		return fmt.Errorf("resolving -dir: %w", err)
 	}
 	cfg.dir = abs
-	return cfg
+	return nil
+}
+
+// registerModelFlags registers -model and -effort, the two dispatch knobs
+// every verb that runs issues takes. The size and remediation policy flags
+// in registerPolicyFlags are work's alone.
+func registerModelFlags(fs *flag.FlagSet, cfg *config, modelDefault string) {
+	fs.StringVar(&cfg.model, "model", modelDefault, "claude --model for every run (empty = whatever the CLI defaults to)")
+	fs.StringVar(&cfg.effort, "effort", "",
+		"claude --effort for every run — one of "+strings.Join(effortLevels, ", ")+" (empty = whatever the CLI defaults to)")
 }
 
 // registerPolicyFlags registers the six flags that steer which model and how
@@ -456,17 +486,15 @@ func parseFlags() config {
 // sizebudget_test.go's funcBudget. Called before applyEnvDefaults, which
 // needs every flag already registered to set its default from the
 // environment.
-func registerPolicyFlags(cfg *config) {
-	flag.StringVar(&cfg.model, "model", "", "claude --model for every run (empty = whatever the CLI defaults to)")
-	flag.StringVar(&cfg.effort, "effort", "",
-		"claude --effort for every run — one of "+strings.Join(effortLevels, ", ")+" (empty = whatever the CLI defaults to)")
-	flag.StringVar(&cfg.remediationModel, "remediation-model", "",
+func registerPolicyFlags(fs *flag.FlagSet, cfg *config) {
+	registerModelFlags(fs, cfg, "")
+	fs.StringVar(&cfg.remediationModel, "remediation-model", "",
 		"claude --model for remediation runs against an open PR — rebase, red-check fix, review reply (empty = the -model cell, then the CLI default)")
-	flag.StringVar(&cfg.remediationEffort, "remediation-effort", "",
+	fs.StringVar(&cfg.remediationEffort, "remediation-effort", "",
 		"claude --effort for remediation runs against an open PR — one of "+strings.Join(effortLevels, ", ")+" (empty = the -effort cell, then the CLI default)")
-	flag.StringVar(&cfg.effortBySize, "effort-by-size", "",
+	fs.StringVar(&cfg.effortBySize, "effort-by-size", "",
 		"claude --effort by the issue's Estimate: line, e.g. S=medium,L=max — SIZE one of S,M,L, level one of "+strings.Join(effortLevels, ", ")+"; below an effort: label, above -effort; implementation runs only (empty = off, no body read)")
-	flag.StringVar(&cfg.modelBySize, "model-by-size", "",
+	fs.StringVar(&cfg.modelBySize, "model-by-size", "",
 		"claude --model by the issue's Estimate: line, e.g. S=sonnet,L=opus — SIZE one of S,M,L; below a model: label, above -model; implementation runs only (empty = off, no body read)")
 }
 

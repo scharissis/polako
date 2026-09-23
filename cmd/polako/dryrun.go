@@ -64,6 +64,14 @@ func dryRun(ctx context.Context, cfg config, out io.Writer) error {
 		cfg.logf("no open issues — nothing to work")
 		return nil
 	}
+	return printIssueInvocation(ctx, cfg, issue, out)
+}
+
+// printIssueInvocation is the half of a dry run that is about one issue
+// already chosen: the PR it would wait on, or the exact invocation it would
+// get. Shared with `polako design -dry-run`, which names its issue rather
+// than resolving one, so both print what a real run would do the same way.
+func printIssueInvocation(ctx context.Context, cfg config, issue int, out io.Writer) error {
 	// Restart safety is the first thing an issue is put through, and the answer
 	// an operator most wants from a dry run: an issue whose branch already has
 	// a PR never gets a claude run at all.
