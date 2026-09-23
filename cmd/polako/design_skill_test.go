@@ -263,7 +263,12 @@ func TestDesignSkillPRBodyNamesTheNextCommand(t *testing.T) {
 	t.Parallel()
 	skill := designSkill(t)
 
-	at := 0
+	// Anchored at Phase 6: PLAN.md's own `## Measured` and `## Decided`
+	// appear earlier and would otherwise satisfy the search.
+	at := strings.Index(skill, "## Phase 6")
+	if at < 0 {
+		t.Fatal("SKILL.md no longer has a Phase 6, where the PR body is spelled")
+	}
 	for _, h := range []string{"## Measured", "## Decided", "## Left open", "## Next"} {
 		n := strings.Index(skill[at:], h)
 		if n < 0 {
