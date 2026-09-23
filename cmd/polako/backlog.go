@@ -236,7 +236,9 @@ func (q issueQueues) open() []int {
 // structural and outranks anything written on it. Needs-human beats proposed,
 // because parking is a judgement a human has already made about that issue —
 // which also keeps the ignoring-proposals line honest, since every issue it
-// counts really would queue if the label came off. Design sits below both —
+// counts really would queue if the label came off — bar one that also carries
+// design, which moves to the design row instead; nothing polako files carries
+// both, so that line stays a hand-labelling edge. Design sits below both —
 // a parked design request still lists as parked, and a proposed one is still
 // nobody's to act on, since exclusion beats inclusion — and above
 // awaiting-answer, so a design request mid-question is never handed to
