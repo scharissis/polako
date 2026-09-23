@@ -92,29 +92,21 @@ func checkLabelDef(ctx context.Context, cfg config, reposOK bool, l labelDef) se
 		return setupRow{name: l.name, status: setupUnknown, required: l.required,
 			detail: "the repository could not be read"}
 	}
-	if l.isGateLabel {
-		desc, exists, err := labelDescription(ctx, cfg, l.name)
-		switch {
-		case err != nil:
-			return setupRow{name: l.name, status: setupUnknown, required: l.required, detail: err.Error()}
-		case !exists:
-			return setupRow{name: l.name, status: setupMissing, required: l.required,
-				detail: fmt.Sprintf("gh label create %s --color %s --description %q", l.name, l.color, l.description)}
-		case desc != gateLabelDescription:
-			return setupRow{name: l.name, status: setupOK, required: l.required, detail: unmarkedGateLabelDetail}
-		default:
-			return setupRow{name: l.name, status: setupOK, required: l.required}
-		}
-	}
-	exists, err := labelExists(ctx, cfg, l.name)
+	// labelDescription over labelExists even for a non-gate def: it reads the
+	// same endpoint and the description comes back either way, so the
+	// err/missing cases below are the one pair of returns every def shares
+	// rather than two copies that would otherwise drift apart.
+	desc, exists, err := labelDescription(ctx, cfg, l.name)
 	switch {
 	case err != nil:
 		return setupRow{name: l.name, status: setupUnknown, required: l.required, detail: err.Error()}
-	case exists:
-		return setupRow{name: l.name, status: setupOK, required: l.required}
-	default:
+	case !exists:
 		return setupRow{name: l.name, status: setupMissing, required: l.required,
 			detail: fmt.Sprintf("gh label create %s --color %s --description %q", l.name, l.color, l.description)}
+	case l.isGateLabel && desc != gateLabelDescription:
+		return setupRow{name: l.name, status: setupOK, required: l.required, detail: unmarkedGateLabelDetail}
+	default:
+		return setupRow{name: l.name, status: setupOK, required: l.required}
 	}
 }
 
