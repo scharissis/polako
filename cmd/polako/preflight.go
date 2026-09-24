@@ -194,8 +194,9 @@ func preflightPairs(cfg config) [][2]string {
 		pairs = append(pairs, [2]string{"queue", fmt.Sprintf("label %q", cfg.label)})
 	}
 	if line := modelEffortLine(cfg); line != "" {
-		// One row for both dispatch knobs. The environment can set either
-		// (POLAKO_MODEL, POLAKO_EFFORT), so an operator who forgot the export
+		// One row for every model and effort knob. The environment can set
+		// any of them (POLAKO_MODEL, POLAKO_REMEDIATION_EFFORT, ...), so an
+		// operator who forgot the export
 		// should not have to work out why every run is on a model they did not
 		// type — the same reason -post-summary earns a row.
 		pairs = append(pairs, [2]string{"model", line})
