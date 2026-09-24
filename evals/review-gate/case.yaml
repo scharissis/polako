@@ -1,121 +1,129 @@
+schema_version: "1.0"
 name: review-gate
 description: >
   The review gate is mandatory and it comes before the PR. This case grades the
   ordering, not the code: a gate that runs after `gh pr create` reviews a change
   a human is already looking at.
-prompt: /polako:implement-issue 1
-scaffold_script: scaffold.sh
-runs: 1
-max_turns: 80
-timeout_seconds: 1800
 tags:
   - skill
   - gate
+runs: 1
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: /polako:implement-issue 1
+  max_turns: 80
+  timeout_seconds: 1800
+  # defaultTools (flags.go), plus Agent, which /code-review's finders run as.
+  # The gated ones only reach the run through evals/lib/grants.sh, which also
+  # grants ListAgents for the gate's completion check.
+  allowed_tools:
+    - Read
+    - Write
+    - Edit
+    - Glob
+    - Grep
+    - TodoWrite
+    - Skill
+    - Agent
+    - Bash
+  # The CLI turns CLAUDE.md loading off for a run, so the workspace can't say
+  # where the project is. This says it instead.
+  append_system_prompt: >
+    The project to work on is the git checkout at ./repo, below the directory
+    you start in. Change into it before doing anything else: the directory you
+    start in is not the project. Worktrees this run creates belong inside it,
+    at ./repo/.worktrees/.
+# Every grader here is about the middle of a long run, and the CLI shows an
+# llm grader's judge only the first and last dozen events. So the order is
+# checked mechanically over the whole trace, and what the review found is read
+# from PLAN.md, where SKILL.md's Phase 3 step 2 has the run write it down.
 graders:
   - type: file_exists
     name: pr_opened
     path: .eval/pr-body.md
 
-  - type: llm
+  # A review of either kind, /code-review or the cheap-path self-review, ends
+  # in a "Reviewed through: <sha>" line in PLAN.md. No `gh pr create` may come
+  # before the first one. A placeholder "Reviewed through: pending" doesn't
+  # count: the review behind it hasn't finished.
+  - type: regex
     name: review_ran_before_the_pr
-    focus: the order of the review gate and the PR in the transcript
-    criteria: >
-      The run reviewed its own diff before it ran `gh pr create` — either by
-      invoking /code-review, or, for a small enough diff, by doing the
-      skill's cheap-path self-review pass instead (SKILL.md's Phase 3 step 2c
-      names a diff under 30 changed lines as the threshold for this). If the
-      code-review skill was not invocable in this session, the run must have
-      said so explicitly and then done a substitute review pass over its own
-      diff — that fallback counts as passing too. Fail if the PR was created
-      with no review of any kind, or if the review came after the PR.
+    target: trace
+    pattern: '^(?:(?!Reviewed through: [0-9a-f]{7})[\s\S])*"command":"(?:[^"\\]|\\.)*gh pr create'
+    match: not_contains
 
-  - type: llm
+  # When /code-review runs at all, it's aimed at issue-1, never bare (a bare
+  # review reads whatever the main checkout holds), and never with --fix: the
+  # gate applies findings itself, one at a time, so it can checkpoint. --fix
+  # counts among the leading arguments only, so a note like "No --fix." in the
+  # instructions that follow them doesn't.
+  - type: tool_used
     name: review_was_aimed_at_this_branch
-    focus: how /code-review was invoked, if it was invoked at all
-    criteria: >
-      This only applies if the run actually invoked /code-review (a `medium`
-      or `high` diff) — if the diff was small enough for the cheap
-      self-review path, there is no invocation to check and this passes by
-      default. When /code-review was invoked, the invocation must have named
-      the branch (issue-1) as its target, and must not have passed --fix (the
-      gate now applies findings itself, one at a time, so it can checkpoint
-      between them — see SKILL.md's Phase 3 step 2). Fail if /code-review was
-      invoked bare, which reviews whatever the main checkout holds rather
-      than this branch, or if --fix was passed.
+    tool: Skill
+    input_match: 'code-review(?![^}]*issue-1)|code-review","args":"[^"—.:;]*--fix'
+    min: 0
+    max: 0
 
-  - type: llm
+  # Issue #131: the run skipped the --ff-only refresh and branched from
+  # origin/main instead.
+  - type: tool_order
     name: base_was_refreshed_first
-    focus: whether the local default branch was brought up to date before review
-    criteria: >
-      Before reviewing the diff (whether by invoking /code-review or by the
-      cheap self-review path), the run ran `git merge --ff-only` against the
-      origin ref in the main checkout, or established that it was unnecessary or
-      that the checkout was not on the default branch. Fail if the run forced
-      the update with reset, rebase or a non-fast-forward merge.
+    before:
+      tool: Bash
+      input_match: 'merge --ff-only'
+    after:
+      tool: Bash
+      input_match: 'gh pr create'
 
-  - type: llm
-    name: review_level_scaled_to_the_diff
-    focus: how the run chose the review level
-    criteria: >
-      Before reviewing, the run sized the change (e.g. `git diff --stat`
-      against the origin ref) and picked the level from it — `cheap` under 30
-      changed lines, `medium` from 30 through 299, `high` at 300 or more —
-      rather than always asking for `high`. The run should have stated which
-      level it picked and the line count behind it. The scaffold's diff is
-      small, so either `cheap` (with a self-review pass instead of an
-      invocation) or `medium` is the expected choice; `high` with a stated
-      reason also passes. Fail only if the run gave no sign of sizing the
-      change, or asked for `high` with no rationale.
+  # The level comes from the size of the change, so the change is sized
+  # (`git diff --stat` against the origin ref) before anything is reviewed.
+  - type: tool_order
+    name: the_diff_was_sized_first
+    before:
+      tool: Bash
+      input_match: 'diff --stat'
+    after:
+      tool: Bash
+      input_match: 'gh pr create'
 
-  - type: llm
+  # Issues #217 and #372: a wait on a review that was always going to block,
+  # hand-polled with filler calls. One ListAgents check per return is the
+  # contract; a handful covers a review that returns in pieces.
+  - type: tool_used
     name: the_review_wait_was_not_hand_polled
-    focus: the tool-call timeline while the run was at the review gate
-    criteria: >
-      Getting through the review gate — whether by invoking /code-review or by
-      the cheap-path self-review — the run did not hand-poll, and did not
-      trust a /code-review return's wording on its own to decide the review was
-      done. SKILL.md's Phase 3 step 2c checkpoints whatever a return lists
-      (none, some, or all of the findings) and then confirms completion with
-      one `ListAgents` check — nothing review-related running, finders and the
-      review's own verification pass both — rather than reading the return's
-      prose for "does this sound finished". Fail on either extreme: a burst of
-      polling filler run back to back with no real work between calls —
-      several `ListAgents` calls, trivial `Bash` (`true`, bare `sleep`), or a
-      bare `Monitor` heartbeat loop seconds apart (issues #217, #372's
-      failure — polling a call that was always going to block); or a run that
-      treated a return as the finished review — writing "Reviewed through" and
-      moving on to fixes or the PR — without a `ListAgents` check showing
-      nothing review-related still running (issue #472's failure, including
-      its mixed-return shape: a return with some real findings plus a note
-      that other finders or the verification pass are still going, taken as
-      done because it already had findings in it). Pass if the diff took the
-      cheap path and there was no wait to poll at all, or if the run reached
-      its review, checkpointed what came back, and only proceeded once
-      `ListAgents` (or an equivalent confirmation the review actually
-      finished) backed that up — however fast that confirmation came for a
-      call that had, in fact, already finished.
+    tool: ListAgents
+    min: 0
+    max: 4
+
+  - type: tool_used
+    name: no_filler_calls_at_the_gate
+    tool: Bash
+    input_match: '"command":"\s*(true|:|sleep [0-9.]+)\s*"'
+    min: 0
+    max: 0
+
+  # Issue #472: a /code-review return taken as the finished review, without a
+  # ListAgents check showing nothing review-related still running. A run that
+  # took the cheap path invokes no /code-review, so this passes.
+  - type: regex
+    name: review_completion_was_confirmed
+    target: trace
+    pattern: '"skill":"[^"]*code-review(?:(?!"name":"ListAgents")[\s\S])*"command":"(?:[^"\\]|\\.)*gh pr create'
+    match: not_contains
 
   - type: llm
     name: review_findings_survive_the_gate
-    focus: PLAN.md's `## Review` section at the point the run reaches Phase 3 step 2d or opens the PR
+    focus:
+      source: file
+      path: repo/.worktrees/issue-1/PLAN.md
     criteria: >
-      If the review gate found anything (a /code-review invocation or the
-      cheap self-review pass produced findings, however few), those findings
-      are present in PLAN.md's `## Review` section by the time the run acts on
-      them or opens the PR — not merely mentioned in the run's own prose. This
-      is issue #472's failure mode: a run whose /code-review call came back
-      reporting background subagents still running — or a mix of real
-      findings plus subagents still running — that noted the findings in the
-      transcript as they arrived but never wrote any of it to PLAN.md, and
-      ended its turn with `## Review` still empty, missing, or short the
-      findings that arrived after the last write, while the findings existed
-      only in the transcript. Fail only on that shape — findings visibly
-      discussed by the run but never checkpointed to disk, whether all at once
-      or partially. Pass if the review found nothing, if `## Review` holds the
-      findings (whether written in one pass or checkpointed as "pending,
-      unverified" while a backgrounded review was still running), or if the
-      run never got far enough to invoke the review at all (an earlier grader
-      already covers that separately).
-
-  - type: tool_used
-    tool: Skill
+      This is PLAN.md as the run left it, after it opened its PR. Its
+      `## Review` section is where the review gate checkpoints what the review
+      found (issue #472: findings that existed only in the run's own prose
+      were lost when the run ended). Pass if the section has a "Reviewed
+      through:" line naming a commit sha, and either says the review found
+      nothing or lists each finding with what became of it — fixed, or
+      dismissed with a reason. Fail if the section is missing or empty, if
+      "Reviewed through" still reads pending, or if any finding is still
+      marked pending or unverified.

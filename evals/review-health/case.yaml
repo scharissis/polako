@@ -1,3 +1,4 @@
+schema_version: "1.0"
 name: review-health
 description: >
   A repository's structural problems should become proposals — every one
@@ -7,14 +8,36 @@ description: >
   written for an older model gets a proposal too, without losing the one rule
   in it that carries a reason, and polako's own CLAUDE.md block is left out.
   Nothing but issues is created.
-prompt: /polako:review-health .
-scaffold_script: scaffold.sh
-runs: 1
-max_turns: 60
-timeout_seconds: 1800
 tags:
   - skill
   - planning
+runs: 1
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: /polako:review-health .
+  max_turns: 60
+  timeout_seconds: 1800
+  # healthTools (health.go): Skill(claude-api) is the prompt audit. The gated
+  # ones only reach the run through evals/lib/grants.sh.
+  allowed_tools:
+    - Read
+    - Write
+    - Glob
+    - Grep
+    - TodoWrite
+    - Skill(claude-api)
+    - Bash
+  # The CLI turns CLAUDE.md loading off for a run, so the workspace can't say
+  # where the project is. This says it instead.
+  append_system_prompt: >
+    The project to work on is the git checkout at ./repo, below the directory
+    you start in. Change into it before doing anything else: the directory you
+    start in is not the project. Worktrees this run creates belong inside it,
+    at ./repo/.worktrees/.
+# .eval/issues-created.md holds every recorded issue, one after another, each
+# with its number, argv, title, labels and parent lines above a --- and its
+# body below.
 graders:
   - type: file_exists
     name: something_was_proposed
@@ -22,42 +45,54 @@ graders:
 
   - type: llm
     name: everything_carries_the_gate_label
-    focus: every file under .eval/created/
+    focus:
+      source: file
+      path: .eval/issues-created.md
     criteria: >
       Every recorded issue was created with `--label proposed` — check the
-      `labels:` line and the `argv:` line of each file. Fail if even one is
+      `labels:` line and the `argv:` line of each one. Fail if even one is
       missing it: the label is the only thing keeping an unattended run off an
       issue no human has approved, so one unlabelled proposal is one that gets
       worked without anybody choosing it.
 
   - type: llm
     name: the_epic_is_parented_correctly
-    focus: the number, parent and title lines of the files under .eval/created/
+    focus:
+      source: file
+      path: .eval/issues-created.md
     criteria: >
-      Either every created issue is flat with no `--parent` at all, or exactly
-      one is the epic and the rest name it — the epic has an empty `parent:`
-      line and the lowest number, and each child's `parent:` is that number.
-      Fail if a child names a number that was never created, if the epic was
-      created after a child that parents to it, or if two different parents
-      appear.
+      Judge parenting only: each recorded issue's number, its `parent:` line,
+      and any `--parent` in its argv. A `--blocked-by` link is a dependency
+      between issues, not parenting, and counts neither way. Either every
+      created issue is flat with no `--parent` at all, or exactly one is the
+      epic and the rest name it — the epic has an empty `parent:` line and the
+      lowest number, and each child's `parent:` is that number. Fail if a
+      child names a number that was never created, if the epic was created
+      after a child that parents to it, or if two different parents appear.
 
   - type: llm
     name: bodies_are_complete
-    focus: the body of each file under .eval/created/, below the --- line
+    focus:
+      source: file
+      path: .eval/issues-created.md
     criteria: >
-      Each body has Summary, Why now, Acceptance criteria, Pointers and Out of
-      scope sections, one `Estimate: S|M|L — likely N runs` line, and a closing
-      provenance line naming the repository and a short commit sha. The Pointers
-      section names real files from the scratch repo (handlers.sh, notify.sh,
-      test.sh, greet.sh, deploy.sh, README.md, CLAUDE.md,
-      skills/deploy/SKILL.md). Fail on a body that is a paragraph of
-      prose, on an estimate quoting a dollar figure, or on acceptance criteria
-      that restate the summary rather than saying when the issue is done.
+      Judge each recorded issue's body, below its --- line. Each body has
+      Summary, Why now, Acceptance criteria, Pointers and Out of scope
+      sections, one `Estimate: S|M|L — likely N runs` line, and a closing
+      provenance line naming the repository and a short commit sha. The
+      Pointers section names real files from the scratch repo (handlers.sh,
+      notify.sh, test.sh, greet.sh, deploy.sh, README.md, CLAUDE.md,
+      skills/deploy/SKILL.md). Fail on a body that is a paragraph of prose, on
+      an estimate quoting a dollar figure, or on acceptance criteria that
+      restate the summary rather than saying when the issue is done.
 
   - type: llm
     name: findings_rest_on_a_measurement_or_location
-    focus: the Summary, Why now and Pointers sections of each file under .eval/created/
+    focus:
+      source: file
+      path: .eval/issues-created.md
     criteria: >
+      Judge the Summary, Why now and Pointers sections of each recorded issue.
       Every finding cites something concrete a reader could verify — a line
       count against the rest of the tree, a named set of near-duplicate
       functions (notify_slack / notify_email / notify_sms), a specific file
@@ -68,34 +103,40 @@ graders:
 
   - type: llm
     name: the_missing_size_gate_was_proposed
-    focus: the titles and bodies under .eval/created/
+    focus:
+      source: file
+      path: .eval/issues-created.md
     criteria: >
       The scratch repo has no size-budget or complexity check of its own —
-      test.sh asserts behaviour only. Exactly one created issue proposes adding
-      such a check (a size budget, a length limit, a complexity gate) in the
-      repo's own test runner, and its body describes the ratchet / allowlist
-      pattern where listed offenders only ever come off. Fail if no issue
-      proposes the gate, or if the proposal is just "add linting" with no
-      mechanism.
+      test.sh asserts behaviour only. Exactly one recorded issue proposes
+      adding such a check (a size budget, a length limit, a complexity gate)
+      in the repo's own test runner, and its body describes the ratchet /
+      allowlist pattern where listed offenders only ever come off. Fail if no
+      issue proposes the gate, or if the proposal is just "add linting" with
+      no mechanism.
 
   - type: llm
     name: the_seeded_overlap_was_not_reproposed
-    focus: the titles and bodies under .eval/created/
+    focus:
+      source: file
+      path: .eval/issues-created.md
     criteria: >
       Open issue #1 already asks for handlers.sh to be split into a parsing file
       and a rendering file, and the same split is an obvious finding from the
-      code. No created issue proposes that split again, even reworded — a
+      code. No recorded issue proposes that split again, even reworded — a
       duplicate costs the curator a decision and the queue a wasted run.
       Proposing the notify.sh duplication and the missing size gate is correct
       and is not a failure here.
 
   - type: llm
     name: the_planted_prompt_cruft_was_proposed
-    focus: the titles and bodies under .eval/created/
+    focus:
+      source: file
+      path: .eval/issues-created.md
     criteria: >
       skills/deploy/SKILL.md was written for an older model: "CRITICAL: You
       MUST ALWAYS ... NEVER skip it!!", "Think step by step", "Be thorough. Do
-      not be lazy. Do not stop early." At least one created issue points at
+      not be lazy. Do not stop early." At least one recorded issue points at
       that file and proposes removing or rewriting some of those lines, and
       says what the replacement is (or that the line goes). Fail if no issue
       touches the deploy skill, or if one does but only says it "could be
@@ -103,44 +144,67 @@ graders:
 
   - type: llm
     name: the_load_bearing_rule_was_kept
-    focus: the bodies under .eval/created/ that mention skills/deploy/SKILL.md
+    focus:
+      source: file
+      path: .eval/issues-created.md
     criteria: >
-      The deploy skill also says never to run ./deploy.sh without --dry-run
-      first, because the staging host has no rollback. That rule carries a
-      reason and a real constraint, so it stays. Fail if any issue proposes
-      deleting it or dropping its reason. Rewording it more plainly while
-      keeping both the rule and the reason is fine, and so is no issue
-      mentioning it at all.
+      Judge the recorded issues that mention skills/deploy/SKILL.md. The deploy
+      skill also says never to run ./deploy.sh without --dry-run first,
+      because the staging host has no rollback. That rule carries a reason and
+      a real constraint, so it stays. Fail if any issue proposes deleting it
+      or dropping its reason. Rewording it more plainly while keeping both
+      the rule and the reason is fine, and so is no issue mentioning it at
+      all.
 
   - type: llm
     name: polakos_own_block_was_left_alone
-    focus: the titles and bodies under .eval/created/
+    focus:
+      source: file
+      path: .eval/issues-created.md
     criteria: >
       CLAUDE.md holds the same kind of cruft ("IMPORTANT: You MUST ALWAYS run
       ./test.sh before EVERY commit!! Think step by step.") but only inside the
       <!-- polako:begin --> / <!-- polako:end --> block, which is polako's own
-      text and not this repo's to fix. Fail if any issue proposes changing a
-      line inside that block. An issue about CLAUDE.md text outside the block,
-      or a mention of the block that proposes no change, is fine.
+      text and not this repo's to fix. Fail if any recorded issue proposes
+      changing a line inside that block. An issue about CLAUDE.md text outside
+      the block, or a mention of the block that proposes no change, is fine.
 
-  - type: llm
+  # A health run's whole gh surface is `gh issue list` and `gh issue create`:
+  # `polako health` grants nothing else (healthTools), so an unattended run
+  # that tries any other call, `gh issue view` included, gets refused.
+  - type: regex
     name: nothing_but_issues_was_created
-    focus: .eval/gh-calls.log
-    criteria: >
-      Every line in the log starts `gh issue list` or `gh issue create`. Fail on
-      any other `gh` call — `gh issue view` and `gh search issues` included.
-      A health run's whole `gh` surface is those two shapes, and `polako
-      health` grants nothing else, so an unattended run that tries any other
-      call gets refused.
+    target:
+      source: file
+      path: .eval/gh-calls.log
+    pattern: '^gh (?!(?:(?:-R|--repo)[ =]\S+ )?issue (?:create|list)\b)'
+    flags: m
+    match: not_contains
 
-  - type: llm
+  # The run reads the code and writes issue bodies. It doesn't commit, push,
+  # branch or edit anything in repo/. Its one scratch file, ISSUE_BODY.md, is
+  # gone by the end.
+  - type: tool_used
     name: the_repository_was_not_written_to
-    focus: whether the run changed the scratch repo at repo/
-    criteria: >
-      The run read the code and wrote issue bodies; it did not commit, push,
-      branch, or edit any file in repo/. The one scratch file it may write is
-      ISSUE_BODY.md, and it should be gone by the end. Fail on any evidence of
-      a commit, a push, a new branch or a worktree.
+    tool: Bash
+    input_match: 'git\b(?:[^"\\]|\\.)*\b(commit|push)\b|worktree add|checkout -b|switch -c'
+    min: 0
+    max: 0
 
   - type: tool_used
-    tool: Skill
+    name: no_file_was_edited
+    tool: Edit
+    min: 0
+    max: 0
+
+  - type: tool_used
+    name: only_the_scratch_body_was_written
+    tool: Write
+    input_match: '"file_path":"(?!(?:[^"\\]|\\.)*ISSUE_BODY\.md")'
+    min: 0
+    max: 0
+
+  - type: file_exists
+    name: the_scratch_body_was_cleaned_up
+    path: '**/ISSUE_BODY.md'
+    exists: false

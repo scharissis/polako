@@ -7,18 +7,28 @@
 # graders fixed paths to read instead of having to work out where the run put
 # its worktree.
 #
+# It runs from a copy inside the workspace, beside a copy of the case's
+# fixtures, because `claude plugin eval` sandboxes the run's shell away from the
+# plugin tree this file ships in (lib/scaffold.sh makes the copies).
+#
 # Only the subcommands a shipped skill is permitted are answered. Anything else
 # exits non-zero, because a case passing on a call the real run would never be
-# permitted to make is a case that proves nothing. For implement-issue that set
-# is defaultTools in main.go; the plan-backlog reads and the one `issue create`
-# it is allowed are not in defaultTools and deliberately so — there is no plan
-# verb yet, and the allowlist that grants them ships with it.
+# permitted to make is a case that proves nothing. That set is each verb's own
+# grant: defaultTools in flags.go for implement-issue, planTools and healthTools
+# for the two skills that only file issues.
 set -euo pipefail
 
 record=$1
 shift
-case_dir=$1
+fixtures=$1
 shift
+
+# lib/scaffold.sh's routing check, answered before anything is logged so the
+# check leaves no trace a grader could read as a call the run made.
+if [ "${1-}" = --polako-eval-stand-in ]; then
+  printf '%s\n' "$record"
+  exit 0
+fi
 
 printf '%s\n' "gh $*" >> "$record/gh-calls.log"
 
@@ -65,8 +75,8 @@ case "$subcommand" in
 # numbers (a call its own grader permits, even though no SKILL.md instructs it)
 # falls back to looking the number up there instead of crashing under set -e.
 "issue view")
-  if [ -f "$case_dir/issue.json" ]; then
-    cat "$case_dir/issue.json"
+  if [ -f "$fixtures/issue.json" ]; then
+    cat "$fixtures/issue.json"
   else
     # Fixture priority mirrors "issue list" just below: open before closed.
     number=${3-}
@@ -84,7 +94,7 @@ for path in paths:
             json.dump(issue, sys.stdout)
             sys.exit(0)
 sys.exit(1)
-' "$number" "$case_dir/issues.json" "$case_dir/issues-closed.json"); then
+' "$number" "$fixtures/issues.json" "$fixtures/issues-closed.json"); then
       printf '%s\n' "$found"
     else
       echo "GraphQL: Could not resolve to an issue or pull request with the number of $number. (repository.issue)" >&2
@@ -101,9 +111,9 @@ sys.exit(1)
 "issue list")
   state=$(value_of --state "$@" || true)
   if [ "$state" = closed ]; then
-    fixture=$case_dir/issues-closed.json
+    fixture=$fixtures/issues-closed.json
   else
-    fixture=$case_dir/issues.json
+    fixture=$fixtures/issues.json
   fi
   if [ -f "$fixture" ]; then cat "$fixture"; else echo "[]"; fi
   ;;
@@ -116,7 +126,9 @@ sys.exit(1)
 # first and passes the number it gets back as `--parent` for every child, so a
 # stand-in that printed a fixed number would make the hierarchy ungradeable.
 # Numbers start above any fixture's so a created issue is never confused for a
-# seeded one.
+# seeded one. Each one also lands in issues-created.md, and everything a run
+# puts in front of a human lands in posted.md: a CLI judge reads one file, not
+# a directory.
 "issue create")
   mkdir -p "$record/created"
   number=$((100 + $(ls "$record/created" | wc -l | tr -d ' ')))
@@ -129,12 +141,16 @@ sys.exit(1)
     printf -- '---\n'
     body_of "$@"
   } > "$record/created/$number.md"
+  { printf '\n=== issue %s ===\n' "$number"; cat "$record/created/$number.md"; } \
+    | tee -a "$record/posted.md" >> "$record/issues-created.md"
   echo "https://github.com/eval/scratch/issues/$number"
   ;;
 
 "issue comment")
   mkdir -p "$record/comments"
-  body_of "$@" > "$record/comments/$(ls "$record/comments" | wc -l | tr -d ' ').md"
+  comment=$record/comments/$(ls "$record/comments" | wc -l | tr -d ' ').md
+  body_of "$@" > "$comment"
+  { printf '\n=== comment on #%s ===\n' "${3-1}"; cat "$comment"; } >> "$record/posted.md"
   echo "https://github.com/eval/scratch/issues/${3-1}#issuecomment-1"
   ;;
 
@@ -163,8 +179,8 @@ sys.exit(1)
       echo "$out" >&2
       exit 1
     fi
-    # What a reviewer would see on the PR. The judge reads only .eval/, and a
-    # design-plan run's whole deliverable is a file on this branch.
+    # What a reviewer would see on the PR: a design-plan run's whole
+    # deliverable is a file on this branch.
     git -C "$repo" diff --name-status "main...$head" > "$record/pr-files.txt" 2>&1 || true
     git -C "$repo" diff "main...$head" > "$record/pr-diff.txt" 2>&1 || true
   fi
@@ -172,6 +188,24 @@ sys.exit(1)
   # let the graders be the ones to object.
   value_of --title "$@" > "$record/pr-title.txt" || true
   body_of "$@" > "$record/pr-body.md"
+  { printf '\n=== pull request: %s ===\n' "$(cat "$record/pr-title.txt")"
+    cat "$record/pr-body.md"; } >> "$record/posted.md"
+  # The whole PR in one file, for a grader that has to check the body against
+  # the change or against the evidence branch: origin is read at this moment,
+  # after any evidence push and before the run can tidy anything away. The
+  # === markers can't be mistaken for the body's own markdown headings.
+  origin=$record/origin.git
+  {
+    printf 'title: %s\n\n=== body ===\n' "$(cat "$record/pr-title.txt")"
+    cat "$record/pr-body.md"
+    printf '\n=== changed files ===\n'
+    cat "$record/pr-files.txt" 2>/dev/null || echo "(no --head given, so none recorded)"
+    printf '\n=== origin refs ===\n'
+    git --git-dir="$origin" for-each-ref --format='%(objectname) %(refname)'
+    printf '\n=== polako-evidence tree ===\n'
+    git --git-dir="$origin" ls-tree -r polako-evidence 2>/dev/null \
+      || echo "(no polako-evidence branch on origin)"
+  } > "$record/pr.md"
   echo "https://github.com/eval/scratch/pull/1"
   ;;
 

@@ -1,42 +1,56 @@
 #!/usr/bin/env python3
-"""Grade one hand-run eval case against its case.yaml.
+"""Grade one hand-run eval case the way `claude plugin eval` grades it.
 
-Half of evals/run.sh, the by-hand stand-in for the CLI's `plugin eval` command
-(see "Running it" in evals/README.md). This half owns everything that
-wants a real parser: reading case.yaml, checking the mechanical graders,
-condensing the run's event stream into judgeable evidence, and asking a judge
-session to score the llm graders.
+Half of evals/run.sh, the by-hand runner beside `claude plugin eval` (see
+"Running it" in evals/README.md). It reads the same case.yaml the CLI reads
+and applies the CLI's grader semantics, taken from the CLI's own runner, so a
+case means the same thing under either runner:
 
-Stdlib only — same discipline as the Go half, and for the same reason: nothing
-to install. The YAML reader handles only the shape this suite's case files
-actually use (flat scalars, flat lists, one `graders:` list, `>` block
-scalars); it is not a YAML parser and refuses surprises loudly rather than
-misreading them — a silently dropped `criteria:` line would send a grader to
-the judge asserting nothing, and the verdict would still count.
+- file_exists passes when the run *created* the path. run.sh lists the
+  workspace after the scaffold (`grade.py snapshot`) and this diffs that list
+  against the workspace after the run. A file the scaffold put there doesn't
+  count, even if the run changed it.
+- tool_used and tool_order match a regex against each tool call's input, as
+  compact JSON.
+- regex reads the whole trace, the run's last message, the list of created
+  paths, or one workspace file. A focus file that doesn't exist fails the
+  grader.
+- llm gives a judge one source, the grader's focus, never a bundle, and
+  takes the majority of three votes. A trace focus shows only the first and
+  last 12 events.
 
-Verdict semantics, deliberately different from a naive reading of case.yaml:
-`tool_used: Skill` graders are reported as indicators, not scored. Slash-
-command expansion emits no Skill tool_use event, so on paths that never reach
-/code-review the grader cannot fire however well the skill drove the run
-(issue #127) — and the CLI itself demotes these graders to "plugin-fired
-indicator" under its default ablation mode. The demotion is scoped to that
-one tool: a `tool_used` on any other tool asserts real behavior the argument
-does not cover, and is scored. Exit codes: 0 green, 1 a scored grader failed,
-2 the harness itself broke (not a skill verdict), 3 nothing failed but a
-human still has graders to score.
+evidence.md is still written, for a human reading a red run. No judge sees it.
+
+Stdlib only, the same discipline as the Go half, and for the same reason:
+nothing to install. The YAML reader takes only the subset the suite's case
+files use, and it refuses anything else loudly rather than misreading it. It
+also refuses keys the CLI would drop without a word: a silently dropped key
+is how every case once failed to load under the CLI.
+
+Exit codes: 0 green, 1 a grader failed, 2 the harness itself broke (not a
+skill verdict), 3 nothing failed but a human still has graders to score.
 """
+import concurrent.futures
 import json
 import os
 import re
 import subprocess
 import sys
 
-EVIDENCE_FILE_CAP = 4000  # chars per quoted artifact, plenty for this suite
-# Recorded by every `gh pr create`, but quoted only for a case whose graders
-# name them, so the other cases' judges see what they always saw. The diff
-# gets its own cap: design-plan's whole deliverable is one plan document.
-ON_REQUEST_CAPS = {".eval/pr-diff.txt": 16000, ".eval/pr-files.txt": EVIDENCE_FILE_CAP}
+EVIDENCE_FILE_CAP = 4000  # chars per quoted artifact in evidence.md
 RESULT_HEAD = 200         # chars of each tool result kept in the timeline
+
+# The CLI's judge limits: a trace focus keeps the first and last TRACE_KEEP
+# events, and any focus text keeps its first JUDGE_HEAD and last JUDGE_TAIL
+# characters.
+TRACE_KEEP = 12
+JUDGE_HEAD = 80000
+JUDGE_TAIL = 20000
+JUDGE_SYSTEM = "You are a strict, terse evaluation judge for coding-agent traces."
+# The CLI's vote count. One vote flipped a verdict the CLI's three agreed on,
+# on the same input.
+JUDGE_VOTES = 3
+JUDGE_WORKERS = 4
 
 
 def die(msg):
@@ -44,129 +58,256 @@ def die(msg):
     sys.exit(2)
 
 
-# --- case.yaml, the constrained subset -------------------------------------
+# --- case.yaml, the subset this suite writes ---------------------------------
+
+class CaseReader:
+    """Block mappings and lists, `>` and `|` block scalars, plain, 'single'
+    and "double" quoted scalars, one-line [flow, lists]. Nothing else."""
+
+    KEY = re.compile(r"^([A-Za-z_][\w-]*):(?:\s+(.*))?$")
+
+    def __init__(self, path):
+        self.path = path
+        self.lines = open(path).read().split("\n")
+        self.i = 0
+
+    def fail(self, msg):
+        die(f"{self.path}:{self.i + 1}: {msg} — write the case in the subset "
+            "the suite's other case files use, or teach CaseReader the shape")
+
+    def skip_blank(self):
+        while self.i < len(self.lines):
+            s = self.lines[self.i].strip()
+            if s and not s.startswith("#"):
+                return
+            self.i += 1
+
+    def indent(self):
+        line = self.lines[self.i]
+        return len(line) - len(line.lstrip(" "))
+
+    def at_item(self):
+        s = self.lines[self.i].strip()
+        return s == "-" or s.startswith("- ")
+
+    def read(self):
+        self.skip_blank()
+        doc = self.mapping(0)
+        self.skip_blank()
+        if self.i < len(self.lines):
+            self.fail("unexpected indentation")
+        return doc
+
+    def mapping(self, ind):
+        out = {}
+        while True:
+            self.skip_blank()
+            if self.i >= len(self.lines) or self.indent() < ind:
+                return out
+            if self.indent() > ind:
+                self.fail("unexpected indentation")
+            if self.at_item():
+                return out
+            m = self.KEY.match(self.lines[self.i].strip())
+            if not m:
+                self.fail(f"expected `key: value`, got {self.lines[self.i].strip()!r}")
+            key, rest = m.group(1), uncomment(m.group(2) or "")
+            if key in out:
+                self.fail(f"duplicate key {key!r}")
+            self.i += 1
+            out[key] = self.value(rest, ind)
+
+    def value(self, rest, ind):
+        if rest in (">", "|", ">-", "|-"):
+            return self.block_scalar(rest, ind)
+        if rest:
+            return self.scalar(rest)
+        self.skip_blank()
+        if self.i >= len(self.lines):
+            return None
+        if self.at_item() and self.indent() >= ind:
+            return self.sequence(self.indent())
+        if self.indent() > ind:
+            return self.mapping(self.indent())
+        return None
+
+    def sequence(self, ind):
+        out = []
+        while True:
+            self.skip_blank()
+            if self.i >= len(self.lines) or self.indent() != ind or not self.at_item():
+                if self.i < len(self.lines) and self.indent() > ind:
+                    self.fail("unexpected indentation in a list")
+                return out
+            item = self.lines[self.i].strip()[2:]
+            if self.KEY.match(item):
+                # `- key: value` opens a mapping whose later keys sit two deeper.
+                self.lines[self.i] = " " * (ind + 2) + item
+                out.append(self.mapping(ind + 2))
+            else:
+                self.i += 1
+                out.append(self.scalar(uncomment(item)))
+
+    def block_scalar(self, style, ind):
+        body, block = [], None
+        while self.i < len(self.lines):
+            line = self.lines[self.i]
+            if not line.strip():
+                body.append("")
+                self.i += 1
+                continue
+            here = len(line) - len(line.lstrip(" "))
+            if here <= ind:
+                break
+            if block is None:
+                block = here
+            elif here < block:
+                self.fail("a block scalar's lines dedent below its first line")
+            body.append(line[block:])
+            self.i += 1
+        while body and not body[-1]:
+            body.pop()
+        if style.startswith("|"):
+            text = "\n".join(body)
+        else:
+            paragraphs, cur = [], []
+            for line in body:
+                if line:
+                    cur.append(line.strip())
+                else:
+                    paragraphs.append(" ".join(cur))
+                    cur = []
+            paragraphs.append(" ".join(cur))
+            text = "\n".join(paragraphs)
+        return text if style.endswith("-") else text + "\n"
+
+    def scalar(self, text):
+        if text.startswith("'"):
+            if len(text) < 2 or not text.endswith("'"):
+                self.fail(f"unterminated single-quoted scalar {text!r}")
+            return text[1:-1].replace("''", "'")
+        if text.startswith('"'):
+            try:
+                return json.loads(text)
+            except ValueError:
+                self.fail(f"double-quoted scalar {text!r} uses an escape this "
+                          "reader doesn't take — single-quote it instead")
+        if text.startswith("["):
+            if not text.endswith("]"):
+                self.fail(f"a flow list must close on its own line: {text!r}")
+            inner = text[1:-1].strip()
+            return [self.scalar(p.strip()) for p in inner.split(",")] if inner else []
+        if text.startswith("{"):
+            self.fail("flow mappings aren't read here — write it as a block mapping")
+        if text in ("true", "false"):
+            return text == "true"
+        if re.fullmatch(r"-?\d+", text):
+            return int(text)
+        return text
+
+
+def uncomment(text):
+    """Drop a trailing ` # comment` from a plain scalar. Quoted and flow
+    scalars are left whole: a regex like 'a #b' is data, not a comment."""
+    if text.startswith(("'", '"', "[")):
+        return text
+    return re.split(r"\s+#", text, maxsplit=1)[0].strip()
+
+
+# The CLI's case schema. The grader shapes are strict there, so an unknown key
+# is a load error. The rest drops unknown keys silently, which is worse, so
+# here every level is strict.
+TOP_KEYS = {"schema_version", "name", "description", "tags", "plugins",
+            "context", "execution", "runs", "graders", "expected_outcome"}
+CONTEXT_KEYS = {"scaffold_script", "history_file", "add_dirs"}
+EXECUTION_KEYS = {"prompt", "max_turns", "timeout_seconds", "model",
+                  "allowed_tools", "artifact_publish", "growthbook_overrides",
+                  "append_system_prompt", "env"}
+COMMON = {"type", "name", "weight", "arm"}
+GRADER_KEYS = {
+    "regex": COMMON | {"target", "pattern", "flags", "match"},
+    "tool_order": COMMON | {"before", "after"},
+    "tool_used": COMMON | {"tool", "input_match", "min", "max"},
+    "file_exists": COMMON | {"path", "exists"},
+    "llm": COMMON | {"criteria", "focus"},
+}
+FOCI = {"trace", "last_message", "files", "mock_calls"}
+# Tools a case may name in allowed_tools without the operator granting them.
+# Every other tool reaches the model only through the operator's grant.
+UNGATED = {"Read", "Glob", "Grep", "NotebookRead", "Skill", "AskUserQuestion",
+           "TaskCreate", "TaskGet", "TaskList", "TaskUpdate", "TaskStop",
+           "Agent", "TodoWrite"}
+# Tools the CLI's run gets along with the ones it's granted, as its session
+# lists them on CLI 2.1.280: the task tools stand in for TodoWrite, and
+# NotebookEdit comes with Edit.
+FAMILIES = {"TodoWrite": ["TaskCreate", "TaskGet", "TaskList", "TaskUpdate", "TaskStop"],
+            "Edit": ["NotebookEdit"]}
+ALWAYS = ["ToolSearch"]
+
 
 def parse_case(path):
-    top = {}
-    graders = []
-    cur = None          # grader dict being filled
-    cur_list = None     # top-level list collecting `  - item` lines
-    block_key = None    # key collecting a `>` folded scalar
-    block_lines = []
-    block_owner = None  # dict the folded scalar belongs to
-    in_graders = False
+    case = CaseReader(path).read()
 
-    def flush_block():
-        nonlocal block_key, block_lines, block_owner
-        if block_key is not None:
-            block_owner[block_key] = " ".join(
-                l.strip() for l in block_lines if l.strip())
-            block_key, block_lines, block_owner = None, [], None
+    def strict(obj, allowed, where):
+        if not isinstance(obj, dict):
+            die(f"{path}: {where} must be a mapping")
+        extra = set(obj) - allowed
+        if extra:
+            die(f"{path}: {where} has {', '.join(sorted(extra))}, which the "
+                "CLI's case schema doesn't have — it would drop or refuse it")
 
-    for lineno, raw in enumerate(open(path), 1):
-        line = raw.rstrip("\n")
-        stripped = line.strip()
-        if block_key is not None:
-            # A folded scalar runs until the indentation drops back.
-            if stripped == "" or line.startswith("    ") or (
-                    not in_graders and line.startswith("  ")):
-                block_lines.append(line)
-                continue
-            flush_block()
-        if stripped == "" or stripped.startswith("#"):
-            continue
-        if line.startswith("graders:"):
-            in_graders = True
-            cur_list = None
-            continue
-        if in_graders:
-            m = re.match(r"^  - (\w+): (.*)$", line)
-            if m:
-                cur = {m.group(1): m.group(2).strip()}
-                graders.append(cur)
-                continue
-            m = re.match(r"^    (\w+): (.*)$", line)
-            if m and cur is not None:
-                key, val = m.group(1), m.group(2).strip()
-                if val == ">":
-                    block_key, block_owner = key, cur
-                else:
-                    cur[key] = val
-                continue
-            die(f"{path}:{lineno}: unrecognized graders line {line!r} — "
-                "fix the indentation (2 spaces for '- type:', 4 for fields) "
-                "or teach parse_case the new shape")
-        m = re.match(r"^(\w+):\s*(.*)$", line)
-        if m:
-            key, val = m.group(1), m.group(2).strip()
-            if val == ">":
-                block_key, block_owner = key, top
-                cur_list = None
-            elif val == "":
-                top[key] = []  # a list like tags:, items collected below
-                cur_list = top[key]
-            else:
-                top[key] = val
-                cur_list = None
-            continue
-        m = re.match(r"^  - (.*)$", line)
-        if m:
-            if cur_list is None:
-                die(f"{path}:{lineno}: list item {line!r} follows no list "
-                    "key — fix the indentation or move it under its key")
-            cur_list.append(m.group(1).strip())
-            continue
-        die(f"{path}:{lineno}: unrecognized line {line!r} — fix the file "
-            "or teach parse_case the new shape")
-    flush_block()
-    top["graders"] = graders
-    return top
+    strict(case, TOP_KEYS, "the case")
+    version = case.get("schema_version")
+    if not isinstance(version, str) or version.split(".")[0] != "1":
+        die(f"{path}: schema_version must be a quoted 1.x string, like \"1.0\"")
+    strict(case.get("context") or {}, CONTEXT_KEYS, "context")
+    strict(case.get("execution") or {}, EXECUTION_KEYS, "execution")
+    if not str((case.get("execution") or {}).get("prompt") or "").strip():
+        die(f"{path}: execution.prompt is required")
+    graders = case.get("graders")
+    if not isinstance(graders, list) or not graders:
+        die(f"{path}: graders must be a non-empty list")
+    names = set()
+    for g in graders:
+        if not isinstance(g, dict) or g.get("type") not in GRADER_KEYS:
+            die(f"{path}: grader {g!r} has no type the CLI knows "
+                f"({', '.join(sorted(GRADER_KEYS))})")
+        strict(g, GRADER_KEYS[g["type"]], f"grader {g.get('name')!r}")
+        if not g.get("name"):
+            die(f"{path}: every grader needs a name")
+        if g["name"] in names:
+            die(f"{path}: duplicate grader name {g['name']!r}")
+        names.add(g["name"])
+        for side in ("before", "after"):
+            if g["type"] == "tool_order" and isinstance(g.get(side), dict):
+                strict(g[side], {"tool", "input_match"}, f"{g['name']}.{side}")
+        where = g.get("focus") if g["type"] == "llm" else g.get("target")
+        if isinstance(where, dict):
+            strict(where, {"source", "path"}, f"{g['name']} focus")
+            if where.get("source") != "file" or not where.get("path"):
+                die(f"{path}: {g['name']}: a mapping focus is `source: file` plus a path")
+        elif where is not None and where not in FOCI:
+            die(f"{path}: {g['name']}: {where!r} isn't a focus the CLI knows "
+                f"({', '.join(sorted(FOCI))}, or source: file)")
+    return case
 
 
-# --- evidence --------------------------------------------------------------
+# --- what the run left -------------------------------------------------------
 
-def quote_file(ws, rel, cap=EVIDENCE_FILE_CAP):
-    p = os.path.join(ws, rel)
-    try:
-        body = open(p, errors="replace").read()
-    except OSError:
-        return f"### {rel}\n(missing)\n"
-    if len(body) > cap:
-        body = body[:cap] + "\n…(truncated)"
-    return f"### {rel}\n```\n{body}\n```\n"
-
-
-def find_leak(ws, term):
-    """Every .eval/ file (case-insensitively) containing term — what a
-    no_leak grader scores. .eval/ is everything the run posted or recorded,
-    the same tree build_evidence walks; a term found here is a term the run
-    put in front of a human rather than kept to itself (issue #386).
-
-    origin.git is pruned: it's the fixture, not something the run posted, and
-    push-blocked's seeded pre-receive hook spells every term out in it — left
-    in, the hook fails all three graders on a run that leaked nothing."""
-    hits = []
-    for root, dirs, files in os.walk(os.path.join(ws, ".eval")):
-        if "origin.git" in dirs:
-            dirs.remove("origin.git")
+def list_files(ws):
+    """Every file under ws, as the CLI lists a run directory: recurse into real
+    directories, and count anything else, links to directories included, as a
+    file."""
+    out = set()
+    for root, dirs, files in os.walk(ws):
+        rel = os.path.relpath(root, ws)
+        for d in list(dirs):
+            if os.path.islink(os.path.join(root, d)):
+                dirs.remove(d)
+                files.append(d)
         for f in files:
-            p = os.path.join(root, f)
-            try:
-                text = open(p, errors="replace").read()
-            except OSError:
-                continue
-            if term.lower() in text.lower():
-                hits.append(os.path.relpath(p, ws))
-    return hits
-
-
-def git(ws, sub, *args):
-    d = os.path.join(ws, sub)
-    if not os.path.isdir(d):
-        return f"(no {sub})"
-    out = subprocess.run(["git", "-C", d, *args],
-                         capture_output=True, text=True)
-    return out.stdout.strip() or out.stderr.strip()
+            out.add((f if rel == "." else os.path.join(rel, f)).replace(os.sep, "/"))
+    return out
 
 
 def load_events(stream_path):
@@ -191,272 +332,391 @@ def load_events(stream_path):
 
 def content(ev):
     """An event's content blocks. Not every event has them: a `system`
-    `permission_denied` event carries its message as a plain string, and one
-    of those in the stream used to crash grading — turning the run most worth
-    reading, one that hit a refusal, into a harness error."""
+    `permission_denied` event carries its message as a plain string."""
     msg = ev.get("message")
     return (msg.get("content") or []) if isinstance(msg, dict) else []
 
 
-def relative_to_ws(s, ws):
-    """Strip the workspace's absolute path out of `s`, wherever it appears —
-    a leading `file_path`, or a `command` that names the workspace mid-string
-    (`git -C <ws>/repo status`). A plain replace, not an anchored prefix
-    check, so both land relative."""
-    return s.replace(ws.rstrip(os.sep) + os.sep, "")
+def compact(obj):
+    # JSON.stringify's shape, so a regex written against the CLI's trace, like
+    # "command":"git…, matches here too.
+    return json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
 
 
-def timeline(events, ws):
-    """One line per tool call, with a head of its result — enough for the
-    ordering and did-it-block criteria without shipping the whole transcript."""
-    lines, results, tools = [], {}, set()
-    for ev in events:
+class Run:
+    def __init__(self, ws, stream, before):
+        self.ws = ws
+        self.events, self.stream_note = load_events(stream)
+        self.calls = []
+        self.last_text = ""
+        self.result = None
+        for ev in self.events:
+            if ev.get("type") == "result":
+                self.result = ev
+            if ev.get("type") != "assistant":
+                continue
+            texts = []
+            for c in content(ev):
+                if not isinstance(c, dict):
+                    continue
+                if c.get("type") == "tool_use":
+                    self.calls.append((c.get("name"), compact(c.get("input", {}))))
+                elif c.get("type") == "text":
+                    texts.append(str(c.get("text", "")))
+            if texts:
+                self.last_text = "\n".join(texts)
+        self.created = sorted(list_files(ws) - before)
+
+    def trace(self):
+        return "\n".join(compact(ev) for ev in self.events)
+
+    def judged_trace(self):
+        lines = [compact(ev) for ev in self.events]
+        if len(lines) <= 2 * TRACE_KEEP:
+            return "\n".join(lines)
+        gone = len(lines) - 2 * TRACE_KEEP
+        return "\n".join(lines[:TRACE_KEEP] + [f"[…{gone} messages elided…]"]
+                         + lines[-TRACE_KEEP:])
+
+    def focus_text(self, focus, judged=False):
+        """(text, None) or (None, why it can't be read)."""
+        if isinstance(focus, dict):
+            p = os.path.realpath(os.path.join(self.ws, focus["path"]))
+            if not p.startswith(os.path.realpath(self.ws) + os.sep):
+                return None, f"focus file {focus['path']} leaves the run directory"
+            try:
+                return open(p, errors="replace").read(), None
+            except FileNotFoundError:
+                return None, f"focus file {focus['path']} does not exist"
+            except OSError as e:
+                return None, f"focus file {focus['path']} is unreadable ({e})"
+        if focus in (None, "last_message"):
+            return self.last_text, None
+        if focus == "files":
+            return "\n".join(self.created), None
+        if focus == "trace":
+            return (self.judged_trace() if judged else self.trace()), None
+        return None, ("no mock stand-ins were active in this run — a "
+                      "mock_calls grader has nothing to check")
+
+
+def focus_label(focus):
+    return f"file {focus['path']}" if isinstance(focus, dict) else (focus or "last_message")
+
+
+# --- graders, as the CLI scores them ------------------------------------------
+
+def glob_regex(pattern):
+    """The CLI's path glob: ** crosses directories, * and ? don't."""
+    out, i = "^", 0
+    while i < len(pattern):
+        c = pattern[i]
+        if c == "*" and pattern[i + 1:i + 3] == "*/":
+            out, i = out + "(?:.*/)?", i + 3
+            continue
+        if c == "*" and pattern[i + 1:i + 2] == "*":
+            out, i = out + ".*", i + 2
+            continue
+        out += {"*": "[^/]*", "?": "."}.get(c, re.escape(c) if c in ".+^${}()|[]\\" else c)
+        i += 1
+    return re.compile(out + "$")
+
+
+def call_matches(call, spec):
+    name, input_text = call
+    if isinstance(spec, str):
+        spec = {"tool": spec}
+    if name != spec["tool"]:
+        return False
+    return not spec.get("input_match") or re.search(spec["input_match"], input_text) is not None
+
+
+def py_flags(flags):
+    # d, g, u, v and y change nothing a single search here depends on.
+    return sum({"i": re.I, "m": re.M, "s": re.S}.get(f, 0) for f in flags or "")
+
+
+def grade_file_exists(g, run):
+    want = g.get("exists", True)
+    rx = glob_regex(g["path"])
+    found = any(rx.match(p) for p in run.created)
+    ok = found == want
+    return ok, (f"{g['path']} {'exists' if want else 'absent'} as expected" if ok else
+                f"{g['path']} {'exists' if found else 'missing'} "
+                f"(expected {'present' if want else 'absent'})")
+
+
+def grade_tool_used(g, run):
+    n = sum(1 for c in run.calls if call_matches(c, g))
+    lo, hi = g.get("min", 1), g.get("max")
+    ok = n >= lo and (hi is None or n <= hi)
+    return ok, f"{g['tool']} called {n}x (expected {lo}..{'∞' if hi is None else hi})"
+
+
+def grade_tool_order(g, run):
+    def first(spec):
+        return next((i for i, c in enumerate(run.calls) if call_matches(c, spec)), -1)
+    b, a = first(g["before"]), first(g["after"])
+    tool = lambda s: s if isinstance(s, str) else s["tool"]
+    if b == -1:
+        return False, f'"before" tool {tool(g["before"])} never called'
+    if a == -1:
+        return False, f'"after" tool {tool(g["after"])} never called'
+    return b < a, (f"{tool(g['before'])}@{b} {'precedes' if b < a else 'does NOT precede'} "
+                   f"{tool(g['after'])}@{a}")
+
+
+def grade_regex(g, run):
+    text, why = run.focus_text(g.get("target", "last_message"))
+    if text is None:
+        return False, why
+    rx = re.compile(g["pattern"], py_flags(g.get("flags")))
+    match = g.get("match", "contains")
+    where = focus_label(g.get("target", "last_message"))
+    if match == "contains":
+        ok = rx.search(text) is not None
+        return ok, f"matched {g['pattern']}" if ok else f"pattern not found in {where}"
+    if match == "not_contains":
+        ok = rx.search(text) is None
+        return ok, "pattern absent as expected" if ok else "pattern found (expected absent)"
+    m = re.fullmatch(r"count:(\d+)", str(match))
+    if not m:
+        return False, f"unknown match mode {match!r} (use contains | not_contains | count:N)"
+    n = sum(1 for _ in rx.finditer(text))
+    return n == int(m.group(1)), f"found {n} matches (expected {m.group(1)})"
+
+
+def judge_prompt(g, run):
+    text, why = run.focus_text(g.get("focus", "last_message"), judged=True)
+    if text is None:
+        return None, why
+    if text == "" and g.get("focus") == "files":
+        text = "(no file changes)"
+    if len(text) > JUDGE_HEAD + JUDGE_TAIL:
+        gone = len(text) - JUDGE_HEAD - JUDGE_TAIL
+        text = f"{text[:JUDGE_HEAD]}\n[…{gone} chars elided…]\n{text[-JUDGE_TAIL:]}"
+    return (f"You are grading the output of a coding agent against a criterion.\n\n"
+            f"Criterion:\n{g['criteria']}\n\n\n"
+            f"Agent output ({focus_label(g.get('focus', 'last_message'))}):\n{text}\n\n\n"
+            f"Respond with exactly one word: PASS or FAIL."), None
+
+
+def judge(prompt, model, cwd):
+    env = dict(os.environ, CLAUDE_CODE_DISABLE_CLAUDE_MDS="1")
+    try:
+        # Prompt over stdin, not argv: a trace can push it past the exec limit.
+        out = subprocess.run(
+            ["claude", "-p", "--model", model, "--output-format", "json",
+             "--system-prompt", JUDGE_SYSTEM, "--tools", ""],
+            input=prompt, capture_output=True, text=True, timeout=600,
+            cwd=cwd, env=env)
+    except subprocess.TimeoutExpired:
+        return None, "judge session took over 600s"
+    try:
+        reply = json.loads(out.stdout)
+    except ValueError:
+        reply = {}
+    # A refused judge call (a usage limit, say) says why in its JSON result,
+    # not on stderr.
+    if out.returncode != 0 or reply.get("is_error"):
+        why = out.stderr.strip() or str(reply.get("result", "")) or "no output"
+        return None, f"judge session failed: {why[:300]}"
+    if not reply:
+        return None, "judge session printed no JSON"
+    return str(reply.get("result", "")), None
+
+
+# --- evidence, for the human reading a red run ---------------------------------
+
+def quote_file(ws, rel):
+    try:
+        body = open(os.path.join(ws, rel), errors="replace").read()
+    except OSError:
+        return f"### {rel}\n(missing)\n"
+    if len(body) > EVIDENCE_FILE_CAP:
+        body = body[:EVIDENCE_FILE_CAP] + "\n…(truncated)"
+    return f"### {rel}\n```\n{body}\n```\n"
+
+
+def git(ws, sub, *args):
+    d = os.path.join(ws, sub)
+    if not os.path.isdir(d):
+        return f"(no {sub})"
+    out = subprocess.run(["git", "-C", d, *args], capture_output=True, text=True)
+    return out.stdout.strip() or out.stderr.strip()
+
+
+def timeline(run):
+    """One line per tool call, with a head of its result."""
+    results = {}
+    for ev in run.events:
         for c in content(ev):
             if isinstance(c, dict) and c.get("type") == "tool_result":
                 txt = c.get("content")
                 if isinstance(txt, list):
-                    txt = " ".join(p.get("text", "") for p in txt
-                                   if isinstance(p, dict))
+                    txt = " ".join(p.get("text", "") for p in txt if isinstance(p, dict))
                 results[c.get("tool_use_id")] = str(txt)[:RESULT_HEAD]
-    n = 0
-    for ev in events:
+    lines, n = [], 0
+    prefix = run.ws.rstrip(os.sep) + os.sep
+    for ev in run.events:
         for c in content(ev):
             if isinstance(c, dict) and c.get("type") == "tool_use":
                 n += 1
-                tools.add(c["name"])
                 inp = c.get("input", {})
-                # Skill carries its target in skill+args; leaving them out
-                # once made a judge fail a review for being aimed at nothing.
-                skill = " ".join(filter(None, [inp.get("skill"),
-                                               inp.get("args")]))
-                what = relative_to_ws(str(inp.get("file_path")
-                                          or inp.get("command")
-                                          or inp.get("prompt") or skill), ws)
-                what = what[-120:]
+                what = str(inp.get("file_path") or inp.get("command") or inp.get("prompt")
+                           or " ".join(filter(None, [inp.get("skill"), inp.get("args")])))
+                what = what.replace(prefix, "")[-120:]
                 bg = " [background]" if inp.get("run_in_background") else ""
                 head = results.get(c.get("id"), "").replace("\n", " ")
-                lines.append(f"{n:3d} {c['name']}{bg}: {what}\n"
-                             f"      -> {head}")
-    return "\n".join(lines), tools
+                lines.append(f"{n:3d} {c['name']}{bg}: {what}\n      -> {head}")
+    return "\n".join(lines)
 
 
-def final_message(events):
-    for ev in reversed(events):
-        if ev.get("type") == "result":
-            return str(ev.get("result"))[:EVIDENCE_FILE_CAP]
-    return "(no result event — the run did not end on its own)"
-
-
-def grader_paths(graders):
-    """Every workspace path the graders talk about, taken from the graders
-    themselves — the one place the judge's questions are actually written —
-    so a file a run never created gets its absence said out loud instead of
-    leaving the judge to infer from silence."""
-    paths = set()
-    for g in graders:
-        if "path" in g:
-            paths.add(g["path"])
-        for field in ("focus", "criteria"):
-            paths.update(re.findall(r"\.eval/[\w./-]*\w", g.get(field, "")))
-    return paths
-
-
-def origin_state(ws, sub):
-    """Origin's own view of its refs and the polako-evidence branch, read
-    fresh each grade rather than off whatever the local checkout happened to
-    fetch during the run — a plain `git push` to a plumbing-built ref like
-    polako-evidence never touches the pusher's own remote-tracking refs, so
-    without this a pushed evidence commit would be invisible to grading. The
-    fetch is scoped to that one ref; nothing here writes to the checkout the
-    run itself worked in. Reuses git() for the two read-only calls; the fetch
-    stays a bare subprocess.run because git() throws its returncode away and
-    this is the one call whose success decides what runs next."""
-    d = os.path.join(ws, sub)
-    if not os.path.isdir(d):
-        return f"(no {sub})"
-    refs_out = git(ws, sub, "ls-remote", "origin") or "(no refs)"
-    fetch = subprocess.run(
-        ["git", "-C", d, "fetch", "--quiet", "origin", "polako-evidence"],
-        capture_output=True, text=True)
-    if fetch.returncode != 0:
-        tree_out = "(no polako-evidence ref on origin)"
-    else:
-        tree_out = git(ws, sub, "ls-tree", "-r", "FETCH_HEAD") or "(empty tree)"
-    return (f"origin refs (ls-remote): {refs_out}\n"
-           f"polako-evidence tree (ls-tree -r): {tree_out}")
-
-
-def build_evidence(ws, case):
-    events, stream_note = load_events(os.path.join(ws, "run.stream.jsonl"))
-    parts = ["## Recorded artifacts (.eval/)"]
-    seen = set()
-    wanted = grader_paths(case["graders"])
-    for root, _dirs, files in os.walk(os.path.join(ws, ".eval")):
+def write_evidence(out_dir, run):
+    parts = ["Evidence for a human. No judge reads this file: each llm grader's "
+             "judge saw only its own focus, saved beside this under judge/.",
+             "## Files the run created\n" + ("\n".join(run.created) or "(none)"),
+             "## Recorded artifacts (.eval/)"]
+    record = os.path.join(run.ws, ".eval")
+    for root, dirs, files in os.walk(record):
+        dirs[:] = [d for d in dirs if d not in ("origin.git", "lib", "bin")]
         for f in sorted(files):
-            rel = os.path.relpath(os.path.join(root, f), ws)
-            if rel in ON_REQUEST_CAPS and rel not in wanted:
-                continue
             if f.endswith((".md", ".log", ".txt")):
-                parts.append(quote_file(ws, rel, ON_REQUEST_CAPS.get(rel, EVIDENCE_FILE_CAP)))
-                seen.add(rel)
-    for rel in sorted(wanted):
-        if rel not in seen and not os.path.exists(os.path.join(ws, rel)):
-            parts.append(f"### {rel}\n(never created — the run performed no "
-                         "operation that writes it)\n")
+                parts.append(quote_file(run.ws, os.path.relpath(os.path.join(root, f), run.ws)))
     parts.append("## Repository state")
-    for sub in sorted(d for d in os.listdir(ws)
-                      if d == "repo" or d.startswith("repo-")):
-        parts.append(f"### {sub}\n"
-                     f"log: {git(ws, sub, 'log', '--oneline', '-8')}\n"
-                     f"status: {git(ws, sub, 'status', '--porcelain') or '(clean)'}\n"
-                     f"branches: {git(ws, sub, 'branch', '-a')}\n"
-                     + origin_state(ws, sub))
-    tl, tools = timeline(events, ws)
+    for sub in sorted(d for d in os.listdir(run.ws) if d == "repo"):
+        parts.append(f"### {sub}\nlog: {git(run.ws, sub, 'log', '--oneline', '-8')}\n"
+                     f"status: {git(run.ws, sub, 'status', '--porcelain') or '(clean)'}\n"
+                     f"branches: {git(run.ws, sub, 'branch', '-a')}")
     parts.append("## Tool timeline (call order, with result heads)\n"
-                 + stream_note + "\n" + tl)
-    parts.append("## Final message\n" + final_message(events))
-    return "\n\n".join(parts), tools
+                 + run.stream_note + "\n" + timeline(run))
+    parts.append("## Last message\n" + (run.last_text[:EVIDENCE_FILE_CAP] or "(none)"))
+    open(os.path.join(out_dir, "evidence.md"), "w").write("\n\n".join(parts))
 
 
-# --- judging ---------------------------------------------------------------
+# --- entry points ---------------------------------------------------------------
 
-JUDGE_PROMPT = """You are grading one recorded run of an automated coding \
-skill against its eval criteria. The evidence below is everything the run \
-left behind. Judge only from the evidence; where it is silent, say so rather \
-than guessing.
+def cmd_meta(case_file, grants):
+    """NUL-separated key=value records for run.sh: a folded prompt or system
+    prompt can carry a newline, which a line-based read would split.
 
-For each grader, give a verdict: its name, whether it passed, and one \
-sentence citing the evidence.
+    `allowed` is the toolset `claude plugin eval` gives the case: the
+    operator's grants, plus the ungated tools the case names. A gated tool the
+    case names but the operator didn't grant is dropped, as the CLI drops it.
+    `tools` is the same set as bare tool names, for --tools."""
+    case = parse_case(case_file)
+    ex, ctx = case.get("execution") or {}, case.get("context") or {}
+    allowed = list(grants)
+    for t in ex.get("allowed_tools") or []:
+        if t.split("(")[0] in UNGATED and t not in allowed:
+            allowed.append(t)
+    tools = []
+    for t in allowed:
+        name = t.split("(")[0]
+        for n in [name] + FAMILIES.get(name, []):
+            if n not in tools:
+                tools.append(n)
+    tools += [n for n in ALWAYS if n not in tools]
+    fields = {
+        "prompt": str(ex["prompt"]).strip(),
+        # The CLI's own defaults, for a case that leaves these out.
+        "max_turns": ex.get("max_turns", 10),
+        "timeout_seconds": ex.get("timeout_seconds", 300),
+        "scaffold_script": ctx.get("scaffold_script", ""),
+        "model": ex.get("model", ""),
+        "allowed": ",".join(allowed),
+        "tools": ",".join(tools),
+        "append_system_prompt": str(ex.get("append_system_prompt") or "").strip(),
+    }
+    for k, v in fields.items():
+        sys.stdout.write(f"{k}={v}\0")
 
-# Graders
-%s
 
-# Evidence
-%s
-"""
-
-VERDICT_SCHEMA = json.dumps({
-    "type": "object", "additionalProperties": False, "required": ["verdicts"],
-    "properties": {"verdicts": {"type": "array", "items": {
-        "type": "object", "additionalProperties": False,
-        "required": ["name", "pass", "reason"],
-        "properties": {"name": {"type": "string"}, "pass": {"type": "boolean"},
-                       "reason": {"type": "string"}}}}}})
-
-RETRY_HINT = ("the run's evidence.md is intact — rerun grading with judge "
-              "'none' and score the llm graders yourself, or rerun this "
-              "case's grade step when the judge model is back")
+def cmd_snapshot(ws, out):
+    open(out, "w").write("".join(p + "\n" for p in sorted(list_files(ws))))
 
 
-def judge(llm_graders, evidence, model, ws):
-    spec = "\n".join(
-        f"- name: {g.get('name')}\n  focus: {g.get('focus', '')}\n"
-        f"  criteria: {g.get('criteria', '')}" for g in llm_graders)
+def cmd_grade(case_file, case_out, judge_model):
+    case = parse_case(case_file)
+    ws = os.path.join(case_out, "ws")
     try:
-        # Prompt over stdin, not argv: a long run's timeline can push the
-        # prompt past the per-argument exec limit, and the expensive runs are
-        # exactly the ones that must not die at the grading step.
-        out = subprocess.run(
-            ["claude", "-p", "--model", model, "--output-format", "json",
-             "--json-schema", VERDICT_SCHEMA],
-            input=JUDGE_PROMPT % (spec, evidence),
-            capture_output=True, text=True, timeout=600)
-    except subprocess.TimeoutExpired:
-        die(f"judge session took over 600s — {RETRY_HINT}")
-    if out.returncode != 0:
-        die(f"judge session failed: {out.stderr.strip()[:500]} — {RETRY_HINT}")
-    reply = json.loads(out.stdout)
-    # Kept for the human who has to audit a refused or empty verdict.
-    open(os.path.join(ws, "judge-raw.txt"), "w").write(str(reply.get("result", "")))
-    verdicts = (reply.get("structured_output") or {}).get("verdicts")
-    if not verdicts:
-        die(f"judge returned no verdicts (saved to judge-raw.txt) — {RETRY_HINT}")
-    return {v["name"]: v for v in verdicts}
+        before = set(open(os.path.join(case_out, "files-before.txt")).read().split("\n")) - {""}
+    except OSError:
+        die(f"no files-before.txt in {case_out} — run.sh writes it right after "
+            "the scaffold; without it every file_exists grader is meaningless")
+    run = Run(ws, os.path.join(case_out, "run.stream.jsonl"), before)
+    write_evidence(case_out, run)
+    # A session the API cut short (a usage limit, an outage) left nothing a
+    # grader can hold the skill to: grading it would call an empty workspace
+    # the skill's fault.
+    res = run.result or {}
+    if res.get("is_error") and res.get("api_error_status"):
+        die(f"the session was cut short by the API (HTTP {res['api_error_status']}: "
+            f"{str(res.get('result', ''))[:200]}) — rerun this case once that clears")
 
-
-# --- entry points ----------------------------------------------------------
-
-def cmd_meta(case_yaml):
-    """key=value lines for run.sh — named, so adding a field can't silently
-    shift another into the wrong variable."""
-    case = parse_case(case_yaml)
-    print(f"prompt={case.get('prompt', '')}")
-    print(f"max_turns={case.get('max_turns', '80')}")
-    print(f"timeout_seconds={case.get('timeout_seconds', '1800')}")
-    print(f"scaffold_script={case.get('scaffold_script', 'scaffold.sh')}")
-
-
-def cmd_grade(case_yaml, ws, judge_model):
-    case = parse_case(case_yaml)
-    evidence, tools = build_evidence(ws, case)
-    open(os.path.join(ws, "evidence.md"), "w").write(evidence)
-
-    rows, behavioral_fail, undecided = [], 0, 0
-    llm_graders = [g for g in case["graders"] if g["type"] == "llm"]
-    verdicts = {}
-    if llm_graders and judge_model != "none":
-        verdicts = judge(llm_graders, evidence, judge_model, ws)
-
+    judge_dir = os.path.join(case_out, "judge")
+    os.makedirs(judge_dir, exist_ok=True)
+    rows, pending = {}, {}
     for g in case["graders"]:
-        name = g.get("name") or g.get("tool", g["type"])
-        if g["type"] == "file_exists":
-            ok = os.path.exists(os.path.join(ws, g["path"]))
-            rows.append((name, "pass" if ok else "FAIL",
-                         g["path"] + (" exists" if ok else " missing")))
-            behavioral_fail += 0 if ok else 1
-        elif g["type"] == "tool_used" and g.get("tool") == "Skill":
-            fired = "Skill" in tools
-            rows.append((name, "indicator:" +
-                         ("fired" if fired else "not-fired"),
-                         "not scored — see issue #127"))
-        elif g["type"] == "tool_used":
-            fired = g["tool"] in tools
-            rows.append((name, "pass" if fired else "FAIL",
-                         f"tool {g['tool']} " +
-                         ("was used" if fired else "was never used")))
-            behavioral_fail += 0 if fired else 1
-        elif g["type"] == "llm":
-            v = verdicts.get(name)
-            if v is None:
-                rows.append((name, "NEEDS-HUMAN",
-                             "no judge ran; grade from evidence.md"))
-                undecided += 1
-            else:
-                rows.append((name, "pass" if v["pass"] else "FAIL",
-                             v.get("reason", "")))
-                behavioral_fail += 0 if v["pass"] else 1
-        elif g["type"] == "no_leak":
-            hits = find_leak(ws, g["term"])
-            ok = not hits
-            rows.append((name, "pass" if ok else "FAIL",
-                         "not found" if ok
-                         else f"{g['term']!r} found in " + ", ".join(hits)))
-            behavioral_fail += 0 if ok else 1
+        grade = {"file_exists": grade_file_exists, "tool_used": grade_tool_used,
+                 "tool_order": grade_tool_order, "regex": grade_regex}.get(g["type"])
+        if grade:
+            ok, detail = grade(g, run)
+            rows[g["name"]] = ("pass" if ok else "FAIL", detail)
+            continue
+        prompt, why = judge_prompt(g, run)
+        if prompt is None:
+            rows[g["name"]] = ("FAIL", why)
+            continue
+        open(os.path.join(judge_dir, g["name"] + ".prompt.txt"), "w").write(prompt)
+        if judge_model == "none":
+            rows[g["name"]] = ("NEEDS-HUMAN", f"no judge ran; read judge/{g['name']}.prompt.txt")
         else:
-            rows.append((name, "NEEDS-HUMAN",
-                         f"unknown grader type {g['type']!r}"))
-            undecided += 1
+            pending[g["name"]] = prompt
 
+    with concurrent.futures.ThreadPoolExecutor(JUDGE_WORKERS) as pool:
+        futures = {n: [pool.submit(judge, p, judge_model, case_out) for _ in range(JUDGE_VOTES)]
+                   for n, p in pending.items()}
+        for name, votes in futures.items():
+            passes = []
+            for i, fut in enumerate(votes, 1):
+                reply, err = fut.result()
+                if reply is None:
+                    die(f"{name}: {err} — rerun this grade step, or pass judge "
+                        "'none' and score it yourself from the judge/ prompts")
+                open(os.path.join(judge_dir, f"{name}.reply-{i}.txt"), "w").write(reply)
+                passes.append(bool(re.search(r"\bPASS\b", reply, re.I))
+                              and not re.search(r"\bFAIL\b", reply, re.I))
+            ok = sum(passes) > len(passes) / 2
+            rows[name] = ("pass" if ok else "FAIL",
+                          "judge votes: " + " ".join("PASS" if v else "FAIL" for v in passes))
+
+    ordered = [(g["name"],) + rows[g["name"]] for g in case["graders"]]
     summary = {"case": case.get("name"), "verdicts": [
-        {"name": n, "verdict": v, "detail": d} for n, v, d in rows]}
-    open(os.path.join(ws, "summary.json"), "w").write(
-        json.dumps(summary, indent=2))
-    for n, v, d in rows:
-        print(f"  {v:<20} {n}  — {d}")
-    # 1 = a scored grader failed; 3 = nothing failed but a human still has
-    # graders to score (judge 'none', or a grader type this file doesn't
-    # know). die() above exits 2: harness trouble, not a skill verdict.
-    sys.exit(1 if behavioral_fail else (3 if undecided else 0))
+        {"name": n, "verdict": v, "detail": d} for n, v, d in ordered]}
+    open(os.path.join(case_out, "summary.json"), "w").write(json.dumps(summary, indent=2))
+    for n, v, d in ordered:
+        print(f"  {v:<12} {n}  — {d}")
+    failed = any(v == "FAIL" for _, v, _ in ordered)
+    undecided = any(v == "NEEDS-HUMAN" for _, v, _ in ordered)
+    sys.exit(1 if failed else (3 if undecided else 0))
 
 
 def main():
-    if len(sys.argv) >= 3 and sys.argv[1] == "meta":
-        cmd_meta(sys.argv[2])
-    elif len(sys.argv) >= 5 and sys.argv[1] == "grade":
-        cmd_grade(sys.argv[2], sys.argv[3], sys.argv[4])
+    a = sys.argv[1:]
+    if len(a) >= 2 and a[0] == "meta":
+        cmd_meta(a[1], a[2:])
+    elif len(a) == 2 and a[0] == "check":
+        parse_case(a[1])
+        print(f"{a[1]}: ok")
+    elif len(a) == 3 and a[0] == "snapshot":
+        cmd_snapshot(a[1], a[2])
+    elif len(a) == 4 and a[0] == "grade":
+        cmd_grade(a[1], a[2], a[3])
     else:
-        die("usage: grade.py meta <case.yaml> | "
-            "grade.py grade <case.yaml> <workspace> <judge-model|none>")
+        die("usage: grade.py check <case file> | meta <case file> <grant>... | "
+            "snapshot <workspace> <out> | "
+            "grade <case file> <case results dir> <judge model|none>")
 
 
 if __name__ == "__main__":
