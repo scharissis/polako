@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -111,6 +112,25 @@ func TestStatsModelsSilentOnOneModel(t *testing.T) {
 `)
 	if out := stats(t, "-metrics", dir); hasLine(out, "models claude-") {
 		t.Errorf("one model printed a models line:\n%s", out)
+	}
+	if epochs := statsEpochs(t, dir); len(epochs) != 0 {
+		t.Errorf("epochs = %+v, want []", epochs)
+	}
+}
+
+// The same, end to end: a real stream through execClaude, not observe alone.
+func TestExecClaudeRecordsTheInitEventsVersion(t *testing.T) {
+	t.Parallel()
+	captureLog(t)
+	cfg := fakeClaudeConfig(t, "stream")
+	cfg.claudeVersion = "2.1.200"
+	rep, err := execClaude(context.Background(), cfg, "/implement-issue 7", "", "implement-issue", 0)
+	if err != nil {
+		t.Fatalf("execClaude: %v", err)
+	}
+	rec := newRunRecord(cfg, runContext{started: time.Now(), ended: time.Now()}, rep)
+	if rec.ClaudeVersion != "2.1.280" {
+		t.Errorf("claude_version = %q, want the init event's 2.1.280", rec.ClaudeVersion)
 	}
 }
 
