@@ -39,6 +39,10 @@ const (
 	commentCeiling = 0.40
 )
 
+// A file this short gets no comment-density verdict: a doc comment on a small
+// new file is a high share of nothing, and extraction can't fix a ratio.
+const minCommentLines = 50
+
 // A block opener is checked before the line markers, so Lua's `--[[` opens a
 // block rather than reading as one `--` line.
 type style struct {
@@ -184,12 +188,16 @@ func run(w io.Writer, repo, base string) error {
 			before = measureSource(old, st)
 			baseText = fmt.Sprint(before.lines)
 		}
+		density := "ok"
+		if head.lines >= minCommentLines {
+			density = verdict(before.ratio(), head.ratio(), ratioBound)
+		}
 		if rows == 0 {
 			fmt.Fprintln(tw, "file\tlines base→head\tfile length\tcomment base→head\tcomment density")
 		}
 		fmt.Fprintf(tw, "%s\t%s→%d\t%s\t%s→%.0f%%\t%s\n", p,
 			baseText, head.lines, verdict(float64(before.lines), float64(head.lines), lineBound),
-			pct(baseText, before), 100*head.ratio(), verdict(before.ratio(), head.ratio(), ratioBound))
+			pct(baseText, before), 100*head.ratio(), density)
 		rows++
 	}
 	if rows == 0 {
