@@ -13,6 +13,26 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.34.0]
+
+### What's Changed
+* docs: fold the code review into the model-selection tickets by @scharissis in https://github.com/scharissis/polako/pull/602
+* docs: say when and how to run the eval suite by @scharissis in https://github.com/scharissis/polako/pull/616
+* feat: a design label keeps work off design requests by @scharissis in https://github.com/scharissis/polako/pull/617 (closes #546)
+* feat: design runs write design-run and design-issue record kinds by @scharissis in https://github.com/scharissis/polako/pull/618 (closes #549)
+* feat: polako design -issue N runs one design request to a merged PR by @scharissis in https://github.com/scharissis/polako/pull/619 (closes #550)
+* fix: halve Windows CI's go test step — no test-result cache, TEMP on D: by @scharissis in https://github.com/scharissis/polako/pull/623
+* feat: polako design -brief files the request issue, then works it by @scharissis in https://github.com/scharissis/polako/pull/624 (closes #551)
+* docs: document the design verb, its label and its write surface by @scharissis in https://github.com/scharissis/polako/pull/625 (closes #552)
+* feat: unpark and status name polako design for a parked design issue by @scharissis in https://github.com/scharissis/polako/pull/626 (closes #553)
+* fix: the shift log's reclaim line says what it removed by @scharissis in https://github.com/scharissis/polako/pull/628 (closes #583)
+* fix: plan's review link survives a quote in the milestone title by @scharissis in https://github.com/scharissis/polako/pull/629 (closes #584)
+* fix: evals' Closes #1 graders allow a trailing attribution line by @scharissis in https://github.com/scharissis/polako/pull/630 (closes #586)
+* feat: accretion check gets its medians from code, not the model by @scharissis in https://github.com/scharissis/polako/pull/631 (closes #587)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.33.0...v0.34.0
+
 ## [0.33.0]
 
 ### What's Changed
