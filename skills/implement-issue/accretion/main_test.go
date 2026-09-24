@@ -56,9 +56,6 @@ func TestMedianBoundedByCeiling(t *testing.T) {
 	if got := median([]float64{3, 1, 2, 10}); got != 2.5 {
 		t.Errorf("median = %v, want 2.5", got)
 	}
-	if source(2000, fileCeiling, "1000") != "ceiling 1000" || source(200, fileCeiling, "1000") != "median" {
-		t.Error("source should name the ceiling only when the median is above it")
-	}
 }
 
 // A real git repo in a temp dir: the helper's whole job is reading one, and a

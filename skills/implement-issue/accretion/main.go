@@ -166,8 +166,15 @@ func run(w io.Writer, repo, base string) error {
 
 	fmt.Fprintf(w, "accretion: %d source files; median %.0f lines, %.0f%% comment\n",
 		len(all), medLines, 100*medRatio)
+	lineSource, ratioSource := "median", "median"
+	if medLines > fileCeiling {
+		lineSource = fmt.Sprintf("ceiling %d", fileCeiling)
+	}
+	if medRatio > commentCeiling {
+		ratioSource = fmt.Sprintf("ceiling %.0f%%", 100*commentCeiling)
+	}
 	fmt.Fprintf(w, "bounds: file length %.0f lines (%s), comment density %.0f%% (%s)\n\n",
-		lineBound, source(medLines, fileCeiling, "1000"), 100*ratioBound, source(medRatio, commentCeiling, "40%"))
+		lineBound, lineSource, 100*ratioBound, ratioSource)
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	rows := 0
@@ -182,11 +189,14 @@ func run(w io.Writer, repo, base string) error {
 			continue
 		}
 		head := measureSource(src, st)
+		// A new file's base is the zero measure, so any excess over the bound
+		// reads as worse than the base: it was born over.
 		var before measure
-		baseText := "new"
+		baseLines, baseRatio := "new", "new"
 		if old, ok := blobs[mb+":"+c.old]; ok {
 			before = measureSource(old, st)
-			baseText = fmt.Sprint(before.lines)
+			baseLines = fmt.Sprint(before.lines)
+			baseRatio = fmt.Sprintf("%.0f%%", 100*before.ratio())
 		}
 		density := "ok"
 		if head.lines >= minCommentLines {
@@ -196,8 +206,8 @@ func run(w io.Writer, repo, base string) error {
 			fmt.Fprintln(tw, "file\tlines base→head\tfile length\tcomment base→head\tcomment density")
 		}
 		fmt.Fprintf(tw, "%s\t%s→%d\t%s\t%s→%.0f%%\t%s\n", p,
-			baseText, head.lines, verdict(float64(before.lines), float64(head.lines), lineBound),
-			pct(baseText, before), 100*head.ratio(), density)
+			baseLines, head.lines, verdict(float64(before.lines), float64(head.lines), lineBound),
+			baseRatio, 100*head.ratio(), density)
 		rows++
 	}
 	if rows == 0 {
@@ -239,20 +249,6 @@ func verdict(before, head, bound float64) string {
 	default:
 		return "act"
 	}
-}
-
-func source(med, ceiling float64, spelled string) string {
-	if med <= ceiling {
-		return "median"
-	}
-	return "ceiling " + spelled
-}
-
-func pct(baseText string, m measure) string {
-	if baseText == "new" {
-		return "new"
-	}
-	return fmt.Sprintf("%.0f%%", 100*m.ratio())
 }
 
 func sourceStyle(p string) (style, bool) {
