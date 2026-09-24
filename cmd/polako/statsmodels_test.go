@@ -61,6 +61,19 @@ func TestStatsListsTheModelsInheritedRunsRanOn(t *testing.T) {
 	}
 }
 
+// A model whose first run recorded no CLI version says nothing about one,
+// rather than borrowing a later run's.
+func TestStatsModelsNeverBackfillTheFirstVersion(t *testing.T) {
+	t.Parallel()
+	dir := writeRecords(t, `{"v":1,"kind":"run","ts":"2026-08-28T09:00:00Z","repo":"r/r","issue":1,"reason":"implement","status":"ok","model":"claude-sonnet-5"}
+{"v":1,"kind":"run","ts":"2026-09-10T09:00:00Z","repo":"r/r","issue":2,"reason":"implement","status":"ok","model":"claude-sonnet-5","claude_version":"2.1.260"}
+{"v":1,"kind":"run","ts":"2026-09-23T09:00:00Z","repo":"r/r","issue":3,"reason":"implement","status":"ok","model":"claude-opus-5-5[1m]","claude_version":"2.1.280"}
+`)
+	if e := statsEpochs(t, dir)[0]; e.FirstClaudeVersion != "" {
+		t.Errorf("first_claude_version = %q, want none — the first run recorded none", e.FirstClaudeVersion)
+	}
+}
+
 // A resume can report the bare id where the fresh run reported [1m]. Counting
 // it would print one model as two.
 func TestStatsModelsIgnoresResumes(t *testing.T) {

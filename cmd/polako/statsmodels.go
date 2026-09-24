@@ -46,9 +46,8 @@ func buildModelEpochs(ds dataset) []modelEpoch {
 		if t.After(e.last) {
 			e.last = t
 		}
-		if e.claudeVersion == "" {
-			e.claudeVersion = r.ClaudeVersion
-		}
+		// No backfill from a later run: an unknown first version stays
+		// unknown rather than naming a CLI the model didn't arrive on.
 	}
 	if len(epochs) < 2 {
 		return nil
