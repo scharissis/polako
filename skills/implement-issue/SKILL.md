@@ -766,8 +766,9 @@ don't post again, and stop.
       machine, or it errors — say so in PLAN.md and fall back to sampling a
       spread of files yourself (`git -C <worktree> ls-files` and Read; no `wc`
       needed and none is granted). Function/unit length the helper doesn't
-      measure: judge the units your change added or grew against the ceiling
-      above and the file's other units.
+      measure: judge the units your change added or grew against the bound
+      in its bullet above — the repo's median unit length or 150 lines,
+      whichever is lower.
       For each touched file the change pushed past its lower bound — an `act`
       the helper printed, or a unit over its bound: either
       extract the excess into a new file or unit in this same PR — extraction
