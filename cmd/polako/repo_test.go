@@ -343,6 +343,36 @@ func TestPlanSkillLabelsEverythingItCreates(t *testing.T) {
 	}
 }
 
+// planPrompt and healthPrompt pass the -max-issues cap as the third argument,
+// so the skill's third declared argument has to be `cap`, and its proposal
+// gate has to fit the batch to it. The supervisor's kill at the cap can only
+// stop a run, not choose what to keep, and a kill mid-epic files half of one.
+func assertSkillFitsTheCap(t *testing.T, path, skill string) {
+	t.Helper()
+	front, _ := skillFrontmatter(t, path, skill)
+	if declared := declaredArguments(t, front); len(declared) < 3 || declared[2] != "cap" {
+		t.Errorf("%s declares %v; the binary passes the issue cap third, so the third must be `cap`", path, declared)
+	}
+	flat := strings.Join(strings.Fields(skill), " ")
+	for _, want := range []string{
+		"**Fit to the cap.**",
+		"cut the batch to the cap, weakest",
+		"an epic is one, and each of its children is one more",
+		"A create call `gh` rejects takes a slot too",
+		"Never leave an epic without the children it names",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("%s's proposal gate no longer says %q, so a batch over the cap is cut by the"+
+				" supervisor's kill instead, mid-epic if that is where the count lands", path, want)
+		}
+	}
+}
+
+func TestPlanSkillFitsTheBatchToTheCap(t *testing.T) {
+	t.Parallel()
+	assertSkillFitsTheCap(t, "skills/"+planSkillDir+"/SKILL.md", planSkill(t))
+}
+
 // The sizing contract is what keeps proposals workable: an issue too big for one
 // PR, or one hiding a decision nobody has made, becomes a park or a question
 // weeks later at full price. It is one sentence and it earns its pin.

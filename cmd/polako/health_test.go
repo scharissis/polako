@@ -162,7 +162,7 @@ func TestHealthDryRunWritesNothingAndPrintsTheInvocation(t *testing.T) {
 		t.Errorf("want one invocation and nothing else on stdout, got:\n%s", printed)
 	}
 	for _, want := range []string{
-		`'/polako:review-health "" "only cmd/polako"'`,
+		`'/polako:review-health "" "only cmd/polako" 7'`,
 		"--model opus",
 		"Bash(gh issue create:*)",
 		"Skill(claude-api)",
@@ -190,14 +190,19 @@ func TestHealthDryRunWritesNothingAndPrintsTheInvocation(t *testing.T) {
 	}
 }
 
-// With no -focus, healthPrompt is the bare slash command — no trailing `""`
-// placeholder nobody needed.
-func TestHealthPromptOmitsArgumentsWhenFocusIsEmpty(t *testing.T) {
+// With no -focus, both prompts hold the focus position open with `""`, so the
+// cap still lands on $cap rather than $focus.
+func TestIntakePromptsKeepTheCapThirdWhenFocusIsEmpty(t *testing.T) {
 	t.Parallel()
 	cfg, _, _ := healthTestConfig(t, &ghState{})
 	cfg.skill = defaultHealthSkill
-	if got, want := healthPrompt(cfg, healthOptions{}), "/"+defaultHealthSkill; got != want {
+	if got, want := healthPrompt(cfg, healthOptions{maxIssues: 10}), "/"+defaultHealthSkill+` "" "" 10`; got != want {
 		t.Errorf("healthPrompt with no focus = %q, want %q", got, want)
+	}
+	cfg.skill = "polako:plan-backlog"
+	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 4}, design: "docs/VISION.md"}
+	if got, want := planPrompt(cfg, opt), `/polako:plan-backlog docs/VISION.md "" 4`; got != want {
+		t.Errorf("planPrompt with no focus = %q, want %q", got, want)
 	}
 }
 

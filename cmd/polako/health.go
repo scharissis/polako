@@ -172,17 +172,14 @@ func healthArgs(cfg config, opt healthOptions) []string {
 }
 
 // healthPrompt is the -p string the skill is invoked with: the slash command
-// and review-health's two declared arguments, repo and focus. The repo
+// and review-health's three declared arguments, repo, focus and cap. The repo
 // argument is always left empty — execClaude already runs the process with
 // cwd set to cfg.dir (see dispatchClaude), and review-health's own SKILL.md
 // says an empty $repo means "the repository the session is already in", so
 // passing it explicitly would only repeat what -dir already established. An
-// explicit "" placeholder holds that argument's position open when -focus is
-// set, so $focus still binds to the second argument rather than the first.
+// explicit "" placeholder holds that argument's position open, so $focus and
+// $cap still bind to the second and third. The cap is there for the same
+// reason planPrompt passes it.
 func healthPrompt(cfg config, opt healthOptions) string {
-	prompt := "/" + cfg.skill
-	if opt.focus != "" {
-		prompt += ` "" ` + planSlashArg(opt.focus)
-	}
-	return prompt
+	return "/" + cfg.skill + ` ""` + intakeTailArgs(opt)
 }
