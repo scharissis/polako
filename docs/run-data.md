@@ -222,9 +222,9 @@ separately so a crash-prone configuration doesn't get to look cheap.
 to — first and last day seen, run count, and the CLI version it first
 showed up on. It appears only when there are two or more: a Claude Code
 release can move the inherited model, and nothing else in the report says
-so. It counts fresh runs that asked for no model — not a `-model` or
-`model:` label run, and not a `resume` or `unfinished` run, which can
-report the bare id where the fresh run reported `[1m]`. It lists models,
+so. It counts fresh runs that asked for no model — any run with a
+`requested_model` is out, whatever set it, and so is any `--resume`, which
+can report the bare id where the fresh run reported `[1m]`. It lists models,
 not a timeline: inherit can differ per repo. `stats -by model` then prices
 each side. `claude_version` comes from the run's own init event, falling
 back to the version read at shift start.

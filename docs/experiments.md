@@ -62,8 +62,10 @@ by tag
 ```
 
 A change nobody chose — Claude Code moving the inherited model — needs no
-tag: the default `stats` report's `models` line says when it happened, and
-`stats -by model` splits the two sides. For anything `stats` doesn't
+tag: the default `stats` report's `models` line shows each model's first
+and last day, and `stats -by model` splits the two sides. Those ranges can
+overlap, since inherit can differ per repo, so read a switch off them only
+when they don't. For anything `stats` doesn't
 answer, the files are JSONL:
 
 ```bash
