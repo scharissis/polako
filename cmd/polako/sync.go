@@ -61,6 +61,15 @@ func gitAuthFailure(err error) bool {
 	return false
 }
 
+// fetchOriginError is the shift-ending error for an origin polako can't fetch:
+// a dead remote on the first try, or an auth failure that outlasted
+// authHoldLimit pickups.
+func fetchOriginError(dir string, err error) error {
+	return fmt.Errorf("could not fetch origin, so a run would start from a base of unknown age "+
+		"and could not push its work — check the network and git's credentials (is the ssh-agent "+
+		"unlocked? does `git -C %s fetch origin` work?), then start the drain again: %w", dir, err)
+}
+
 // porcelainPath is the path out of one `git status --porcelain` line, or "" for
 // a blank one. The format is two status columns and a space, then the path.
 func porcelainPath(line string) string {
@@ -129,11 +138,15 @@ func worktreeFor(list, branch string) string {
 // straight auth failures on 2026-09-19 sat in the same window #396 and #400
 // both opened PRs in — so stopping the whole shift over it is the wrong fix.
 // This warns (raw stderr is fine in the log, an operator's to read) and
-// records it on st instead of returning the fatal error, so the run this
-// precedes goes on; st is nil for the tidy sweep's call, which isn't about
-// any one about-to-run issue. If that run then ends with no PR, the park
-// leads with the real cause — see parkCleanExit — rather than whatever else
-// it drew along the way, which is what actually misled #390.
+// records it on st instead of returning the fatal error; st is nil for the
+// tidy sweep's call, which isn't about any one about-to-run issue.
+//
+// #425 let the run this precedes go on. Issue #595 took that back — see
+// authhold.go: processIssue now holds the run, and the drain waits and tries
+// the pickup again, stopping the shift only after authHoldLimit in a row.
+// #425's point survives: a short outage costs a wait, not the shift.
+// parkCleanExit still leads with the auth cause if a run ever does start
+// after one.
 //
 // st.fetchAuthFailed is reset to false on every call before anything can
 // fail: it means "this leg's own pickup fetch just failed to authenticate",
@@ -160,16 +173,14 @@ func syncDefaultBranch(ctx context.Context, cfg config, st *issueState) error {
 			return ctx.Err()
 		}
 		if gitAuthFailure(err) {
-			cfg.narrate(sevWarning, "polako's own git fetch could not authenticate in %s — the run will "+
-				"go on, but expect a stale base or a failed push until git access is fixed: %v", cfg.dir, err)
+			cfg.narrate(sevWarning, "polako's own git fetch could not authenticate in %s — "+
+				"is the ssh-agent unlocked? %v", cfg.dir, err)
 			if st != nil {
 				st.fetchAuthFailed = true
 			}
 			return nil
 		}
-		return fmt.Errorf("could not fetch origin, so a run would start from a base of unknown age "+
-			"and could not push its work — check the network and git's credentials (is the ssh-agent "+
-			"unlocked? does `git -C %s fetch origin` work?), then start the drain again: %w", cfg.dir, err)
+		return fetchOriginError(cfg.dir, err)
 	}
 	remote, local, err := originHead(ctx, cfg)
 	if err != nil {

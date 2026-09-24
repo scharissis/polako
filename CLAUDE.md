@@ -225,6 +225,10 @@ in the PR body rather than doing it quietly.
   nothing. A refusal is logged and the drain carries on; an origin that can't
   be fetched at pickup stops the shift instead — that run would start from a
   base of unknown age and couldn't push, and so would every issue behind it.
+  A fetch git refuses on auth is the one softer case (issues #425, #595):
+  often a blip, so it starts no run and parks nothing — the drain waits a
+  `-poll` and tries the pickup again, and stops the shift only after three
+  in a row. An issue whose PR is already open is still waited on.
   Both halves do this; the skill also runs with no supervisor at all.
 - **Stdlib-only Go.** No third-party modules — it has to cross-compile to a
   single binary for five targets with nothing but the Go toolchain, and CI

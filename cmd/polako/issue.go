@@ -284,6 +284,11 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 			return err
 		}
 		if !waitsOnPR(pr) {
+			// After the PR check, not before: a PR already open needs no fetch
+			// to be waited on, only a new run does (issue #595).
+			if st.fetchAuthFailed {
+				return errFetchAuthHeld
+			}
 			// dispatchRun's return shapes are the loop's verdict: (nil, err)
 			// is a terminal exit with that error, (nil, nil) means go round
 			// again, and (pr, nil) means a PR is open now and superviseToClose
