@@ -31,7 +31,7 @@ func TestLogEventRendersProgressLines(t *testing.T) {
 
 	out := buf.String()
 	for _, want := range []string{
-		"session started (model claude-opus-5)",
+		"session started (model claude-opus-5, inherited)",
 		"Gathering context on issue #48. Starting now.",
 		"→ Bash: gh issue view 48",
 		"→ Write: PLAN.md",
@@ -62,8 +62,53 @@ func TestLogEventNamesTheSession(t *testing.T) {
 		t.Fatal("init event should parse")
 	}
 	(&eventLog{u: testUI(t)}).event(ev)
-	if want := "session started (model claude-opus-5, session 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9)"; !strings.Contains(buf.String(), want) {
+	if want := "session started (model claude-opus-5, inherited, session 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9)"; !strings.Contains(buf.String(), want) {
 		t.Errorf("output missing %q\ngot:\n%s", want, buf.String())
+	}
+}
+
+// The session line says whether anyone asked for the model, and warns once
+// when an asked-for tier ran as another. Only the four tier words are checked;
+// anything else passes through the way labelPolicy passes a model: value.
+func TestLogEventSaysWhereTheModelCameFrom(t *testing.T) {
+	t.Parallel()
+	const warning = "but the session runs"
+	for _, tc := range []struct {
+		name, requested, model, line string
+		warns                        bool
+	}{
+		{"inherited", "", "claude-opus-5", "(model claude-opus-5, inherited)", false},
+		{"match", "opus", "claude-opus-5[1m]", "(model claude-opus-5[1m], asked for opus)", false},
+		{"match with suffix", "opus[1m]", "claude-opus-5", "(model claude-opus-5, asked for opus[1m])", false},
+		{"full id", "claude-sonnet-5", "claude-sonnet-5", "(model claude-sonnet-5, asked for claude-sonnet-5)", false},
+		{"mismatch", "sonnet", "claude-opus-5", "(model claude-opus-5, asked for sonnet)", true},
+		{"mismatch fable", "fable", "claude-opus-5", "(model claude-opus-5, asked for fable)", true},
+		{"unchecked opusplan", "opusplan", "claude-sonnet-5", "(model claude-sonnet-5, asked for opusplan)", false},
+		{"unchecked best", "best", "claude-opus-5", "(model claude-opus-5, asked for best)", false},
+		{"unchecked gateway name", "my-proxy-model", "claude-opus-5", "(model claude-opus-5, asked for my-proxy-model)", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			buf := captureLog(t)
+			ev, ok := parseEvent([]byte(`{"type":"system","subtype":"init","model":"` + tc.model + `"}`))
+			if !ok {
+				t.Fatal("init event should parse")
+			}
+			el := eventLog{u: testUI(t), requested: tc.requested}
+			el.event(ev)
+			el.event(ev) // a background-task wakeup: never a second warning
+			out := buf.String()
+			if !strings.Contains(out, "session started "+tc.line) {
+				t.Errorf("output missing %q\ngot:\n%s", tc.line, out)
+			}
+			want := 0
+			if tc.warns {
+				want = 1
+			}
+			if got := strings.Count(out, warning); got != want {
+				t.Errorf("got %d tier warnings, want %d\ngot:\n%s", got, want, out)
+			}
+		})
 	}
 }
 

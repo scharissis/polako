@@ -3407,6 +3407,30 @@ func TestDrainChildModelDefaultBeatsEpic(t *testing.T) {
 	}
 }
 
+// A run that asked for sonnet and inited as the fake's opus id says so: the
+// session line names the request, and one warning names both.
+func TestDrainWarnsWhenAskedForTierRanAsAnother(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "implementmerged", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	cfg.model = "sonnet"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := drain(ctx, cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "session started (model claude-opus-5, asked for sonnet") {
+		t.Errorf("session line should name the request\ngot:\n%s", out)
+	}
+	if got := strings.Count(out, "asked for sonnet but the session runs claude-opus-5"); got != 1 {
+		t.Errorf("want one tier warning, got %d\ngot:\n%s", got, out)
+	}
+}
+
 // The two families resolve independently: a child with effort:high under a
 // parent with model:sonnet gets both.
 func TestDrainEpicAndChildLabelsResolveIndependently(t *testing.T) {

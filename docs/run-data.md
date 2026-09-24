@@ -355,7 +355,7 @@ before the CLI announced itself. The id is also in the live log, on every
 run's first line and beside a park:
 
 ```
-[claude] session started (model claude-opus-5, session 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9)
+[claude] session started (model claude-opus-5, inherited, session 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9)
 issue #48 needs a human: claude crashed and 3 resume attempts failed — parking it and moving on
 issue #48: `claude --resume 0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9` reopens what the last skill run on it did
 ```
