@@ -338,7 +338,7 @@ func fakeClaude(mode string) int {
 		// The init event carries the session's command inventory (2.1.85+);
 		// both spellings of the skill are listed so the healthy path proves
 		// the missing-skill tripwire stays quiet when the command exists.
-		emit(`{"type":"system","subtype":"init","session_id":"sess-xyz","model":"claude-opus-5",` +
+		emit(`{"type":"system","subtype":"init","session_id":"sess-xyz","model":"claude-opus-5","claude_code_version":"2.1.280",` +
 			`"slash_commands":["compact","context","cost","polako:implement-issue","implement-issue"]}`)
 		emit(`{"type":"assistant","session_id":"sess-xyz","message":{"content":[{"type":"text","text":"Reading the issue."}],` +
 			`"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":30,"cache_creation_input_tokens":40}}}`)

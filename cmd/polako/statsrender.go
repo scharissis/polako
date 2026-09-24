@@ -257,6 +257,9 @@ func runPairs(s runsSummary) [][2]string {
 			fmt.Sprintf("%d of %d runs priced from the streamed tally, not a result event",
 				s.approximated, s.total)})
 	}
+	if len(s.models) > 0 {
+		pairs = append(pairs, [2]string{"models", modelsLine(s.models)})
+	}
 	return pairs
 }
 

@@ -26,7 +26,11 @@ type streamEvent struct {
 	// session can invoke — the only early sign of a -skill this installation
 	// does not have. CLIs before 2.1.85 do not send it.
 	SlashCommands []string `json:"slash_commands"`
-	Message       struct {
+	// ClaudeCodeVersion is the init event's own CLI version: the one that
+	// actually ran, where the preflight snapshot goes stale on a mid-shift
+	// update.
+	ClaudeCodeVersion string `json:"claude_code_version"`
+	Message           struct {
 		Content []struct {
 			Type  string          `json:"type"`
 			Text  string          `json:"text"`
@@ -124,6 +128,7 @@ type pendingTool struct {
 type runReport struct {
 	sessionID  string
 	model      string // what actually ran, which -model only requests
+	claudeVer  string // the init event's claude_code_version; empty on CLIs that omit it
 	subtype    string
 	isError    bool
 	hasResult  bool
@@ -342,6 +347,9 @@ func (r *runReport) observe(ev streamEvent) {
 			r.started = true
 			if ev.Model != "" {
 				r.model = ev.Model
+			}
+			if ev.ClaudeCodeVersion != "" {
+				r.claudeVer = ev.ClaudeCodeVersion
 			}
 		}
 	case "assistant":

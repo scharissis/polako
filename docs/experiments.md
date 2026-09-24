@@ -37,6 +37,41 @@ Any change to a `SKILL.md`, to the model, or to a strategy knob — `-stall`,
 [continuous-improvement.md](continuous-improvement.md) for the retro this
 sits inside.
 
+## Comparing configurations
+
+`-run-tag` labels a batch so you can price one setup against another later:
+
+```bash
+polako work -model opus -run-tag baseline
+```
+
+Change one thing — model, skill wording, `-stall` — tag the next batch
+differently, and the two sets of records are comparable. The binary's
+version doesn't pin the skill's text, so tag discipline is what makes
+skill-wording experiments mean anything.
+
+```bash
+polako stats -by tag
+```
+
+```
+by tag
+  tag         issues  merged  runs   cost  $/merged  tokens
+  baseline         3       2     5  $6.70     $3.35   16.9M
+  terse-plan       2       1     2  $1.40     $1.40    2.2M
+```
+
+A change nobody chose — Claude Code moving the inherited model — needs no
+tag: the default `stats` report's `models` line shows each model's first
+and last day, and `stats -by model` splits the two sides. Those ranges can
+overlap, since inherit can differ per repo, so read a switch off them only
+when they don't. For anything `stats` doesn't
+answer, the files are JSONL:
+
+```bash
+cat ~/.polako/metrics/*.jsonl | jq -s 'map(select(.kind=="run")) | map(.cost_usd) | add'
+```
+
 ## How to settle one
 
 Run enough issues under the tag that the comparison is not one lucky night —

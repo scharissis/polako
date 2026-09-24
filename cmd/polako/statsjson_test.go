@@ -83,7 +83,8 @@ func TestStatsJSONGoldenDocument(t *testing.T) {
     "pr_to_merge": {
       "count": 0
     }
-  }
+  },
+  "epochs": []
 }
 `, dir)
 	if out != want {

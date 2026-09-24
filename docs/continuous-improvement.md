@@ -137,14 +137,16 @@ the labels honest, and the ledger that stops the results evaporating:
   `model_usage` prices each) and *is the default `-stall` losing more to
   kills than it saves in hangs?* (the `stalled` status count against wall
   time, across two tagged batches).
-- **Version drift is a recipe, not a flag.** Every record carries the three
-  versions in play, and the `no-skill` status exists because a CLI upgrade
-  (2.1.85) silently changed behavior — exactly the regression a per-version
-  breakdown catches. But `stats` keeps its `-by` list short on purpose and
-  points the long tail at jq and DuckDB, so this is a documented one-liner
-  (group status counts by `claude_version` — see [Recipes](#recipes) below),
-  run as part of the retro after any CLI upgrade. It becomes a `-by` group
-  only if someone reaches for the recipe often enough to resent typing it.
+- **Model drift is a report line; CLI-version drift is a recipe.** Every
+  record carries the three versions in play, and the `no-skill` status
+  exists because a CLI upgrade (2.1.85) silently changed behavior. CLI
+  drift stays a documented one-liner (group status counts by
+  `claude_version` — see [Recipes](#recipes) below), run in the retro after
+  any upgrade; `stats` keeps its `-by` list short on purpose. Model drift
+  used to be the same recipe, and it missed both times the inherited model
+  moved — the one drift that moves cost 2×. So the default `stats` report
+  now prints a `models` line whenever inherited runs resolved to more than
+  one model ([run-data.md](run-data.md#reading-it-back-polako-stats)).
 
 ## Pillar 5 — quality past the merge
 

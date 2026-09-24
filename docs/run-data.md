@@ -156,6 +156,7 @@ runs
   outcomes      opened pr 3, posted questions 1, nothing 3
   work          131 turns, 115 tool uses
   approximated  1 of 7 runs priced from the streamed tally, not a result event
+  models        claude-opus-5 2026-08-20 → 2026-08-23, 4 runs; claude-sonnet-5 2026-08-22 → 2026-08-24, 2 runs
 
 cost
   total          $8.10 over 4.1d ($1.98/day)
@@ -216,6 +217,23 @@ over several lines and omits subagent turns.
 **On approximated runs:** a crashed, stalled or interrupted run's tokens
 are the tally seen streaming past, dollars read zero — counted out
 separately so a crash-prone configuration doesn't get to look cheap.
+
+**On models:** the `models` line lists each model inherited runs resolved
+to — first and last day seen, run count, and the CLI version it first
+showed up on. It appears only when there are two or more: a Claude Code
+release can move the inherited model, and nothing else in the report says
+so. It counts fresh runs that asked for no model — any run with a
+`requested_model` is out, whatever set it, and so is any `--resume`, which
+can report the bare id where the fresh run reported `[1m]`. It lists models,
+not a timeline: inherit can differ per repo. `stats -by model` then prices
+each side. `claude_version` comes from the run's own init event, falling
+back to the version read at shift start.
+
+**On dollars:** `cost_usd` is the CLI's API-equivalent pricing — real money
+on API-key auth, notional on a subscription plan. Tokens are the ground
+truth; dollars are derived from them. For anything `stats` doesn't answer,
+the files are JSONL, readable by jq, DuckDB or any spreadsheet.
+[experiments.md](experiments.md) covers comparing configurations.
 
 ## Calendar windows: `-window`
 
@@ -419,13 +437,19 @@ polako stats -json | jq .
   "latency": {
     "blocked_on_answers": { "count": 1, "median_seconds": 11400, "max_seconds": 11400 },
     "pr_to_merge": { "count": 3, "median_seconds": 4800, "max_seconds": 7200 }
-  }
+  },
+  "epochs": [
+    { "model": "claude-opus-5", "first": "2026-08-20T09:00:00Z", "last": "2026-08-23T09:00:00Z", "runs": 4 },
+    { "model": "claude-sonnet-5", "first": "2026-08-22T09:00:00Z", "last": "2026-08-24T09:00:00Z", "runs": 2 }
+  ]
 }
 ```
 
 Field for field, this is `polako stats` above: `source` is the
 `read`/`window`/`repos` line, `issues`/`runs`/`cost`/`latency` the four
-summary sections. `-by` and `run_log` are top-level fields present only
+summary sections, `epochs` the `models` line — always there, `[]` when
+the line isn't printed, each entry adding `first_claude_version` when the
+records have one. `-by` and `run_log` are top-level fields present only
 when given:
 
 ```bash
@@ -457,44 +481,3 @@ when the text report's matching line is. `-by` and `run_log` are omitted,
 not empty, when their flag wasn't given. With `-json -html` together, the
 "wrote the HTML report to …" line moves to stderr, so stdout carries
 exactly the document a `| jq` pipeline expects.
-
-## Comparing configurations
-
-`-run-tag` labels a batch so you can price one setup against another later:
-
-```bash
-polako work -model opus -run-tag baseline
-```
-
-Change one thing — model, skill wording, `-stall` — tag the next batch
-differently, and the two sets of records are comparable. The binary's
-version doesn't pin the skill's text, so tag discipline is what makes
-skill-wording experiments mean anything.
-
-```bash
-polako stats -by tag
-```
-
-```
-by tag
-  tag         issues  merged  runs   cost  $/merged  tokens
-  baseline         3       2     5  $6.70     $3.35   16.9M
-  terse-plan       2       1     2  $1.40     $1.40    2.2M
-```
-
-An issue worked under two tags is counted under each. For anything `stats`
-doesn't answer, the files are JSONL, readable by jq, DuckDB or any
-spreadsheet:
-
-```bash
-cat ~/.polako/metrics/*.jsonl | jq -s 'map(select(.kind=="run")) | map(.cost_usd) | add'
-```
-
-Tagging is a habit, not a flag: see
-[continuous-improvement.md](continuous-improvement.md) for
-when a batch needs a fresh tag, and
-[experiments.md](experiments.md) for the verdicts.
-
-**On dollars:** `cost_usd` is the CLI's API-equivalent pricing — real money
-on API-key auth, notional on a subscription plan. Tokens are the ground
-truth; dollars are derived from them.

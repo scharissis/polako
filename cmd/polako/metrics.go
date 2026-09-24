@@ -20,6 +20,7 @@ package main
 // who could already see that PR. Nothing goes anywhere else, ever.
 
 import (
+	"cmp"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -495,7 +496,7 @@ func newRunRecord(cfg config, rc runContext, rep runReport) runRecord {
 		MaxSessionCostUSD: cfg.maxSessionCost,
 
 		PolakoVersion: polakoVersion(),
-		ClaudeVersion: cfg.claudeVersion,
+		ClaudeVersion: cmp.Or(rep.claudeVer, cfg.claudeVersion),
 		PluginVersion: cfg.pluginVersion,
 	}
 	// No result event: the run died mid-flight. Report what was seen going

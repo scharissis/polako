@@ -129,6 +129,7 @@ runs
   outcomes      opened pr 3, posted questions 1, nothing 3
   work          131 turns, 115 tool uses
   approximated  1 of 7 runs priced from the streamed tally, not a result event
+  models        claude-opus-5 2026-08-20 → 2026-08-23, 4 runs; claude-sonnet-5 2026-08-22 → 2026-08-24, 2 runs
 
 cost
   total          $8.10 over 4.1d ($1.98/day)
