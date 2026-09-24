@@ -917,7 +917,8 @@ func needsYouParts(snap statusSnapshot) []string {
 	// lookups all miss the same way an empty one's would, so every parked
 	// issue falls back to the batched clause. One pass decides both lists,
 	// so the two clauses can never classify the same issue two different
-	// ways.
+	// ways. A parked design request always gets its own clause
+	// (parkedDesignClause), since dropping the label requeues nothing.
 	var undecided []int
 	var perIssue []string
 	for _, issue := range snap.queues.parked {
@@ -925,6 +926,8 @@ func needsYouParts(snap statusSnapshot) []string {
 		switch {
 		case !ok:
 			undecided = append(undecided, issue)
+		case it.design:
+			perIssue = append(perIssue, parkedDesignClause(it))
 		case len(it.entries) > 0:
 			perIssue = append(perIssue, fmt.Sprintf("grant %s or fix the skill, then polako unpark #%d",
 				strings.Join(it.entries, ", "), issue))

@@ -814,7 +814,9 @@ func TestStatusMakesOnlyReadCalls(t *testing.T) {
 
 	// Stronger than the state comparison, which a refused write would also
 	// pass: this is the list of subcommands that were reached for at all.
-	reads := []string{"issue list", "pr list", "pr view", "repo view"}
+	// issue view is readParkListItem's label read (issue #553), reached only
+	// because #3 above is parked.
+	reads := []string{"issue list", "issue view", "pr list", "pr view", "repo view"}
 	f, err := os.Open(calls)
 	if err != nil {
 		t.Fatalf("reading the gh call log: %v", err)

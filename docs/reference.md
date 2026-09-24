@@ -604,6 +604,11 @@ over — nothing was pushed`. A `checks_remediation` park whose CI is still
 red gets one more line: a warning that the next shift will remediate the
 same red and likely park again, so fix the branch before clearing the
 label. Both also name a next step per category, `read the thread` with none.
+A parked design request (labelled `design`) is one no `work` shift picks
+up, so its line names the verb that does: `polako design -issue 7 resumes
+issue-7 from its 2 commits`, `polako design -issue 8 waits on PR #81`.
+`status`'s needs-you clause for one ends the same way: `polako unpark 7,
+then polako design -issue 7`.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |

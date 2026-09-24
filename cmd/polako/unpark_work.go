@@ -169,6 +169,24 @@ func nextShiftLine(w parkWork, local leftWork) string {
 	return "starts over — nothing was pushed"
 }
 
+// designRunCommand is the verb that works a design request. The `work`
+// queue leaves design issues out, so for one of those this, not a shift, is
+// what clearing needs-human hands the issue back to.
+func designRunCommand(issue int) string {
+	return fmt.Sprintf("polako design -issue %d", issue)
+}
+
+// parkNextShift is nextShiftLine for one listed item: a design issue's line
+// names designRunCommand as the subject, since no `work` shift will act on
+// it. "not read" stays as it is — there is no action to attribute.
+func parkNextShift(it parkListItem) string {
+	line := nextShiftLine(it.work, it.local)
+	if !it.design || !it.work.read {
+		return line
+	}
+	return designRunCommand(it.issue) + " " + line
+}
+
 // --- next step ---
 
 // parkNextStepTable maps each park category (metrics.go) to the one-sentence

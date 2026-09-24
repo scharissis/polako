@@ -4,7 +4,10 @@ package main
 // Apart from status.go because that file sits at its size budget
 // (sizebudget_test.go).
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // designLine is the `design` row: how many, which, and the label that keeps
 // them out of the queue.
@@ -29,4 +32,21 @@ func designClauses(design []designInfo) []string {
 		}
 	}
 	return parts
+}
+
+// parkedDesignClause is the needs-you clause for a parked design request.
+// Clearing needs-human alone moves nothing — `work` leaves design issues
+// out — so every form ends with designRunCommand, the same verb unpark's
+// next-shift line names (parkNextShift). It never joins the batched "drop
+// needs-human to requeue" clause, since there is no queue to go back to.
+func parkedDesignClause(it parkListItem) string {
+	then := fmt.Sprintf("polako unpark %d, then %s", it.issue, designRunCommand(it.issue))
+	if len(it.entries) > 0 {
+		return fmt.Sprintf("grant %s or fix the skill, then %s", strings.Join(it.entries, ", "), then)
+	}
+	clause, ok := parkNeedsYouClause[it.category]
+	if !ok {
+		clause = "is a parked design request"
+	}
+	return fmt.Sprintf("#%d %s — %s", it.issue, clause, then)
 }
