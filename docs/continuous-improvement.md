@@ -42,14 +42,14 @@ The highest-leverage item in this plan is not new; it is finishing one that
 exists. `evals/` grades what a real skill run leaves behind — ten cases now,
 across all four shipped skills. It has run in full once, by hand through
 `evals/run.sh` on 2026-08-28 (32/34, both reds genuine skill findings), and
-never green. `claude plugin eval`, the CLI's own runner, has never run it at
-all.
+never green. Issue #77 ported it to `claude plugin eval`, the CLI's own
+runner: the cases are written to the CLI's schema, `evals/plugin-eval.sh`
+runs them, and `run.sh` grades by the CLI's rules, so the two agree.
 
 The work, in order:
 
-- One budgeted `plugin eval` session (issue #77): `--case clear-issue` first,
-  then the rest. Settle the seven CLI unknowns listed at the bottom of
-  `evals/README.md`, fix what the run finds, and delete that section.
+- One budgeted session over every case, under both runners (issue #77):
+  `--case clear-issue` first, then the rest. Fix what the runs find.
 - Record the baseline: scores and cost per case, in the PR body of whatever
   change the first green run rides on — the same "the PR body says what was
   verified" convention skill changes already follow.

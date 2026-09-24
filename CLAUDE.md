@@ -319,11 +319,12 @@ a scratch repo and grades what they leave behind:
 evals/run.sh <case>...
 ```
 
-`claude plugin eval .` runs the same cases, and is no longer early-access as
-of CLI 2.1.280, but it has never run this suite: its first run is issue
-#77's debugging session, and until then a PR quotes `run.sh`'s verdicts.
-`evals/README.md` has when to run which cases ("When to run it") and both
-runners' flags ("Running it").
+`evals/plugin-eval.sh --case <glob>` runs the same cases through `claude
+plugin eval`, the CLI's own runner, and `run.sh` grades by the CLI's rules,
+so the two should agree on every verdict. Either one's verdicts can go in a
+PR body; an unattended run uses `run.sh`. `evals/README.md` has when to run
+which cases ("When to run it"), both runners' flags ("Running it"), and what
+the CLI does with a case ("Writing a case").
 
 Two of the CLI's defaults matter, both covered in `evals/README.md`:
 `--ablation` adds a second, no-plugin baseline arm, so every case runs twice;
@@ -347,10 +348,10 @@ unattended run does this itself: `Bash(evals/run.sh:*)` is in `defaultTools`,
 and Phase 3 has the skill run `evals/run.sh --plugin-dir <worktree>
 --max-cost 5 <case>` once its own commits touch a shipped `SKILL.md`. By hand
 it's `evals/run.sh <case>` from the branch's checkout. The one thing a run
-can't verify is a change to the suite itself — `run.sh`, `evals/lib/`, a
-`case.yaml` — because it calls the main checkout's copy, which grades with
-main's harness and cases; that PR defers to a human and says so in its
-body. A wobbling case gets run three
+can't verify is a change to the suite itself — `run.sh`, `plugin-eval.sh`,
+`evals/lib/`, a case file — because it calls the main checkout's copy,
+which grades with main's harness and cases; that PR defers to a human and
+says so in its body. A wobbling case gets run three
 times (`--runs 3` on the CLI, three `run.sh` invocations by hand): a flaky
 grader is worse than no grader, since it teaches the habit of ignoring
 red. Skill wording is a tagged change too, so the next batch runs under a
