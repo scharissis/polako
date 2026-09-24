@@ -96,6 +96,7 @@ func TestStatsModelsIgnoresResumes(t *testing.T) {
 	dir := writeRecords(t, `{"v":1,"kind":"run","ts":"2026-09-23T09:00:00Z","repo":"r/r","issue":1,"reason":"implement","status":"crash","model":"claude-opus-5-5[1m]"}
 {"v":1,"kind":"run","ts":"2026-09-23T09:10:00Z","repo":"r/r","issue":1,"reason":"resume","status":"ok","model":"claude-opus-5-5"}
 {"v":1,"kind":"run","ts":"2026-09-23T10:00:00Z","repo":"r/r","issue":1,"reason":"unfinished","status":"ok","model":"claude-opus-5-5"}
+{"v":1,"kind":"run","ts":"2026-09-23T11:00:00Z","repo":"r/r","issue":1,"reason":"checks","resumed_from":"s1","status":"ok","model":"claude-opus-5-5"}
 `)
 	if out := stats(t, "-metrics", dir); hasLine(out, "models claude-") {
 		t.Errorf("a resume's bare id printed a second model:\n%s", out)

@@ -30,7 +30,10 @@ type modelEpoch struct {
 func buildModelEpochs(ds dataset) []modelEpoch {
 	var epochs []modelEpoch
 	for _, r := range ds.runs {
-		if r.Model == "" || r.RequestedModel != "" || r.Reason == reasonResume || r.Reason == reasonUnfinished {
+		// ResumedFrom catches a --resume under any reason; the reason names
+		// catch one written before that field existed.
+		resumed := r.ResumedFrom != "" || r.Reason == reasonResume || r.Reason == reasonUnfinished
+		if r.Model == "" || r.RequestedModel != "" || resumed {
 			continue
 		}
 		t := recTime(r.TS)
