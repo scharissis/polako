@@ -30,10 +30,7 @@ type inheritedModel struct {
 func buildInheritedModels(ds dataset) []inheritedModel {
 	var epochs []inheritedModel
 	for _, r := range ds.runs {
-		// ResumedFrom catches a --resume under any reason; the reason names
-		// catch one written before that field existed.
-		resumed := r.ResumedFrom != "" || r.Reason == reasonResume || r.Reason == reasonUnfinished
-		if r.Model == "" || r.RequestedModel != "" || resumed {
+		if r.Model == "" || r.RequestedModel != "" || resumedRun(r) {
 			continue
 		}
 		t := recTime(r.TS)
@@ -56,6 +53,12 @@ func buildInheritedModels(ds dataset) []inheritedModel {
 		return nil
 	}
 	return epochs
+}
+
+// resumedRun is a --resume. ResumedFrom catches one under any reason; the
+// reason names catch one written before that field existed.
+func resumedRun(r runRecord) bool {
+	return r.ResumedFrom != "" || r.Reason == reasonResume || r.Reason == reasonUnfinished
 }
 
 // modelsLine is the text form, shared by the text report and the HTML

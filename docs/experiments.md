@@ -80,6 +80,13 @@ fill in the verdict with the numbers rather than the impression. An issue
 worked under two tags counts under each, and the table says so when it
 happened; if that is most of the batch, the comparison is not one.
 
+A batch and its baseline should each run on one model. When Claude Code
+moves the inherited model mid-batch, `stats -by tag` says so under the
+table — `(model moved under baseline: inherit ran on A and B)` — and the
+comparison is partly a model comparison. A tag that asked for two models on
+purpose, like `plan-best`, never gets the note: there the model is the
+change.
+
 ## The ledger
 
 | tag | hypothesis | change | verdict | decision |

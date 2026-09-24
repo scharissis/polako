@@ -19,6 +19,11 @@ func printGroupTable(w io.Writer, rpt report, ds dataset, issues []*issueStats, 
 	if note := spanningNote(spanning, by); note != "" {
 		fmt.Fprintf(w, "  %s\n", note)
 	}
+	if by == byTag {
+		if note := movedNote(movedTags(ds)); note != "" {
+			fmt.Fprintf(w, "  %s\n", note)
+		}
+	}
 }
 
 // groupHeader names the first column after whatever is being grouped by, so
