@@ -150,6 +150,11 @@ type parkListItem struct {
 	entries  []string
 	ignored  []string
 	category string
+	// design is whether the issue carries designLabel: no `work` shift picks
+	// a parked design request back up, `polako design -issue N` does, so the
+	// next-shift line and status's needs-you clause name that verb instead.
+	// False when the label read fails, which falls back to today's wording.
+	design bool
 	// work is read separately from the rest of this struct — it needs
 	// gh calls readParkListItem doesn't make, and readParkListItems is
 	// shared with status.go's own needs-you line, which has no use for it.
@@ -267,9 +272,11 @@ func ghViewerLogin(ctx context.Context, cfg config) (string, error) {
 // that is both authored by viewer and shaped like parkIssue's own — walking
 // newest-first, since a re-park after a reply appends a second one. Best
 // effort: a thread that fails to read still gets a row, with a reason that
-// says so, rather than dropping the issue from the listing entirely.
+// says so, rather than dropping the issue from the listing entirely. One more
+// gh call reads the issue's labels for item.design.
 func readParkListItem(ctx context.Context, cfg config, issue int, viewer string) parkListItem {
 	item := parkListItem{issue: issue}
+	item.design, _ = issueHasLabel(ctx, cfg, issue, designLabel)
 	comments, err := issueComments(ctx, cfg, issue)
 	if err != nil {
 		item.reason = "could not read its comments"
@@ -360,7 +367,7 @@ func applyUnpark(ctx context.Context, prompt *setupPrompt, autoApprove bool, out
 			fmt.Fprintf(out, "  could not remove %s from #%d: %v\n", needsHumanLabel, it.issue, err)
 			continue
 		}
-		fmt.Fprintf(out, "  #%d next shift: %s\n", it.issue, nextShiftLine(it.work, it.local))
+		fmt.Fprintf(out, "  #%d next shift: %s\n", it.issue, parkNextShift(it))
 		if warn := staleRedCIWarning(it.category, it.work); warn != "" {
 			fmt.Fprintf(out, "  #%d warning: %s\n", it.issue, warn)
 		}
@@ -410,7 +417,7 @@ func renderUnpark(w io.Writer, rpt report, cfg config, items []parkListItem, sin
 		renderLocalWork(w, rpt, it.local)
 		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("reason   "), it.reason)
 		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("add-tools"), renderParkEntries(it))
-		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("next shift"), nextShiftLine(it.work, it.local))
+		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("next shift"), parkNextShift(it))
 		fmt.Fprintf(w, "  %s  %s\n", rpt.dim("next step"), parkNextStep(it))
 		if warn := staleRedCIWarning(it.category, it.work); warn != "" {
 			fmt.Fprintf(w, "  %s  %s\n", rpt.dim("warning"), warn)

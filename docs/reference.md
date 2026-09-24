@@ -595,15 +595,15 @@ polako work -dir . -add-tools "Bash(echo:*)"
 POLAKO_ADD_TOOLS=Bash(echo:*)
 ```
 
-Both the one-issue view and this per-issue print after `-apply` say what
-happens once the label is gone — the same restart-safety call the drain
-itself makes (`waitsOnPR`, issue.go), never a second copy of it: `waits on
-PR #84` (`and remediates its red CI` when it's open and red), `resumes
-issue-390 from its 4 commits` with a pushed branch and no PR yet, or `starts
-over — nothing was pushed`. A `checks_remediation` park whose CI is still
-red gets one more line: a warning that the next shift will remediate the
-same red and likely park again, so fix the branch before clearing the
-label. Both also name a next step per category, `read the thread` with none.
+Both the one-issue view and this per-issue print say what happens once the
+label is gone, via the drain's own restart-safety call (`waitsOnPR`,
+issue.go): `waits on PR #84` (`and remediates its red CI` if open and red),
+`resumes issue-390 from its 4 commits` (pushed, no PR), or `starts over —
+nothing was pushed`. A `checks_remediation` park still red warns it will
+likely park again, so fix the branch first. Each names a next step per
+category, `read the thread` with none. A parked `design` request names the
+verb that works it, `polako design -issue 7 resumes issue-7 from its 2
+commits`; `status` ends `polako unpark 7, then polako design -issue 7`.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
