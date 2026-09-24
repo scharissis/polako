@@ -32,6 +32,9 @@ type statsDoc struct {
 	Runs    statsDocRuns    `json:"runs"`
 	Cost    statsDocCost    `json:"cost"`
 	Latency statsDocLatency `json:"latency"`
+	// Epochs is the text report's `models` line: always present, [] when
+	// inherited runs resolved to fewer than two models.
+	Epochs []statsDocEpoch `json:"epochs"`
 	// Window is the resolved -window bounds, present only when the flag was
 	// given — the typed twin of the text report's "window" header line.
 	Window *statsDocWindow `json:"window,omitempty"`
@@ -246,6 +249,7 @@ func statsDocFrom(ds dataset, issues []*issueStats, summary statsSummary, opt st
 		Runs:    statsDocRunsFrom(summary.runs),
 		Cost:    statsDocCostFrom(summary.cost),
 		Latency: statsDocLatencyFrom(summary.latency),
+		Epochs:  statsDocEpochsFrom(summary.runs.models),
 	}
 	doc.Window = statsDocWindowFrom(summary.source)
 	doc.Plan = statsDocPlanFrom(summary.plan)

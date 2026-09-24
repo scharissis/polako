@@ -653,10 +653,12 @@ type runsSummary struct {
 	approximated int
 	turns        int
 	tools        int
+	models       []modelEpoch // nil unless inherited runs resolved to two or more models
 }
 
 func buildRunsSummary(ds dataset) runsSummary {
-	s := runsSummary{total: len(ds.runs), statuses: map[string]int{}, reasons: map[string]int{}, outcomes: map[string]int{}}
+	s := runsSummary{total: len(ds.runs), statuses: map[string]int{}, reasons: map[string]int{}, outcomes: map[string]int{},
+		models: buildModelEpochs(ds)}
 	for _, r := range ds.runs {
 		s.statuses[r.Status]++
 		s.reasons[r.Reason]++
