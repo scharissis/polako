@@ -358,6 +358,7 @@ func assertSkillFitsTheCap(t *testing.T, path, skill string) {
 		"**Fit to the cap.**",
 		"cut the batch to the cap, weakest",
 		"an epic is one, and each of its children is one more",
+		"A create call `gh` rejects takes a slot too",
 		"Never leave an epic without the children it names",
 	} {
 		if !strings.Contains(flat, want) {

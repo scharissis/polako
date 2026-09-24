@@ -185,10 +185,12 @@ set against the document and against the backlog you read in Phase 0:
   a decision and costs a run real money. Cut it.
 - **Fit to the cap.** If a cap was given and the batch is still over it, cut
   the batch to the cap, weakest proposals first. Every issue takes one slot:
-  an epic is one, and each of its children is one more.
-  Never leave an epic without the children it names: drop a whole epic, or
-  shrink it and rewrite its body to name only the children that stay. The
-  supervisor kills the run at the cap, and a kill mid-epic files half of one.
+  an epic is one, and each of its children is one more. A create call `gh`
+  rejects takes a slot too, and Phase 4's fallback for an older `gh` starts
+  with one, so a batch with children leaves one slot spare. Never leave an
+  epic without the children it names: drop a whole epic, or shrink it and
+  rewrite its body to name only the children that stay. The supervisor kills
+  the run at the cap, and a kill mid-epic files half of one.
 
 Creation is the outward act; this is the last point at which being wrong is
 cheap.
