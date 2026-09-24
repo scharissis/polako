@@ -9,8 +9,7 @@ description: >
   A run whose change is visual should show the change: a screenshot pushed to
   polako-evidence, embedded in the PR body by commit SHA. That pipeline shipped
   in tickets 3-6 (#402-#405) of the now-retired visual-evidence plan; this case
-  existed first so those tickets had something to grade against, and none of
-  the graders below has been re-run since to confirm it passes.
+  existed first so those tickets had something to grade against.
 tags:
   - skill
   - visual-evidence
@@ -80,9 +79,8 @@ graders:
     min: 0
     max: 0
 
-  # Expected to stay red until ticket 6 (#405) shipped the before shot — v1's
-  # capture (ticket 4) was after-only by design. #405 merged, so this is the
-  # one to check first on the next run of this case.
+  # A before shot shows what the change changed only if nothing had been edited
+  # yet when it was taken (ticket 6, #405).
   - type: tool_order
     name: before_shot_precedes_first_edit
     before:
