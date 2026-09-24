@@ -1,8 +1,8 @@
 package main
 
-// The `models` line: which models inherited runs resolved to, and when. The
-// inherited model changed twice in four weeks and `stats` said nothing unless
-// asked with -by model, so a switch now shows up in the default report.
+// The `models` line: which models inherited runs resolved to, and when. It is
+// in the default report, not behind -by model, because a Claude Code release
+// can move the inherited model with nothing else in the report saying so.
 
 import (
 	"fmt"
