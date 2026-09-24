@@ -128,9 +128,9 @@ log line, never a failed shift.
 
 ## Reading it back: `polako stats`
 
-`stats` is the only thing that reads those files — its sibling
-[`status`](reference.md#where-the-backlog-stands-polako-status) reads GitHub
-instead.
+`stats` is one of three readers. The pricing line after `plan` and `health`
+is another; [`status`](reference.md#where-the-backlog-stands-polako-status)'s
+last-shift line and row details, read after GitHub, are the third.
 
 ```bash
 polako stats

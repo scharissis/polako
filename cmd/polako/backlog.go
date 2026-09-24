@@ -456,7 +456,7 @@ func issueHasLabel(ctx context.Context, cfg config, issue int, name string) (boo
 // on the flags beats no run — it warns and falls through to them.
 //
 // Up to three gh calls. The first widens #363's `--json labels` (plus `body`
-// when -effort-by-size is armed) to also ask for `parent`; a gh that does not
+// when -effort-by-size or -model-by-size is armed) to also ask for `parent`; a gh that does not
 // serve `parent` on `issue view` retries it with the same fields minus
 // `parent` through unknownJSONField — the retry inside the retryRead attempt,
 // like listOpenIssues, so it costs no retry allowance. Unlike listOpenIssues

@@ -30,9 +30,9 @@ the backlog, never through the supervisor reading its own telemetry.
 2. **Skill and configuration changes are measured, not hoped.** The eval suite
    gates skill text; `-run-tag` discipline makes before/after batches
    comparable; the numbers that settle a comparison are trustworthy.
-3. **The invariants come out untouched.** No new telemetry readers (the plan
-   report's pricing line, argued in `docs/designs/backlog-fill.md`, would be the second and
-   last), no work-loop reads, no self-tuning, no third destination off the
+3. **The invariants come out untouched.** No new telemetry readers beyond the
+   three CLAUDE.md names (`stats`, the plan report's pricing line and
+   `status`'s last-shift line), no work-loop reads, no self-tuning, no third destination off the
    machine, no issue or PR text in a record — reviewing text means following
    a session id to the CLI's own files, never copying text into ours.
 
