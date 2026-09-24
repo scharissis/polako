@@ -1,13 +1,16 @@
 ---
 description: Turn a vision document into a curated backlog of proposed epics and one-PR issues
-argument-hint: [design-doc] [focus]
-arguments: [design, focus]
+argument-hint: [design-doc] [focus] [cap]
+arguments: [design, focus, cap]
 disable-model-invocation: true
 ---
 
 # Propose a backlog from $design
 
 Focus, if one was given: $focus
+
+Issue cap, if one was given: $cap — the most issues this run may create,
+epics included. Phase 3 fits the batch to it.
 
 ## What this run may do, and what it may not
 
@@ -180,6 +183,11 @@ set against the document and against the backlog you read in Phase 0:
   just a thought you had while sequencing.
 - **Weak proposals cut.** An issue that exists to look thorough costs a curator
   a decision and costs a run real money. Cut it.
+- **Fit to the cap.** If a cap was given and the batch is still over it, cut
+  the batch to the cap, weakest proposals first; an epic counts as one issue.
+  Never leave an epic without the children it names: drop a whole epic, or
+  shrink it and rewrite its body to name only the children that stay. The
+  supervisor kills the run at the cap, and a kill mid-epic files half of one.
 
 Creation is the outward act; this is the last point at which being wrong is
 cheap.

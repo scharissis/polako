@@ -87,6 +87,12 @@ func TestHealthSkillLabelsEverythingItCreates(t *testing.T) {
 	}
 }
 
+// Mirrors TestPlanSkillFitsTheBatchToTheCap.
+func TestHealthSkillFitsTheBatchToTheCap(t *testing.T) {
+	t.Parallel()
+	assertSkillFitsTheCap(t, "skills/"+healthSkillDir+"/SKILL.md", healthSkill(t))
+}
+
 // Mirrors TestPlanSkillStatesTheSizingContract: an issue too big for one PR, or
 // one hiding a decision nobody has made, becomes a park or a question weeks
 // later at full price. The sentence is read with its line breaks flattened —
