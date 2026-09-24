@@ -735,18 +735,38 @@ don't post again, and stop.
       the floor under that failure, and it is generous on purpose — high enough
       to be uncontroversial in any language, so it only bites the bootstrap
       case and the repo's own median does the rest.
-      - File length: the repo's median source-file line count (sample a spread
-        of files with `git -C <worktree> ls-files` and Read; no `wc` needed and
-        none is granted), or an absolute ceiling of 1,000 lines.
+      - File length: the repo's median source-file line count, or an absolute
+        ceiling of 1,000 lines.
       - Function/unit length: the repo's median function/method/class length,
         or an absolute ceiling of 150 lines.
-      - Comment density: the repo's median ratio of comment lines to code lines
-        in a file, or an absolute ceiling of 40%. This is the measure that
+      - Comment density: the repo's median share of a file's lines that are
+        comment, or an absolute ceiling of 40%. This is the measure that
         would otherwise go unwatched — every run adds justification for its own
         change and none removes the justification a later run's reversal left
         stranded, so without this comments drift from explanation into a second
         untested codebase.
-      For each touched file the change pushed past its lower bound: either
+      Don't work out file length or comment density yourself — medians are
+      arithmetic with one right answer, and a helper ships with this skill to
+      do it. Run it from this skill's own base directory (the "Base directory
+      for this skill" line this skill was loaded with), `<base>` the
+      `origin/…` ref Phase 1 resolved:
+
+          go -C <skill-dir> run ./accretion -repo <worktree> -base <base>
+
+      It prints both medians, each bound — min(median, ceiling) — and one row
+      per source file changed since `<base>`, with its lines and comment share
+      at the base and now. Each measure reads `ok`, `over, not worse` (already
+      over at the base, and no bigger — not this change's debt) or `act`
+      (over the bound, and worse than the base, a new file included). Take
+      those verdicts as given, for the substantially changed files above
+      only — a row for a one-line edit is still out of scope. If the helper can't run — no `go` on this
+      machine, or it errors — say so in PLAN.md and fall back to sampling a
+      spread of files yourself (`git -C <worktree> ls-files` and Read; no `wc`
+      needed and none is granted). Function/unit length the helper doesn't
+      measure: judge the units your change added or grew against the ceiling
+      above and the file's other units.
+      For each touched file the change pushed past its lower bound — an `act`
+      the helper printed, or a unit over its bound: either
       extract the excess into a new file or unit in this same PR — extraction
       only, never a redesign the issue did not ask for — or, if splitting it
       cleanly is awkward, leave it and say so under `## Scope` in the PR body,

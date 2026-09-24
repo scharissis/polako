@@ -1061,6 +1061,17 @@ func TestReviewGateChecksForAccretion(t *testing.T) {
 			" whichever is lower` — a relative-only check reads as a harmless simplification and" +
 			" silently restores issue #154's bootstrapping flaw, so pin the ceiling here")
 	}
+	// Issue #587: the medians come from a shipped helper, not the model's own
+	// arithmetic. Unattended, it only runs if defaultTools grants `go`.
+	if !strings.Contains(flat, "go -C <skill-dir> run ./accretion") {
+		t.Error("the accretion check no longer runs its helper — the model is back to working" +
+			" out medians by hand (issue #587)")
+	}
+	readRepoFile(t, "skills", skillDir, "accretion", "main.go")
+	if !strings.Contains(defaultTools, "Bash(go:*)") {
+		t.Error("defaultTools no longer grants Bash(go:*), so the accretion helper raises a prompt" +
+			" an unattended run can't answer")
+	}
 }
 
 // PLAN.md is the resume point: a run killed mid-implementation is restarted
