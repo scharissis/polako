@@ -183,6 +183,9 @@ type statsDocBy struct {
 	Issues   []statsDocIssueRow `json:"issues,omitempty"`
 	Groups   []statsDocGroupRow `json:"groups,omitempty"`
 	Spanning int                `json:"spanning,omitempty"`
+	// ModelMoved is the text table's model note, -by tag only: each request
+	// inside a tag that ran on more than one model.
+	ModelMoved []statsDocTagMove `json:"model_moved,omitempty"`
 }
 
 // statsDocIssueRow is `-by issue`'s row, the typed source issueRows formats
@@ -443,7 +446,11 @@ func statsDocByFrom(ds dataset, issues []*issueStats, by string) statsDocBy {
 		}
 		rows = append(rows, row)
 	}
-	return statsDocBy{Kind: by, Groups: rows, Spanning: spanningCount(groups, order)}
+	doc := statsDocBy{Kind: by, Groups: rows, Spanning: spanningCount(groups, order)}
+	if by == byTag {
+		doc.ModelMoved = statsDocTagMovesFrom(movedTags(ds))
+	}
+	return doc
 }
 
 func statsDocRunsLogFrom(ds dataset) []statsDocRun {

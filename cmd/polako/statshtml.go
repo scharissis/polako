@@ -560,6 +560,11 @@ func groupTable(ds dataset, issues []*issueStats, by string) htmlTable {
 	t := htmlTableOf("by "+by, groupHeader(by), rows, groupLeft,
 		"no runs in this window to break down")
 	t.Note = spanningNote(spanning, by)
+	if by == byTag {
+		if moved := movedNote(movedTags(ds)); moved != "" {
+			t.Note = strings.TrimSpace(t.Note + " " + moved)
+		}
+	}
 	return t
 }
 

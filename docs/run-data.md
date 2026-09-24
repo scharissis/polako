@@ -472,7 +472,9 @@ polako stats -json -by tag -runs | jq '.by, .run_log[0]'
 ```
 
 `.by.issues` holds the rows instead of `.by.groups` when `-by issue` was
-given. Outcome, status, reason and park-reason values are the raw on-disk
+given. Under `-by tag`, `.by.model_moved` lists each tag whose one request
+ran on more than one model — `{ "tag", "requested", "models" }`, with
+`requested` reading `inherit` for no request — and is absent when none did. Outcome, status, reason and park-reason values are the raw on-disk
 vocabulary this page documents (`opened_pr`, not "opened pr"). Every array
 and breakdown map defaults to `[]`/`{}`, never `null`; a handful of fields
 are conditionally *absent* instead — `park_reasons`, `change_per_issue`,
