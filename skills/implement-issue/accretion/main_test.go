@@ -15,8 +15,21 @@ func TestMeasureSource(t *testing.T) {
 	if got.lines != 7 || got.comments != 3 {
 		t.Errorf("measureSource = %+v, want 7 lines, 3 comment lines", got)
 	}
-	if got := measureSource([]byte("# a\nx = 1\n"), hash); got.lines != 2 || got.comments != 1 {
-		t.Errorf("hash style = %+v, want 2 lines, 1 comment line", got)
+	for _, c := range []struct {
+		ext, src string
+		comments int
+	}{
+		{".py", "# a\nx = 1\n", 1},
+		{".lua", "--[[ a\nb\n]]\nx = 1\n-- c\n", 4},
+		{".sql", "/* a\nb */\nselect 1;\n-- c\n", 3},
+		{".hs", "{- a\nb -}\nx = 1\n", 2},
+		{".php", "# a\n// b\n$x = 1;\n", 2},
+		{".vue", "<!-- a\nb -->\n<div/>\n", 2},
+	} {
+		st, _ := sourceStyle("f" + c.ext)
+		if got := measureSource([]byte(c.src), st); got.comments != c.comments {
+			t.Errorf("%s: %d comment lines, want %d", c.ext, got.comments, c.comments)
+		}
 	}
 }
 

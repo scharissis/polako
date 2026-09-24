@@ -39,29 +39,38 @@ const (
 	commentCeiling = 0.40
 )
 
+// A block opener is checked before the line markers, so Lua's `--[[` opens a
+// block rather than reading as one `--` line.
 type style struct {
-	line        []string
-	open, close string
+	line   []string
+	blocks [][2]string // open, close
 }
 
 var (
-	slash = style{line: []string{"//"}, open: "/*", close: "*/"}
-	hash  = style{line: []string{"#"}}
-	dash  = style{line: []string{"--"}}
-	css   = style{open: "/*", close: "*/"}
-	ps    = style{line: []string{"#"}, open: "<#", close: "#>"}
+	cBlock    = [2]string{"/*", "*/"}
+	htmlBlock = [2]string{"<!--", "-->"}
+
+	slash  = style{line: []string{"//"}, blocks: [][2]string{cBlock}}
+	markup = style{line: []string{"//"}, blocks: [][2]string{cBlock, htmlBlock}}
+	php    = style{line: []string{"//", "#"}, blocks: [][2]string{cBlock}}
+	hash   = style{line: []string{"#"}}
+	css    = style{blocks: [][2]string{cBlock}}
+	ps     = style{line: []string{"#"}, blocks: [][2]string{{"<#", "#>"}}}
+	sql    = style{line: []string{"--"}, blocks: [][2]string{cBlock}}
+	lua    = style{line: []string{"--"}, blocks: [][2]string{{"--[[", "]]"}}}
+	hs     = style{line: []string{"--"}, blocks: [][2]string{{"{-", "-}"}}}
 )
 
 var styles = map[string]style{
 	".go": slash, ".c": slash, ".h": slash, ".cc": slash, ".cpp": slash, ".hpp": slash,
 	".cs": slash, ".java": slash, ".kt": slash, ".kts": slash, ".scala": slash,
-	".swift": slash, ".rs": slash, ".dart": slash, ".php": slash,
+	".swift": slash, ".rs": slash, ".dart": slash, ".php": php,
 	".js": slash, ".jsx": slash, ".mjs": slash, ".cjs": slash, ".ts": slash, ".tsx": slash,
-	".vue": slash, ".svelte": slash, ".astro": slash,
+	".vue": markup, ".svelte": markup, ".astro": markup,
 	".css": css, ".scss": slash, ".less": slash,
 	".py": hash, ".rb": hash, ".sh": hash, ".bash": hash, ".zsh": hash, ".pl": hash,
 	".r": hash, ".ex": hash, ".exs": hash, ".tf": hash, ".ps1": ps,
-	".sql": dash, ".lua": dash, ".hs": dash,
+	".sql": sql, ".lua": lua, ".hs": hs,
 }
 
 // Paths a repo carries but didn't write; measuring them would set the median
@@ -258,23 +267,41 @@ func measureSource(src []byte, st style) measure {
 	if len(src) == 0 {
 		return m
 	}
-	inBlock := false
+	closer := "" // non-empty while inside a block comment
 	for _, raw := range bytes.Split(bytes.TrimSuffix(src, []byte("\n")), []byte("\n")) {
 		m.lines++
 		t := strings.TrimSpace(string(raw))
-		switch {
-		case inBlock:
+		if closer != "" {
 			m.comments++
-			inBlock = !strings.Contains(t, st.close)
-		case t == "":
-		case hasAnyPrefix(t, st.line):
+			if strings.Contains(t, closer) {
+				closer = ""
+			}
+			continue
+		}
+		if t == "" {
+			continue
+		}
+		if b, ok := openedBlock(t, st); ok {
 			m.comments++
-		case st.open != "" && strings.HasPrefix(t, st.open):
+			if !strings.Contains(t[len(b[0]):], b[1]) {
+				closer = b[1]
+			}
+			continue
+		}
+		if hasAnyPrefix(t, st.line) {
 			m.comments++
-			inBlock = !strings.Contains(t[len(st.open):], st.close)
 		}
 	}
 	return m
+}
+
+func openedBlock(t string, st style) ([2]string, bool) {
+	for _, b := range st.blocks {
+		if strings.HasPrefix(t, b[0]) {
+			return b, true
+		}
+	}
+	return [2]string{}, false
 }
 
 func hasAnyPrefix(s string, prefixes []string) bool {
