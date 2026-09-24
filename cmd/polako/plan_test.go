@@ -111,6 +111,13 @@ func TestPlanMilestoneTitle(t *testing.T) {
 		// No space near the cap: the cut must land on a rune boundary, not a
 		// byte one, or the title comes out as invalid UTF-8.
 		{planOptions{brief: strings.Repeat("x", 48) + "日本語テスト"}, strings.Repeat("x", 48) + "日本"},
+		// A pasted list item with quotes (issue #584): the marker and every
+		// `"` go, so the cut can't leave one unpaired to break the review link.
+		{planOptions{brief: `- Ambiguous logs "18:56:19 reclaimed 1 finished issue: issue-563" - what does reclaimed mean?`},
+			"Ambiguous logs 18:56:19 reclaimed 1 finished"},
+		{planOptions{brief: `* a "short" one`}, "a short one"},
+		// An explicit -milestone is the operator's own spelling: kept as is.
+		{planOptions{milestone: `Batch "3"`}, `Batch "3"`},
 	}
 	for _, tc := range cases {
 		if got := planMilestoneTitle(&tc.opt); got != tc.want {
@@ -910,6 +917,10 @@ func TestLabelPassSummaryVariants(t *testing.T) {
 			labelPassOutcome{created: 3, numbers: []int{9, 8, 7}, labelled: []int{9, 8, 7}, milestone: []int{9}, title: "m"},
 			runReport{},
 			`filed 3 issues — #7–#9, all labelled proposed, milestone "m" attached to 1`},
+		{"a quote in the title prints plain, not Go-escaped",
+			labelPassOutcome{created: 1, numbers: []int{5}, labelled: []int{5}, milestone: []int{5}, title: `Batch "3"`},
+			runReport{},
+			`filed 1 issue — #5, all labelled proposed, milestone "Batch "3""`},
 		{"a label that did not take, strays stripped, capped",
 			labelPassOutcome{created: 3, numbers: []int{9, 8, 7}, labelled: []int{9, 8}, stripped: 2,
 				failures: []string{"could not add proposed to #7: boom"}},
@@ -954,6 +965,8 @@ func TestCurationLine(t *testing.T) {
 			"review them at https://github.com/scharissis/polako/issues?q=is%3Aopen+label%3Aproposed+milestone%3A%22visual-evidence%22 — remove the proposed label to queue them"},
 		{"a title with a space survives the query", "o/r", "a dating app",
 			"review them at https://github.com/o/r/issues?q=is%3Aopen+label%3Aproposed+milestone%3A%22a+dating+app%22 — remove the proposed label to queue them"},
+		{"a title with a quote links the unnarrowed search", "o/r", `Batch "3"`,
+			"review them at https://github.com/o/r/issues?q=is%3Aopen+label%3Aproposed — remove the proposed label to queue them"},
 		{"health, no milestone", "o/r", "",
 			"review them at https://github.com/o/r/issues?q=is%3Aopen+label%3Aproposed — remove the proposed label to queue them"},
 		{"a slug that is not owner/name gets no invented link", "ghe.example.com/o/r", "m",

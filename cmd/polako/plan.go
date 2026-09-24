@@ -266,7 +266,19 @@ func planMilestoneTitle(opt *planOptions) string {
 		}
 		return base
 	}
-	return briefTitle(strings.TrimSpace(opt.brief))
+	return briefTitle(cleanBrief(opt.brief))
+}
+
+// cleanBrief readies a brief for use as a title: no leading list marker, and
+// no `"` — a quote in the milestone title breaks the review link's search
+// (GitHub's query syntax has no escape for one), and a 50-rune cut can leave
+// one unpaired anyway.
+func cleanBrief(s string) string {
+	s = strings.TrimSpace(s)
+	for _, marker := range []string{"- ", "* "} {
+		s = strings.TrimPrefix(s, marker)
+	}
+	return strings.Join(strings.Fields(strings.ReplaceAll(s, `"`, "")), " ")
 }
 
 // briefTitleMax is the character cap on a brief-derived milestone title —

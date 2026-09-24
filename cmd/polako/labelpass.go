@@ -227,9 +227,9 @@ func (o labelPassOutcome) summary(rep runReport) string {
 	case len(o.milestone) == 0:
 		// No milestone concept, -milestone off, or the run set its own.
 	case len(o.milestone) == o.created:
-		s += fmt.Sprintf(", milestone %q", o.title)
+		s += `, milestone "` + o.title + `"`
 	default:
-		s += fmt.Sprintf(", milestone %q attached to %d", o.title, len(o.milestone))
+		s += fmt.Sprintf(`, milestone "%s" attached to %d`, o.title, len(o.milestone))
 	}
 	if rep.capped {
 		s += " — stopped at the -max-issues cap"
@@ -400,8 +400,11 @@ func proposalsURL(repo, milestone string) string {
 		return ""
 	}
 	q := "is:open label:" + proposedLabel
-	if milestone != "" {
-		q += fmt.Sprintf(" milestone:%q", milestone)
+	// Not %q: GitHub search has no backslash escape, so Go's \" breaks the
+	// query. A title that holds a quote can't be searched for at all; the
+	// unnarrowed search is wider but still opens.
+	if milestone != "" && !strings.Contains(milestone, `"`) {
+		q += ` milestone:"` + milestone + `"`
 	}
 	return fmt.Sprintf("https://github.com/%s/issues?%s", repo, url.Values{"q": {q}}.Encode())
 }
