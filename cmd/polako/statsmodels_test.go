@@ -2,19 +2,16 @@ package main
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
+// writeRecords is sessionFixtureDir over a block of JSONL, which reads
+// better here than one argument per record.
 func writeRecords(t *testing.T, body string) string {
 	t.Helper()
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "r--r.jsonl"), []byte(body), 0o600); err != nil {
-		t.Fatalf("writing fixture: %v", err)
-	}
-	return dir
+	return sessionFixtureDir(t, strings.Split(strings.TrimSuffix(body, "\n"), "\n")...)
 }
 
 func statsEpochs(t *testing.T, dir string) []statsDocEpoch {
