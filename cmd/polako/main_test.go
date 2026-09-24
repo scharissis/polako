@@ -64,6 +64,15 @@ func fakeEnv(kv ...string) []string {
 	return env
 }
 
+// blankModelEnv blanks the CLI's model and effort overrides for a config's
+// children and for lookupEnv, so a developer's own export can't trip the effort
+// gate or the env warnings in a test that never asked for them. A test that
+// wants one set layers it on with setFakeEnv.
+func blankModelEnv() []string {
+	return []string{"ANTHROPIC_MODEL=", "ANTHROPIC_DEFAULT_OPUS_MODEL=", "ANTHROPIC_DEFAULT_SONNET_MODEL=",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL=", effortEnv + "="}
+}
+
 // setFakeEnv replaces (or adds, or with an empty value removes) KEY=value
 // entries on cfg.env, for a test that layers one more handshake variable on a
 // config a builder already populated.
@@ -1368,7 +1377,7 @@ func captureUI(t *testing.T, u *ui) {
 func fakeClaudeConfig(t *testing.T, mode string) config {
 	t.Helper()
 	return config{
-		env:            fakeEnv(fakeClaudeEnv, mode), // handed to the child, not set on the parent
+		env:            append(fakeEnv(fakeClaudeEnv, mode), blankModelEnv()...), // handed to the child, not set on the parent
 		ui:             testUI(t),
 		dir:            t.TempDir(),
 		claudeBin:      fakeCLI(t), // this test package, re-entered via TestMain

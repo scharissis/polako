@@ -1106,7 +1106,7 @@ func drainConfig(t *testing.T, mode string, st *ghState) (config, string) {
 		t.Fatalf("writing fake gh state: %v", err)
 	}
 	return config{
-		env: fakeEnv(fakeGhEnv, path, fakeClaudeEnv, mode),
+		env: append(fakeEnv(fakeGhEnv, path, fakeClaudeEnv, mode), blankModelEnv()...),
 		ui:  testUI(t),
 		// Not a checkout at all, which is deliberate: worktree cleanup is
 		// best-effort, and so is the probe that says what a parked run left
@@ -3108,6 +3108,36 @@ func TestDrainRemediationFlagsSteerOnlyTheRemediationRun(t *testing.T) {
 		t.Errorf("rebase record = effort_source %q / requested_model %q / requested_effort %q, "+
 			"want remediation / sonnet / medium",
 			rebaseRec.EffortSource, rebaseRec.RequestedModel, rebaseRec.RequestedEffort)
+	}
+}
+
+// An exported CLAUDE_CODE_EFFORT_LEVEL beats --effort, so an effort: label it
+// disagrees with does nothing: the pickup says so once, not once per dispatch.
+// One that agrees says nothing.
+func TestDrainWarnsOnceWhenTheEnvOverridesAnEffortLabel(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		env  string
+		warn bool
+	}{{"max", true}, {"low", false}} {
+		t.Run(tc.env, func(t *testing.T) {
+			t.Parallel()
+			buf := captureLog(t)
+			cfg, _ := drainConfig(t, "implementmerged", &ghState{
+				Issues: map[string]*fakeIssue{"1": {Open: true, Labels: []string{"effort:low"}}},
+			})
+			setFakeEnv(&cfg, effortEnv, tc.env)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := drain(ctx, cfg); err != nil {
+				t.Fatalf("drain: %v", err)
+			}
+			got := strings.Count(buf.String(), "effort:low label will not take")
+			if want := map[bool]int{true: 1, false: 0}[tc.warn]; got != want {
+				t.Errorf("with %s=%s the override warning appeared %d times, want %d:\n%s",
+					effortEnv, tc.env, got, want, buf.String())
+			}
+		})
 	}
 }
 
