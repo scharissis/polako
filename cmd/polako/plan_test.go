@@ -298,7 +298,7 @@ func TestPlanDryRunWritesNothingAndPrintsTheInvocation(t *testing.T) {
 		t.Errorf("want one invocation and nothing else on stdout, got:\n%s", printed)
 	}
 	for _, want := range []string{
-		`'/polako:plan-backlog docs/VISION.md "the observability section"'`,
+		`'/polako:plan-backlog docs/VISION.md "the observability section" 7'`,
 		"--model opus",
 		"Bash(gh issue create:*)",
 		"--output-format stream-json",

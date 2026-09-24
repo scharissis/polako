@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -127,6 +128,17 @@ func intakeConfig(opt *intakeOptions) (config, error) {
 	}
 	cfg.dir = abs
 	return cfg, nil
+}
+
+// intakeTailArgs is the focus and cap arguments plan and health both end their
+// prompt with. An empty focus is spelled `""` so the cap still binds to the
+// third argument rather than the second.
+func intakeTailArgs(opt intakeOptions) string {
+	focus := `""`
+	if opt.focus != "" {
+		focus = planSlashArg(opt.focus)
+	}
+	return " " + focus + " " + strconv.Itoa(opt.maxIssues)
 }
 
 // intakePreflight is the preflight `polako plan` and `polako health` share:

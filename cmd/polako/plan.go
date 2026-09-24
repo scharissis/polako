@@ -404,17 +404,15 @@ func planArgs(cfg config, opt planOptions) []string {
 }
 
 // planPrompt is the -p string the skill is invoked with: the slash command and
-// its two declared arguments, the document (or brief) and the optional focus.
-// Just those two — the shipped plan-backlog SKILL.md declares `arguments:
-// [design, focus]` and nothing more: it derives flat-vs-hierarchical from its
-// own `gh issue create` error, and the batch milestone is attached binary-side
-// by the label pass, so there is nothing more for the prompt to carry.
+// its three declared arguments, the document (or brief), the optional focus and
+// the -max-issues cap. The cap is passed so the skill's proposal gate can pick
+// which issues to keep; the supervisor's kill at the cap (errIssueCap) only
+// stops a run, it can't choose, and a kill mid-epic leaves the epic missing
+// children. The skill derives flat-vs-hierarchical from its own `gh issue
+// create` error, and the batch milestone is attached binary-side by the label
+// pass, so there is nothing more for the prompt to carry.
 func planPrompt(cfg config, opt planOptions) string {
-	prompt := "/" + cfg.skill + " " + planSlashArg(planPromptSubject(opt))
-	if opt.focus != "" {
-		prompt += " " + planSlashArg(opt.focus)
-	}
-	return prompt
+	return "/" + cfg.skill + " " + planSlashArg(planPromptSubject(opt)) + intakeTailArgs(opt.intakeOptions)
 }
 
 // planPromptSubject is the skill's first argument: the document path, or the
