@@ -194,8 +194,9 @@ func preflightPairs(cfg config) [][2]string {
 		pairs = append(pairs, [2]string{"queue", fmt.Sprintf("label %q", cfg.label)})
 	}
 	if line := modelEffortLine(cfg); line != "" {
-		// One row for both dispatch knobs. The environment can set either
-		// (POLAKO_MODEL, POLAKO_EFFORT), so an operator who forgot the export
+		// One row for every model and effort knob. The environment can set
+		// any of them (POLAKO_MODEL, POLAKO_REMEDIATION_EFFORT, ...), so an
+		// operator who forgot the export
 		// should not have to work out why every run is on a model they did not
 		// type — the same reason -post-summary earns a row.
 		pairs = append(pairs, [2]string{"model", line})
@@ -253,10 +254,10 @@ func preflightPairs(cfg config) [][2]string {
 }
 
 // modelEffortLine renders the settings-block value for -model, -effort,
-// -model-by-size and -effort-by-size: whichever were set, "" when none were
-// so the row is skipped. "inherit" is not spelled — an omitted flag adds
-// nothing to disclose. The by-size specs are shown verbatim since
-// POLAKO_MODEL_BY_SIZE / POLAKO_EFFORT_BY_SIZE can set them silently.
+// -model-by-size, -effort-by-size, -remediation-model and
+// -remediation-effort: whichever were set, "" when none were so the row is
+// skipped. "inherit" is not spelled — an omitted flag adds nothing to
+// disclose. Every one is shown since a POLAKO_* variable can set it silently.
 func modelEffortLine(cfg config) string {
 	var parts []string
 	if cfg.model != "" {
@@ -270,6 +271,12 @@ func modelEffortLine(cfg config) string {
 	}
 	if cfg.effortBySize != "" {
 		parts = append(parts, "effort-by-size "+cfg.effortBySize)
+	}
+	if cfg.remediationModel != "" {
+		parts = append(parts, "remediation-model "+cfg.remediationModel)
+	}
+	if cfg.remediationEffort != "" {
+		parts = append(parts, "remediation-effort "+cfg.remediationEffort)
 	}
 	return strings.Join(parts, ", ")
 }

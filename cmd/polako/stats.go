@@ -5,9 +5,10 @@ package main
 // renderer formats from; the record reader is statsrecords.go, the text/JSON/
 // HTML renderers their own files, and the shared formatters format.go.
 //
-// `stats` is the only reader the run data has: the drain loop never opens
-// these files, so telemetry stays telemetry rather than becoming state the
-// supervisor depends on.
+// `stats` is one of the run data's three readers, beside proposalPricingLine
+// and status's readLastShift — all human-facing rendering. The drain loop
+// never opens these files, so telemetry stays telemetry rather than becoming
+// state the supervisor depends on.
 //
 // Everything summable — cost per issue, runs per issue, question rounds, the
 // human-latency spans — is derived here, at read time, from run records. That
