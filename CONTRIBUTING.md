@@ -98,8 +98,8 @@ Ten cases, each one a real run against a scratch repo and a stand-in `gh`,
 covering all four shipped skills — [`evals/README.md`](evals/README.md) has the
 table. This one is not part of `check.sh` and not in CI. It needs the network,
 a real `claude` and money, roughly $0.30–$1.60 a case — a deliberate exception
-to the hermetic rule, argued in that README. The suite has not yet had a green
-run.
+to the hermetic rule, argued in that README. Every case has passed once
+(issue #77), though not yet all in one run.
 
 When to run it, in short. A PR that changes a shipped `SKILL.md` runs the
 cases its change touches and quotes each verdict and the spend in its body. An
@@ -111,12 +111,11 @@ an unattended run can only grade with main's copy. From a branch checkout it is
 just `evals/run.sh <case>`. See `CLAUDE.md`, "The suite is the verification",
 and the README's "When to run it".
 
-`claude plugin eval .` — the CLI's own runner, no longer early-access as of CLI
-2.1.280 — runs the same cases, but it has never run this suite; its first run
-is issue #77. Read the README's "Running it" before you try it, not after: as
-written it runs every case twice — `--ablation` defaults to a no-plugin
-baseline arm — and publishes an HTML report of the prompts and grader verdicts
-to claude.ai.
+`evals/plugin-eval.sh` runs the same cases through `claude plugin eval`, the
+CLI's own runner, and the two runners should agree on every verdict. Read the
+README's "Running it" before you try it, not after: by default the CLI runs
+every case twice — `--ablation` adds a no-plugin baseline arm — and publishes
+an HTML report of the prompts and grader verdicts to claude.ai.
 
 ## Running both halves from a working tree
 

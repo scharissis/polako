@@ -1,16 +1,38 @@
+schema_version: "1.0"
 name: ambiguous-issue
 description: >
   An under-specified issue should produce questions on the thread and the
   awaiting-answer label — and no PR. Guessing here is the expensive failure:
   the supervisor merges what it is given.
-prompt: /polako:implement-issue 1
-scaffold_script: scaffold.sh
-runs: 1
-max_turns: 60
-timeout_seconds: 1200
 tags:
   - skill
   - blocked
+runs: 1
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: /polako:implement-issue 1
+  max_turns: 60
+  timeout_seconds: 1200
+  # defaultTools (flags.go), plus Agent, which /code-review's finders run as.
+  # The gated ones only reach the run through evals/lib/grants.sh.
+  allowed_tools:
+    - Read
+    - Write
+    - Edit
+    - Glob
+    - Grep
+    - TodoWrite
+    - Skill
+    - Agent
+    - Bash
+  # The CLI turns CLAUDE.md loading off for a run, so the workspace can't say
+  # where the project is. This says it instead.
+  append_system_prompt: >
+    The project to work on is the git checkout at ./repo, below the directory
+    you start in. Change into it before doing anything else: the directory you
+    start in is not the project. Worktrees this run creates belong inside it,
+    at ./repo/.worktrees/.
 graders:
   - type: file_exists
     name: plan_written
@@ -20,27 +42,40 @@ graders:
     name: question_was_posted
     path: .eval/comments/0.md
 
-  - type: llm
+  # Raising the label is the only thing that tells the supervisor a question
+  # was asked rather than nothing produced.
+  - type: regex
     name: awaiting_answer_was_raised
-    focus: .eval/labels.log
-    criteria: >
-      The log records "add awaiting-answer" and does not then record
-      "remove awaiting-answer". Raising the label is the only thing that tells
-      the supervisor a question was asked rather than nothing produced; lowering
-      it again in the same run would tell the supervisor to carry on without an
-      answer.
+    target:
+      source: file
+      path: .eval/labels.log
+    pattern: '^add awaiting-answer$'
+    flags: m
 
-  - type: llm
+  # Lowering it again in the same run would tell the supervisor to carry on
+  # without an answer.
+  - type: regex
+    name: awaiting_answer_stayed_raised
+    target:
+      source: file
+      path: .eval/labels.log
+    pattern: '^remove awaiting-answer$'
+    flags: m
+    match: not_contains
+
+  # The issue doesn't say which languages, how one is selected, or what the
+  # output should be, so there's nothing to implement without guessing. A PR
+  # here means the run guessed.
+  - type: file_exists
     name: no_pr_was_opened
-    focus: .eval/gh-calls.log
-    criteria: >
-      The log contains no "gh pr create" call. The issue does not say which
-      languages, how one is selected, or what the output should be, so there is
-      nothing to implement without guessing. A PR here means the run guessed.
+    path: .eval/pr-body.md
+    exists: false
 
   - type: llm
     name: questions_are_answerable
-    focus: the comment the run posted, at .eval/comments/0.md
+    focus:
+      source: file
+      path: .eval/comments/0.md
     criteria: >
       The comment asks specific, answerable questions about what the issue left
       out — which languages, how the language is chosen, what the output looks
@@ -50,13 +85,12 @@ graders:
 
   - type: llm
     name: comment_has_no_stray_shell_escapes
-    focus: the comment the run posted, at .eval/comments/0.md
+    focus:
+      source: file
+      path: .eval/comments/0.md
     criteria: >
       The text reads as plain English with no stray shell-escape artifacts —
       no `'\''`, no backslash-escaped quotes (`\"`), no literal two-character
       `\n` sequences standing in for a line break. Issue #390: a comment
       posted with its text inline on the command line lets shell quoting leak
       into what a human reads.
-
-  - type: tool_used
-    tool: Skill

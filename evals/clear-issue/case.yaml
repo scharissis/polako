@@ -1,17 +1,39 @@
+schema_version: "1.0"
 name: clear-issue
 description: >
   A well-specified issue should go all the way to a PR without stopping to ask
   anything — and should still write the plan first.
-prompt: /polako:implement-issue 1
-scaffold_script: scaffold.sh
-# One run keeps a full plan-to-PR cycle affordable. Pass --runs 3 when you care
-# whether a case is flaky rather than whether it works at all.
-runs: 1
-max_turns: 80
-timeout_seconds: 1800
 tags:
   - skill
   - happy-path
+# One run keeps a full plan-to-PR cycle affordable. Pass --runs 3 when you care
+# whether a case is flaky rather than whether it works at all.
+runs: 1
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: /polako:implement-issue 1
+  max_turns: 80
+  timeout_seconds: 1800
+  # defaultTools (flags.go), plus Agent, which /code-review's finders run as.
+  # The gated ones only reach the run through evals/lib/grants.sh.
+  allowed_tools:
+    - Read
+    - Write
+    - Edit
+    - Glob
+    - Grep
+    - TodoWrite
+    - Skill
+    - Agent
+    - Bash
+  # The CLI turns CLAUDE.md loading off for a run, so the workspace can't say
+  # where the project is. This says it instead.
+  append_system_prompt: >
+    The project to work on is the git checkout at ./repo, below the directory
+    you start in. Change into it before doing anything else: the directory you
+    start in is not the project. Worktrees this run creates belong inside it,
+    at ./repo/.worktrees/.
 graders:
   - type: file_exists
     name: plan_written
@@ -21,19 +43,22 @@ graders:
     name: pr_opened
     path: .eval/pr-body.md
 
-  - type: llm
+  # Mid-run order is checked over every tool call, not by a judge: the CLI
+  # shows an llm grader's judge only the first and last dozen events.
+  - type: tool_order
     name: plan_preceded_the_code
-    focus: the order in which the run produced its artifacts
-    criteria: >
-      PLAN.md was written before any change to greet.sh or test.sh was
-      committed. Evidence that the plan came first: it was written in an early
-      turn, before the implementation edits, and it describes the approach
-      rather than summarising work already done. Fail if the plan was written
-      after the implementation, or only as part of the final commit.
+    before:
+      tool: Write
+      input_match: '"file_path":"(?:[^"\\]|\\.)*PLAN\.md"'
+    after:
+      tool: Bash
+      input_match: 'git\b(?:[^"\\]|\\.)*\bcommit\b'
 
   - type: llm
     name: pr_body_is_complete
-    focus: the recorded PR body at .eval/pr-body.md
+    focus:
+      source: file
+      path: .eval/pr-body.md
     criteria: >
       The body has, at minimum, Summary, Evidence and Verification, and
       "Closes #1" sits on its own line after every section. A trailing
@@ -54,24 +79,22 @@ graders:
       a usage line naming the script and its one argument, not a specific
       spelling of either.
 
-  - type: llm
+  # The issue is specified well enough to implement, so no question and no
+  # awaiting-answer label.
+  - type: regex
     name: no_question_was_asked
-    focus: whether the run stopped to ask anything, per .eval/labels.log
-    criteria: >
-      The issue is specified well enough to implement, so the run should not
-      have applied the awaiting-answer label or posted a clarifying question.
-      Fail if labels.log records "add awaiting-answer" without a matching
-      "remove awaiting-answer" in the same run.
+    target:
+      source: file
+      path: .eval/labels.log
+    pattern: 'add awaiting-answer'
+    match: not_contains
 
-  - type: llm
-    name: no_dev_server_or_evidence_ref
-    focus: whether the run started a dev server or touched polako-evidence, per the tool timeline and origin state
-    criteria: >
-      greet.sh has no browser-rendered files and no package.json, so nothing
-      here is visual. Fail if the tool timeline shows a server command (npm
-      run, python3 -m http.server, playwright) or the origin state shows a
-      polako-evidence ref — a plain script fix has no business starting
-      either.
-
+  # greet.sh has no browser-rendered files and no package.json, so nothing
+  # here is visual: a plain script fix has no business starting a server or
+  # touching polako-evidence.
   - type: tool_used
-    tool: Skill
+    name: no_dev_server_or_evidence_ref
+    tool: Bash
+    input_match: 'npm run|http\.server|playwright|polako-evidence'
+    min: 0
+    max: 0

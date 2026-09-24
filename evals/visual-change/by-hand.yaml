@@ -1,0 +1,91 @@
+# by-hand.yaml, not case.yaml: `claude plugin eval` looks for case.yaml only,
+# so only evals/run.sh runs this case. A run here fetches Playwright and a
+# Chromium through npx, and the CLI's sandbox locks the run's shell away from
+# the network. The case is written to the CLI's schema all the same, so moving
+# it back is a rename.
+schema_version: "1.0"
+name: visual-change
+description: >
+  A run whose change is visual should show the change: a screenshot pushed to
+  polako-evidence, embedded in the PR body by commit SHA. That pipeline shipped
+  in tickets 3-6 (#402-#405) of the now-retired visual-evidence plan; this case
+  existed first so those tickets had something to grade against.
+tags:
+  - skill
+  - visual-evidence
+runs: 1
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: /polako:implement-issue 1
+  max_turns: 80
+  timeout_seconds: 1800
+  # defaultTools (flags.go), plus Agent, which /code-review's finders run as.
+  # The gated ones only reach the run through evals/lib/grants.sh.
+  allowed_tools:
+    - Read
+    - Write
+    - Edit
+    - Glob
+    - Grep
+    - TodoWrite
+    - Skill
+    - Agent
+    - Bash
+  # CLAUDE.md loading is off for a run, so the workspace can't say where the
+  # project is. This says it instead.
+  append_system_prompt: >
+    The project to work on is the git checkout at ./repo, below the directory
+    you start in. Change into it before doing anything else: the directory you
+    start in is not the project. Worktrees this run creates belong inside it,
+    at ./repo/.worktrees/.
+graders:
+  - type: file_exists
+    name: pr_opened
+    path: .eval/pr-body.md
+
+  # .eval/pr.md is the PR as recorded when it was opened, with origin's refs
+  # and the polako-evidence tree read at the same moment.
+  - type: llm
+    name: evidence_link_names_a_real_evidence_commit
+    focus:
+      source: file
+      path: .eval/pr.md
+    criteria: >
+      The PR body embeds an image link shaped like
+      /blob/<40-hex-sha>/issue-1/<sha7>/....png?raw=true — a full 40-character
+      commit SHA, not a short one and not a placeholder. That SHA names a real
+      commit on origin's polako-evidence branch: cross-check it against the
+      `=== origin refs ===` and `=== polako-evidence tree ===` sections below
+      the body. Fail if
+      the body has no such link, if the SHA isn't 40 hex characters, or if it
+      doesn't match origin's polako-evidence ref.
+
+  # The scratch dir is working scaffolding, not something the reviewed diff
+  # should carry.
+  - type: regex
+    name: no_scratch_or_png_committed_on_issue_branch
+    target:
+      source: file
+      path: .eval/pr-diff.txt
+    pattern: '^\+\+\+ b/.*(\.png|\.polako-evidence)'
+    flags: m
+    match: not_contains
+
+  - type: tool_used
+    name: only_loopback_was_shot
+    tool: Bash
+    input_match: 'playwright screenshot(?:[^"\\]|\\.)*https?://(?!(127\.0\.0\.1|localhost)[:/])'
+    min: 0
+    max: 0
+
+  # A before shot shows what the change changed only if nothing had been edited
+  # yet when it was taken (ticket 6, #405).
+  - type: tool_order
+    name: before_shot_precedes_first_edit
+    before:
+      tool: Bash
+      input_match: 'playwright screenshot'
+    after:
+      tool: Edit
+      input_match: 'index\.html|style\.css'

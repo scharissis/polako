@@ -26,9 +26,12 @@ the scratch repo for this case alone, so the other cases stay quick.
 `dev` script it can serve. It uses a real Chromium, about 150 MB once into the
 user cache, so it stays as opt-in as the rest of the suite. It shipped ahead
 of what the skill did at the time — the capture pipeline it grades landed
-across tickets 3–6 (#402–#405) of the now-retired visual-evidence plan;
-`case.yaml` says so. Its graders have not been re-run since #405 (before
-shots) merged to confirm they now pass.
+across tickets 3–6 (#402–#405) of the now-retired visual-evidence plan; its
+case file says so. It first passed on 2026-09-24, once its `dev` script served
+through `serve.py`, which prints its URL at once. It's also the one case
+`claude plugin eval` can't run: the run fetches Playwright and a Chromium
+through npx, and the CLI's sandbox refuses the run's shell any network. So its
+file is `by-hand.yaml`, which only `run.sh` looks for.
 
 `push-blocked` seeds a pre-receive hook on the scratch origin that rejects
 every branch but `main`, with a rejection message shaped like a real one — an
@@ -51,8 +54,8 @@ these runs must never do, which is write anything but issues.
 
 `design-plan` is the reverse: its deliverable is a file on a branch, not an
 issue. The stand-in `gh pr create` records the PR's changed files and diff
-(`.eval/pr-files.txt`, `.eval/pr-diff.txt`), since the judge reads only
-`.eval/`, and the graders read the plan document from there.
+(`.eval/pr-files.txt`, `.eval/pr-diff.txt`), and the graders read the plan
+document from the diff.
 
 ## When to run it
 
@@ -66,8 +69,9 @@ of a skill's cases a change touches, run all of that skill's.
   spend in the PR body's `## Verification` (`CLAUDE.md`, "The suite is the
   verification"). An unattended `implement-issue` run does this itself in
   Phase 3, capped at `--max-cost 5`. A PR you open yourself is on you.
-- **A PR changes the suite itself** — `run.sh`, anything under `lib/`, a
-  `case.yaml`. Run the touched cases from the branch's own checkout. This one
+- **A PR changes the suite itself** — `run.sh`, `plugin-eval.sh`, anything
+  under `lib/`, a case file. Run the touched cases from the branch's own
+  checkout, under both runners if the change is to grading. This one
   is always a human's: an unattended run calls the main checkout's `run.sh`,
   which grades with main's harness and cases, so it can't check new ones
   before they merge. Its PR says so and leaves the run to you.
@@ -82,12 +86,12 @@ baseline: the first green run (issue #77), or before you trust a new
 
 ## Running it
 
-Two runners, same cases. Use `run.sh`: it has run this suite, a skill run
-calls it, and it's the only one that knows `push-blocked`'s `no_leak`
-grader. `claude plugin eval` works on any account as of CLI 2.1.280, but it
-has never run this suite, and seven things about it are still unverified
-(the last section below). Its first run is issue #77, a budgeted debugging
-session. Until that lands, a PR quotes `run.sh`'s verdicts.
+Two runners, same cases, same grading. `evals/plugin-eval.sh` runs the suite
+through `claude plugin eval`, the CLI's own runner. `evals/run.sh` runs it by
+hand, and it's the one a skill run calls, under its fixed
+`Bash(evals/run.sh:*)` grant. They should agree on every verdict: `run.sh`
+and `lib/grade.py` copy the CLI's grading rules, so a case they disagree on
+is a bug in the copy. `visual-change` runs under `run.sh` only.
 
 ### With `run.sh`
 
@@ -97,6 +101,7 @@ evals/run.sh clear-issue           # one case
 evals/run.sh --no-judge            # skip the llm judge; grade those yourself
 evals/run.sh --plugin-dir ../wt    # test a plugin checkout other than this one
 evals/run.sh --max-cost 5          # stop before the next case once $5 is spent
+evals/run.sh --model opus          # every case on one model, like the CLI's --model
 ```
 
 Where you run it from matters. The harness and the cases come from the
@@ -106,75 +111,84 @@ the one way to test a change to the suite itself. From the main checkout,
 `--plugin-dir <worktree>` tests a branch's skills against main's cases,
 which is what an unattended run does.
 
-`run.sh` reproduces what `plugin eval` would do for this suite — scaffold each
-case into a fresh workspace under a `<timestamp>-by-hand/` directory inside a
-`mktemp -d` root outside the checkout (`$TMPDIR` or `/tmp` — not
-`evals/results/`; see below), run the case's prompt in a headless session with
-the plugin loaded (from this checkout, or from `--plugin-dir` — how an
-`implement-issue` run drives the suite from its worktree while invoking the
-main checkout's copy of this script, so the tool grant can stay a fixed
-`Bash(evals/run.sh:*)`), then grade what the run left behind (`lib/grade.py`).
-`file_exists` and `no_leak` graders are checked
-mechanically — the latter is this runner's own invention, a case-insensitive
-substring search over everything under `.eval/` but the scratch origin (the
-seeded hook names the terms itself) for one `term`, and it exists
-because "the run never quoted this string anywhere" is a claim a judge can
-mishear as easily as confirm; `push-blocked` is the one case that uses it.
-`llm` graders go to a judge session — haiku, the CLI's own default judge,
-`--judge-model` to override — fed the recorded artifacts, repository state and a
-tool-call timeline, all of which is also written to each case's `evidence.md` so
-a verdict can be audited rather than trusted. Exit 0 is green; 1 means a grader
-failed, a case timed out, or the harness broke, and the per-case line says
-which — a harness error is not a skill verdict; `--no-judge` exits 3 until a
-human scores what the judge would have; `--max-cost` (dollars, default off)
-sums `total_cost_usd` across the cases run so far and exits 4 having skipped the
-rest once the cap is reached. To re-run one wobbling case three times, invoke
-`evals/run.sh <case>` three times — each invocation gets its own timestamped
-results directory.
+`run.sh` does for this suite what `plugin eval` does. It scaffolds each case
+into a fresh workspace, lists what the scaffold left, runs the case's prompt
+in a headless session with the plugin loaded (from this checkout, or from
+`--plugin-dir`) and the toolset the CLI would give it, then grades what the
+run left behind by the CLI's rules (`lib/grade.py`, whose header has them).
+Each `llm` grader gets judge sessions of its own — haiku, the CLI's default
+judge, `--judge-model` to override — shown that grader's focus and nothing
+else, and the majority of three votes decides, as under the CLI. The prompt
+each judge saw is kept in the case's `judge/`, so a verdict can be audited
+rather than trusted, and `evidence.md` beside it lays out the whole run for a
+human. Exit 0 is green; 1 means a grader failed, a case timed out, or the
+harness broke, and the per-case line says which — a harness error is not a
+skill verdict; `--no-judge` exits 3 until a human scores what the judge would
+have; `--max-cost` (dollars, default off) sums `total_cost_usd` across the
+cases run so far and exits 4 having skipped the rest once the cap is reached.
+To re-run one wobbling case three times, invoke `evals/run.sh <case>` three
+times — each invocation gets its own timestamped results directory. A session
+the API cut short, at a usage limit say, grades as a harness error, not a red.
 
-It costs the same money the real runner would — roughly $0.30–$1.60 per case,
-plus cents of judging — and needs `claude`, `git` and `python3`. Two deliberate
-divergences from a naive reading of the cases, each argued where it lives:
+It costs the same money the CLI would — roughly $0.30–$1.60 per case, plus
+cents of judging — and needs `claude`, `git` and `python3`. Where it differs
+from the CLI:
 
-- The stand-in `gh` rides in on the **launch environment's** `PATH`, because a
-  headless `claude -p` ignores the `settings.json` the scaffold writes
+- The stand-in `gh` rides in on the launch environment's `PATH`, because a
+  headless session ignores a workspace settings file's `env.PATH`
   (issue #126).
-- `tool_used` graders are reported as `indicator:fired`/`not-fired`, not
-  scored: slash-command expansion emits no `Skill` tool call, so they cannot
-  fire on a path that never reaches `/code-review` (issue #127) — the CLI's
-  own ablation mode demotes them the same way.
+- With no model named, each runner resolves its own default, and they can
+  differ: the CLI starts each run from a fresh config, `run.sh` from this
+  machine's own (on 2026-09-23, Opus 5.5 under the CLI and Fable 5.1 by hand,
+  on the same account). Pass the same `--model` to both when comparing
+  verdicts.
+- The run's shell isn't sandboxed, and the session keeps this machine's user
+  settings (though not its MCP servers), where the CLI gives each run a fresh
+  config directory.
 
 Results land outside the checkout, in a `mktemp -d` directory a run's own
 final message names (`results: ...`) — not `evals/results/` (issue #459: a
 workspace inside `--plugin-dir`'s tree gets every write refused as
-"sensitive"). The durable record of a run is the per-case verdicts quoted in
-the PR body —
+"sensitive"). Each case gets a directory there: its workspace under `ws/`,
+and beside it the run's stream, `evidence.md`, `summary.json` and `judge/`.
+The durable record of a run is the per-case verdicts quoted in the PR body —
 "say what was verified", the convention `CLAUDE.md` sets — and, for tagged
 skill experiments, a row in `docs/experiments.md`.
 
-### With `claude plugin eval`
-
-From the repository root — `.` is the plugin, not this directory, and the
-manifest it needs is `.claude-plugin/plugin.json` one level up:
+### With `plugin-eval.sh`
 
 ```bash
-claude plugin eval . --scaffold --allow-tools Bash Write Edit 'Skill(claude-api)'
+evals/plugin-eval.sh --case clear-issue --ablation none --no-publish --max-cost-usd 5
 ```
 
-An older CLI may print one line — *`plugin eval` is currently in early
-access* — and run nothing: the command used to be gated per account. That
-isn't a suite failure. Update `claude`.
+It wraps `claude plugin eval` for two things the CLI can't be told any other
+way:
 
-Both flags are required and neither is defaulted on:
+- **The stand-in `gh` has to come first on the run's `PATH`**, and a case
+  can't put it there: the CLI ignores a workspace settings file's `env.PATH`,
+  and a case may set `EVAL_*` variables and nothing else. So the wrapper puts
+  a dispatcher (`lib/gh-dispatch.sh`) first on `PATH` that routes each call
+  to the stand-in in the caller's own workspace, and refuses outside one. It
+  lives under `~/.cache/polako-evals/`, outside the plugin tree, because the
+  CLI drops `PATH` entries inside that tree from the run's shell.
+- **The target is `evals/`, not `.`.** The CLI walks its whole target for
+  cases and skips only `.git`, `node_modules`, `.claude`, `results` and
+  `mocks`, so the repository root would also run every stale copy of the
+  suite under `.worktrees/`. The plugin still loads from the root above.
 
-- `--scaffold` runs `scaffold.sh`, which is author-supplied bash executed as
-  you. Read it before you run it — that is exactly why the CLI makes you ask.
-- `--allow-tools` grants the gated tools the skill needs. Without them a run
-  stalls on the first `git` call. Only `Bash`, `Write`, `Edit`, `WebFetch` and
-  `mcp__*` are gated, so the read-only file tools need no grant. One skill is
-  gated too: `claude-api`, which review-health runs for its prompt audit. A
-  `claude -p` probe on CLI 2.1.280 refused it without the grant. Nobody has
-  checked the `plugin eval` path yet.
+It pins `git` and `python3` in the same directory, by their resolved paths.
+On macOS the CLI's sandbox can't run Apple's `/usr/bin` shims, and its shell
+can't see through Homebrew's symlinks, so an ordinary lookup of `git` lands
+on Apple's shim even with Homebrew's git ahead of it on `PATH`. The same goes
+for `git-upload-pack` and `git-receive-pack`, which git runs by name for a
+fetch or push to the scratch origin, so those are pinned too. On a Mac whose
+only git is Apple's, the wrapper stops and says so.
+
+It also passes `--scaffold`, which runs each case's `scaffold.sh` as you, and
+the tool grant in `lib/grants.sh`. Every other flag is the CLI's own and
+passes through. Run bare, without the wrapper, each case's scaffold refuses to
+start before any model call is paid for: it checks that `gh` reaches its own
+stand-in.
 
 The first run in a plugin directory you haven't trusted asks you to confirm;
 `--trust-plugin` answers it for a script. Results land under
@@ -202,18 +216,12 @@ sends something somewhere if you meet it by surprise.
   the ceiling the paid graders (`llm`, baseline) are skipped while the free ones
   still score it.
 
-So a first debugging run — issue #77's — under a ceiling, is:
-
-```bash
-claude plugin eval . --scaffold --allow-tools Bash Write Edit 'Skill(claude-api)' \
-  --case clear-issue --ablation none --no-publish --keep-temp --max-cost-usd 40
-```
-
-`--keep-temp` leaves the scaffold directory behind, which is the difference
-between reading a failure and paying for another run to guess at it. The
-`40` is the whole debugging session's ceiling, and the flag bounds one
-invocation: pass what is left of it on each rerun rather than the same number
-again, or six invocations spend six times it.
+`--keep-temp` leaves each case's run directory behind, which is the difference
+between reading a failure and paying for another run to guess at it. The CLI
+seals the parts the run wrote (mode 000) and says how to open them; don't run
+`git` anywhere inside one, since a repository the run wrote can carry config
+that executes. `--max-cost-usd` bounds one invocation: pass what is left of a
+session's budget on each rerun rather than the same number again.
 
 Useful once it works: `--case <glob>` to run one, `--runs 3` when you want to
 know whether a case is flaky rather than whether it works — every case here sets
@@ -252,71 +260,97 @@ check it is *kept*.
   `issue list` — and, when a case has no `issue.json`, `issue view` falls back
   to looking the requested number up in those same two files) and *records*
   every write into `.eval/` instead of performing it. It refuses any
-  subcommand no shipped skill is permitted, so a case cannot
-  pass on a call the real run could never make — `defaultTools` is the set for
-  `implement-issue`, and for `plan-backlog` it is the write surface its
-  `SKILL.md` names, which the `plan` verb grants through its own `planTools`,
-  outside `defaultTools`.
-  `issue create` both records and answers: it hands back an incrementing number
-  from 100 up, so a plan run can file an epic and parent children to the number
-  it got.
-- `.claude/settings.json` — puts that `gh` first on `PATH`.
-- `CLAUDE.md` — says the project is `repo/`. The prompt is a bare slash command
-  with nowhere to name a directory, and Phase 0's `git worktree list` otherwise
-  runs wherever the runner started: no repository at all, or — if the workspace
-  sits inside one — the wrong one.
+  subcommand no shipped skill is permitted, so a case cannot pass on a call the
+  real run could never make: `defaultTools` is the set for `implement-issue`,
+  and `planTools` and `healthTools` are the sets for the two skills that only
+  file issues. `issue create` both records and answers: it hands back an
+  incrementing number from 100 up, so a plan run can file an epic and parent
+  children to the number it got. The stand-in and the fixtures are copied into
+  `.eval/lib/` and `.eval/fixture/`: the CLI's sandbox keeps the run's shell out
+  of the plugin tree they ship in.
 
-It refuses to run in a directory that already holds any of those, so a second
-run in the same workspace, or a run pointed at a real project, stops with a
-sentence about it rather than half-building on top.
+Getting that `gh` onto `PATH` is each runner's job: `run.sh` puts `.eval/bin`
+first, and `plugin-eval.sh` puts a dispatcher first that finds it. The
+scaffold checks the route end to end and stops if `gh` would reach anything
+else, before any model call is paid for. There's no workspace `CLAUDE.md`
+saying the project is `repo/`: the CLI turns CLAUDE.md loading off for a run,
+so each case says it in `execution.append_system_prompt` instead, and `run.sh`
+turns the loading off too.
 
-Graders then read fixed paths (`.eval/pr-body.md`, `.eval/labels.log`,
-`.eval/comments/0.md`, `.eval/created/*.md`, `repo/.worktrees/issue-1/PLAN.md`)
-rather than having to work out where the run put its worktree.
+It refuses to run in a directory that already holds `repo/` or `.eval/`, so a
+second run in the same workspace, or a run pointed at a real project, stops
+with a sentence about it rather than half-building on top.
 
-## What a hand-run settled, and what only the CLI can
+Graders then read fixed paths rather than having to work out where the run put
+its worktree: `repo/.worktrees/issue-1/PLAN.md`, and what the stand-in records
+under `.eval/` — `gh-calls.log`, `labels.log`, `comments/0.md`, `created/*.md`,
+`pr-body.md`, `pr-files.txt`, `pr-diff.txt`. Three more exist because a CLI
+judge reads one file, not a directory: `issues-created.md` holds every created
+issue, `posted.md` everything the run put in front of a human (comments, PR
+title and body, created issues), and `pr.md` the PR as it was opened — body,
+changed files, and origin's refs and `polako-evidence` tree read at that
+moment. The logs and `posted.md` start empty, so a grader reading one never
+meets a missing file.
 
-The suite has now run in anger — every case then in it, by hand, on 2026-08-28
-(the `run.sh` path above) — so the scaffold, the stand-in `gh` and
-the graders are no longer read-only theory. What that run settled:
+## Writing a case
 
-- **The scratch world works as written.** `lib/scaffold.sh` and `lib/gh-fake.sh`
-  behaved as designed on their first execution, including the seeds, and
-  `plan-vision`'s bare `VISION.md` prompt was found through the workspace
-  `CLAUDE.md` pointer without needing a `repo/` prefix.
-- **The skills held.** 32/34 behavioral graders passed. The two reds were both
-  genuine catches, not grader noise: a plan run improvised `gh label list`, a
-  read outside its granted surface, which the stand-in rejected (issue #128);
-  and a `review-gate` run skipped `SKILL.md`'s `--ff-only` mirror refresh and
-  branched from `origin/main` instead (issue #131).
-- **`.claude/settings.json` is not how the stand-in `gh` gets onto `PATH`**
-  under a headless `claude -p` — the launch environment is (issue #126). The
-  failure was loud, exactly as this section predicted.
-- **`tool_used: Skill` never fires from slash-command expansion.** It fires
-  only when a run happens to reach `/code-review` (issue #127), which is why
-  the by-hand runner reports it as an indicator instead of scoring it.
+A case is `case.yaml` in the CLI's own schema: `schema_version: "1.0"`, the
+prompt and its limits under `execution:`, the scaffold under `context:`.
+`python3 evals/lib/grade.py check <file>` says whether one holds, and it's
+stricter than the CLI on purpose. The CLI refuses an unknown key in a grader
+but drops one anywhere else without a word, which is how every case here once
+loaded as nothing. What the CLI does with a case, read from its runner on CLI
+2.1.280 and checked with probes:
 
-`claude plugin eval .` itself has still never run this suite — it was
-early-access, and its first run since is issue #77 — so everything
-CLI-specific is still unverified: the
-grader key spellings beyond what `--help` shows (including the `regex` grader
-recovered from the binary — `name` + `target` + `pattern`, `target:
-last_message` reading the agent's final message — which no case uses yet, and
-`no_leak`, which no CLI grader answers to at all: `push-blocked` runs today
-only through `run.sh`, and a `plugin eval` run of it would need `no_leak`
-translated to `regex` once it is clear whether `target` can read a workspace
-file rather than only the final message);
-whether the real runner's cwd is the workspace the scaffold assumes (if not,
-set `EVAL_WORKSPACE` — `lib/scaffold.sh` honours it — rather than rewriting
-paths in every case; `run.sh` guarantees the assumption by construction, so
-the hand-run settles nothing here); whether the real runner applies the
-workspace settings the scaffold writes (if it does, #126 is a by-hand quirk;
-if not, every case fails loudly on its first `gh` call); whether its `llm`
-graders can read workspace files or only the transcript; whether
-`--ablation none` scores `tool_used` graders it would otherwise treat as
-indicators; and whether the real runner's own scaffolded workspace hits the
-same "sensitive file" wall `run.sh` worked around by moving its results
-directory outside the checkout (issue #459) — its workspace location under
-`plugin eval` is unknown until it actually runs. Check those seven on its
-first run, issue #77, before reading anything into scores — then fold the
-answers in above and delete this section.
+- **The run gets exactly the tools it's given**: the operator's grant
+  (`lib/grants.sh`: `Bash`, `Write`, `Edit`, `Skill(claude-api)`,
+  `ListAgents`) plus the ungated tools the case's `allowed_tools` names, like
+  `Read`, `Grep`, `Skill`, `Agent` and `TodoWrite`. Every other tool is
+  withheld from the model. Each case mirrors its verb's own grant
+  (`defaultTools`, `planTools`, `healthTools`), plus `Agent` where
+  `/code-review` may run.
+- **Its shell is sandboxed.** The network is refused, and a `PATH` entry
+  inside the plugin tree is dropped; in a probe, a command naming a path in
+  that tree was refused too. So the workspace carries its own copy of the
+  stand-in, and `visual-change` can't run here. On macOS, Apple's `/usr/bin`
+  shims for `git` and `python3` fail inside it, which is why
+  `plugin-eval.sh` pins both. Writes to a repository's `.git/config` are
+  refused too: `git worktree add -b` and `git push -u` still work, but the
+  branch's upstream never gets recorded.
+- **It loads no CLAUDE.md**, so a case says in `append_system_prompt` what a
+  workspace CLAUDE.md would have.
+- **The scaffold** runs in the run's own working directory, with a minimal
+  environment and 120 seconds before it's killed. A case can set `EVAL_*`
+  variables for the run and nothing else. A workspace settings file's
+  `env.PATH` is ignored (issue #126 holds under the CLI too), and so are its
+  hooks.
+- **`file_exists` means the run created the path.** The CLI lists the
+  workspace before and after the run, and a file the scaffold made doesn't
+  count even if the run changed it. `exists: false` is the safe way to assert
+  that something never happened.
+- **An `llm` judge sees one source**: the grader's `focus` — `last_message`,
+  `trace`, `files` (the list of created paths, not their contents), or one
+  workspace file (`source: file` plus `path`) — never a bundle. It votes three
+  times, and the majority wins. A `trace` focus shows it only the first and
+  last 12 events, so the middle of a long run is out of its sight: check
+  mid-run order with `tool_order`, `tool_used` or a `regex` over the whole
+  trace. A focus file that doesn't exist fails the grader.
+- **`tool_used` and `tool_order` match `input_match` against the tool call's
+  input as compact JSON** — `"command":"git …"`, `"file_path":"…"`.
+  `tool_used` defaults to `min: 1`, so an absence check needs `min: 0` as well
+  as `max: 0`.
+- **`regex` reads the same sources**, the whole trace included, with
+  JavaScript flags (`i`, `m`, `s`) and `match: contains`, `not_contains` or
+  `count:N`. It's how `push-blocked` checks nothing leaked; there is no
+  `no_leak` grader.
+- **Under `--ablation none` every grader scores**, `tool_used: Skill`
+  included. That grader is gone from the suite: slash-command expansion emits
+  no `Skill` call, so it only ever fired when a run happened to reach
+  `/code-review` (issue #127).
+- **The run directory is outside the plugin tree** (under `/tmp` on macOS), so
+  the "sensitive file" refusal `run.sh` moved its results for (issue #459)
+  doesn't reach it.
+
+A case the CLI can't run is `by-hand.yaml` instead of `case.yaml`, written to
+the same schema: the CLI looks for `case.yaml` only, and `run.sh` takes
+either. Say at the top of the file why it's by hand.

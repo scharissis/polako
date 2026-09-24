@@ -1,96 +1,147 @@
+schema_version: "1.0"
 name: design-plan
 description: >
   A design request specific enough to need no question should become one plan
   document under docs/designs/, behind one PR — every claim about the repo
   resting on a pointer or a run, every drafted ticket carrying all four parts
   and an estimate, every rejected alternative a reason — and no issue filed.
-prompt: /polako:design-plan 1
-scaffold_script: scaffold.sh
-runs: 1
-max_turns: 80
-timeout_seconds: 1800
 tags:
   - skill
   - planning
+runs: 1
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: /polako:design-plan 1
+  max_turns: 80
+  timeout_seconds: 1800
+  # defaultTools (flags.go): there is no design verb with a grant of its own
+  # yet. Agent is what /code-review's finders run as. The gated ones only
+  # reach the run through evals/lib/grants.sh.
+  allowed_tools:
+    - Read
+    - Write
+    - Edit
+    - Glob
+    - Grep
+    - TodoWrite
+    - Skill
+    - Agent
+    - Bash
+  # The CLI turns CLAUDE.md loading off for a run, so the workspace can't say
+  # where the project is. This says it instead.
+  append_system_prompt: >
+    The project to work on is the git checkout at ./repo, below the directory
+    you start in. Change into it before doing anything else: the directory you
+    start in is not the project. Worktrees this run creates belong inside it,
+    at ./repo/.worktrees/.
+# The stand-in `gh pr create` records the PR's changed files and diff
+# (.eval/pr-files.txt, .eval/pr-diff.txt), and the whole PR, body and changed
+# files together, in .eval/pr.md.
 graders:
   - type: file_exists
     name: pr_opened
     path: .eval/pr-body.md
 
-  - type: llm
+  # Exactly one file, added, directly under docs/designs/.
+  - type: regex
     name: one_design_doc_and_nothing_else
-    focus: .eval/pr-files.txt
-    criteria: >
-      The PR's branch adds exactly one file, and it sits directly under
-      docs/designs/ with a .md extension. Fail if it changes greet.sh,
-      test.sh, README.md or any other file, adds a second file, or if
-      .eval/pr-files.txt was never created.
+    target:
+      source: file
+      path: .eval/pr-files.txt
+    pattern: '^A\tdocs/designs/[^/\s]+\.md\n?$'
 
   - type: llm
     name: the_doc_has_the_template
-    focus: the added file in .eval/pr-diff.txt
+    focus:
+      source: file
+      path: .eval/pr-diff.txt
     criteria: >
-      The document has a title line, a `Scope: … · Behavior change: …` line
-      under it, and these sections in this order: What exists today, The
-      answer in one paragraph, What this may read and write, Drafted tickets,
-      Considered and not proposed. Fail if a section is missing, or if the
-      document carries a `Status:` or `Tracking:` line.
+      Judge the file this diff adds. The document has a title line, a
+      `Scope: … · Behavior change: …` line under it, and these sections in
+      this order: What exists today, The answer in one paragraph, What this
+      may read and write, Drafted tickets, Considered and not proposed. Fail
+      if a section is missing, or if the document carries a `Status:` or
+      `Tracking:` line.
 
   - type: llm
     name: exists_today_rests_on_pointers_or_runs
-    focus: the What exists today section of the added file in .eval/pr-diff.txt
+    focus:
+      source: file
+      path: .eval/pr-diff.txt
     criteria: >
-      Every claim about the current repo names greet.sh, test.sh or
-      README.md (a file, a line or a function), or describes a command the
-      run executed and what it showed. Fail on a claim with neither behind
-      it, or on a pasted terminal transcript rather than a described result.
+      Judge the What exists today section of the file this diff adds. Every
+      claim about the current repo names greet.sh, test.sh or README.md (a
+      file, a line or a function), or describes a command the run executed
+      and what it showed. That includes a claim that something is absent,
+      like "there is no docs/ directory": it needs the command that showed
+      it. Fail on a claim with neither behind it, or on a pasted terminal
+      transcript rather than a described result.
 
   - type: llm
     name: tickets_are_complete
-    focus: the Drafted tickets section of the added file in .eval/pr-diff.txt
+    focus:
+      source: file
+      path: .eval/pr-diff.txt
     criteria: >
-      Every ticket has a numbered imperative title and all of Problem, Shape,
-      Done when and an `Estimate: S`, `M` or `L` line, and its Shape names the
+      Judge the Drafted tickets section of the file this diff adds. Every
+      ticket has a numbered imperative title and all of Problem, Shape, Done
+      when and an `Estimate: S`, `M` or `L` line, and its Shape names the
       files it changes. Fail if any ticket misses a part, quotes money, or is
       plainly too big for one PR (for example "implement all of it").
 
   - type: llm
     name: alternatives_have_reasons
-    focus: the Considered and not proposed section of the added file in .eval/pr-diff.txt
+    focus:
+      source: file
+      path: .eval/pr-diff.txt
     criteria: >
-      The section lists at least one alternative, and every one says why it
-      wasn't chosen. Fail on a bare list of alternatives with no reasons.
+      Judge the Considered and not proposed section of the file this diff
+      adds. The section lists at least one alternative, and every one says
+      why it wasn't chosen. Fail on a bare list of alternatives with no
+      reasons.
 
   - type: llm
     name: pr_body_hands_off
-    focus: the recorded PR body at .eval/pr-body.md
+    focus:
+      source: file
+      path: .eval/pr.md
     criteria: >
-      The body has Measured, Decided and Next sections (Left open is optional
-      when nothing is left open). Next names `polako plan -design
-      docs/designs/<file>` with the same file the PR adds per
-      .eval/pr-files.txt. "Closes #1" sits on its own line after every
-      section; a trailing attribution line after it (such as "Generated with
-      Claude Code") is fine, so do not fail the body for it. Fail if any of
-      those is missing or wrong.
+      This is the PR as recorded: its title, its body between `=== body ===`
+      and `=== changed files ===`, then the files it changes. The body has
+      Measured, Decided and Next sections (Left open is optional when nothing
+      is left open). Next names `polako plan -design docs/designs/<file>` with
+      the same file the PR adds, per its changed files. "Closes #1" sits on
+      its own line after every section of the body; a trailing attribution
+      line after it (such as "Generated with Claude Code") is fine, so do not
+      fail the body for it. Fail if any of those is missing or wrong.
 
-  - type: llm
+  # Reads, at most a comment and a label edit for a question, and one PR. No
+  # issue filed, nothing merged, no `gh api` — wherever a global -R puts the
+  # subcommand.
+  - type: regex
     name: write_surface_held
-    focus: .eval/gh-calls.log
-    criteria: >
-      The log holds reads (`gh issue view`, `gh issue list`, `gh search
-      issues`, `gh pr list`), at most `gh issue comment` and `gh issue edit`
-      for a question, and one `gh pr create`. Fail on any `gh issue create`,
-      `gh pr merge` or `gh api` call: a design run files no issues and merges
-      nothing.
+    target:
+      source: file
+      path: .eval/gh-calls.log
+    pattern: '^gh (?:(?:-R|--repo)[ =]\S+ )?(?:issue create|pr merge|api)\b'
+    flags: m
+    match: not_contains
 
-  - type: llm
+  - type: regex
+    name: one_pr_was_opened
+    target:
+      source: file
+      path: .eval/gh-calls.log
+    pattern: '^gh pr create\b'
+    flags: m
+    match: count:1
+
+  # The request settles every decision a design of this size needs.
+  - type: regex
     name: no_question_was_asked
-    focus: whether the run stopped to ask anything, per .eval/labels.log
-    criteria: >
-      The request settles every decision a design of this size needs, so the
-      run should not have applied the awaiting-answer label. Fail if
-      labels.log records "add awaiting-answer" without a matching "remove
-      awaiting-answer".
-
-  - type: tool_used
-    tool: Skill
+    target:
+      source: file
+      path: .eval/labels.log
+    pattern: 'add awaiting-answer'
+    match: not_contains
