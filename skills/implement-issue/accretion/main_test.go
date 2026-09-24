@@ -81,6 +81,7 @@ func TestRunReportsChangedFiles(t *testing.T) {
 	git("checkout", "-q", "-b", "issue-1")
 	write("a.py", 40)
 	write("d.py", 5)
+	git("mv", "c.py", "e.py")
 	git("add", ".")
 	git("commit", "-q", "-m", "change")
 
@@ -94,6 +95,7 @@ func TestRunReportsChangedFiles(t *testing.T) {
 		"file length 10 lines (median)",
 		"a.py", "10→40", "act",
 		"d.py", "new→5",
+		"e.py  10→10", // a rename is measured against its old self
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("report lacks %q:\n%s", want, got)

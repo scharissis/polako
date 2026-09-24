@@ -135,14 +135,15 @@ func run(w io.Writer, repo, base string) error {
 		return fmt.Errorf("finding the merge base of %s and HEAD: %w", base, err)
 	}
 	mb := strings.TrimSpace(string(mergeBase))
-	changed, err := gitList(repo, "diff", "--name-only", "-z", "--diff-filter=AMR", mb, "HEAD")
+	status, err := gitList(repo, "diff", "--name-status", "-z", "--diff-filter=AMR", mb, "HEAD")
 	if err != nil {
 		return fmt.Errorf("listing changed files: %w", err)
 	}
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	rows := 0
-	for _, p := range changed {
+	for _, c := range parseNameStatus(status) {
+		p := c.path
 		st, ok := sourceStyle(p)
 		if !ok {
 			continue
@@ -154,7 +155,7 @@ func run(w io.Writer, repo, base string) error {
 		head := measureSource(src, st)
 		var before measure
 		baseText := "new"
-		if old, err := gitOut(repo, "show", mb+":"+p); err == nil {
+		if old, err := gitOut(repo, "show", mb+":"+c.old); err == nil {
 			before = measureSource(old, st)
 			baseText = fmt.Sprint(before.lines)
 		}
@@ -170,6 +171,27 @@ func run(w io.Writer, repo, base string) error {
 		fmt.Fprintln(tw, "no source file changed since the base")
 	}
 	return tw.Flush()
+}
+
+type change struct {
+	old, path string // old is where the file lived at the base: path, unless renamed
+}
+
+// parseNameStatus reads `git diff --name-status -z`: a status field, then one
+// path — or, for a rename, the old path and the new one. A moved file is
+// measured against its old self, not as new.
+func parseNameStatus(fields []string) []change {
+	var out []change
+	for i := 0; i+1 < len(fields); {
+		if strings.HasPrefix(fields[i], "R") && i+2 < len(fields) {
+			out = append(out, change{old: fields[i+1], path: fields[i+2]})
+			i += 3
+			continue
+		}
+		out = append(out, change{old: fields[i+1], path: fields[i+1]})
+		i += 2
+	}
+	return out
 }
 
 // verdict is the whole rule, so the model doesn't redo it: under the bound is
