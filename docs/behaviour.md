@@ -34,8 +34,10 @@ checkout alone. An origin it can't fetch at all is different: after a few
 tries the shift stops, with a `stopped` notification, rather than pay for a
 run on a base of unknown age that couldn't push its work anyway — nothing is
 parked, fix the network or unlock the ssh-agent and start it again. Refused
-credentials are narrower and not fatal: the run goes on, and a park after it
-leads with the real cause.
+credentials are narrower, and often a blip: no run starts and nothing is
+parked, polako waits one `-poll` and tries the pickup again, and only three
+in a row stop the shift. An issue whose PR is already open is still waited
+on.
 
 **A finished issue's worktree and branch get reclaimed, not left to pile
 up.** At shift start — catching PRs merged by hand between shifts — and
