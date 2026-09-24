@@ -357,7 +357,7 @@ func assertSkillFitsTheCap(t *testing.T, path, skill string) {
 	for _, want := range []string{
 		"**Fit to the cap.**",
 		"cut the batch to the cap, weakest",
-		"an epic counts as one issue",
+		"an epic is one, and each of its children is one more",
 		"Never leave an epic without the children it names",
 	} {
 		if !strings.Contains(flat, want) {

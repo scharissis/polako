@@ -273,7 +273,8 @@ set against the repo and against the backlog you read in Phase 0:
   a decision and costs a run real money. Cut it. Fewer, sharper issues beat
   coverage.
 - **Fit to the cap.** If a cap was given and the batch is still over it, cut
-  the batch to the cap, weakest findings first; an epic counts as one issue.
+  the batch to the cap, weakest findings first. Every issue takes one slot:
+  an epic is one, and each of its children is one more.
   Never leave an epic without the children it names: drop a whole epic, or
   shrink it and rewrite its body to name only the children that stay. The
   supervisor kills the run at the cap, and a kill mid-epic files half of one.
