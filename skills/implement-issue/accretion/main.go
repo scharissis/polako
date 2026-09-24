@@ -17,16 +17,11 @@
 package main
 
 import (
-	"bytes"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
-	"path"
 	"sort"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 )
@@ -42,44 +37,6 @@ const (
 // A file this short gets no comment-density verdict: a doc comment on a small
 // new file is a high share of nothing, and extraction can't fix a ratio.
 const minCommentLines = 50
-
-// A block opener is checked before the line markers, so Lua's `--[[` opens a
-// block rather than reading as one `--` line.
-type style struct {
-	line   []string
-	blocks [][2]string // open, close
-}
-
-var (
-	cBlock    = [2]string{"/*", "*/"}
-	htmlBlock = [2]string{"<!--", "-->"}
-
-	slash  = style{line: []string{"//"}, blocks: [][2]string{cBlock}}
-	markup = style{line: []string{"//"}, blocks: [][2]string{cBlock, htmlBlock}}
-	php    = style{line: []string{"//", "#"}, blocks: [][2]string{cBlock}}
-	hash   = style{line: []string{"#"}}
-	css    = style{blocks: [][2]string{cBlock}}
-	ps     = style{line: []string{"#"}, blocks: [][2]string{{"<#", "#>"}}}
-	sql    = style{line: []string{"--"}, blocks: [][2]string{cBlock}}
-	lua    = style{line: []string{"--"}, blocks: [][2]string{{"--[[", "]]"}}}
-	hs     = style{line: []string{"--"}, blocks: [][2]string{{"{-", "-}"}}}
-)
-
-var styles = map[string]style{
-	".go": slash, ".c": slash, ".h": slash, ".cc": slash, ".cpp": slash, ".hpp": slash,
-	".cs": slash, ".java": slash, ".kt": slash, ".kts": slash, ".scala": slash,
-	".swift": slash, ".rs": slash, ".dart": slash, ".php": php,
-	".js": slash, ".jsx": slash, ".mjs": slash, ".cjs": slash, ".ts": slash, ".tsx": slash,
-	".vue": markup, ".svelte": markup, ".astro": markup,
-	".css": css, ".scss": slash, ".less": slash,
-	".py": hash, ".rb": hash, ".sh": hash, ".bash": hash, ".zsh": hash, ".pl": hash,
-	".r": hash, ".ex": hash, ".exs": hash, ".tf": hash, ".ps1": ps,
-	".sql": sql, ".lua": lua, ".hs": hs,
-}
-
-// Paths a repo carries but didn't write; measuring them would set the median
-// by someone else's code.
-var skipDirs = []string{"vendor/", "node_modules/", "third_party/"}
 
 type measure struct {
 	lines, comments int
@@ -216,27 +173,6 @@ func run(w io.Writer, repo, base string) error {
 	return tw.Flush()
 }
 
-type change struct {
-	old, path string // old is where the file lived at the base: path, unless renamed
-}
-
-// parseNameStatus reads `git diff --name-status -z`: a status field, then one
-// path — or, for a rename, the old path and the new one. A moved file is
-// measured against its old self, not as new.
-func parseNameStatus(fields []string) []change {
-	var out []change
-	for i := 0; i+1 < len(fields); {
-		if strings.HasPrefix(fields[i], "R") && i+2 < len(fields) {
-			out = append(out, change{old: fields[i+1], path: fields[i+2]})
-			i += 3
-			continue
-		}
-		out = append(out, change{old: fields[i+1], path: fields[i+1]})
-		i += 2
-	}
-	return out
-}
-
 // verdict is the whole rule, so the model doesn't redo it: under the bound is
 // fine; over it but no worse than the base is someone else's debt; over it
 // and worse than the base is this change's to extract or note.
@@ -251,72 +187,6 @@ func verdict(before, head, bound float64) string {
 	}
 }
 
-func sourceStyle(p string) (style, bool) {
-	for _, d := range skipDirs {
-		if strings.HasPrefix(p, d) || strings.Contains(p, "/"+d) {
-			return style{}, false
-		}
-	}
-	if strings.HasSuffix(p, ".min.js") || strings.HasSuffix(p, ".min.css") {
-		return style{}, false
-	}
-	st, ok := styles[strings.ToLower(path.Ext(p))]
-	return st, ok
-}
-
-// measureSource counts lines the way scripts/health does — a final line with
-// no newline still counts — and comment lines by leading marker.
-func measureSource(src []byte, st style) measure {
-	var m measure
-	if len(src) == 0 {
-		return m
-	}
-	closer := "" // non-empty while inside a block comment
-	for _, raw := range bytes.Split(bytes.TrimSuffix(src, []byte("\n")), []byte("\n")) {
-		m.lines++
-		t := strings.TrimSpace(string(raw))
-		if closer != "" {
-			m.comments++
-			if strings.Contains(t, closer) {
-				closer = ""
-			}
-			continue
-		}
-		if t == "" {
-			continue
-		}
-		if b, ok := openedBlock(t, st); ok {
-			m.comments++
-			if !strings.Contains(t[len(b[0]):], b[1]) {
-				closer = b[1]
-			}
-			continue
-		}
-		if hasAnyPrefix(t, st.line) {
-			m.comments++
-		}
-	}
-	return m
-}
-
-func openedBlock(t string, st style) ([2]string, bool) {
-	for _, b := range st.blocks {
-		if strings.HasPrefix(t, b[0]) {
-			return b, true
-		}
-	}
-	return [2]string{}, false
-}
-
-func hasAnyPrefix(s string, prefixes []string) bool {
-	for _, p := range prefixes {
-		if strings.HasPrefix(s, p) {
-			return true
-		}
-	}
-	return false
-}
-
 func median(xs []float64) float64 {
 	s := append([]float64(nil), xs...)
 	sort.Float64s(s)
@@ -325,77 +195,4 @@ func median(xs []float64) float64 {
 		return s[n/2]
 	}
 	return (s[n/2-1] + s[n/2]) / 2
-}
-
-func gitOut(repo string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return nil, errors.New(msg)
-		}
-		return nil, err
-	}
-	return out, nil
-}
-
-// catFile reads every `<rev>:<path>` spec in one `git cat-file --batch`, not
-// one process per file. A spec git can't resolve to a blob — missing, a
-// submodule — is left out of the map.
-func catFile(repo string, specs []string) (map[string][]byte, error) {
-	var in bytes.Buffer
-	var asked []string
-	for _, s := range specs {
-		if !strings.Contains(s, "\n") { // one spec per line; such a path can't be asked for
-			in.WriteString(s + "\n")
-			asked = append(asked, s)
-		}
-	}
-	cmd := exec.Command("git", "-C", repo, "cat-file", "--batch")
-	cmd.Stdin = &in
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	blobs := map[string][]byte{}
-	for _, s := range asked {
-		nl := bytes.IndexByte(out, '\n')
-		if nl < 0 {
-			return nil, errors.New("cat-file output ended early")
-		}
-		line := string(out[:nl])
-		out = out[nl+1:]
-		if strings.HasSuffix(line, " missing") || strings.HasSuffix(line, " ambiguous") {
-			continue
-		}
-		header := strings.Fields(line) // "<oid> <type> <size>"
-		if len(header) != 3 {
-			return nil, fmt.Errorf("unreadable cat-file header %q", line)
-		}
-		size, err := strconv.Atoi(header[2])
-		if err != nil || size+1 > len(out) {
-			return nil, fmt.Errorf("unreadable cat-file header %q", header)
-		}
-		if header[1] == "blob" {
-			blobs[s] = out[:size]
-		}
-		out = out[size+1:]
-	}
-	return blobs, nil
-}
-
-func gitList(repo string, args ...string) ([]string, error) {
-	out, err := gitOut(repo, args...)
-	if err != nil {
-		return nil, err
-	}
-	var paths []string
-	for _, p := range strings.Split(string(out), "\x00") {
-		if p != "" {
-			paths = append(paths, p)
-		}
-	}
-	return paths, nil
 }
