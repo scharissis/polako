@@ -91,8 +91,13 @@ func statsDocEpochsFrom(epochs []modelEpoch) []statsDocEpoch {
 	out := make([]statsDocEpoch, 0, len(epochs))
 	for _, e := range epochs {
 		doc := statsDocEpoch{Model: e.model, Runs: e.runs, FirstClaudeVersion: e.claudeVersion}
+		// Each on its own: a first run with an unparsable ts leaves first zero
+		// while later runs still set a real last.
 		if !e.first.IsZero() {
-			doc.First, doc.Last = stamp(e.first), stamp(e.last)
+			doc.First = stamp(e.first)
+		}
+		if !e.last.IsZero() {
+			doc.Last = stamp(e.last)
 		}
 		out = append(out, doc)
 	}

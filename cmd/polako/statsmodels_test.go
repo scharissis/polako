@@ -74,6 +74,21 @@ func TestStatsModelsNeverBackfillTheFirstVersion(t *testing.T) {
 	}
 }
 
+// An unparsable first ts drops first, never last, which the text line still
+// prints.
+func TestStatsModelsJSONKeepsLastWithoutFirst(t *testing.T) {
+	t.Parallel()
+	dir := writeRecords(t, `{"v":1,"kind":"run","ts":"not a time","repo":"r/r","issue":1,"reason":"implement","status":"ok","model":"claude-sonnet-5"}
+{"v":1,"kind":"run","ts":"2026-09-10T09:00:00Z","repo":"r/r","issue":2,"reason":"implement","status":"ok","model":"claude-sonnet-5"}
+{"v":1,"kind":"run","ts":"2026-09-23T09:00:00Z","repo":"r/r","issue":3,"reason":"implement","status":"ok","model":"claude-opus-5-5[1m]"}
+`)
+	for _, e := range statsEpochs(t, dir) {
+		if e.Model == "claude-sonnet-5" && (e.First != "" || e.Last != "2026-09-10T09:00:00Z") {
+			t.Errorf("epoch = %+v, want no first and last 2026-09-10T09:00:00Z", e)
+		}
+	}
+}
+
 // A resume can report the bare id where the fresh run reported [1m]. Counting
 // it would print one model as two.
 func TestStatsModelsIgnoresResumes(t *testing.T) {
