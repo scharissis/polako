@@ -30,14 +30,11 @@ it only watches, and it's what the skill branches from and a review diffs
 against. Left stale, a review folds an already-merged PR into what it's
 diffing. It's `--ff-only` and nothing else: a commit of its own, work in the
 way, or a checkout on another branch, and polako logs it and leaves the
-checkout alone. An origin it can't fetch at all is different: after a few
-tries the shift stops, with a `stopped` notification, rather than pay for a
-run on a base of unknown age that couldn't push its work anyway — nothing is
-parked, fix the network or unlock the ssh-agent and start it again. Refused
-credentials are narrower, and often a blip: no run starts and nothing is
-parked, polako waits one `-poll` and tries the pickup again, and only three
-in a row stop the shift. An issue whose PR is already open is still waited
-on.
+checkout alone. An origin it can't fetch at all stops the shift, with a
+`stopped` notification, rather than pay for a run on a base of unknown age
+that couldn't push anyway — nothing is parked. Refused credentials are often
+a blip: no run starts, polako waits a `-poll` and retries the pickup, and
+only three in a row stop the shift. An open PR is still waited on.
 
 **A finished issue's worktree and branch get reclaimed, not left to pile
 up.** At shift start — catching PRs merged by hand between shifts — and
