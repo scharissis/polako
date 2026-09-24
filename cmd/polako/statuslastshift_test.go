@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"maps"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -43,6 +44,32 @@ func TestLastShiftLineFromRunData(t *testing.T) {
 	})
 	if got, want := lastShiftLine(readLastShift(dir, "example/repo", statusNow)), wantLastShiftLine(dir); got != want {
 		t.Errorf("line:\n got %q\nwant %q", got, want)
+	}
+}
+
+// The line and last_shift name the models the shift's fresh, inherited runs
+// reported, first-seen order. A run that asked for a model, or a resume, says
+// nothing about what inherit resolved to; an older shift's model isn't this
+// one's.
+func TestLastShiftNamesTheModels(t *testing.T) {
+	t.Parallel()
+	const recs = `
+{"v":1,"kind":"run","ts":"2026-02-10T09:00:00Z","ended":"2026-02-10T09:30:00Z","repo":"example/repo","shift":"aaaa0001","issue":1,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":5.00,"model":"claude-haiku-4-5"}
+{"v":1,"kind":"run","ts":"2026-02-21T02:10:00Z","ended":"2026-02-21T03:00:00Z","repo":"example/repo","shift":"bbbb0002","issue":3,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":10.00,"model":"claude-sonnet-5"}
+{"v":1,"kind":"run","ts":"2026-02-21T03:10:00Z","ended":"2026-02-21T03:20:00Z","repo":"example/repo","shift":"bbbb0002","issue":3,"reason":"rebase","status":"ok","outcome":"opened_pr","cost_usd":1.00,"model":"claude-fable-5-1","requested_model":"fable"}
+{"v":1,"kind":"run","ts":"2026-02-21T03:30:00Z","ended":"2026-02-21T03:40:00Z","repo":"example/repo","shift":"bbbb0002","issue":5,"reason":"resume","status":"ok","outcome":"opened_pr","cost_usd":1.00,"model":"claude-sonnet-5-bare"}
+{"v":1,"kind":"run","ts":"2026-02-21T04:10:00Z","ended":"2026-02-21T05:00:00Z","repo":"example/repo","shift":"bbbb0002","issue":7,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":2.00,"model":"claude-opus-5-5[1m]"}
+{"v":1,"kind":"run","ts":"2026-02-21T05:10:00Z","ended":"2026-02-21T05:20:00Z","repo":"example/repo","shift":"bbbb0002","issue":9,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":2.00,"model":"claude-sonnet-5"}
+`
+	dir := writePricingFixture(t, map[string]string{"example--repo.jsonl": recs})
+	ls := readLastShift(dir, "example/repo", statusNow)
+	want := "last shift here: Feb 21 02:10, 3h10m — 0 merged, 0 parked, $16.00, on claude-sonnet-5 and claude-opus-5-5[1m] — " +
+		"polako stats -shift bbbb0002 -metrics " + dir
+	if got := lastShiftLine(ls); got != want {
+		t.Errorf("line:\n got %q\nwant %q", got, want)
+	}
+	if got, want := toStatusDocLastShift(ls).Models, []string{"claude-sonnet-5", "claude-opus-5-5[1m]"}; !slices.Equal(got, want) {
+		t.Errorf("last_shift.models = %q, want %q", got, want)
 	}
 }
 
@@ -251,8 +278,8 @@ func TestStatusRunDataChangesOnlyItsOwnDetails(t *testing.T) {
 		t.Fatalf("last_shift: %v", err)
 	}
 	want := statusDocLastShift{Shift: "bbbb0002", Started: "2026-02-21T02:10:00Z", SpanSeconds: 22320,
-		Merged: 1, Parked: 1, CostUSD: 31.2}
-	if ls != want {
+		Merged: 1, Parked: 1, CostUSD: 31.2, Models: []string{}}
+	if !reflect.DeepEqual(ls, want) {
 		t.Errorf("last_shift = %+v, want %+v", ls, want)
 	}
 	for k, v := range withDoc {

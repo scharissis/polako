@@ -55,6 +55,11 @@ type lastShift struct {
 	// hint is the stats command that opens this shift, -metrics included
 	// when the records came from somewhere stats wouldn't look by default.
 	hint string
+	// models is what the shift's fresh, inherited runs reported, by stats'
+	// own models rule: a model switch between shifts otherwise shows nowhere
+	// a human looks by default. Empty for records from before the model was
+	// recorded, and the line renders as it always did.
+	models []string
 }
 
 // readLastShift loads this repository's records and keeps the newest shift.
@@ -106,6 +111,9 @@ func readLastShift(metricsDir, repo string, now time.Time) *lastShift {
 		case issueNeedsHuman, issueClosed: // a closed-unmerged PR parks the issue too (parkPRClosed)
 			ls.parked++
 		}
+	}
+	for _, m := range inheritedModels(ds) {
+		ls.models = append(ls.models, m.model)
 	}
 	return ls
 }
@@ -205,8 +213,12 @@ func lastShiftLine(ls *lastShift) string {
 	if ls.ran {
 		when += ", " + medianDur(ls.span)
 	}
-	return fmt.Sprintf("last shift here: %s — %d merged, %d parked, %s — %s",
-		when, ls.merged, ls.parked, usd(ls.cost), ls.hint)
+	on := ""
+	if len(ls.models) > 0 {
+		on = ", on " + andList(ls.models)
+	}
+	return fmt.Sprintf("last shift here: %s — %d merged, %d parked, %s%s — %s",
+		when, ls.merged, ls.parked, usd(ls.cost), on, ls.hint)
 }
 
 // statusDocLastShift is last_shift in `status -json`. Started is RFC 3339 in
@@ -219,6 +231,8 @@ type statusDocLastShift struct {
 	Merged      int     `json:"merged"`
 	Parked      int     `json:"parked"`
 	CostUSD     float64 `json:"cost_usd"`
+	// Models is always [], never null, the -json rule for every array.
+	Models []string `json:"models"`
 }
 
 func toStatusDocLastShift(ls *lastShift) *statusDocLastShift {
@@ -230,5 +244,6 @@ func toStatusDocLastShift(ls *lastShift) *statusDocLastShift {
 		// Cents, as the text line prints it: a float sum of per-run costs
 		// otherwise leaks 0.30000000000000004 into the schema.
 		Merged: ls.merged, Parked: ls.parked, CostUSD: round2(ls.cost),
+		Models: append([]string{}, ls.models...),
 	}
 }
