@@ -747,11 +747,14 @@ don't post again, and stop.
         untested codebase.
       Don't work out file length or comment density yourself — medians are
       arithmetic with one right answer, and a helper ships with this skill to
-      do it. Run it from this skill's own base directory (the "Base directory
-      for this skill" line this skill was loaded with), `<base>` the
-      `origin/…` ref Phase 1 resolved:
+      do it:
 
           go -C <skill-dir> run ./accretion -repo <worktree> -base <base>
+
+      Three different paths, don't mix them up: `<skill-dir>` is this skill's
+      own directory, the "Base directory for this skill" line it was loaded
+      with; `<worktree>` is issue-$issue's worktree; `<base>` is the `origin/…`
+      ref Phase 1 resolved, a ref and not a directory.
 
       It prints both medians, each bound — min(median, ceiling) — and one row
       per source file changed since `<base>`, with its lines and comment share
