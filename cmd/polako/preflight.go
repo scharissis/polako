@@ -253,10 +253,10 @@ func preflightPairs(cfg config) [][2]string {
 }
 
 // modelEffortLine renders the settings-block value for -model, -effort,
-// -model-by-size and -effort-by-size: whichever were set, "" when none were
-// so the row is skipped. "inherit" is not spelled — an omitted flag adds
-// nothing to disclose. The by-size specs are shown verbatim since
-// POLAKO_MODEL_BY_SIZE / POLAKO_EFFORT_BY_SIZE can set them silently.
+// -model-by-size, -effort-by-size, -remediation-model and
+// -remediation-effort: whichever were set, "" when none were so the row is
+// skipped. "inherit" is not spelled — an omitted flag adds nothing to
+// disclose. Every one is shown since a POLAKO_* variable can set it silently.
 func modelEffortLine(cfg config) string {
 	var parts []string
 	if cfg.model != "" {
@@ -270,6 +270,12 @@ func modelEffortLine(cfg config) string {
 	}
 	if cfg.effortBySize != "" {
 		parts = append(parts, "effort-by-size "+cfg.effortBySize)
+	}
+	if cfg.remediationModel != "" {
+		parts = append(parts, "remediation-model "+cfg.remediationModel)
+	}
+	if cfg.remediationEffort != "" {
+		parts = append(parts, "remediation-effort "+cfg.remediationEffort)
 	}
 	return strings.Join(parts, ", ")
 }

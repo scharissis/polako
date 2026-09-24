@@ -255,9 +255,9 @@ func TestPreflightPairsGatesAndOrdersEveryRow(t *testing.T) {
 	}
 }
 
-// modelEffortLine discloses the by-size cells too, since POLAKO_MODEL_BY_SIZE
-// / POLAKO_EFFORT_BY_SIZE can set them silently — same reasoning as every
-// other unprompted preflight row.
+// modelEffortLine discloses the by-size cells and the remediation pair too,
+// since a POLAKO_* variable can set any of them silently — same reasoning as
+// every other unprompted preflight row.
 func TestModelEffortLine(t *testing.T) {
 	t.Parallel()
 	if got := modelEffortLine(config{}); got != "" {
@@ -274,6 +274,10 @@ func TestModelEffortLine(t *testing.T) {
 	}
 	if got := modelEffortLine(config{modelBySize: "S=sonnet"}); got != "model-by-size S=sonnet" {
 		t.Errorf("modelEffortLine(model-by-size alone) = %q, want just that part", got)
+	}
+	got = modelEffortLine(config{model: "opus", remediationModel: "sonnet", remediationEffort: "medium"})
+	if want := "model opus, remediation-model sonnet, remediation-effort medium"; got != want {
+		t.Errorf("modelEffortLine(remediation pair) = %q, want %q", got, want)
 	}
 }
 
