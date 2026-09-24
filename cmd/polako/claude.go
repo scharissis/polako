@@ -234,12 +234,9 @@ func buildArgs(cfg config, prompt, resumeID string) []string {
 	if cfg.model != "" {
 		args = append(args, "--model", cfg.model)
 	}
-	// --effort only on a fresh run: the session already carries the effort it
-	// was started with, so re-passing it on a resume is at best redundant and
-	// at worst a usage error, depending on whether the CLI treats effort as
-	// session-fixed (unverified). Either way "a resume keeps its run's choice"
-	// holds without the flag.
-	if cfg.effort != "" && resumeID == "" {
+	// On a resume too: probed on 2.1.280, a session does not keep its effort
+	// across --resume — resumed without the flag, it runs at the default.
+	if cfg.effort != "" {
 		args = append(args, "--effort", cfg.effort)
 	}
 	if cfg.remote && cfg.remoteName != "" {
