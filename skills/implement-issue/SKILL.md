@@ -756,13 +756,14 @@ don't post again, and stop.
       with; `<worktree>` is issue-$issue's worktree; `<base>` is the `origin/…`
       ref Phase 1 resolved, a ref and not a directory.
 
-      It prints both medians, each bound — min(median, ceiling) — and one row
-      per source file changed since `<base>`, with its lines and comment share
-      at the base and now. Each measure reads `ok`, `over, not worse` (already
-      over at the base, and no bigger — not this change's debt) or `act`
-      (over the bound, and worse than the base, a new file included). Take
-      those verdicts as given, for the substantially changed files above
-      only — a row for a one-line edit is still out of scope. If the helper can't run — no `go` on this
+      It prints both medians, taken at the base, each bound — min(median,
+      ceiling) — and one row per source file changed since `<base>`, with its
+      lines and comment share at the base and now. Each measure reads `ok`,
+      `over, not worse` (already over at the base, and no bigger — not this
+      change's debt) or `act` (over the bound, and worse than the base, a new
+      file included). Take those verdicts as given, for the substantially
+      changed files above only — a row for a one-line edit is still out of
+      scope. If the helper can't run — no `go` on this
       machine, or it errors — say so in PLAN.md and fall back to sampling a
       spread of files yourself (`git -C <worktree> ls-files` and Read; no `wc`
       needed and none is granted). Function/unit length the helper doesn't
