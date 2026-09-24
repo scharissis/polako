@@ -98,8 +98,8 @@ Ten cases, each one a real run against a scratch repo and a stand-in `gh`,
 covering all four shipped skills — [`evals/README.md`](evals/README.md) has the
 table. This one is not part of `check.sh` and not in CI. It needs the network,
 a real `claude` and money, roughly $0.30–$1.60 a case — a deliberate exception
-to the hermetic rule, argued in that README. The suite has not yet had a green
-run.
+to the hermetic rule, argued in that README. Every case has passed once
+(issue #77), though not yet all in one run.
 
 When to run it, in short. A PR that changes a shipped `SKILL.md` runs the
 cases its change touches and quotes each verdict and the spend in its body. An

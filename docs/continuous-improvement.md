@@ -41,18 +41,21 @@ the backlog, never through the supervisor reading its own telemetry.
 The highest-leverage item in this plan is not new; it is finishing one that
 exists. `evals/` grades what a real skill run leaves behind — ten cases now,
 across all four shipped skills. It has run in full once, by hand through
-`evals/run.sh` on 2026-08-28 (32/34, both reds genuine skill findings), and
-never green. Issue #77 ported it to `claude plugin eval`, the CLI's own
-runner: the cases are written to the CLI's schema, `evals/plugin-eval.sh`
-runs them, and `run.sh` grades by the CLI's rules, so the two agree.
+`evals/run.sh` on 2026-08-28 (32/34, both reds genuine skill findings).
+Issue #77 ported it to `claude plugin eval`, the CLI's own runner: the cases
+are written to the CLI's schema, `evals/plugin-eval.sh` runs them, and
+`run.sh` grades by the CLI's rules, so the two agree. By 2026-09-24 every
+case had passed, the nine the CLI runs under it and `visual-change` by hand,
+though not all in one run.
 
 The work, in order:
 
 - One budgeted session over every case, under both runners (issue #77):
-  `--case clear-issue` first, then the rest. Fix what the runs find.
-- Record the baseline: scores and cost per case, in the PR body of whatever
-  change the first green run rides on — the same "the PR body says what was
-  verified" convention skill changes already follow.
+  `--case clear-issue` first, then the rest. Fix what the runs find. Done:
+  the baseline, scores and cost per case, is in #77's PR body.
+- One pass of the whole suite, green end to end, under the graders as they
+  now stand. The #77 session's green runs came case by case, and some
+  graders were reworded after theirs.
 - The standing rule, now in CLAUDE.md's checking section: **a PR that changes
   a skill's `SKILL.md` runs the cases its change touches, and its body quotes
   the scores.** `--runs 3` when a case wobbles, because a flaky grader is
@@ -64,7 +67,7 @@ takes `--plugin-dir` and `--max-cost`, `Bash(evals/run.sh:*)` is granted in
 cases against its own worktree, passing `--max-cost 5` (which stops before
 the next case once the spend so far reaches the cap — not a hard ceiling
 inside one case), when its commits change a shipped `SKILL.md`. What is still
-owed is the first green run itself — the budgeted debugging session above.
+owed is that one clean pass.
 
 The suite stays opt-in and out of CI, per the agreement on issue #9 — it
 needs network, a real `claude` and money. The gate is the skill PR, not the

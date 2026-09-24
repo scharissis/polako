@@ -336,10 +336,12 @@ that invariant exists.
 
 This suite is the one exception to hermetic tests, agreed on issue #9: it
 needs the network, a real `claude`, and money, so it's opt-in and stays out
-of `check.sh` and CI. Its first and only full run (by hand, 2026-08-28, six
-cases — four more came later) scored 32/34, two genuine skill findings
-short of green: issues #128 and #131. Both were fixed that evening, neither
-with its case re-run to confirm it, and the suite has still never been green.
+of `check.sh` and CI. Its first full run (by hand, 2026-08-28, six cases
+then) scored 32/34, two genuine skill findings short of green: issues #128
+and #131. Issue #77 ported it to `claude plugin eval`, and by 2026-09-24
+every case had passed: the nine the CLI runs, under the CLI, and
+`visual-change` by hand. Not all in one run yet, and some graders were
+reworded after their green runs, so one clean pass is still owed.
 
 **The suite is the verification.** A PR that changes a skill's `SKILL.md`
 runs the eval cases its change touches and quotes the per-case verdicts and

@@ -26,12 +26,12 @@ the scratch repo for this case alone, so the other cases stay quick.
 `dev` script it can serve. It uses a real Chromium, about 150 MB once into the
 user cache, so it stays as opt-in as the rest of the suite. It shipped ahead
 of what the skill did at the time — the capture pipeline it grades landed
-across tickets 3–6 (#402–#405) of the now-retired visual-evidence plan;
-its case file says so. Its graders have not been re-run since #405 (before
-shots) merged to confirm they now pass. It's also the one case `claude plugin
-eval` can't run: the run fetches Playwright and a Chromium through npx, and
-the CLI's sandbox refuses the run's shell any network. So its file is
-`by-hand.yaml`, which only `run.sh` looks for.
+across tickets 3–6 (#402–#405) of the now-retired visual-evidence plan; its
+case file says so. It first passed on 2026-09-24, once its `dev` script served
+through `serve.py`, which prints its URL at once. It's also the one case
+`claude plugin eval` can't run: the run fetches Playwright and a Chromium
+through npx, and the CLI's sandbox refuses the run's shell any network. So its
+file is `by-hand.yaml`, which only `run.sh` looks for.
 
 `push-blocked` seeds a pre-receive hook on the scratch origin that rejects
 every branch but `main`, with a rejection message shaped like a real one — an
