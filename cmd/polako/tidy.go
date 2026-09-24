@@ -335,7 +335,13 @@ func tidySweep(ctx context.Context, cfg config, watched int) {
 	var reclaimed []string
 	for _, r := range results {
 		if r.reclaimed {
-			reclaimed = append(reclaimed, r.branch)
+			// "local" because a cold reader of the shift log can't otherwise
+			// tell this from something done on GitHub.
+			action := "local branch deleted"
+			if r.worktreePath != "" {
+				action = "worktree removed, local branch deleted"
+			}
+			reclaimed = append(reclaimed, fmt.Sprintf("%s (%s)", r.branch, action))
 			continue
 		}
 		switch {
@@ -383,7 +389,7 @@ func tidySweep(ctx context.Context, cfg config, watched int) {
 	}
 	if len(reclaimed) > 0 {
 		// The branch is always deleted, the worktree only when one was there —
-		// so this counts issues, and names them by branch.
+		// so this counts issues, and names each by branch with what it lost.
 		cfg.logf("reclaimed %s: %s", plural(len(reclaimed), "finished issue"), strings.Join(reclaimed, ", "))
 	}
 }

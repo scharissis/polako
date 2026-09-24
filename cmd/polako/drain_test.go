@@ -2397,7 +2397,7 @@ func TestDrainReclaimsALeftoverWorktreeAtShiftStart(t *testing.T) {
 		t.Errorf("branch issue-1 still exists: %q", got)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "reclaimed 1 finished issue: issue-1") {
+	if !strings.Contains(out, "reclaimed 1 finished issue: issue-1 (worktree removed, local branch deleted)") {
 		t.Errorf("no reclaim line in the log:\n%s", out)
 	}
 }
