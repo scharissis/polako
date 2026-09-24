@@ -481,7 +481,7 @@ polako status -json | jq .
     "curate #27, #28 (drop proposed to queue them)", "run polako design -issue 31"
   ], "notes": [],
   "plans": { "docs": [{ "path": "docs/designs/backlog-fill.md", "state": "active", "open_children": 4, "containers": [{ "issue": 101, "total": 6, "completed": 2, "finished": false, "held": false, "closed": false }] }, { "path": "docs/designs/epic.md", "state": "done", "open_children": 0, "containers": [{ "issue": 202, "total": 3, "completed": 3, "finished": true, "held": false, "closed": true }] }], "gone": [{ "path": "docs/designs/dropped.md", "issues": [88, 91], "open": 1 }], "truncated": false },
-  "plan": "plan: session 42%, week 52% (resets Sep 2, 6pm) — polako was 29% of the last 24h", "published": "0.24.0", "last_shift": { "shift": "3f9a1c20", "started": "2026-09-21T02:10:00Z", "span_seconds": 22320, "merged": 4, "parked": 1, "cost_usd": 31.2 }
+  "plan": "plan: session 42%, week 52% (resets Sep 2, 6pm) — polako was 29% of the last 24h", "published": "0.24.0", "last_shift": { "shift": "3f9a1c20", "started": "2026-09-21T02:10:00Z", "span_seconds": 22320, "merged": 4, "parked": 1, "cost_usd": 31.2, "models": ["claude-sonnet-5"] }
 }
 ```
 
@@ -510,7 +510,7 @@ caller's. `closed` is only ever true under `plans.docs[]` — `queue.containers`
 is open issues alone — and means exactly that: already closed, nothing left
 for anyone to do. `queue.parked` is `{ "issue", "entries", "category" }` the same way — `polako unpark`'s own read; `category` is one of the fixed identifiers in `metrics.go`, or `""` for a hand-labelled park.
 Every array field is always `[]`, never `null`; `quiet_seconds`, `plan` and
-`published` can be *absent* instead of a fake zero or empty string; `last_shift` (`started` in UTC) is `null` with no local run data. Same
+`published` can be *absent* instead of a fake zero or empty string; `last_shift` (`started` in UTC) is `null` with no local run data, and its `models` is what the shift's fresh, inherited runs reported, `stats`' models rule — the text line's `, on <model>`, absent when `[]`. Same
 rule as the text report: no issue, PR or comment text, only numbers,
 branches, labels, states and URLs.
 

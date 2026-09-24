@@ -28,6 +28,16 @@ type inheritedModel struct {
 // had a [1m] suffix — which would print one model as two. nil when fewer than
 // two models are left, since one model is nothing to report.
 func buildInheritedModels(ds dataset) []inheritedModel {
+	if epochs := inheritedModels(ds); len(epochs) >= 2 {
+		return epochs
+	}
+	return nil
+}
+
+// inheritedModels is every model ds's fresh, inherited runs reported, in the
+// order each first appeared — buildInheritedModels without its cut, for a
+// reader that does have something to say about one model.
+func inheritedModels(ds dataset) []inheritedModel {
 	var epochs []inheritedModel
 	for _, r := range ds.runs {
 		if r.Model == "" || r.RequestedModel != "" || resumedRun(r) {
@@ -48,9 +58,6 @@ func buildInheritedModels(ds dataset) []inheritedModel {
 		}
 		// No backfill from a later run: an unknown first version stays
 		// unknown rather than naming a CLI the model didn't arrive on.
-	}
-	if len(epochs) < 2 {
-		return nil
 	}
 	return epochs
 }
