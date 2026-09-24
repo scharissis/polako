@@ -35,10 +35,13 @@ graders:
     name: pr_body_is_complete
     focus: the recorded PR body at .eval/pr-body.md
     criteria: >
-      The body has, at minimum, Summary, Evidence and Verification, and its
-      last line is exactly "Closes #1". Fail if any of those three sections
-      is missing, if the body is a bare diff summary, or if the closing line
-      is absent or buried mid-paragraph. Design decisions and Scope are
+      The body has, at minimum, Summary, Evidence and Verification, and
+      "Closes #1" sits on its own line after every section. A trailing
+      attribution line after it (such as "Generated with Claude Code") is
+      fine — Claude Code appends one — so do not fail the body for it. Fail
+      if any of those three sections is missing, if the body is a bare diff
+      summary, or if the closing line is absent, shares a line with other
+      text, or is buried mid-paragraph. Design decisions and Scope are
       optional — the skill omits either when there's nothing to report — so
       do not fail the body for lacking one or both of them. The issue's own
       change is exactly the kind Evidence exists for: `--help` printing a
