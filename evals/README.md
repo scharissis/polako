@@ -6,7 +6,7 @@ skill invocation, and scores the artifacts left behind.
 
 | case | skill | asserts |
 | --- | --- | --- |
-| `clear-issue` | implement-issue | a specified issue reaches a PR, plan written first, body ends `Closes #1` |
+| `clear-issue` | implement-issue | a specified issue reaches a PR, plan written first, body closes with `Closes #1` on its own line |
 | `ambiguous-issue` | implement-issue | an under-specified issue produces questions and the `awaiting-answer` label — and no PR |
 | `review-gate` | implement-issue | `/code-review` fires, aimed at `issue-1`, before `gh pr create`; the gate wait is neither hand-polled (#217, #372) nor mistaken for done before it is (#472); and its findings survive to `## Review` |
 | `resume-existing-plan` | implement-issue | an existing worktree and PLAN.md are resumed, not rewritten |

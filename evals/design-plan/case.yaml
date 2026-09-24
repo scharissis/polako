@@ -68,7 +68,9 @@ graders:
       The body has Measured, Decided and Next sections (Left open is optional
       when nothing is left open). Next names `polako plan -design
       docs/designs/<file>` with the same file the PR adds per
-      .eval/pr-files.txt. The last line is exactly "Closes #1". Fail if any of
+      .eval/pr-files.txt. "Closes #1" sits on its own line after every
+      section; a trailing attribution line after it (such as "Generated with
+      Claude Code") is fine, so do not fail the body for it. Fail if any of
       those is missing or wrong.
 
   - type: llm
