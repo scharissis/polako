@@ -43,14 +43,14 @@ after each merge it observes, polako runs the same sweep
 [`polako tidy`](reference.md#reclaiming-finished-issues-polako-tidy) does:
 for every `issue-N` branch it can prove finished — closed, or merged with a
 clean worktree and nothing unpushed — it removes the worktree and deletes
-the branch. For the issue whose merge the shift just watched, GitHub's
-merge event stands in for the ancestor check, so a squash merge is
-reclaimed too. A sweep that can't run at all, and the just-merged
-worktree specifically failing to reclaim — usually uncommitted work the
-merge didn't take — are both named in the shift log rather than swallowed;
+the local branch, touching nothing on GitHub, and the shift log says which:
+`reclaimed 1 finished issue: issue-7 (worktree removed, local branch
+deleted)`. For the issue whose merge the shift just watched, GitHub's merge
+event stands in for the ancestor check, so a squash merge is reclaimed too.
+A sweep that can't run at all, and the just-merged worktree failing to
+reclaim (usually uncommitted work), are both named in the shift log;
 neither ends a shift, since a tidy-up must not take a backlog down. A
-put-down issue is never finished, so its worktree stays put (see
-`-strict-order` below).
+put-down issue's worktree stays put (see `-strict-order` below).
 
 `implement-issue` puts that worktree at `.worktrees/issue-N`, inside the
 main checkout — gitignored rather than merely untracked, so **`git clean
