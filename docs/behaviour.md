@@ -412,10 +412,10 @@ case.
 
 ## Which model and effort a run gets
 
-Every run polako dispatches is one `claude -p` process, and two arguments
-decide most of what it costs: which model, and how hard it thinks. Both are
-resolved once per pickup — the choice is fixed for every run on that issue in
-that leg, and a resume keeps the choice of the run it resumes.
+Every run is one `claude -p` process; its model and effort decide most of
+what it costs. Both resolve once per pickup, fixed for every run on that issue
+in that leg, and a resume keeps the choice of the run it resumes. An exported
+`CLAUDE_CODE_EFFORT_LEVEL` beats them: preflight refuses a flag it contradicts.
 
 Six levels can set them, most specific first:
 

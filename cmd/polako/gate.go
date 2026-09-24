@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -82,6 +81,8 @@ func refuseOrNote(cfg config, err error, dryRun bool) error {
 // has no --effort: that usage error would otherwise surface an hour in, look
 // like a crash, burn -retries resumes, and park the issue for nothing. The
 // message names the CLI version so the operator knows which install to update.
+// It also fails when CLAUDE_CODE_EFFORT_LEVEL is exported with a value one of
+// those flags disagrees with, since the flag would silently do nothing.
 //
 // A no-op when none is set — the common path, and the one that keeps this
 // from adding a `claude --help` call to every preflight. A probe that will not
@@ -112,6 +113,14 @@ func effortFlagGate(ctx context.Context, cfg config) error {
 	if len(setFlags) > 1 {
 		drop = "drop them"
 	}
+	// Probed on 2.1.280: an exported CLAUDE_CODE_EFFORT_LEVEL beats --effort,
+	// so a flag that disagrees with it does nothing. Refused rather than
+	// unset for the child — polako never edits a child's environment
+	// (docs/hardening.md). Ahead of the --help probe: it costs no process.
+	if env := lookupEnv(cfg, effortEnv); env != "" && !effortFlagsMatch(cfg, env) {
+		return fmt.Errorf("%s is set, but %s=%s is exported and the CLI lets it win over --effort — "+
+			"unset %s, or %s", set, effortEnv, env, effortEnv, drop)
+	}
 	out, err := capture(ctx, cfg.dir, cfg.env, cfg.claudeBin, "--help")
 	if err != nil {
 		cfg.logf("could not check whether claude takes --effort (%v) — running anyway; "+
@@ -130,21 +139,6 @@ func effortFlagGate(ctx context.Context, cfg config) error {
 	}
 	return fmt.Errorf("%s is set, but claude (%s) does not list --effort in `claude --help` — "+
 		"update the CLI, or %s", set, v, drop)
-}
-
-// warnClaudeModelEnv says out loud when the operator's environment carries a
-// model or effort override. The CLI's own precedence puts ANTHROPIC_MODEL
-// above --model, and the child inherits this process's environment by design
-// (TestDispatchGivesTheChildTheOperatorsEnvironment pins cmd.Env nil so the
-// egress proxy keeps working), so an exported variable silently beats -model
-// and -effort both — worth a line before an operator wonders why their flag
-// did nothing.
-func warnClaudeModelEnv(cfg config) {
-	for _, name := range []string{"ANTHROPIC_MODEL", "CLAUDE_CODE_EFFORT_LEVEL"} {
-		if v := os.Getenv(name); v != "" {
-			cfg.logf("%s=%s is exported — the CLI reads it, and it can override -model/-effort for every run", name, v)
-		}
-	}
 }
 
 // claudeVersion pins which CLI produced a run's numbers. Best-effort: a

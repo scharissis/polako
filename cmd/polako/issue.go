@@ -253,6 +253,7 @@ func processIssue(ctx context.Context, cfg config, issue int, st *issueState) er
 	// dispatchRun's awaiting-answer check: that one is re-read every loop
 	// iteration on purpose, this one is fixed for the leg.
 	r.policy.labels, r.policy.size = issuePickupPolicy(ctx, cfg, issue)
+	warnEffortLabelEnv(cfg, issue, r.policy.labels)
 
 	// Before the run, not only after the last merge: the gap this closes is also
 	// opened by a teammate's push and by a drain restarted days later, and the

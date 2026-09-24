@@ -602,7 +602,7 @@ func TestReleaseVersionRejectsAPseudoVersion(t *testing.T) {
 // version so the operator knows which install to update.
 func TestEffortFlagGate(t *testing.T) {
 	t.Setenv(fakeClaudeEnv, "stream") // any mode: --help is argv-dispatched ahead of it
-	cfg := config{claudeBin: fakeCLI(t), dir: t.TempDir()}
+	cfg := config{claudeBin: fakeCLI(t), dir: t.TempDir(), env: blankModelEnv()}
 
 	// Unset -effort: no probe, no error, whatever the CLI is.
 	if err := effortFlagGate(context.Background(), cfg); err != nil {
@@ -616,14 +616,14 @@ func TestEffortFlagGate(t *testing.T) {
 
 	// -remediation-effort is the other flag that gates: it maps to the same
 	// --effort, so a CLI that lists it passes with only that one set.
-	remOnly := config{claudeBin: cfg.claudeBin, dir: cfg.dir, remediationEffort: "medium"}
+	remOnly := config{claudeBin: cfg.claudeBin, dir: cfg.dir, env: cfg.env, remediationEffort: "medium"}
 	if err := effortFlagGate(context.Background(), remOnly); err != nil {
 		t.Errorf("-remediation-effort alone should gate like -effort, got %v", err)
 	}
 
 	// -effort-by-size can put --effort on the argv too, so it gates like the
 	// other two: alone it passes against a CLI that lists --effort.
-	sizeOnly := config{claudeBin: cfg.claudeBin, dir: cfg.dir, effortBySize: "S=medium"}
+	sizeOnly := config{claudeBin: cfg.claudeBin, dir: cfg.dir, env: cfg.env, effortBySize: "S=medium"}
 	if err := effortFlagGate(context.Background(), sizeOnly); err != nil {
 		t.Errorf("-effort-by-size alone should gate like -effort, got %v", err)
 	}
@@ -646,7 +646,7 @@ func TestEffortFlagGate(t *testing.T) {
 		t.Errorf("the error should name -remediation-effort, got %v", err)
 	}
 	// Both set: name both, so the operator does not fix one and hit the other.
-	both := config{claudeBin: cfg.claudeBin, dir: cfg.dir, effort: "high", remediationEffort: "medium"}
+	both := config{claudeBin: cfg.claudeBin, dir: cfg.dir, env: cfg.env, effort: "high", remediationEffort: "medium"}
 	err = effortFlagGate(context.Background(), both)
 	if err == nil || !strings.Contains(err.Error(), "-effort high") ||
 		!strings.Contains(err.Error(), "-remediation-effort medium") {
@@ -659,5 +659,88 @@ func TestEffortFlagGate(t *testing.T) {
 	broken.claudeBin = filepath.Join(t.TempDir(), "no-such-claude")
 	if err := effortFlagGate(context.Background(), broken); err != nil {
 		t.Errorf("a failed --help probe should not block the run, got %v", err)
+	}
+}
+
+// An exported CLAUDE_CODE_EFFORT_LEVEL beats --effort, so an effort flag that
+// disagrees with it would silently do nothing: refuse, naming both fixes. One
+// that agrees passes; -dry-run only notes it.
+func TestEffortFlagGateRefusesAnEffortTheEnvOverrides(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	base := fakeClaudeConfig(t, "stream") // --help lists --effort, so only the env can refuse
+	setFakeEnv(&base, effortEnv, "max")
+
+	for _, tc := range []struct {
+		name string
+		set  func(*config)
+		want string // "" means pass
+	}{
+		{"-effort differs", func(c *config) { c.effort = "low" }, "-effort low"},
+		{"-remediation-effort differs", func(c *config) { c.remediationEffort = "low" }, "-remediation-effort low"},
+		{"a size cell differs", func(c *config) { c.effortBySize = "S=max,L=low" }, "-effort-by-size S=max,L=low"},
+		{"every flag equal", func(c *config) { c.effort, c.effortBySize = "max", "L=max" }, ""},
+		{"no flag set", func(*config) {}, ""},
+	} {
+		cfg := base
+		tc.set(&cfg)
+		err := effortFlagGate(context.Background(), cfg)
+		if tc.want == "" {
+			if err != nil {
+				t.Errorf("%s: want a pass, got %v", tc.name, err)
+			}
+			continue
+		}
+		if err == nil {
+			t.Errorf("%s: want a refusal, got nil", tc.name)
+			continue
+		}
+		for _, s := range []string{tc.want, effortEnv + "=max", "unset " + effortEnv, "drop it"} {
+			if !strings.Contains(err.Error(), s) {
+				t.Errorf("%s: the error should say %q, got %v", tc.name, s, err)
+			}
+		}
+	}
+
+	// A blank in cfg.env beats whatever the process has — PATH is always set —
+	// which is what keeps a developer's own export out of every other test.
+	if v := lookupEnv(config{env: []string{"PATH="}}, "PATH"); v != "" {
+		t.Errorf("a blank cfg.env entry should read as unset, got %q", v)
+	}
+	if lookupEnv(config{}, "PATH") == "" {
+		t.Error("with no cfg.env entry the process environment should answer")
+	}
+
+	dry := base
+	dry.effort = "low"
+	if err := refuseOrNote(dry, effortFlagGate(context.Background(), dry), true); err != nil {
+		t.Errorf("-dry-run should note the refusal, not return it: %v", err)
+	}
+	if !strings.Contains(buf.String(), "a real run would refuse") || !strings.Contains(buf.String(), effortEnv) {
+		t.Errorf("-dry-run should note what a real run would refuse on, got:\n%s", buf.String())
+	}
+}
+
+// warnClaudeModelEnv says what each variable actually does, read through
+// cfg.env: ANTHROPIC_MODEL moves only inheriting runs, the alias remap moves
+// -model opus too, and the effort variable beats every effort polako passes.
+func TestWarnClaudeModelEnvSaysWhatEachVariableDoes(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg := fakeClaudeConfig(t, "stream")
+	warnClaudeModelEnv(cfg)
+	if buf.Len() != 0 {
+		t.Fatalf("with every variable blank there should be no warning, got:\n%s", buf.String())
+	}
+	setFakeEnv(&cfg, "ANTHROPIC_MODEL", "sonnet", "ANTHROPIC_DEFAULT_OPUS_MODEL", "some-model", effortEnv, "max")
+	warnClaudeModelEnv(cfg)
+	for _, want := range []string{
+		"ANTHROPIC_MODEL=sonnet is exported — it moves only runs that inherit",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL=some-model is exported — it remaps opus wherever a run asks for it, -model opus included",
+		effortEnv + "=max is exported — it beats every effort polako passes",
+	} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("warning missing %q, got:\n%s", want, buf.String())
+		}
 	}
 }

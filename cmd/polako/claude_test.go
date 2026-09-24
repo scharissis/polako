@@ -94,10 +94,11 @@ func TestBuildArgsPassesTheRequestedEffort(t *testing.T) {
 	if slices.Contains(buildArgs(config{tools: "Read"}, "p", ""), "--effort") {
 		t.Error("an unset -effort must leave the CLI's own default alone")
 	}
-	// Not on a resume: the session already has its effort, and re-passing it
-	// risks a usage error against a CLI that fixes effort at session start.
-	if slices.Contains(buildArgs(cfg, "continue", "sess-1"), "--effort") {
-		t.Error("a resume must not re-pass --effort")
+	// On a resume too: a session doesn't keep its effort across --resume, so a
+	// resume without the flag would fall back to the CLI's default.
+	resumed := buildArgs(cfg, "continue", "sess-1")
+	if i := slices.Index(resumed, "--effort"); i < 0 || resumed[i+1] != "medium" {
+		t.Errorf("a resume must re-pass --effort, got %v", resumed)
 	}
 }
 
