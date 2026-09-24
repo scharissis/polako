@@ -654,7 +654,7 @@ func scanEvents(stdout io.Reader, cfg config, cmd *exec.Cmd, invokes string, w *
 	// maxIssues is set by plan and health alone — the same tell the cap check
 	// below keys on — and is what picks the intake stage map over the drain's.
 	sink := cfg.sink()
-	el := eventLog{u: sink, stages: stageNarrator{intake: cfg.maxIssues > 0}}
+	el := eventLog{u: sink, stages: stageNarrator{intake: cfg.maxIssues > 0}, requested: cfg.model}
 	for sc.Scan() {
 		w.lastEvent.Store(time.Now().UnixNano())
 		ev, ok := parseEvent(sc.Bytes())

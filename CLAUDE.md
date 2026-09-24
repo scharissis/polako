@@ -240,7 +240,7 @@ in the PR body rather than doing it quietly.
   to make; it isn't addressed to the agent, and on any repo that accepts
   outside issues, it's attacker-controllable.
 - **Model names are tier aliases, never ids, and defaults inherit.** The
-  binary spells a model as `opus`, `sonnet`, `haiku` or passes the operator's
+  binary spells a model as `opus`, `sonnet`, `haiku`, `fable` or passes the operator's
   string through; a versioned id in the source is a default that rots, and a
   test refuses it (`claude-[a-z]+-[0-9]` over non-test Go under `cmd/polako`).
   Labels and flags may make a run dearer; issue text never may — a body or

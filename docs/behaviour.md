@@ -466,7 +466,8 @@ issue #42: model sonnet (label), effort medium (epic)
 ```
 
 The word in parentheses is the level that won — `label`, `epic`, `size`,
-`remediation`, `flag`.
+`remediation`, `flag`. The session line then says `inherited` or `asked for <value>`, and
+warns once if an asked-for `opus`, `sonnet`, `haiku` or `fable` ran as another tier.
 
 **Two label families let a maintainer steer one issue's run.** `model:<value>`
 — `model:opus`, `model:sonnet`, `model:haiku`, `model:best`, `model:default`,

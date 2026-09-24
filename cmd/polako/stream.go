@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -492,6 +493,33 @@ type eventLog struct {
 	u       *ui // where each line narrates — the dispatch's config.ui
 	started bool
 	stages  stageNarrator
+	// requested is the --model this invocation passed, empty when it
+	// inherited. The session line says which, and tierMismatch checks it
+	// against the init event's model — this run's request against this run's
+	// init, nothing remembered across runs.
+	requested string
+}
+
+// modelTiers are the tier words tierMismatch checks. Any other request —
+// opusplan, best, default, a gateway's own name — passes unchecked, the same
+// way labelPolicy passes a model: value through without judging it.
+var modelTiers = []string{"opus", "sonnet", "haiku", "fable"}
+
+// tierMismatch reports whether a request named a tier the model that actually
+// ran doesn't carry — ANTHROPIC_DEFAULT_OPUS_MODEL, a settings file or a
+// gateway can each remap a tier with nothing else in the stream saying so.
+// Both strings split on non-letters, so a [1m] suffix or a full id compares
+// by its tier word alone.
+func tierMismatch(requested, model string) bool {
+	words := func(s string) []string {
+		return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool { return r < 'a' || r > 'z' })
+	}
+	for _, w := range words(requested) {
+		if slices.Contains(modelTiers, w) {
+			return !slices.Contains(words(model), w)
+		}
+	}
+	return false
 }
 
 // event renders one stream-json event as a single progress line. A run's start
@@ -523,7 +551,15 @@ func (el *eventLog) event(ev streamEvent) {
 				return
 			}
 			el.started = true
-			el.u.logf("[claude] session started (model %s%s)", ev.Model, session)
+			origin := "inherited"
+			if el.requested != "" {
+				origin = "asked for " + el.requested
+			}
+			el.u.logf("[claude] session started (model %s, %s%s)", ev.Model, origin, session)
+			if tierMismatch(el.requested, ev.Model) {
+				el.u.narrate(sevWarning, "[claude] asked for %s but the session runs %s — something remaps it: "+
+					"check for an exported ANTHROPIC_DEFAULT_*_MODEL, Claude Code's settings, or a gateway", el.requested, ev.Model)
+			}
 		}
 	case "assistant":
 		for _, c := range ev.Message.Content {
