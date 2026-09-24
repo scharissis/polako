@@ -11,24 +11,24 @@ import (
 	"time"
 )
 
-// modelEpoch is one model inherited runs resolved to: when it was first and
+// inheritedModel is one model inherited runs resolved to: when it was first and
 // last seen, how many runs, and the CLI version it first appeared on.
-type modelEpoch struct {
+type inheritedModel struct {
 	model         string
 	first, last   time.Time
 	runs          int
 	claudeVersion string
 }
 
-// buildModelEpochs lists models, not consecutive epochs: inherit can differ
+// buildInheritedModels lists models, not consecutive epochs: inherit can differ
 // per repo through .claude/settings.json, so one machine draining two repos
 // would flap between them. Only fresh, inherited runs count. A run that asked
 // for a model says nothing about what inherit resolves to, and a resume can
 // report the same model under another id — the bare id where the fresh run
 // had a [1m] suffix — which would print one model as two. nil when fewer than
 // two models are left, since one model is nothing to report.
-func buildModelEpochs(ds dataset) []modelEpoch {
-	var epochs []modelEpoch
+func buildInheritedModels(ds dataset) []inheritedModel {
+	var epochs []inheritedModel
 	for _, r := range ds.runs {
 		// ResumedFrom catches a --resume under any reason; the reason names
 		// catch one written before that field existed.
@@ -37,11 +37,11 @@ func buildModelEpochs(ds dataset) []modelEpoch {
 			continue
 		}
 		t := recTime(r.TS)
-		i := slices.IndexFunc(epochs, func(e modelEpoch) bool { return e.model == r.Model })
+		i := slices.IndexFunc(epochs, func(e inheritedModel) bool { return e.model == r.Model })
 		if i < 0 {
 			// ds.runs is in timestamp order, so the first run seen is the
 			// earliest and its CLI version is the one the model arrived on.
-			epochs = append(epochs, modelEpoch{model: r.Model, first: t, claudeVersion: r.ClaudeVersion})
+			epochs = append(epochs, inheritedModel{model: r.Model, first: t, claudeVersion: r.ClaudeVersion})
 			i = len(epochs) - 1
 		}
 		e := &epochs[i]
@@ -60,7 +60,7 @@ func buildModelEpochs(ds dataset) []modelEpoch {
 
 // modelsLine is the text form, shared by the text report and the HTML
 // sections through runPairs.
-func modelsLine(epochs []modelEpoch) string {
+func modelsLine(epochs []inheritedModel) string {
 	parts := make([]string, 0, len(epochs))
 	for _, e := range epochs {
 		part := fmt.Sprintf("%s %s → %s, %s", e.model, recDay(e.first), recDay(e.last), plural(e.runs, "run"))
@@ -79,7 +79,8 @@ func recDay(t time.Time) string {
 	return t.UTC().Format(time.DateOnly)
 }
 
-// statsDocEpoch is modelEpoch's -json twin.
+// statsDocEpoch is inheritedModel's -json twin. The key is `epochs`, but
+// entries are models and their date ranges can overlap.
 type statsDocEpoch struct {
 	Model              string `json:"model"`
 	First              string `json:"first,omitempty"`
@@ -90,7 +91,7 @@ type statsDocEpoch struct {
 
 // statsDocEpochsFrom is always non-nil: `epochs` is present in every
 // document, [] when the text report prints no models line.
-func statsDocEpochsFrom(epochs []modelEpoch) []statsDocEpoch {
+func statsDocEpochsFrom(epochs []inheritedModel) []statsDocEpoch {
 	out := make([]statsDocEpoch, 0, len(epochs))
 	for _, e := range epochs {
 		doc := statsDocEpoch{Model: e.model, Runs: e.runs, FirstClaudeVersion: e.claudeVersion}
