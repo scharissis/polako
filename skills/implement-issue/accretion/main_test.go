@@ -91,7 +91,7 @@ func TestRunReportsChangedFiles(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{
-		"4 source files; median 10 lines",
+		"3 source files; median 10 lines", // the base's files, not the branch's
 		"file length 10 lines (median)",
 		"a.py", "10→40", "act",
 		"d.py", "new→5",

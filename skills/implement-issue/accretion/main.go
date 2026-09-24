@@ -25,8 +25,8 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 )
@@ -94,21 +94,47 @@ func main() {
 }
 
 func run(w io.Writer, repo, base string) error {
-	tracked, err := gitList(repo, "ls-files", "-z")
+	mergeBase, err := gitOut(repo, "merge-base", base, "HEAD")
 	if err != nil {
-		return fmt.Errorf("listing tracked files: %w", err)
+		return fmt.Errorf("finding the merge base of %s and HEAD: %w", base, err)
 	}
-	var all []measure
+	mb := strings.TrimSpace(string(mergeBase))
+
+	// The norm is the base's, not the branch's: measured after the change, a
+	// branch's own new files would move the median it is then judged by.
+	tracked, err := gitList(repo, "ls-tree", "-r", "-z", "--name-only", mb)
+	if err != nil {
+		return fmt.Errorf("listing the base's files: %w", err)
+	}
+	var specs []string
+	var specStyles []style
 	for _, p := range tracked {
-		st, ok := sourceStyle(p)
-		if !ok {
-			continue
+		if st, ok := sourceStyle(p); ok {
+			specs = append(specs, mb+":"+p)
+			specStyles = append(specStyles, st)
 		}
-		src, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(p)))
-		if err != nil {
-			continue // tracked but deleted in the worktree: nothing to measure
+	}
+	status, err := gitList(repo, "diff", "--name-status", "-z", "--diff-filter=AMR", mb, "HEAD")
+	if err != nil {
+		return fmt.Errorf("listing changed files: %w", err)
+	}
+	changes := parseNameStatus(status)
+	// Committed content, not the worktree: the rows describe what diff listed,
+	// and an uncommitted edit mid-extraction would otherwise skew them.
+	wanted := append([]string(nil), specs...)
+	for _, c := range changes {
+		wanted = append(wanted, "HEAD:"+c.path, mb+":"+c.old)
+	}
+	blobs, err := catFile(repo, wanted)
+	if err != nil {
+		return fmt.Errorf("reading files: %w", err)
+	}
+
+	var all []measure
+	for i, st := range specStyles {
+		if src, ok := blobs[specs[i]]; ok {
+			all = append(all, measureSource(src, st))
 		}
-		all = append(all, measureSource(src, st))
 	}
 	if len(all) == 0 {
 		fmt.Fprintln(w, "accretion: no source files recognised — measure by hand")
@@ -130,32 +156,22 @@ func run(w io.Writer, repo, base string) error {
 	fmt.Fprintf(w, "bounds: file length %.0f lines (%s), comment density %.0f%% (%s)\n\n",
 		lineBound, source(medLines, fileCeiling, "1000"), 100*ratioBound, source(medRatio, commentCeiling, "40%"))
 
-	mergeBase, err := gitOut(repo, "merge-base", base, "HEAD")
-	if err != nil {
-		return fmt.Errorf("finding the merge base of %s and HEAD: %w", base, err)
-	}
-	mb := strings.TrimSpace(string(mergeBase))
-	status, err := gitList(repo, "diff", "--name-status", "-z", "--diff-filter=AMR", mb, "HEAD")
-	if err != nil {
-		return fmt.Errorf("listing changed files: %w", err)
-	}
-
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	rows := 0
-	for _, c := range parseNameStatus(status) {
+	for _, c := range changes {
 		p := c.path
 		st, ok := sourceStyle(p)
 		if !ok {
 			continue
 		}
-		src, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(p)))
-		if err != nil {
+		src, ok := blobs["HEAD:"+p]
+		if !ok {
 			continue
 		}
 		head := measureSource(src, st)
 		var before measure
 		baseText := "new"
-		if old, err := gitOut(repo, "show", mb+":"+c.old); err == nil {
+		if old, ok := blobs[mb+":"+c.old]; ok {
 			before = measureSource(old, st)
 			baseText = fmt.Sprint(before.lines)
 		}
@@ -292,6 +308,51 @@ func gitOut(repo string, args ...string) ([]byte, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// catFile reads every `<rev>:<path>` spec in one `git cat-file --batch`, not
+// one process per file. A spec git can't resolve to a blob — missing, a
+// submodule — is left out of the map.
+func catFile(repo string, specs []string) (map[string][]byte, error) {
+	var in bytes.Buffer
+	var asked []string
+	for _, s := range specs {
+		if !strings.Contains(s, "\n") { // one spec per line; such a path can't be asked for
+			in.WriteString(s + "\n")
+			asked = append(asked, s)
+		}
+	}
+	cmd := exec.Command("git", "-C", repo, "cat-file", "--batch")
+	cmd.Stdin = &in
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	blobs := map[string][]byte{}
+	for _, s := range asked {
+		nl := bytes.IndexByte(out, '\n')
+		if nl < 0 {
+			return nil, errors.New("cat-file output ended early")
+		}
+		line := string(out[:nl])
+		out = out[nl+1:]
+		if strings.HasSuffix(line, " missing") || strings.HasSuffix(line, " ambiguous") {
+			continue
+		}
+		header := strings.Fields(line) // "<oid> <type> <size>"
+		if len(header) != 3 {
+			return nil, fmt.Errorf("unreadable cat-file header %q", line)
+		}
+		size, err := strconv.Atoi(header[2])
+		if err != nil || size+1 > len(out) {
+			return nil, fmt.Errorf("unreadable cat-file header %q", header)
+		}
+		if header[1] == "blob" {
+			blobs[s] = out[:size]
+		}
+		out = out[size+1:]
+	}
+	return blobs, nil
 }
 
 func gitList(repo string, args ...string) ([]string, error) {
