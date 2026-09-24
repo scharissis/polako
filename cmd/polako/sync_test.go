@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -267,14 +268,40 @@ func buildFakeGitSSHDeny() {
 	}
 	fakeSSHDenyDir = dir
 	src := filepath.Join(dir, "main.go")
+	// With no counter it always refuses. With one, it refuses the first
+	// POLAKO_FAKE_SSH_FAILS calls and then serves POLAKO_FAKE_SSH_REPO the way
+	// sshd would, running the git service git asked for against it — an agent
+	// that comes back on its own (issue #595).
 	const source = `package main
 
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"strconv"
+	"strings"
 )
 
 func main() {
+	if counter := os.Getenv("POLAKO_FAKE_SSH_COUNTER"); counter != "" {
+		b, _ := os.ReadFile(counter)
+		n, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+		n++
+		if err := os.WriteFile(counter, []byte(strconv.Itoa(n)), 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, "fake ssh:", err)
+			os.Exit(1)
+		}
+		fails, _ := strconv.Atoi(os.Getenv("POLAKO_FAKE_SSH_FAILS"))
+		if n > fails {
+			service := strings.Fields(os.Args[len(os.Args)-1])[0]
+			cmd := exec.Command("git", strings.TrimPrefix(service, "git-"), os.Getenv("POLAKO_FAKE_SSH_REPO"))
+			cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+			if err := cmd.Run(); err != nil {
+				os.Exit(1)
+			}
+			return
+		}
+	}
 	fmt.Fprintln(os.Stderr, "git@github.com: Permission denied (publickey).")
 	os.Exit(1)
 }
@@ -311,11 +338,26 @@ func denyGitAuth(t *testing.T, cfg *config, checkout string) {
 	setFakeEnv(cfg, "GIT_SSH_COMMAND", filepath.ToSlash(fakeGitSSHDeny(t)))
 }
 
+// flakyGitAuth is denyGitAuth for an agent that comes back: the first fails
+// ssh calls are refused, and every one after that fetches from checkout's own
+// bare origin. One call per fetch attempt, so a failed sync costs ghReads.
+func flakyGitAuth(t *testing.T, cfg *config, checkout string, fails int) {
+	t.Helper()
+	origin := gitAt(t, checkout, "config", "--get", "remote.origin.url")
+	denyGitAuth(t, cfg, checkout)
+	setFakeEnv(cfg,
+		// Else git probes an unknown ssh command with -G first, a second
+		// call per fetch that would throw the count off.
+		"GIT_SSH_VARIANT", "simple",
+		"POLAKO_FAKE_SSH_COUNTER", filepath.Join(t.TempDir(), "ssh-calls"),
+		"POLAKO_FAKE_SSH_FAILS", strconv.Itoa(fails),
+		"POLAKO_FAKE_SSH_REPO", origin)
+}
+
 // Issue #425: git's own credentials being refused is a narrower, likelier-
 // transient case than a dead remote, so it must not stop the caller the way
-// TestSyncDefaultBranchReportsAnUnreachableOrigin's does — the run this
-// precedes still goes on, with st remembering why for the park that might
-// follow (see parkCleanExit).
+// TestSyncDefaultBranchReportsAnUnreachableOrigin's does — st remembers it
+// instead, for processIssue to hold the run on (issue #595).
 func TestSyncDefaultBranchDoesNotStopOnAnAuthFailure(t *testing.T) {
 	t.Parallel()
 	buf := captureLog(t)
@@ -328,7 +370,7 @@ func TestSyncDefaultBranchDoesNotStopOnAnAuthFailure(t *testing.T) {
 		t.Fatalf("an auth failure must not stop the caller: %v", err)
 	}
 	if !st.fetchAuthFailed {
-		t.Error("st.fetchAuthFailed = false, want true — the park that follows needs it to lead with the real cause")
+		t.Error("st.fetchAuthFailed = false, want true — processIssue needs it to hold the run")
 	}
 	if !strings.Contains(buf.String(), "could not authenticate") {
 		t.Errorf("log does not say the fetch could not authenticate:\n%s", buf)

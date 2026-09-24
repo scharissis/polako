@@ -38,11 +38,6 @@ type issueResult struct {
 	// issue this process only waited on contributes an honest zero.
 	cost         float64
 	approximated int
-	// fetchAuthFailed carries issueState's own field through to the exit
-	// summary, which counts it once across every issue rather than repeating
-	// the fact in each park's own reason (which already says it, per-issue,
-	// via parkCleanExit).
-	fetchAuthFailed bool
 }
 
 // issueState is what one drain remembers between the runs it dispatches for a
@@ -88,11 +83,11 @@ type issueState struct {
 	weekUsageAtPickup    int
 	hasWeekUsageAtPickup bool
 	// fetchAuthFailed is set by syncDefaultBranch when the fetch it ran right
-	// before this leg's pickup couldn't authenticate. A clean-exit park that
-	// follows reads it to lead its reason with the real cause (see
-	// parkCleanExit) rather than whatever else the run drew along the way —
-	// issue #425, filed after one such run parked as "permission refused"
-	// when the actual cause was the SSH agent.
+	// before this leg's pickup couldn't authenticate. processIssue reads it to
+	// hold back a new run (issue #595), and the drain to count the failure. A
+	// clean-exit park reads it too, to lead its reason with the real cause
+	// (see parkCleanExit) — issue #425, filed after one such run parked as
+	// "permission refused" when the actual cause was the SSH agent.
 	fetchAuthFailed bool
 }
 
@@ -194,6 +189,12 @@ type shift struct {
 	// knew and no more, same as any other "ends before it re-lists" exit;
 	// the next shift's own first pass says the rest.
 	lastContainers []containerInfo
+	// authFailures counts pickups whose own fetch couldn't authenticate, for
+	// the exit summary's one auth line. authStreak is the same, in a row: any
+	// pickup whose fetch worked resets it, and authHold stops the shift when
+	// it reaches authHoldLimit. In-process only, like everything else here.
+	authFailures int
+	authStreak   int
 }
 
 func newShift(cfg config) *shift {
@@ -216,8 +217,15 @@ func newShift(cfg config) *shift {
 // it died on is not among them — unfinished is not an outcome — so a run
 // that dies on its first issue has nothing to summarize and says nothing.
 func (s *shift) finish(ctx context.Context, err error) error {
-	if lines := drainSummary(append(s.results, stillWaiting(s.states)...),
-		s.lastContainers, s.closedEpics, s.retiredDocs, time.Since(s.started)); len(lines) > 0 {
+	results := append(s.results, stillWaiting(s.states)...)
+	lines := drainSummary(results, s.lastContainers, s.closedEpics, s.retiredDocs, time.Since(s.started))
+	// Right under the heading, which drainSummary only writes when there are
+	// results. A shift that only ever held stops on an error that says the
+	// same thing, so it needs no line of its own.
+	if s.authFailures > 0 && len(results) > 0 {
+		lines = slices.Insert(lines, 1, authSummaryLine(s.authFailures))
+	}
+	if len(lines) > 0 {
 		s.cfg.narrate(sevSection, "%s", lines[0]) // the shift's own closing heading
 		for _, line := range lines[1:] {
 			s.cfg.logf("%s", line)
@@ -390,7 +398,21 @@ func drain(ctx context.Context, cfg config) error {
 		// while its PR is open, a fatal error — end by telling the operator to
 		// reply on a thread nobody is waiting on any more.
 		st.awaiting = false
-		if err := s.handleOutcome(ctx, issue, st, processIssue(ctx, s.cfg, issue, st)); err != nil {
+		err = processIssue(ctx, s.cfg, issue, st)
+		if errors.Is(err, errFetchAuthHeld) {
+			// Nothing ran and nothing parked, so this is no issue's outcome and
+			// -once hasn't had its one issue yet.
+			if err := s.authHold(ctx, issue); err != nil {
+				return s.finish(ctx, err)
+			}
+			continue
+		}
+		if st.fetchAuthFailed {
+			s.authFailures++ // a PR was waiting, so no run was held
+		} else {
+			s.authStreak = 0
+		}
+		if err := s.handleOutcome(ctx, issue, st, err); err != nil {
 			return s.finish(ctx, err)
 		}
 		if s.cfg.once {
@@ -404,7 +426,6 @@ func drain(ctx context.Context, cfg config) error {
 // the last moment it is readable, since the state is dropped immediately after.
 func spend(st *issueState, r issueResult) issueResult {
 	r.cost, r.approximated = st.tally.costUSD, st.tally.approximated
-	r.fetchAuthFailed = st.fetchAuthFailed
 	return r
 }
 
@@ -768,11 +789,7 @@ func drainSummary(results []issueResult, containers, closed []containerInfo, ret
 	var closedNoChange []string
 	var waiting []string
 	var parked []string
-	authFailures := 0
 	for _, r := range results {
-		if r.fetchAuthFailed {
-			authFailures++
-		}
 		switch {
 		case r.awaiting:
 			waiting = append(waiting, "#"+strconv.Itoa(r.issue)+price(r.cost))
@@ -815,14 +832,6 @@ func drainSummary(results []issueResult, containers, closed []containerInfo, ret
 		}
 	}
 	lines := []string{head + ", " + dur(elapsed) + " of wall clock"}
-	if authFailures > 0 {
-		// Once here rather than repeated in every affected park's own reason
-		// (which already says it — see parkCleanExit): the point is one number
-		// an operator sees without counting parked lines themselves.
-		lines = append(lines, fmt.Sprintf("  auth    polako's own git fetch failed to authenticate before %s "+
-			"this shift — fix git access in -dir, then remove needs-human from anything it parked",
-			plural(authFailures, "run")))
-	}
 	if len(merged) > 0 {
 		lines = append(lines, "  merged  "+strings.Join(merged, ", "))
 	}

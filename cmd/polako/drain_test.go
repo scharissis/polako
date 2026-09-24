@@ -1602,47 +1602,85 @@ func TestDrainParksAPermissionRefusalWithoutResuming(t *testing.T) {
 	}
 }
 
-// Issue #425, and the exact shape #390 was: this pickup's own fetch couldn't
-// authenticate, and the run it still went on to run then drew an unrelated
-// permission refusal along the way. Before this fix the park blamed only the
-// refusal, and the operator was told to grant a tool when the real fix was
-// the SSH agent; now the fetch failure leads the park's reason and the exit
-// summary totals it once, and neither carries git's own stderr to the thread.
-func TestDrainParkLeadsWithAFetchAuthFailure(t *testing.T) {
+// Issue #595: an ssh-agent outage used to start a run per pickup that
+// couldn't work — the skill stops at its own failed fetch since #493 — and
+// park a healthy issue each time. Now an auth-failed pickup starts nothing and
+// parks nothing: the drain waits a -poll and tries again, and once the agent
+// is back the same issue runs.
+func TestDrainHoldsAPickupWhileItsFetchCannotAuthenticate(t *testing.T) {
 	t.Parallel()
 	buf := captureLog(t)
-	cfg, _ := drainConfig(t, "permissionblocked", &ghState{
+	cfg, _ := drainConfig(t, "implementmerged", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 	})
 	_, checkout := upstream(t)
-	denyGitAuth(t, &cfg, checkout)
 	cfg.dir = checkout
+	// The shift-start sweep's fetch, then two pickups', each ghReads attempts.
+	flakyGitAuth(t, &cfg, checkout, 3*ghReads)
 	calls := filepath.Join(t.TempDir(), "gh-calls.log")
 	setFakeEnv(&cfg, fakeGhLogEnv, calls)
 
 	if err := drain(context.Background(), cfg); err != nil {
-		t.Fatalf("an auth failure that lets the run go on must not end the drain: %v", err)
+		t.Fatalf("an auth outage shorter than the limit must not end the drain: %v", err)
 	}
 
 	out := buf.String()
-	if want := "parked  #1 ($0.10) — polako's own fetch couldn't authenticate just before this run; " +
-		"fix git access in -dir (`ssh-add -l`, or an https remote), then remove needs-human; " +
-		"the run stopped to ask for a permission"; !strings.Contains(out, want) {
-		t.Errorf("park reason does not lead with the fetch auth failure\ngot:\n%s", out)
+	if got := strings.Count(out, "trying the pickup again"); got != 2 {
+		t.Errorf("held %d pickups, want 2\ngot:\n%s", got, out)
 	}
-	if want := "auth    polako's own git fetch failed to authenticate before 1 run this shift"; !strings.Contains(out, want) {
-		t.Errorf("exit summary does not total the fetch auth failures once\ngot:\n%s", out)
+	if got := strings.Count(out, "session started"); got != 1 {
+		t.Errorf("%d runs dispatched, want 1 — only the pickup whose fetch worked\ngot:\n%s", got, out)
 	}
-
+	if want := "auth    polako's own git fetch failed to authenticate at 2 pickups this shift"; strings.Count(out, want) != 1 {
+		t.Errorf("exit summary does not total the auth failures once\ngot:\n%s", out)
+	}
 	posted, err := os.ReadFile(calls)
 	if err != nil {
 		t.Fatalf("reading the fake gh call log: %v", err)
 	}
-	if want := "polako's own fetch couldn't authenticate"; !strings.Contains(string(posted), want) {
-		t.Errorf("no gh call carried the fetch auth explanation to the thread\ngot:\n%s", posted)
+	if strings.Contains(string(posted), "--add-label "+needsHumanLabel) {
+		t.Errorf("an auth-failed pickup parked the issue\ngot:\n%s", posted)
 	}
-	if strings.Contains(string(posted), "Permission denied (publickey)") {
-		t.Errorf("the park comment carries raw git stderr\ngot:\n%s", posted)
+}
+
+// The other half of #595: an outage that outlasts authHoldLimit pickups in a
+// row stops the shift with the dead-remote guidance, still without a run or a
+// park.
+func TestDrainStopsAfterTooManyAuthFailedPickups(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	_, checkout := upstream(t)
+	cfg.dir = checkout
+	denyGitAuth(t, &cfg, checkout)
+	calls := filepath.Join(t.TempDir(), "gh-calls.log")
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
+
+	err := drain(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("err = nil, want the shift stopped once the auth failures hit the limit")
+	}
+	for _, want := range []string{"could not fetch origin", "is the ssh-agent unlocked",
+		fmt.Sprintf("failed to authenticate at %d pickups in a row", authHoldLimit)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error is missing %q:\n%v", want, err)
+		}
+	}
+	out := buf.String()
+	if got := strings.Count(out, "trying the pickup again"); got != authHoldLimit-1 {
+		t.Errorf("held %d pickups before stopping, want %d\ngot:\n%s", got, authHoldLimit-1, out)
+	}
+	if strings.Contains(out, "session started") {
+		t.Errorf("a run was dispatched after an auth-failed fetch\ngot:\n%s", out)
+	}
+	posted, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatalf("reading the fake gh call log: %v", err)
+	}
+	if strings.Contains(string(posted), "--add-label "+needsHumanLabel) {
+		t.Errorf("an auth-failed pickup parked the issue\ngot:\n%s", posted)
 	}
 }
 
