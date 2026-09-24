@@ -397,11 +397,14 @@ func drain(ctx context.Context, cfg config) error {
 		// have every exit from here that is neither a merge nor a park — Ctrl+C
 		// while its PR is open, a fatal error — end by telling the operator to
 		// reply on a thread nobody is waiting on any more.
+		wasAwaiting := st.awaiting
 		st.awaiting = false
 		err = processIssue(ctx, s.cfg, issue, st)
 		if errors.Is(err, errFetchAuthHeld) {
 			// Nothing ran and nothing parked, so this is no issue's outcome and
-			// -once hasn't had its one issue yet.
+			// -once hasn't had its one issue yet. Nor was it worked, so a
+			// question it was waiting on still is.
+			st.awaiting = wasAwaiting
 			if err := s.authHold(ctx, issue); err != nil {
 				return s.finish(ctx, err)
 			}
