@@ -80,6 +80,7 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, st *issue
 		// all three of them at once. They never gate the waiting: a PR nobody
 		// has to fix is still free to merge, whatever it has already cost.
 		overspent := overBudget(cfg, *tally)
+		quiet := false
 		switch {
 		case err != nil:
 			if ctx.Err() != nil {
@@ -121,8 +122,15 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, st *issue
 				return "", err
 			}
 		default:
+			quiet = true
 			cfg.logf("PR #%d still open (mergeable: %s, checks: %s%s) — %s",
 				prNumber, pr.mergeable, pr.checks, pr.reviewNote(), nextCheck(cfg))
+		}
+		if !quiet {
+			// A remediation's own push, comment and ran-on edit changed the
+			// PR. Re-prime, so they don't wake a full check seconds later,
+			// before GitHub has settled mergeability and the new head's checks.
+			watch.etag = ""
 		}
 		// Any change to the PR runs the full check at once. Red checks don't
 		// reliably change the PR resource, so those still wait for -poll.
