@@ -94,6 +94,9 @@ type issueState struct {
 	// a restarted supervisor starts empty and merges into what the PR already
 	// says.
 	ranOn []prRanOn
+	// ranOnSent is the PR and lines writeRanOn last put on GitHub, so a
+	// remediation that adds nothing new costs no read and no edit.
+	ranOnSent string
 }
 
 // resumeHint points the operator at the local handles for an issue a shift

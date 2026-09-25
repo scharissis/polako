@@ -167,6 +167,11 @@ func writeRanOn(ctx context.Context, cfg config, prNumber int, st *issueState) {
 	if cfg.dryRun || prNumber == 0 || len(st.ranOn) == 0 {
 		return
 	}
+	// Nothing new since this process last wrote: skip the read and the edit.
+	sent := fmt.Sprint(prNumber, st.ranOn)
+	if sent == st.ranOnSent {
+		return
+	}
 	n := strconv.Itoa(prNumber)
 	out, err := gh(ctx, cfg, "pr", "view", n, "--json", "body")
 	var v struct {
@@ -178,6 +183,7 @@ func writeRanOn(ctx context.Context, cfg config, prNumber int, st *issueState) {
 	if err == nil {
 		next := spliceRanOn(v.Body, st.ranOn)
 		if next == v.Body {
+			st.ranOnSent = sent
 			return
 		}
 		err = ghStdin(ctx, cfg, next, "pr", "edit", n, "--body-file", "-")
@@ -187,5 +193,6 @@ func writeRanOn(ctx context.Context, cfg config, prNumber int, st *issueState) {
 			prNumber, err)
 		return
 	}
+	st.ranOnSent = sent
 	cfg.logf("noted on PR #%d which provider, model and effort ran on it", prNumber)
 }

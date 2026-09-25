@@ -143,6 +143,25 @@ func TestDrainCarriesOnWhenTheRanOnWriteFails(t *testing.T) {
 	}
 }
 
+// A remediation that adds nothing since the last write costs no gh call: the
+// gh here doesn't exist, so any call would log a warning.
+func TestWriteRanOnSkipsWhenNothingIsNew(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{PRs: map[string]*fakePR{"issue-1": {Number: 42, Body: "Closes #1\n"}}})
+	st := &issueState{ranOn: []prRanOn{{combo: "c", reasons: []string{"implement"}}}}
+	writeRanOn(context.Background(), cfg, 42, st)
+	if !strings.Contains(finalGhState(t, path).PRs["issue-1"].Body, "Ran on c (implement)") {
+		t.Fatalf("the first write didn't land:\n%s", buf.String())
+	}
+	buf.Reset()
+	cfg.ghBin = "/nonexistent/gh"
+	writeRanOn(context.Background(), cfg, 42, st)
+	if buf.Len() != 0 {
+		t.Errorf("a write with nothing new called gh:\n%s", buf.String())
+	}
+}
+
 // A dry run writes nothing — not even the read before the write.
 func TestWriteRanOnSkipsADryRun(t *testing.T) {
 	t.Parallel()
