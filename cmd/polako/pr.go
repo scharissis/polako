@@ -73,6 +73,7 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, st *issue
 	// second, fuller review against the same commit.
 	var remediatedReview time.Time
 	var remediatedReviewHead string
+	watch := prWatch(prNumber)
 	for {
 		pr, err := prStatus(ctx, cfg, prNumber)
 		// A remediation is another run charged to this issue, so the caps gate
@@ -120,10 +121,12 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, st *issue
 				return "", err
 			}
 		default:
-			cfg.logf("PR #%d still open (mergeable: %s, checks: %s%s) — next check in %s",
-				prNumber, pr.mergeable, pr.checks, pr.reviewNote(), cfg.poll)
+			cfg.logf("PR #%d still open (mergeable: %s, checks: %s%s) — %s",
+				prNumber, pr.mergeable, pr.checks, pr.reviewNote(), nextCheck(cfg))
 		}
-		if serr := sleep(ctx, cfg.poll); serr != nil {
+		// Any change to the PR runs the full check at once. Red checks don't
+		// reliably change the PR resource, so those still wait for -poll.
+		if _, serr := waitForChange(ctx, cfg, time.Now().Add(cfg.poll), []*etagWatch{watch}); serr != nil {
 			return "", serr
 		}
 	}
@@ -877,39 +880,4 @@ func postSummary(ctx context.Context, cfg config, prNumber int, tally issueTally
 		return
 	}
 	cfg.logf("commented the run summary on PR #%d", prNumber)
-}
-
-func waitForReply(ctx context.Context, cfg config, issue int, baseline int64) error {
-	for {
-		if err := sleep(ctx, cfg.poll); err != nil {
-			return err
-		}
-		comments, err := issueComments(ctx, cfg, issue)
-		if err != nil {
-			cfg.narrate(sevWarning, "transient: checking #%d comments failed (%v) — will retry", issue, err)
-			continue
-		}
-		if replyArrived(comments, baseline) {
-			return nil
-		}
-		cfg.logf("issue #%d still awaiting a reply%s — next check in %s",
-			issue, botsOnly(comments, baseline), cfg.poll)
-	}
-}
-
-// botsOnly says out loud that the thread moved and it still was not an answer.
-// Without it a filtered-out comment is invisible: the log repeats "still
-// awaiting a reply" while GitHub plainly shows new comments, and the honest
-// reading of that is that the drain is broken.
-func botsOnly(comments []issueComment, baseline int64) string {
-	n := 0
-	for _, c := range comments {
-		if c.ID > baseline && c.fromBot() {
-			n++
-		}
-	}
-	if n == 0 {
-		return ""
-	}
-	return fmt.Sprintf(" (%d new comment(s), none of them from a person)", n)
 }
