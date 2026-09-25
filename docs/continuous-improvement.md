@@ -175,7 +175,23 @@ of the house.
 | Before a PR that changes skill text | The eval cases it touches (`evals/README.md`, "When to run it"), fresh `-run-tag` on the next batch | Scores in the PR body, a ledger row |
 | After changing a knob or model | Fresh `-run-tag` | A ledger row with the verdict |
 | After a `claude` CLI upgrade | The per-version recipe | A finding, or nothing |
+| When the model changes | The table below | A `stats -by model` read, or a tagged batch |
 | Occasionally | The post-merge audit recipe; `stats -since 168h` | Findings become issues |
+
+### When the model changes
+
+Inherit follows Claude Code's releases, so the model can move between two
+shifts with nobody choosing it. It moved twice in four weeks
+([model-selection.md](designs/model-selection.md)). The session line,
+`status` and `stats` now say when it does; this is what to do then.
+
+| When | Do |
+| --- | --- |
+| A new version ships in a tier | Nothing; the alias moves |
+| `stats` or `status` shows a new model | Read `stats -by model` once it has ~70 merged issues |
+| You set `-effort` and the model changes | Re-check it: levels don't carry across models (the API default is `medium` on Opus 5.5, `high` on Opus 5) |
+| A new tier ships, or a price moves 25% or more | One tagged batch |
+| You run a tagged batch | Keep it inside one model; `stats -by tag` notes it if the model moved under it |
 
 Issue #53's self-contained HTML report is the thing that makes the periodic
 glance cheap, and is already filed; this plan leans on it rather than
