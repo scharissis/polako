@@ -138,7 +138,7 @@ func TestDrainCarriesOnWhenTheRanOnWriteFails(t *testing.T) {
 	if strings.Contains(st.PRs["issue-1"].Body, ranOnBegin) {
 		t.Errorf("the failed edit still wrote the block: %q", st.PRs["issue-1"].Body)
 	}
-	if want := "could not note on PR #42 which provider, model and effort ran on it";!strings.Contains(buf.String(), want) {
+	if want := "could not note on PR #42 which provider, model and effort ran on it"; !strings.Contains(buf.String(), want) {
 		t.Errorf("log is missing %q\n%s", want, buf.String())
 	}
 }
