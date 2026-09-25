@@ -124,7 +124,7 @@ func TestPeekUnchangedPRWakesNothing(t *testing.T) {
 			t.Parallel()
 			cfg, logPath := peekConfig(t, openPR(func(pr *fakePR) {
 				pr.MergeOnRead, pr.SameETag200 = 2, same200
-			}), 300*time.Millisecond, 20*time.Millisecond)
+			}), 2*time.Second, 20*time.Millisecond) // wide enough for slow CI to spawn several fake gh peeks
 
 			state, err := supervisePR(context.Background(), cfg, 1, 9, &issueState{}, &issueTally{}, runChoice{})
 			if err != nil || state != "MERGED" {
