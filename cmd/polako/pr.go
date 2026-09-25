@@ -74,6 +74,8 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, st *issue
 	var remediatedReview time.Time
 	var remediatedReviewHead string
 	watch := prWatch(prNumber)
+	var early bool
+	var lastLine string
 	for {
 		pr, err := prStatus(ctx, cfg, prNumber)
 		// A remediation is another run charged to this issue, so the caps gate
@@ -123,8 +125,14 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, st *issue
 			}
 		default:
 			quiet = true
-			cfg.logf("PR #%d still open (mergeable: %s, checks: %s%s) — %s",
+			// A PR a bot keeps editing can wake this every few seconds; an
+			// early wake that changed nothing here says nothing.
+			line := fmt.Sprintf("PR #%d still open (mergeable: %s, checks: %s%s) — %s",
 				prNumber, pr.mergeable, pr.checks, pr.reviewNote(), nextCheck(cfg))
+			if !early || line != lastLine {
+				cfg.logf("%s", line)
+			}
+			lastLine = line
 		}
 		if !quiet {
 			// A remediation's own push, comment and ran-on edit changed the
@@ -134,9 +142,11 @@ func supervisePR(ctx context.Context, cfg config, issue, prNumber int, st *issue
 		}
 		// Any change to the PR runs the full check at once. Red checks don't
 		// reliably change the PR resource, so those still wait for -poll.
-		if _, serr := waitForChange(ctx, cfg, time.Now().Add(cfg.poll), []*etagWatch{watch}); serr != nil {
+		changed, serr := waitForChange(ctx, cfg, time.Now().Add(cfg.poll), []*etagWatch{watch})
+		if serr != nil {
 			return "", serr
 		}
+		early = len(changed) > 0
 	}
 }
 
