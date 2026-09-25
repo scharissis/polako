@@ -26,8 +26,7 @@ import (
 // config.peek to.
 const defaultPeekInterval = 15 * time.Second
 
-// peekTimeout bounds one free check. A 304 comes back in well under a second;
-// anything slower is a network that isn't there, and the full poll handles it.
+// peekTimeout bounds one free check; the full poll handles a network that's gone.
 const peekTimeout = 10 * time.Second
 
 // etagWatch is one resource a wait peeks at. The ETag lives here and nowhere
@@ -127,8 +126,7 @@ func (w *etagWatch) check(ctx context.Context, cfg config) bool {
 	if w.off {
 		return false
 	}
-	// Path first, flags after: gh takes either order, and the fake gh routes
-	// on the path.
+	// Path first: gh takes either order, and the fake gh routes on it.
 	args := []string{"api", w.path, "-i"}
 	if w.etag != "" {
 		// A weak W/"…" ETag works sent back as-is.
