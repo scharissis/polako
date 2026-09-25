@@ -197,7 +197,7 @@ func TestStatsHTMLSaysWhatToDoAboutABadPath(t *testing.T) {
 	for name, path := range cases {
 		t.Run(name, func(t *testing.T) {
 			var buf strings.Builder
-			err := runStats([]string{"-metrics", dir, "-html", path}, &buf, io.Discard, fixtureNow, report{})
+			err := runStatsWith(offlineStats, []string{"-metrics", dir, "-html", path}, &buf, io.Discard, fixtureNow, report{})
 			if err == nil {
 				t.Fatalf("-html %s succeeded, want an error explaining what to type instead", path)
 			}

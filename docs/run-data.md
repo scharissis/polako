@@ -198,6 +198,15 @@ record carrying GitHub's answer about its PR adds a **change per issue**
 line — median additions, deletions, changed files and reviews; records
 from before that enrichment carry none.
 
+**On issues merged off-shift:** a terminal record is written only when a
+drain sees the merge, so a shift stopped during the merge wait leaves none.
+For each issue with no terminal record, `stats` asks GitHub about the last PR
+its runs recorded — one `gh pr list` per repository, state and timestamps
+only, 10s at most. Merged or closed counts as terminal, and the `terminal`
+line says `(N from GitHub)`; `-json` carries `from_github`. An open PR stays
+in flight. A repo GitHub won't answer for keeps its issues in flight and gets
+one `note` line (`github_note` in `-json`). Nothing is written back.
+
 **On resumed sessions:** a crashed run and the `--resume` that finishes its
 work are two records, and `stats` sums both — including `unfinished`, a
 `--resume` of a run that ended its turn without a PR rather than crashed.
@@ -412,6 +421,7 @@ polako stats -json | jq .
     "terminal": { "merged": 3, "needs_human": 1 },
     "done": 4,
     "in_flight": 1,
+    "from_github": 0,
     "park_reasons": { "produced_nothing": 1 },
     "priced": 4,
     "runs_per_issue": { "mean": 1.5, "median": 1.5 },

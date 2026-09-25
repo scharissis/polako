@@ -121,6 +121,8 @@ type statsDocIssues struct {
 	Terminal            map[string]int      `json:"terminal"`
 	Done                int                 `json:"done"`
 	InFlight            int                 `json:"in_flight"`
+	FromGitHub          int                 `json:"from_github"`
+	GitHubNote          string              `json:"github_note,omitempty"`
 	ParkReasons         map[string]int      `json:"park_reasons,omitempty"`
 	Priced              int                 `json:"priced"`
 	RunsPerIssue        *statsDocMeanMedian `json:"runs_per_issue,omitempty"`
@@ -342,10 +344,12 @@ func statsDocSourceFrom(s sourceSummary) statsDocSource {
 
 func statsDocIssuesFrom(s issuesSummary) statsDocIssues {
 	doc := statsDocIssues{
-		Terminal: nonNilMap(s.terminal),
-		Done:     s.done,
-		InFlight: s.inFlight,
-		Priced:   s.priced,
+		Terminal:   nonNilMap(s.terminal),
+		Done:       s.done,
+		InFlight:   s.inFlight,
+		FromGitHub: s.fromGitHub,
+		GitHubNote: s.githubNote,
+		Priced:     s.priced,
 	}
 	if len(s.parkReasons) > 0 {
 		doc.ParkReasons = unrecordedKeyed(s.parkReasons)

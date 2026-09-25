@@ -215,6 +215,9 @@ func headlineCards(summary statsSummary) []htmlCard {
 		merged := iss.terminal[issueMerged]
 		rate = percent(merged, iss.done)
 		rateNote = fmt.Sprintf("%d of %s", merged, plural(iss.done, "terminal issue"))
+		if iss.fromGitHub > 0 {
+			rateNote += fmt.Sprintf(", %d from GitHub", iss.fromGitHub)
+		}
 	}
 	// cost.merged is the same denominator costPairs uses: an issue whose runs
 	// a window clipped away contributed nothing to the spend above, so

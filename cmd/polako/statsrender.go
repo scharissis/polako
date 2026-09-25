@@ -138,8 +138,9 @@ func reqWindowLine(s sourceSummary) string {
 
 func issuePairs(s issuesSummary, plan planCostSummary) [][2]string {
 	if s.done == 0 {
-		return [][2]string{{"terminal", "none yet — every issue in this window is still in flight"},
+		pairs := [][2]string{{"terminal", "none yet — every issue in this window is still in flight"},
 			{"in flight", strconv.Itoa(s.inFlight)}}
+		return appendGitHubNote(pairs, s)
 	}
 	// The merge rate leads, with its percentage attached: it is the headline
 	// number, and "merged 3, needs human 1" buries it in a list.
@@ -150,6 +151,11 @@ func issuePairs(s issuesSummary, plan planCostSummary) [][2]string {
 	if other := breakdown(rest, []string{issueClosedNoChange, issueClosed, issueNeedsHuman}); other != "none" {
 		terminal += ", " + other
 	}
+	// Said on the line itself, so nobody reads an outcome GitHub supplied as
+	// one a drain recorded — see resolveInFlight.
+	if s.fromGitHub > 0 {
+		terminal += fmt.Sprintf(" (%d from GitHub)", s.fromGitHub)
+	}
 
 	pairs := [][2]string{{"terminal", terminal}}
 	// What "needs human" above is made of — the most actionable ranking in the
@@ -158,7 +164,7 @@ func issuePairs(s issuesSummary, plan planCostSummary) [][2]string {
 	if len(s.parkReasons) > 0 {
 		pairs = append(pairs, [2]string{"park reasons", breakdown(s.parkReasons, parkReasonOrder)})
 	}
-	pairs = append(pairs, [2]string{"in flight", strconv.Itoa(s.inFlight)})
+	pairs = appendGitHubNote(append(pairs, [2]string{"in flight", strconv.Itoa(s.inFlight)}), s)
 
 	change := changePairsFrom(s.change)
 	planPairs := planCostPairs(plan)
@@ -185,6 +191,15 @@ func issuePairs(s issuesSummary, plan planCostSummary) [][2]string {
 			count(int64(s.tokensMean)), count(s.tokensMedian), split(s.tokensSplitSum, s.tokensSplitN))},
 	)
 	return append(append(pairs, change...), planPairs...)
+}
+
+// appendGitHubNote adds the line saying which repositories' in-flight issues
+// GitHub couldn't settle, right under the count it qualifies.
+func appendGitHubNote(pairs [][2]string, s issuesSummary) [][2]string {
+	if s.githubNote == "" {
+		return pairs
+	}
+	return append(pairs, [2]string{"note", s.githubNote})
 }
 
 // changePairsFrom formats what the work actually changed, from a

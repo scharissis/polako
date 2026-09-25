@@ -96,6 +96,10 @@ type ghState struct {
 	// the two-word call so a test can be flaky about exactly one lookup.
 	FailReads map[string]int `json:"fail_reads"`
 
+	// HiddenRepos are repositories the token can't see: `pr list --repo`
+	// naming one fails the way gh does on a 404, every time.
+	HiddenRepos []string `json:"hidden_repos"`
+
 	// OldGh is a gh from before sub-issues, which rejects the whole --json set
 	// rather than the one field it does not know — and does so before it asks
 	// GitHub anything, so the listing that follows the rejection is the first
@@ -279,6 +283,11 @@ type fakePR struct {
 	// reports MERGED on the Nth `pr view` from now. Counted in reads rather
 	// than wall clock for the same reason as ReplyOnRead.
 	MergeOnRead int `json:"merge_on_read"`
+
+	// MergedAt and ClosedAt are what `pr list` reports for a PR that
+	// already ended — stats's own resolveInFlight reads nothing else.
+	MergedAt string `json:"merged_at"`
+	ClosedAt string `json:"closed_at"`
 	// MergeOnPeek is the same merge, landing on the Nth free check
 	// (answerPeek) instead, so a test proves the peek noticed it.
 	MergeOnPeek int `json:"merge_on_peek"`
@@ -812,6 +821,10 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 		// With --head, the branch lookup the drain makes. Without one, every PR
 		// in the requested state — which is how `status` finds the open PRs on
 		// issue branches in a single call.
+		if slices.Contains(st.HiddenRepos, flagVal("--repo")) {
+			fmt.Fprintf(os.Stderr, "GraphQL: Could not resolve to a Repository with the name '%s'.\n", flagVal("--repo"))
+			return "", false, 1
+		}
 		if head := flagVal("--head"); head != "" {
 			pr, ok := st.PRs[head]
 			if !ok {
@@ -979,8 +992,8 @@ func answerMilestones(st *ghState, args []string) (out string, changed bool, cod
 // headRefName `status` filters on, which the drain's own lookup does not ask
 // for and ignores.
 func prListJSON(branch string, pr *fakePR) string {
-	return fmt.Sprintf(`{"number":%d,"state":%q,"headRefName":%q,"url":"https://example.invalid/pr/%d"}`,
-		pr.Number, pr.State, branch, pr.Number)
+	return fmt.Sprintf(`{"number":%d,"state":%q,"headRefName":%q,"url":"https://example.invalid/pr/%d","mergedAt":%q,"closedAt":%q}`,
+		pr.Number, pr.State, branch, pr.Number, pr.MergedAt, pr.ClosedAt)
 }
 
 // rollupJSON renders the statusCheckRollup half of `pr view --json`. Every
