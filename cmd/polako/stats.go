@@ -349,6 +349,9 @@ type issueStats struct {
 	key      issueKey
 	runs     []runRecord // timestamp order
 	terminal *issueRecord
+	// resolved marks a terminal synthesized from GitHub's answer rather
+	// than read from a record — see resolveInFlight.
+	resolved bool
 	cost     float64
 	tokens   tokenCounts
 	wallMS   int64
@@ -797,6 +800,11 @@ func buildPlanCostSummary(issues []*issueStats, probe *usageSnapshot) planCostSu
 	var s planCostSummary
 	var deltas []float64
 	for _, is := range issues {
+		// A terminal GitHub supplied was never a record, so it never had
+		// a chance to be sampled — not the usage gate's miss to count.
+		if is.resolved {
+			continue
+		}
 		if is.terminal == nil || !is.terminal.hasUsageSamples() {
 			if is.terminal != nil {
 				s.unsampled++

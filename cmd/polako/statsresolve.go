@@ -97,7 +97,7 @@ func resolveInFlight(ctx context.Context, cfg config, issues []*issueStats) prRe
 			default:
 				continue // still open: in flight is the right answer
 			}
-			is.terminal = &rec
+			is.terminal, is.resolved = &rec, true
 			res.resolved++
 		}
 	}

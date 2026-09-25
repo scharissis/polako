@@ -122,6 +122,19 @@ func TestStatsResolvedCountsReachJSONAndTheByTable(t *testing.T) {
 	}
 }
 
+// A terminal GitHub supplied never had usage samples to miss, so it doesn't
+// swell the plan-cost line's "no usable reading" count.
+func TestResolvedIssuesAreNotCountedUnsampled(t *testing.T) {
+	t.Parallel()
+	issues := []*issueStats{
+		{terminal: &issueRecord{Outcome: issueMerged}},                 // a record the gate missed
+		{terminal: &issueRecord{Outcome: issueMerged}, resolved: true}, // GitHub's answer
+	}
+	if got := buildPlanCostSummary(issues, nil).unsampled; got != 1 {
+		t.Errorf("unsampled = %d, want 1 — the resolved issue isn't the gate's miss", got)
+	}
+}
+
 // -shift is that shift's verdict: another shift's merge record was filtered
 // out on purpose, so GitHub isn't asked to fill it back in.
 func TestStatsShiftFilterLeavesResolutionOff(t *testing.T) {
