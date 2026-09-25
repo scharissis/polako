@@ -26,6 +26,10 @@ import (
 // config.peek to.
 const defaultPeekInterval = 15 * time.Second
 
+// peekTimeout bounds one free check. A 304 comes back in well under a second;
+// anything slower is a network that isn't there, and the full poll handles it.
+const peekTimeout = 10 * time.Second
+
 // etagWatch is one resource a wait peeks at. The ETag lives here and nowhere
 // else: a restart loses it and starts from a full check, as it always did.
 type etagWatch struct {
@@ -125,6 +129,10 @@ func (w *etagWatch) check(ctx context.Context, cfg config) bool {
 		// A weak W/"…" ETag works sent back as-is.
 		args = append(args, "-H", "If-None-Match: "+w.etag)
 	}
+	// Bounded, so a peek hung on a dead connection after a laptop sleep can't
+	// hold the wait past its deadline and the full check behind it.
+	ctx, cancel := context.WithTimeout(ctx, peekTimeout)
+	defer cancel()
 	// gh exits 1 on a 304 (stderr "gh: HTTP 304", gh 2.101.0), so the status
 	// line is read off stdout whatever the exit code.
 	out, _ := captureAll(ctx, cfg.dir, cfg.env, nil, cfg.ghBin, ghArgs(cfg.ghRepo, args)...)
