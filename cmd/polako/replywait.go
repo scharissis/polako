@@ -13,6 +13,7 @@ import (
 func waitForReply(ctx context.Context, cfg config, issue int, baseline int64) error {
 	watch := []*etagWatch{issueWatch(issue)}
 	deadline := time.Now().Add(cfg.poll)
+	var lastNote string
 	for {
 		changed, err := waitForChange(ctx, cfg, deadline, watch)
 		if err != nil {
@@ -31,10 +32,11 @@ func waitForReply(ctx context.Context, cfg config, issue int, baseline int64) er
 			return nil
 		}
 		// An early wake that wasn't a reply — a bot, a label, an edit — says
-		// so only when it was a bot, and otherwise waits out the full poll
-		// without a line per peek.
-		if note := botsOnly(comments, baseline); full || note != "" {
+		// so only when a new bot comment caused it, and otherwise waits out the
+		// full poll without a line per peek.
+		if note := botsOnly(comments, baseline); full || note != lastNote {
 			cfg.logf("issue #%d still awaiting a reply%s — %s", issue, note, nextCheck(cfg))
+			lastNote = note
 		}
 	}
 }
@@ -87,6 +89,7 @@ func awaitAnswer(ctx context.Context, cfg config, blocked []int, states map[int]
 		watches[i] = states[issue].thread
 	}
 	deadline := time.Now().Add(cfg.poll)
+	notes := map[int]string{}
 	for {
 		changed, err := waitForChange(ctx, cfg, deadline, watches)
 		if err != nil {
@@ -95,25 +98,29 @@ func awaitAnswer(ctx context.Context, cfg config, blocked []int, states map[int]
 		// An early wake reads only the threads that moved; the full check at
 		// the deadline reads them all, then hands back to the drain so the
 		// queue is re-derived at least every -poll, as before.
+		full := len(changed) == 0
 		toRead := blocked
-		if len(changed) > 0 {
+		if !full {
 			toRead = nil
 			for _, i := range changed {
 				toRead = append(toRead, blocked[i])
 			}
 		}
-		if issue, err := replyOn(ctx, cfg, toRead, states); issue != 0 || err != nil {
+		if issue, err := replyOn(ctx, cfg, toRead, states, notes, full); issue != 0 || err != nil {
 			return issue, err
 		}
-		if len(changed) == 0 {
+		if full {
 			return 0, nil
 		}
 	}
 }
 
 // replyOn reads each issue's thread and returns the first one a person has
-// answered.
-func replyOn(ctx context.Context, cfg config, issues []int, states map[int]*issueState) (int, error) {
+// answered. notes is the bot note each thread last logged, so an early wake
+// repeats one only when a new bot comment is behind it; the full check logs
+// it regardless, as it always has.
+func replyOn(ctx context.Context, cfg config, issues []int, states map[int]*issueState,
+	notes map[int]string, full bool) (int, error) {
 	for _, issue := range issues {
 		comments, err := issueComments(ctx, cfg, issue)
 		if err != nil {
@@ -129,8 +136,9 @@ func replyOn(ctx context.Context, cfg config, issues []int, states map[int]*issu
 			states[issue].answered = true
 			return issue, nil
 		}
-		if note := botsOnly(comments, baseline); note != "" {
+		if note := botsOnly(comments, baseline); note != "" && (full || note != notes[issue]) {
 			cfg.logf("issue #%d still awaiting a reply%s", issue, note)
+			notes[issue] = note
 		}
 	}
 	return 0, nil
