@@ -87,7 +87,10 @@ On a *public* repo the gate isn't advice: `polako work` refuses to start
 without a `-label`, the one shape where the risk is structural. `-ungated`
 overrules it, an explicit flag so the unfiltered queue is something an
 operator says; a [`-dry-run`](reference.md#looking-before-you-leap--dry-run)
-may still look without either, since it runs nothing.
+may still look without either, since it runs nothing. When one label
+carries `setup`'s marker, the refusal names it — "pass `-label ready`" — but
+`work` never scopes itself from the marker: a shift's scope is typed, not
+discovered.
 
 A `-label` naming a label the repository has never defined refuses too,
 public or not: without this, `-label typo` would pass the gate above and
