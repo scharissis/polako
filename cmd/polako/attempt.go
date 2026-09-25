@@ -28,7 +28,9 @@ type runAttempt struct {
 // settled on, so every exit from dispatchRun passes through one.
 func (a *runAttempt) record(prNumber int, outcome string) {
 	a.rc.pr, a.rc.outcome = prNumber, outcome
-	a.tally.add(a.cfg.rec.recordRun(a.cfg, a.rc, a.rep))
+	rec := a.cfg.rec.recordRun(a.cfg, a.rc, a.rep)
+	a.tally.add(rec)
+	noteRanOn(a.st, rec, a.rep)
 }
 
 // classifyNoPR decides what a run that opened no PR means: a dead end to park

@@ -89,6 +89,14 @@ type issueState struct {
 	// (see parkCleanExit) — issue #425, filed after one such run parked as
 	// "permission refused" when the actual cause was the SSH agent.
 	fetchAuthFailed bool
+	// ranOn is every provider · model · effort a run on this issue used, for
+	// the PR body's ran-on block (prranon.go). Process-lifetime like the tally:
+	// a restarted supervisor starts empty and merges into what the PR already
+	// says.
+	ranOn []prRanOn
+	// ranOnSent is the PR and lines writeRanOn last put on GitHub, so a
+	// remediation that adds nothing new costs no read and no edit.
+	ranOnSent string
 }
 
 // resumeHint points the operator at the local handles for an issue a shift

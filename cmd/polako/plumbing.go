@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +19,12 @@ import (
 
 func gh(ctx context.Context, cfg config, args ...string) ([]byte, error) {
 	return capture(ctx, cfg.dir, cfg.env, cfg.ghBin, ghArgs(cfg.ghRepo, args)...)
+}
+
+// ghStdin is gh with stdin, for text that must stay off argv: capture's error
+// quotes argv, and errors reach the shift log.
+func ghStdin(ctx context.Context, cfg config, stdin string, args ...string) ([]byte, error) {
+	return captureIn(ctx, cfg.dir, cfg.env, strings.NewReader(stdin), cfg.ghBin, ghArgs(cfg.ghRepo, args)...)
 }
 
 // parseRepoFlag validates -repo's shape: owner/name, both halves non-empty.
@@ -202,9 +209,15 @@ func childEnv(extra []string) []string {
 // capture runs name in dir and hands back its stdout. env is extra
 // "KEY=value" entries for the child; see childEnv.
 func capture(ctx context.Context, dir string, env []string, name string, args ...string) ([]byte, error) {
+	return captureIn(ctx, dir, env, nil, name, args...)
+}
+
+// captureIn is capture with stdin; nil reads nothing, as capture does.
+func captureIn(ctx context.Context, dir string, env []string, stdin io.Reader, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = childEnv(env)
+	cmd.Stdin = stdin
 	var errBuf strings.Builder
 	cmd.Stderr = &errBuf
 	out, err := cmd.Output()

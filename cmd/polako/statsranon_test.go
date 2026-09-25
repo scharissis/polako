@@ -27,9 +27,10 @@ func TestClaudeProviderReadsOnlyTheProvider(t *testing.T) {
 	}
 }
 
-// The wiring: preflight fills cfg.provider when a record will be written, and
-// skips the probe on a dry run or under -metrics off.
-func TestPreflightReadsTheProviderOnlyForRecords(t *testing.T) {
+// The wiring: preflight fills cfg.provider for anything that writes — records
+// or a PR's ran-on block, so -metrics off still probes — and skips the probe
+// on a dry run.
+func TestPreflightReadsTheProviderUnlessDryRun(t *testing.T) {
 	t.Parallel()
 	_, checkout := upstream(t)
 	for _, tc := range []struct {
@@ -40,7 +41,7 @@ func TestPreflightReadsTheProviderOnlyForRecords(t *testing.T) {
 	}{
 		{"recording", t.TempDir(), false, "anthropic"},
 		{"dry run", t.TempDir(), true, ""},
-		{"metrics off", metricsOff, false, ""},
+		{"metrics off", metricsOff, false, "anthropic"},
 	} {
 		cfg, _ := drainConfig(t, "stream", &ghState{Visibility: "PRIVATE"})
 		cfg.dir = checkout
