@@ -70,6 +70,12 @@ not start a run with it — unless a template's `labels:` key hands them the
 gate label on creation. Keep it out of your templates; `polako setup` checks
 for this too (docs/setup.md) and fails its report if it finds one.
 
+`setup` marks the gate label with a fixed description, and `status` reads
+that marker back to scope itself when no `-label` is given. Trusting it adds
+no one: creating or editing a label takes the same triage rights as applying
+it. The description is only compared against one fixed string — never
+parsed, never printed; only the label's name is.
+
 ```bash
 polako work -label ready-for-claude
 ```
@@ -81,7 +87,10 @@ On a *public* repo the gate isn't advice: `polako work` refuses to start
 without a `-label`, the one shape where the risk is structural. `-ungated`
 overrules it, an explicit flag so the unfiltered queue is something an
 operator says; a [`-dry-run`](reference.md#looking-before-you-leap--dry-run)
-may still look without either, since it runs nothing.
+may still look without either, since it runs nothing. When one label
+carries `setup`'s marker, the refusal names it — "pass `-label ready`" — but
+`work` never scopes itself from the marker: a shift's scope is typed, not
+discovered.
 
 A `-label` naming a label the repository has never defined refuses too,
 public or not: without this, `-label typo` would pass the gate above and

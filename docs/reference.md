@@ -421,7 +421,7 @@ it: that's still polako's job. A parked issue's comment naming a category gets i
 | --- | --- | --- |
 | `-repo` | *(whatever `-dir` is a checkout of)* | Repository to report on, `owner/name`. Naming it is what lets the command run from anywhere — no checkout needed, just a `gh` authenticated for the repo. |
 | `-dir` | `.` | Path to the repository's main checkout, used to resolve the repository when `-repo` is not given. |
-| `-label` | *(none)* | Only count issues carrying this label, the same scoping `polako work`'s `-label` applies — `proposed` and the `outside the gate` row still reach past it, see above. `status` never refuses — it reads only — so a label the repository has never defined prints the same note `work`'s preflight would refuse with, on stdout under the header, and carries on. With neither this nor `POLAKO_LABEL` set, `status` looks for the one label carrying `setup`'s own gate-label marker and scopes itself to it, saying so in the header ("gate label, read from GitHub"); more than one marked label leaves it unscoped, with a note; still unscoped on a public repository notes the same refusal a real `work` run would make. |
+| `-label` | *(none)* | Only count issues carrying this label, the same scoping `polako work`'s `-label` applies — `proposed` and the `outside the gate` row still reach past it, see above. `status` never refuses — it reads only — so a label the repository has never defined prints the same note `work`'s preflight would refuse with, on stdout under the header, and carries on. With neither this nor `POLAKO_LABEL` set, `status` looks for the one label carrying `setup`'s own gate-label marker and scopes itself to it, saying so in the header ("gate label, read from GitHub"); more than one marked label leaves it unscoped, with a note; still unscoped on a public repository notes the same refusal a real `work` run would make. Why the marker is safe to trust: [security.md](security.md). |
 | `-branch-prefix` | `issue-` | Branch prefix the skill uses; how open PRs are matched back to issues. |
 | `-strict-order` | `false` | Report as a work run with `-strict-order` would: an issue awaiting an answer keeps its place, so `next` can name it rather than the ready issue behind it. |
 | `-json` | `false` | Print one JSON document to stdout instead of the text report — see [As JSON](#as-json--json) below. |
@@ -434,7 +434,7 @@ hatch typed on one invocation, not a property of the backlog.
 
 **Reads only.** Every call is a read subcommand polako itself re-derives
 state with at startup — `gh issue list`, `gh pr list`, `gh pr view`, the REST
-read of a thread's comments — so nothing moves an issue, label or PR. It
+read of a thread's comments, plus, with no `-label`, the repository's label list and visibility — so nothing moves an issue, label or PR. It
 prints no issue, PR or comment text. Three details come from this machine's run data, the records' third reader beside `stats` and the pricing line: the `last shift here: …` line; the `ready` row's price, `about $38 at your median` — the median cost of a merged issue here times the ready issues with no open PR yet, the same median `plan` prices with; and a parked issue's reason, `#77 (budget)`, when its newest local record is a park. Nothing else in the report reads it, and which issue sits in which row stays GitHub's call. No local records, or `-metrics off`, and all three are absent.
 
 Two things about the numbers. **Quiet** is the age of the newest comment on

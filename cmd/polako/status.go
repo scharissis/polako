@@ -11,14 +11,15 @@ package main
 //
 // Three rules shape it:
 //
-//   - Reads only. Every call it makes is one of the read subcommands the drain
-//     itself re-derives state with at startup, so nothing here can move an
-//     issue, a label or a PR.
-//   - One line of run data, and nothing else from it. status is the third
-//     reader of the metrics files, beside `stats` and the pricing line `plan`
-//     and `health` print:
-//     the "last shift here" line (statuslastshift.go), read after the GitHub
-//     snapshot and feeding no queue row, `next` or `needs you`. It says
+//   - Reads only. Every call it makes is a read — the drain's own startup
+//     reads, plus the label list and visibility when no -label is given — so
+//     nothing here can move an issue, a label or a PR.
+//   - Three details of run data, and nothing else from it. status is the
+//     third reader of the metrics files, beside `stats` and the pricing line
+//     `plan` and `health` print: the "last shift here" line
+//     (statuslastshift.go), the ready row's price and the reason beside each
+//     parked issue, all read after the GitHub snapshot and feeding no queue
+//     row, `next` or `needs you`. The last-shift line says
 //     "here" because the drain being asked about may be running on somebody
 //     else's machine, which leaves no record on this one.
 //   - State, not liveness. It never asks whether a drain is running, and says
