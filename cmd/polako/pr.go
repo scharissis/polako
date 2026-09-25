@@ -271,12 +271,14 @@ func remediateConflicts(ctx context.Context, cfg config, issue, prNumber int, be
 // promises the branch moved from where the caller found it, so this checks
 // that directly rather than trusting the transcript's own account of itself
 // (issue #381) — a run can edit files, hit a blocker before pushing, and
-// still exit 0. A read that fails here (perr != nil) is left ambiguous
-// rather than guessed at either way: err is neither forced to errNoPush nor
-// confirmed clean, so supervisePR's own cross-poll comparisons — reading
-// the PR fresh on the very next scheduled poll — are what actually catch a
-// genuine non-push in that case, the same way they did before this check
-// existed.
+// still exit 0. The one other success is a review answered with screenshots
+// alone (shotsAnswer), which moves no head by design — the shots go to the
+// evidence ref, never the branch. A read that fails here (perr != nil) is
+// left ambiguous rather than guessed at either way: err is neither forced to
+// errNoPush nor confirmed clean, so supervisePR's own cross-poll comparisons
+// — reading the PR fresh on the very next scheduled poll — are what actually
+// catch a genuine non-push in that case, the same way they did before this
+// check existed.
 func runRemediation(ctx context.Context, cfg config, issue, prNumber int, reason string,
 	choice runChoice, prompt, extraTools, beforeHead string, st *issueState, tally *issueTally) error {
 	runCfg := choice.apply(cfg)
@@ -288,7 +290,8 @@ func runRemediation(ctx context.Context, cfg config, issue, prNumber int, reason
 	started := time.Now()
 	rep, err := execClaude(ctx, runCfg, prompt, "", "", runLimit(cfg, *tally))
 	if err == nil && beforeHead != "" {
-		if after, perr := prStatus(ctx, cfg, prNumber); perr == nil && after.head == beforeHead {
+		if after, perr := prStatus(ctx, cfg, prNumber); perr == nil && after.head == beforeHead &&
+			!(reason == reasonReview && after.shotsAnswer()) {
 			err = errNoPush
 		}
 	}
@@ -346,9 +349,25 @@ func remediateChecks(ctx context.Context, cfg config, issue, prNumber int, faili
 // remediateConflicts and remediateChecks: same worktree, same prohibitions,
 // different diagnosis — and one prohibition of its own, because a run that
 // could dismiss the review could clear the very thing it was sent to answer.
+// With -visual-evidence on it also carries the screenshot steps (reviewshots.go).
 func remediateReview(ctx context.Context, cfg config, issue, prNumber int, beforeHead string, st *issueState, tally *issueTally, choice runChoice) error {
+	// The pinned `gh api …/comments` grant reaches this invocation and nothing
+	// else — including the record, whose tools_hash goes on identifying the
+	// operator's -tools/-add-tools rather than changing with every PR number.
+	return runRemediation(ctx, cfg, issue, prNumber, reasonReview, choice,
+		reviewPrompt(cfg, issue, prNumber), prReviewTools(cfg.repo, prNumber), beforeHead, st, tally)
+}
+
+// reviewPrompt is remediateReview's prompt on its own, so a test can read it
+// without dispatching a run.
+func reviewPrompt(cfg config, issue, prNumber int) string {
 	branch := fmt.Sprintf("%s%d", cfg.branchPrefix, issue)
-	prompt := fmt.Sprintf(
+	// Off, the prompt is the one this run always got, byte for byte.
+	finished, shots := "This run is not finished until the branch has a new commit pushed. ", ""
+	if reviewShoots(cfg) {
+		finished, shots = reviewShotsFinished, reviewShotsHow(branch, issue)
+	}
+	return fmt.Sprintf(
 		"A reviewer requested changes on PR #%d (branch %s). Read the review and address it: "+
 			"`gh pr view %d --json reviews` prints what each reviewer wrote, and "+
 			"`gh api repos/%s/pulls/%d/comments` the comments they left on individual lines "+
@@ -360,20 +379,14 @@ func remediateReview(ctx context.Context, cfg config, issue, prNumber int, befor
 			"create one as a sibling folder with that branch checked out. Working in that "+
 			"worktree: fetch, and make sure the branch is at its remote tip. Then make the "+
 			"changes the review asks for, run the test suite, typecheck and lint locally "+
-			"until they pass, and commit and push. This run is not finished until the branch "+
-			"has a new commit pushed. Leave a short reply on the review (or a PR comment) "+
-			"saying what changed and anything noteworthy about it. Where a comment is wrong, "+
-			"or asks for something a change to this branch cannot do, say so in a PR comment "+
-			"rather than only in your final message. "+prCommentHow(prNumber)+
+			"until they pass, and commit and push. %sLeave a short reply on the review "+
+			"(or a PR comment) saying what changed and anything noteworthy about it. Where a "+
+			"comment is wrong, or asks for something a change to this branch cannot do, say so "+
+			"in a PR comment rather than only in your final message. %s"+prCommentHow(prNumber)+
 			"Do not open a new PR, do not merge "+
 			"anything, do not dismiss or resolve the review, and do not commit to the "+
 			"default branch.",
-		prNumber, branch, prNumber, cfg.repo, prNumber)
-	// The pinned `gh api …/comments` grant reaches this invocation and nothing
-	// else — including the record, whose tools_hash goes on identifying the
-	// operator's -tools/-add-tools rather than changing with every PR number.
-	return runRemediation(ctx, cfg, issue, prNumber, reasonReview, choice, prompt,
-		prReviewTools(cfg.repo, prNumber), beforeHead, st, tally)
+		prNumber, branch, prNumber, cfg.repo, prNumber, finished, shots)
 }
 
 // prCommentTools grants a remediation run the one write its prompt asks for
@@ -573,12 +586,14 @@ type prView struct {
 	failing   []string // the checks that earned a checksFailing verdict
 
 	// The review half. changesRequested is the verdict; reviewedAt is when the
-	// newest review carrying it was submitted, and branchAt when the newest
-	// commit on the branch was made. Those two timestamps are what say whether
-	// anybody has answered the review yet.
+	// newest review carrying it was submitted, branchAt when the newest commit
+	// on the branch was made, and shotsAt when the PR's author last linked an
+	// after shot of the current head (latestShots). Those timestamps are what
+	// say whether anybody has answered the review yet.
 	changesRequested bool
 	reviewedAt       time.Time
 	branchAt         time.Time
+	shotsAt          time.Time
 }
 
 // reviewOutstanding reports a review asking for changes that nothing has
@@ -597,8 +612,21 @@ type prView struct {
 // A rebase counts as an answer, since it rewrites the commits with fresh
 // committer dates. That is the right way round: the review is then against a
 // diff that no longer exists, and re-reading it would address code nobody has.
+//
+// So does a newer comment of the PR author's linking an after shot of the
+// current head: a review that asks only for screenshots gets them without a
+// commit, and without this it would read as unanswered for good. Both dates
+// here are GitHub's own, and the shot has to show the current head, so shots
+// of code the branch has since moved past answer nothing.
 func (p prView) reviewOutstanding() bool {
-	return p.changesRequested && p.reviewedAt.After(p.branchAt)
+	return p.changesRequested && p.reviewedAt.After(p.branchAt) && p.reviewedAt.After(p.shotsAt)
+}
+
+// shotsAnswer reports that screenshots, not a commit, answered the review: the
+// one way a review remediation that left the branch where it was still did
+// its job.
+func (p prView) shotsAnswer() bool {
+	return p.changesRequested && !p.shotsAt.IsZero() && !p.reviewedAt.After(p.shotsAt)
 }
 
 // remediable reports whether a poll of this PR would dispatch a run. It names
@@ -631,7 +659,7 @@ func (p prView) reviewNote() string {
 
 func prStatus(ctx context.Context, cfg config, prNumber int) (prView, error) {
 	out, err := gh(ctx, cfg, "pr", "view", strconv.Itoa(prNumber),
-		"--json", "state,mergeable,headRefOid,statusCheckRollup,reviewDecision,reviews,commits")
+		"--json", "state,mergeable,headRefOid,statusCheckRollup,reviewDecision,reviews,commits,author,comments")
 	if err != nil {
 		return prView{}, err
 	}
@@ -665,6 +693,13 @@ func parsePRStatus(raw []byte) (prView, error) {
 		Commits []struct {
 			CommittedDate string `json:"committedDate"`
 		} `json:"commits"`
+		// Who opened the PR, and its conversation, for latestShots. A comment
+		// this misses can only leave a review reading as outstanding — the
+		// same safe direction.
+		Author struct {
+			Login string `json:"login"`
+		} `json:"author"`
+		Comments []prComment `json:"comments"`
 	}
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return prView{}, fmt.Errorf("parsing PR status: %w", err)
@@ -693,6 +728,7 @@ func parsePRStatus(raw []byte) (prView, error) {
 			pr.branchAt = at
 		}
 	}
+	pr.shotsAt = latestShots(v.Author.Login, v.HeadRefOid, v.Comments)
 	return pr, nil
 }
 

@@ -85,7 +85,12 @@ in the PR body rather than doing it quietly.
   writes through it, chosen per run by the skill's own `evidence` argument
   (`no-evidence` turns it off). Issue #402 shipped the channel and the
   argument; issue #404 wired an actual capture behind it — Phase 3 shoots
-  an after screenshot and publishes it through this same ref. The
+  an after screenshot and publishes it through this same ref. A review
+  remediation writes through it too, when the review asks for shots or its
+  fix changes rendered files: its prompt carries a compact copy of the
+  recipe (`reviewShotsHow`, `reviewshots.go`) under the same
+  `-visual-evidence` switch, never on a design run, and links the shots in
+  a PR comment — still nothing edits a PR body. The
   destination still isn't new. The content is pixels, sha-pinned and, on a
   public repo, not retractable in practice. A new destination beyond these
   three, or widening `-post-summary`, is a change to argue for out loud,
@@ -167,7 +172,9 @@ in the PR body rather than doing it quietly.
   `awaiting-answer` edits — nothing `work` can't already do, on one issue.
   The skill never runs `gh issue create` (the document is the deliverable;
   `plan` files the tickets later) and never touches the evidence ref (there
-  is nothing to screenshot). The binary adds two writes `work` lacks, both
+  is nothing to screenshot) — nor does its PR's review remediation, which
+  `reviewShoots` keeps off the screenshot steps by verb, whatever
+  `visualEvidence` says. The binary adds two writes `work` lacks, both
   label-shaped. Preflight puts `design` on a `-issue N` named without it
   (`labelDesignIssue`), so `work` leaves the issue alone from then on —
   naming it at the command line is the human act, the label only records

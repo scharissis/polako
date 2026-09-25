@@ -158,7 +158,7 @@ Two things, one of them only on request:
 | What | Where it goes | Default |
 | --- | --- | --- |
 | [`-post-summary`](run-data.md#putting-it-on-the-pr--post-summary) | One line of run numbers, as a comment on your own merged PR — readable by exactly the people who can already see that PR. | Off. |
-| Evidence images | A PNG the skill captured as real output, pushed to the `polako-evidence` orphan branch on your own origin and embedded in the PR body by commit sha — readable by anyone who can already read that repo. | On, for a run whose diff touches browser-rendered files in a repo with a script to serve them. [`-visual-evidence`](reference.md) on `polako work`, default on, is the off switch — it appends `no-evidence`, the skill's own second argument, to the invocation. |
+| Evidence images | A PNG a run captured as real output, pushed to the `polako-evidence` orphan branch on your own origin and embedded by commit sha — in the PR body from the skill, in a PR comment from a review remediation — readable by anyone who can already read that repo. | On, for a run whose diff touches browser-rendered files in a repo with a script to serve them, and for a review remediation whose review asks for shots or whose fix changes those files. [`-visual-evidence`](reference.md) on `polako work`, default on, is the off switch — it appends `no-evidence`, the skill's own second argument, to the invocation, and leaves the screenshot steps out of the review prompt. |
 | [`-remote`](reference.md#watching-a-shift-from-anywhere--remote) | Each run's session, registered with Remote Control through the operator's own claude.ai account — watchable and typeable from claude.ai/code or the app, the same visibility an interactive `claude --remote-control` session has. | On. `-remote=false` keeps runs to this machine. |
 
 `plan` and `health` don't change this — neither has a `-post-summary` of its
@@ -201,6 +201,15 @@ publishing it and drops anything that reads as an error, a blank page, a
 login wall, or a credential — the mitigation for a rendered page reading
 something it shouldn't. `-visual-evidence=false` on `polako work` is the way
 to decline the whole thing.
+
+A review can ask for shots, and on a public repo any account can leave a
+review, so read that as anyone being able to ask. What they can't do is aim
+them: the routes come from the repo's own routing code and the host is the
+loopback address the run's own server printed, never anything the review
+says, and the same caps and look step apply. The review run publishes
+through the same recipe the skill uses — a private index, never `--force` —
+and a comment of the PR author's is the only kind the supervisor reads as
+an answer, so a stranger's link can't stand a review down.
 
 ### The published-version read, and why it isn't in that table either
 
