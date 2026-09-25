@@ -192,7 +192,9 @@ func intakePreflight(ctx context.Context, cfg *config, opt *intakeOptions, verb 
 		// a version that will not answer leaves the field empty rather than
 		// stopping the run over telemetry.
 		cfg.claudeVersion = claudeVersion(ctx, *cfg)
-		cfg.provider = claudeProvider(ctx, *cfg)
+		if cfg.rec.enabled() {
+			cfg.provider = claudeProvider(ctx, *cfg)
+		}
 		cfg.pluginVersion, _, _ = pluginVersion(ctx, *cfg)
 
 		// Best-effort like the drain's awaiting-answer declaration: an
