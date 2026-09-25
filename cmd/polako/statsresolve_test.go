@@ -78,6 +78,14 @@ func TestStatsResolvesInFlightIssuesFromGitHub(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}
 	}
+	// The page's merge-rate card says so too, not just its issues section.
+	page := filepath.Join(t.TempDir(), "report.html")
+	if err := runStatsWith(cfg, []string{"-metrics", dir, "-html", page}, io.Discard, io.Discard, fixtureNow, report{}); err != nil {
+		t.Fatalf("stats -html: %v", err)
+	}
+	if b, err := os.ReadFile(page); err != nil || !strings.Contains(string(b), "1 of 2 terminal issues, 2 from GitHub") {
+		t.Errorf("the merge-rate card should say 2 came from GitHub (err %v)", err)
+	}
 	// Nothing written back: the records are exactly what the fixture wrote.
 	b, err := os.ReadFile(filepath.Join(dir, "example.jsonl"))
 	if err != nil || string(b) != strings.TrimPrefix(resolveFixture, "\n") {
