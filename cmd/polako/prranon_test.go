@@ -59,16 +59,17 @@ func TestSpliceRanOnIgnoresQuotedMarkers(t *testing.T) {
 func TestPRComboNamesWhatRanAndWhatWasAskedFor(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		provider, model string
-		choice          runChoice
-		want            string
+		rec  runRecord
+		want string
 	}{
-		{"anthropic", "claude-opus-5-5[1m]", runChoice{}, "anthropic · claude-opus-5-5[1m] · effort inherited"},
-		{"bedrock", "m", runChoice{model: "sonnet", effort: "high"}, "bedrock · m (asked for sonnet) · effort high"},
-		{"", "m", runChoice{}, "unknown · m · effort inherited"},
+		{runRecord{Provider: "anthropic", Model: "claude-opus-5-5[1m]"}, "anthropic · claude-opus-5-5[1m] · effort inherited"},
+		{runRecord{Provider: "bedrock", Model: "m", RequestedModel: "sonnet", RequestedEffort: "high"},
+			"bedrock · m (asked for sonnet) · effort high"},
+		// The probe failed: stats' word for it, not a second one.
+		{runRecord{Model: "m"}, "unrecorded · m · effort inherited"},
 	} {
-		if got := prCombo(tc.provider, tc.model, tc.choice); got != tc.want {
-			t.Errorf("prCombo(%q, %q, %+v) = %q, want %q", tc.provider, tc.model, tc.choice, got, tc.want)
+		if got := prCombo(tc.rec); got != tc.want {
+			t.Errorf("prCombo(%+v) = %q, want %q", tc.rec, got, tc.want)
 		}
 	}
 }

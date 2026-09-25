@@ -309,12 +309,13 @@ func runRemediation(ctx context.Context, cfg config, issue, prNumber int, reason
 	}
 	// A remediation run pushes to a PR that already exists, so it leaves
 	// behind neither a new PR nor questions.
-	tally.add(cfg.rec.recordRun(cfg, runContext{
+	rec := cfg.rec.recordRun(cfg, runContext{
 		issue: issue, pr: prNumber, reason: reason, outcome: outcomeNothing,
 		runChoice: choice,
 		started:   started, ended: time.Now(),
-	}, rep))
-	noteRanOn(st, cfg.provider, reason, choice, rep)
+	}, rep)
+	tally.add(rec)
+	noteRanOn(st, rec)
 	if err == nil {
 		writeRanOn(ctx, cfg, prNumber, st)
 	}

@@ -8,7 +8,6 @@ package main
 // account; those stay behind -post-summary.
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -39,25 +38,26 @@ func (l prRanOn) String() string {
 	return fmt.Sprintf("%s%s (%s)", ranOnPrefix, l.combo, strings.Join(l.reasons, ", "))
 }
 
-// prCombo names what one run ran on. Model is what the run's init reported,
-// with what polako asked for beside it; effort is only ever what was asked
-// for, since no event reports the effort that ran — the same rule stats'
-// `ran on` line follows.
-func prCombo(provider, model string, choice runChoice) string {
-	if choice.model != "" {
-		model += " (asked for " + choice.model + ")"
+// prCombo names what one run ran on, in stats' own words (ranOn): model is
+// what the run's init reported, with what polako asked for beside it; effort
+// is only ever what was asked for, since no event reports the effort that ran.
+func prCombo(r runRecord) string {
+	provider, model, effort := ranOn(r)
+	if r.RequestedModel != "" {
+		model += " (asked for " + r.RequestedModel + ")"
 	}
-	return fmt.Sprintf("%s · %s · effort %s", cmp.Or(provider, "unknown"), model, cmp.Or(choice.effort, "inherited"))
+	return fmt.Sprintf("%s · %s · effort %s", provider, model, effort)
 }
 
-// noteRanOn adds one finished run to the issue's lines. A run whose init never
-// reported a model never got as far as working on anything, so it names
-// nothing.
-func noteRanOn(st *issueState, provider, reason string, choice runChoice, rep runReport) {
-	if rep.model == "" {
+// noteRanOn adds one finished run to the issue's lines, from the record the
+// run just produced — built even under -metrics off — so the block and the
+// run data can't disagree about what ran. A run whose init never reported a
+// model never got as far as working on anything, so it names nothing.
+func noteRanOn(st *issueState, rec runRecord) {
+	if rec.Model == "" {
 		return
 	}
-	st.ranOn = mergeRanOn(st.ranOn, prRanOn{combo: prCombo(provider, rep.model, choice), reasons: []string{reason}})
+	st.ranOn = mergeRanOn(st.ranOn, prRanOn{combo: prCombo(rec), reasons: []string{rec.Reason}})
 }
 
 // mergeRanOn folds add into lines: a combo already there gains add's new
