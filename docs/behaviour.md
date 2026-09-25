@@ -414,8 +414,10 @@ case.
 
 Every run is one `claude -p` process; its model and effort decide most of
 what it costs. Both resolve once per pickup, fixed for every run on that issue
-in that leg, and a resume keeps the choice of the run it resumes. An exported
-`CLAUDE_CODE_EFFORT_LEVEL` beats them: preflight refuses a flag it contradicts.
+in that leg; a resume keeps them. Preflight names any exported override:
+`CLAUDE_CODE_EFFORT_LEVEL` beats every effort, so a flag it contradicts is
+refused; `ANTHROPIC_MODEL` moves only inherited runs; and
+`ANTHROPIC_DEFAULT_OPUS_MODEL` remaps `opus` itself, `-model opus` included.
 
 Six levels can set them, most specific first:
 
@@ -452,12 +454,10 @@ When nobody chooses, the defaults are:
 | `work`, remediation runs | inherit — until a ledger row says otherwise | inherit — until a ledger row says otherwise |
 | `plan`, `health` | `opus` | inherit |
 
-`opus` on `plan` and `health` is a tier alias, not a pinned id: those runs
-happen once and steer everything downstream, so they take the strongest tier
-whatever it is called this year. Everything else inherits, because the CLI's
-own default follows the account tier and moves when a generation ships — a
-number polako hardcoded would be right for one generation and silently wrong
-for the next.
+`opus` on `plan` and `health` is the strong default; `best` is the strongest
+tier, and [experiments.md](experiments.md)'s `plan-best` row says if it pays.
+The rest inherits, so it moves with the account tier and with Claude Code's
+releases — no pinned id to go stale.
 
 A dispatch logs one line, and only when something other than inherit resolved:
 
