@@ -70,6 +70,12 @@ not start a run with it — unless a template's `labels:` key hands them the
 gate label on creation. Keep it out of your templates; `polako setup` checks
 for this too (docs/setup.md) and fails its report if it finds one.
 
+`setup` marks the gate label with a fixed description, and `status` reads
+that marker back to scope itself when no `-label` is given. Trusting it adds
+no one: creating or editing a label takes the same triage rights as applying
+it. The description is only compared against one fixed string — never
+parsed, never printed; only the label's name is.
+
 ```bash
 polako work -label ready-for-claude
 ```
