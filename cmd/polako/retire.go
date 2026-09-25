@@ -3,8 +3,8 @@ package main
 // Garbage-collecting a finished plan: closeFinishedContainers calls into this
 // once a container's own close has actually succeeded. If the container's
 // body carries a plan footer (footer.go) and no other open issue names the
-// same document, file one `proposed` issue asking a human to retire it — the
-// "Retire on close" step in docs/designs/plan-conventions.md.
+// same document, file one `proposed` issue asking a human to move it to
+// docs/designs/done/ — the "Retire on close" step in docs/designs/plan-conventions.md.
 //
 // Best-effort like the close's own comment: nothing here can turn a
 // container close into a drain failure. A read, a search or a create that
@@ -166,7 +166,7 @@ func anyOtherOpenIssueNamesDoc(ctx context.Context, cfg config, doc string) (boo
 // fileRetireIssue creates the retire issue and returns its number, parsed
 // off the URL a successful `gh issue create` prints.
 func fileRetireIssue(ctx context.Context, cfg config, c containerInfo, footer planFooter) (int, error) {
-	title := fmt.Sprintf("docs: retire %s — every issue it proposed is closed", footer.doc)
+	title := fmt.Sprintf("docs: move %s to done/ — every issue it proposed is closed", footer.doc)
 	body := retireIssueBody(c, footer)
 	raw, err := gh(ctx, cfg, "issue", "create", "--title", title, "--body", body, "--label", proposedLabel)
 	if err != nil {
@@ -210,8 +210,9 @@ func retireIssueBody(c containerInfo, footer planFooter) string {
 	if footer.sha != "" {
 		line += " @ " + footer.sha
 	}
-	return fmt.Sprintf("Every issue proposed from %s is closed — #%d was the last. Retire the document: "+
-		"move what is still true into `docs/`, delete the file, and fix any inbound links.\n\n%s — "+
-		"filed after #%d closed; edit freely.",
-		footer.doc, c.number, line, c.number)
+	done := planDocsDoneDir + "/" + strings.TrimPrefix(footer.doc, planDocsDir+"/")
+	return fmt.Sprintf("Every issue proposed from %s is closed — #%d was the last. Move the document, "+
+		"unchanged: `git mv %s %s`, then fix any inbound links. Behaviour it describes that is now "+
+		"true belongs in `docs/` proper. Nothing is deleted.\n\n%s — filed after #%d closed; edit freely.",
+		footer.doc, c.number, footer.doc, done, line, c.number)
 }

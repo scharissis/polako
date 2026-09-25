@@ -145,10 +145,9 @@ func TestPlanDocsResolvesLegacyPlansFooterAgainstDesigns(t *testing.T) {
 	}
 }
 
-// The done/ move itself is a separate, not-yet-built feature (see the issue
-// body's "Out of scope"), but the alias already has to look there: a legacy
-// footer whose document was archived under docs/designs/done/ must not be
-// reported gone just because it is absent from the top-level directory.
+// The alias has to look under done/ too: a legacy footer whose document was
+// moved under docs/designs/done/ must not be reported gone just because it
+// is absent from the top-level directory.
 func TestPlanDocsResolvesLegacyPlansFooterAgainstDesignsDone(t *testing.T) {
 	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
@@ -172,6 +171,58 @@ func TestPlanDocsResolvesLegacyPlansFooterAgainstDesignsDone(t *testing.T) {
 	}
 	if len(snap.gone) != 0 {
 		t.Errorf("gone = %+v, want none — the document was archived under docs/designs/done/, not deleted", snap.gone)
+	}
+}
+
+// issue #620: the folder is the status. A document under done/ reads done
+// whatever its footers say — a docs/plans/ footer, a docs/designs/ footer
+// still open, or no footer at all — and is never draft or gone.
+func TestPlanDocsShowsEveryDocUnderDoneAsDone(t *testing.T) {
+	t.Parallel()
+	cfg, _ := statusConfigFor(t, &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: false, Body: planFooterFor("docs/plans/legacy.md", "1a2b3c4")},
+			"2": {Open: true, Body: planFooterFor("docs/designs/current.md", "2b3c4d5"), SubIssues: 3, SubIssuesCompleted: 1},
+		},
+	})
+	writeDesignDoc(t, cfg.dir, "active.md")
+	doneDir := filepath.Join(cfg.dir, "docs", "designs", "done")
+	if err := os.MkdirAll(doneDir, 0o755); err != nil {
+		t.Fatalf("mkdir docs/designs/done: %v", err)
+	}
+	for _, name := range []string{"legacy.md", "current.md", "footerless.md"} {
+		if err := os.WriteFile(filepath.Join(doneDir, name), []byte("# "+name+"\n"), 0o644); err != nil {
+			t.Fatalf("writing %s: %v", name, err)
+		}
+	}
+
+	snap, err := readPlanDocs(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("readPlanDocs: %v", err)
+	}
+	if len(snap.gone) != 0 {
+		t.Errorf("gone = %+v, want none — every footer names a document under done/", snap.gone)
+	}
+	got := map[string]planDocStatus{}
+	for _, d := range snap.docs {
+		got[d.path] = d
+	}
+	for _, path := range []string{"docs/designs/done/legacy.md", "docs/designs/done/current.md", "docs/designs/done/footerless.md"} {
+		if got[path].state != planDone {
+			t.Errorf("%s state = %q, want done", path, got[path].state)
+		}
+	}
+	if c := got["docs/designs/done/current.md"].containers; len(c) != 1 || c[0].number != 2 {
+		t.Errorf("done/current.md containers = %+v, want #2 from its docs/designs/ footer", c)
+	}
+	if got["docs/designs/active.md"].state != planDraft {
+		t.Errorf("active.md state = %q, want draft", got["docs/designs/active.md"].state)
+	}
+	if len(got) != 4 {
+		t.Errorf("docs = %+v, want four rows", snap.docs)
+	}
+	if n := needsYou(statusSnapshot{plans: snap}); n != "" {
+		t.Errorf("needsYou = %q, want nothing — a document under done/ has already moved", n)
 	}
 }
 
@@ -333,8 +384,8 @@ func TestSortPlanDocsOrdersByStateThenPath(t *testing.T) {
 	}
 }
 
-// issue #510: a done plan document is supposed to leave (move what's still
-// true into docs/, delete the file) — the container route to a retire issue
+// issue #510: a done plan document moves to docs/designs/done/ (issue
+// #620) — the container route to a retire issue
 // only fires when an epic closes, so a document whose naming issues were all
 // plain gets no automatic nudge. needsYouParts is that nudge.
 func TestNeedsYouNamesADoneDocumentStillOnDisk(t *testing.T) {
@@ -344,7 +395,7 @@ func TestNeedsYouNamesADoneDocumentStillOnDisk(t *testing.T) {
 		{path: "docs/designs/backlog-fill.md", state: planActive},
 	}}}
 	got := needsYou(snap)
-	if want := "needs you: retire docs/designs/shipped.md (done — move what's still true into docs/, delete the file)"; got != want {
+	if want := "needs you: move docs/designs/shipped.md to done/ (every issue closed — git mv it, fix inbound links)"; got != want {
 		t.Errorf("needsYou = %q, want %q", got, want)
 	}
 }

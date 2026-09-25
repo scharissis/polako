@@ -4545,11 +4545,14 @@ func TestDrainFilesARetireIssueWhenAContainerCloses(t *testing.T) {
 	if !strings.Contains(retired.Body, planFooterPrefix+"docs/designs/foo.md") {
 		t.Errorf("retire issue body = %q, want it to carry the same footer", retired.Body)
 	}
+	if !strings.Contains(retired.Body, "`git mv docs/designs/foo.md docs/designs/done/foo.md`") {
+		t.Errorf("retire issue body = %q, want it to ask for the move to done/", retired.Body)
+	}
 	argv, err := os.ReadFile(calls)
 	if err != nil {
 		t.Fatalf("reading the gh call log: %v", err)
 	}
-	if !strings.Contains(string(argv), "docs: retire docs/designs/foo.md — every issue it proposed is closed") {
+	if !strings.Contains(string(argv), "docs: move docs/designs/foo.md to done/ — every issue it proposed is closed") {
 		t.Errorf("no call carried the expected title\ngot:\n%s", argv)
 	}
 	want := "retire  #114: docs/designs/foo.md — every issue it proposed is closed"
