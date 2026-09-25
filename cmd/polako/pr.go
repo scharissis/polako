@@ -315,7 +315,7 @@ func runRemediation(ctx context.Context, cfg config, issue, prNumber int, reason
 		started:   started, ended: time.Now(),
 	}, rep)
 	tally.add(rec)
-	noteRanOn(st, rec)
+	noteRanOn(st, rec, rep)
 	if err == nil {
 		writeRanOn(ctx, cfg, prNumber, st)
 	}

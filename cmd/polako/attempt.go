@@ -30,7 +30,7 @@ func (a *runAttempt) record(prNumber int, outcome string) {
 	a.rc.pr, a.rc.outcome = prNumber, outcome
 	rec := a.cfg.rec.recordRun(a.cfg, a.rc, a.rep)
 	a.tally.add(rec)
-	noteRanOn(a.st, rec)
+	noteRanOn(a.st, rec, a.rep)
 }
 
 // classifyNoPR decides what a run that opened no PR means: a dead end to park

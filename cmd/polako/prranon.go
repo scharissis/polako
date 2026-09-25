@@ -51,10 +51,11 @@ func prCombo(r runRecord) string {
 
 // noteRanOn adds one finished run to the issue's lines, from the record the
 // run just produced — built even under -metrics off — so the block and the
-// run data can't disagree about what ran. A run whose init never reported a
-// model never got as far as working on anything, so it names nothing.
-func noteRanOn(st *issueState, rec runRecord) {
-	if rec.Model == "" {
+// run data can't disagree about what ran. A run that did no observable work
+// names nothing: init reports a model before the first API call, so a run
+// refused for a usage limit or a dead token still carries one.
+func noteRanOn(st *issueState, rec runRecord, rep runReport) {
+	if rec.Model == "" || !rep.progressed() {
 		return
 	}
 	st.ranOn = mergeRanOn(st.ranOn, prRanOn{combo: prCombo(rec), reasons: []string{rec.Reason}})

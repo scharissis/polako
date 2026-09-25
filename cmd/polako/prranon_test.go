@@ -44,6 +44,22 @@ func TestSpliceRanOnAppendsAtTheEnd(t *testing.T) {
 	}
 }
 
+// A run refused before doing anything — a usage limit, a dead token — reports
+// a model from init all the same, and still names nothing.
+func TestNoteRanOnSkipsARunThatDidNothing(t *testing.T) {
+	t.Parallel()
+	rec := runRecord{Provider: "anthropic", Model: "m", Reason: reasonImplement}
+	st := &issueState{}
+	noteRanOn(st, rec, runReport{model: "m"})
+	if len(st.ranOn) != 0 {
+		t.Errorf("a run with no work noted %v", st.ranOn)
+	}
+	noteRanOn(st, rec, runReport{model: "m", toolUses: 1})
+	if len(st.ranOn) != 1 {
+		t.Errorf("a run that did work noted %v, want one line", st.ranOn)
+	}
+}
+
 // Markers quoted inline — this feature's own PR bodies do it — aren't a block:
 // the body is left alone and the real block goes on the end.
 func TestSpliceRanOnIgnoresQuotedMarkers(t *testing.T) {
