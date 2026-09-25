@@ -126,6 +126,7 @@ func preflightShared(ctx context.Context, cfg *config, gate func(visibility stri
 		}
 	}
 	cfg.claudeVersion = claudeVersion(ctx, *cfg)
+	cfg.provider = claudeProvider(ctx, *cfg)
 	cfg.pluginVersion, _, _ = pluginVersion(ctx, *cfg)
 	warnClaudeModelEnv(*cfg)
 	if err := refuseOrNote(*cfg, effortFlagGate(ctx, *cfg), cfg.dryRun); err != nil {

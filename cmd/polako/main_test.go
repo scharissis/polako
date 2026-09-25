@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -277,6 +278,14 @@ const fakeUsageEnv = "POLAKO_FAKE_USAGE"
 // predates the flag.
 const fakeEffortHelpEnv = "POLAKO_FAKE_EFFORT_HELP"
 
+// fakeAuthEnv sets the apiProvider fakeClaude's `auth status --json` reports.
+// Unset means firstParty; "fail" models a CLI without the command.
+const fakeAuthEnv = "POLAKO_FAKE_AUTH"
+
+// fakeAuthEmail is the address in that reply — the thing a test proves never
+// reaches a record.
+const fakeAuthEmail = "someone@example.com"
+
 // fakeClaude stands in for `claude -p ... --output-format stream-json`.
 func fakeClaude(mode string) int {
 	emit := func(line string) {
@@ -309,6 +318,18 @@ func fakeClaude(mode string) int {
 	// for the same reason plugin list is.
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
 		emit("2.1.99 (Claude Code)")
+		return 0
+	}
+	// `claude auth status --json` is claudeProvider's probe — argv-dispatched
+	// like --version. The reply carries an email and org on purpose, the way
+	// the real one does, so a test can prove neither reaches a record.
+	if len(os.Args) == 4 && os.Args[1] == "auth" && os.Args[2] == "status" && os.Args[3] == "--json" {
+		provider := cmp.Or(os.Getenv(fakeAuthEnv), "firstParty")
+		if provider == "fail" {
+			return 1 // an older CLI with no such command
+		}
+		emit(`{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"` + provider + `",` +
+			`"email":"` + fakeAuthEmail + `","orgId":"org-123","orgName":"Fake Org","subscriptionType":"max"}`)
 		return 0
 	}
 	// `claude --help` is effortFlagGate's capability probe — argv-dispatched

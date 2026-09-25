@@ -654,11 +654,12 @@ type runsSummary struct {
 	turns        int
 	tools        int
 	models       []inheritedModel // nil unless inherited runs resolved to two or more models
+	ranOn        []ranOnCombo
 }
 
 func buildRunsSummary(ds dataset) runsSummary {
 	s := runsSummary{total: len(ds.runs), statuses: map[string]int{}, reasons: map[string]int{}, outcomes: map[string]int{},
-		models: buildInheritedModels(ds)}
+		models: buildInheritedModels(ds), ranOn: buildRanOn(ds)}
 	for _, r := range ds.runs {
 		s.statuses[r.Status]++
 		s.reasons[r.Reason]++

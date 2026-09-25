@@ -63,7 +63,15 @@ func TestStatsJSONGoldenDocument(t *testing.T) {
     },
     "turns": 9,
     "tool_uses": 0,
-    "approximated": 0
+    "approximated": 0,
+    "ran_on": [
+      {
+        "provider": "unrecorded",
+        "model": "unrecorded",
+        "effort": "inherited",
+        "runs": 1
+      }
+    ]
   },
   "cost": {
     "total_usd": 1.5,

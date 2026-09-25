@@ -257,6 +257,7 @@ func runPairs(s runsSummary) [][2]string {
 			fmt.Sprintf("%d of %d runs priced from the streamed tally, not a result event",
 				s.approximated, s.total)})
 	}
+	pairs = append(pairs, [2]string{"ran on", ranOnLine(s.ranOn)})
 	if len(s.models) > 0 {
 		pairs = append(pairs, [2]string{"models", modelsLine(s.models)})
 	}
@@ -353,13 +354,13 @@ func started(ts string) string {
 // The title is "run log" rather than "runs" because the summary section above
 // already owns that word, and a report with two sections of one name is one
 // nobody can talk about.
-// The six text columns lead so that the numbers all right-align together — and
+// The nine text columns lead so that the numbers all right-align together — and
 // so that a session of "—" sits at the left of its column rather than a UUID's
 // width away from the row it belongs to.
-var runHeader = []string{"started", "issue", "reason", "status", "outcome", "session",
-	"attempt", "cost", "tokens", "wall"}
+var runHeader = []string{"started", "issue", "reason", "status", "outcome", "provider", "model", "effort",
+	"session", "attempt", "cost", "tokens", "wall"}
 
-const runLeft = 6
+const runLeft = 9
 
 func runRows(ds dataset) [][]string {
 	rows := make([][]string, 0, len(ds.runs))
@@ -368,12 +369,16 @@ func runRows(ds dataset) [][]string {
 		if session == "" {
 			session = noValue
 		}
+		provider, model, effort := ranOn(r)
 		rows = append(rows, []string{
 			started(r.TS),
 			fmt.Sprintf("%s#%d", r.Repo, r.Issue),
 			label(r.Reason),
 			r.Status,
 			label(r.Outcome),
+			provider,
+			model,
+			effort,
 			session,
 			strconv.Itoa(r.Attempt),
 			usd(r.CostUSD),

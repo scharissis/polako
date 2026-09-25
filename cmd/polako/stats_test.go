@@ -129,6 +129,7 @@ runs
   outcomes      opened pr 3, posted questions 1, nothing 3
   work          131 turns, 115 tool uses
   approximated  1 of 7 runs priced from the streamed tally, not a result event
+  ran on        unrecorded · claude-opus-5 · inherited, 5 runs; unrecorded · claude-sonnet-5 · inherited, 2 runs
   models        claude-opus-5 2026-08-20 → 2026-08-23, 4 runs; claude-sonnet-5 2026-08-22 → 2026-08-24, 2 runs
 
 cost
@@ -367,14 +368,14 @@ func TestStatsRunLog(t *testing.T) {
 	t.Parallel()
 	out := stats(t, "-metrics", fixtureDir(t), "-runs")
 	want := `run log
-  started               issue                 reason     status    outcome           session  attempt   cost  tokens  wall
-  2026-08-20T09:00:00Z  scharissis/polako#12  implement  ok        posted questions  s12a           0  $1.10    4.2M   20m
-  2026-08-20T12:30:00Z  scharissis/polako#12  answers    ok        opened pr         s12b           0  $2.50    6.4M   30m
-  2026-08-21T09:00:00Z  scharissis/polako#13  implement  crash     nothing           s13a           0  $0.00  746.5k    5m
-  2026-08-21T09:06:00Z  scharissis/polako#13  resume     ok        opened pr         s13a           1  $3.00    5.5M   34m
-  2026-08-22T09:00:00Z  scharissis/polako#14  implement  no-turns  nothing           —              0  $0.10     53k   30m
-  2026-08-23T09:00:00Z  scharissis/polako#15  remediate  ok        nothing           —              0  $0.40  635.4k   12m
-  2026-08-24T09:00:00Z  scharissis/other#5    implement  ok        opened pr         s5             0  $1.00    1.6M   45m
+  started               issue                 reason     status    outcome           provider    model            effort     session  attempt   cost  tokens  wall
+  2026-08-20T09:00:00Z  scharissis/polako#12  implement  ok        posted questions  unrecorded  claude-opus-5    inherited  s12a           0  $1.10    4.2M   20m
+  2026-08-20T12:30:00Z  scharissis/polako#12  answers    ok        opened pr         unrecorded  claude-opus-5    inherited  s12b           0  $2.50    6.4M   30m
+  2026-08-21T09:00:00Z  scharissis/polako#13  implement  crash     nothing           unrecorded  claude-opus-5    inherited  s13a           0  $0.00  746.5k    5m
+  2026-08-21T09:06:00Z  scharissis/polako#13  resume     ok        opened pr         unrecorded  claude-opus-5    inherited  s13a           1  $3.00    5.5M   34m
+  2026-08-22T09:00:00Z  scharissis/polako#14  implement  no-turns  nothing           unrecorded  claude-sonnet-5  inherited  —              0  $0.10     53k   30m
+  2026-08-23T09:00:00Z  scharissis/polako#15  remediate  ok        nothing           unrecorded  claude-opus-5    inherited  —              0  $0.40  635.4k   12m
+  2026-08-24T09:00:00Z  scharissis/other#5    implement  ok        opened pr         unrecorded  claude-sonnet-5  inherited  s5             0  $1.00    1.6M   45m
 `
 	if !strings.Contains(out, want) {
 		t.Errorf("run log differs\n--- got ---\n%s\n--- want ---\n%s", out, want)
@@ -402,7 +403,7 @@ func TestStatsRunLogHonoursTheFilters(t *testing.T) {
 	if strings.Contains(one, "scharissis/polako#") {
 		t.Errorf("-repo let another repository's runs into the log:\n%s", one)
 	}
-	if !hasLine(one, "2026-08-24T09:00:00Z scharissis/other#5 implement ok opened pr s5 0 $1.00 1.6M 45m") {
+	if !hasLine(one, "2026-08-24T09:00:00Z scharissis/other#5 implement ok opened pr unrecorded claude-sonnet-5 inherited s5 0 $1.00 1.6M 45m") {
 		t.Errorf("the one run in scope should still be listed:\n%s", one)
 	}
 
