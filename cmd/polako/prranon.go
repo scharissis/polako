@@ -186,7 +186,7 @@ func writeRanOn(ctx context.Context, cfg config, prNumber int, st *issueState) {
 			st.ranOnSent = sent
 			return
 		}
-		err = ghStdin(ctx, cfg, next, "pr", "edit", n, "--body-file", "-")
+		_, err = ghStdin(ctx, cfg, next, "pr", "edit", n, "--body-file", "-")
 	}
 	if err != nil {
 		cfg.narrate(sevWarning, "could not note on PR #%d which model and effort ran on it (%v) — the shift continues",
