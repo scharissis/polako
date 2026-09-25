@@ -448,6 +448,7 @@ func (r *issueLoop) dispatchRun() (*pullRequest, error) {
 		return a.classifyNoPR(runErr, wasBlocked)
 	}
 	a.record(pr.Number, outcomeOpenedPR)
+	writeRanOn(ctx, cfg, pr.Number, r.st)
 	r.ledger.clearRetries()
 	return pr, nil
 }

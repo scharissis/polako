@@ -314,6 +314,10 @@ func runRemediation(ctx context.Context, cfg config, issue, prNumber int, reason
 		runChoice: choice,
 		started:   started, ended: time.Now(),
 	}, rep))
+	noteRanOn(st, cfg.provider, reason, choice, rep)
+	if err == nil {
+		writeRanOn(ctx, cfg, prNumber, st)
+	}
 	return err
 }
 

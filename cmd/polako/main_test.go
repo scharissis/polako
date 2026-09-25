@@ -1173,7 +1173,7 @@ func plantPRIn(st *ghState, issue, state string) {
 	if st.PRs == nil {
 		st.PRs = map[string]*fakePR{}
 	}
-	st.PRs["issue-"+issue] = &fakePR{Number: 42, State: state}
+	st.PRs["issue-"+issue] = &fakePR{Number: 42, State: state, Body: "Summary.\n\nCloses #" + issue + "\n"}
 }
 
 // countClaudeRun records that another claude invocation happened and reports

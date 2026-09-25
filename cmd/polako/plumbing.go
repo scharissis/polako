@@ -20,6 +20,25 @@ func gh(ctx context.Context, cfg config, args ...string) ([]byte, error) {
 	return capture(ctx, cfg.dir, cfg.env, cfg.ghBin, ghArgs(cfg.ghRepo, args)...)
 }
 
+// ghStdin is gh with stdin and no stdout, for text that must stay off argv:
+// capture's error quotes argv, and errors reach the shift log.
+func ghStdin(ctx context.Context, cfg config, stdin string, args ...string) error {
+	cmd := exec.CommandContext(ctx, cfg.ghBin, ghArgs(cfg.ghRepo, args)...)
+	cmd.Dir = cfg.dir
+	cmd.Env = childEnv(cfg.env)
+	cmd.Stdin = strings.NewReader(stdin)
+	var errBuf strings.Builder
+	cmd.Stderr = &errBuf
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("%s %s: %w: %s", cfg.ghBin, strings.Join(args, " "), err,
+			strings.TrimSpace(errBuf.String()))
+	}
+	return nil
+}
+
 // parseRepoFlag validates -repo's shape: owner/name, both halves non-empty.
 // tidyConfig, statusConfig and setupConfig each let -repo name the
 // repository outright instead of resolving it from -dir, and all three

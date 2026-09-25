@@ -29,6 +29,7 @@ type runAttempt struct {
 func (a *runAttempt) record(prNumber int, outcome string) {
 	a.rc.pr, a.rc.outcome = prNumber, outcome
 	a.tally.add(a.cfg.rec.recordRun(a.cfg, a.rc, a.rep))
+	noteRanOn(a.st, a.cfg.provider, a.rc.reason, a.rc.runChoice, a.rep)
 }
 
 // classifyNoPR decides what a run that opened no PR means: a dead end to park

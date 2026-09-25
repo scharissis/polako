@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/url"
 	"os"
@@ -260,6 +261,10 @@ type fakePR struct {
 	// "shootreview" fake CLI.
 	Author   string        `json:"author"`
 	Comments []fakeComment `json:"comments"`
+
+	// Body is the PR description: what `pr view --json body` reads and
+	// `pr edit --body-file -` writes — the ran-on block's round trip.
+	Body string `json:"body"`
 
 	// MergeOnRead is a human merging the PR while the supervisor polls: it
 	// reports MERGED on the Nth `pr view` from now. Counted in reads rather
@@ -808,6 +813,11 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			if strconv.Itoa(pr.Number) != at(2) {
 				continue
 			}
+			// The ran-on block's read. Not a poll, so it leaves MergeOnRead's
+			// countdown alone.
+			if flagVal("--json") == "body" {
+				return fmt.Sprintf(`{"body":%q}`, pr.Body), false, 0
+			}
 			merging := pr.MergeOnRead > 0
 			if merging {
 				pr.MergeOnRead--
@@ -829,6 +839,26 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 					reviewsJSON(pr.Reviews), commitsJSON(pr.CommittedAt),
 					author, commentsJSON(pr.Comments)),
 				merging, 0
+		}
+		fmt.Fprintf(os.Stderr, "no PR #%s\n", at(2))
+		return "", false, 1
+
+	case "pr edit":
+		// The ran-on block's write: the whole body, on stdin.
+		if flagVal("--body-file") != "-" {
+			fmt.Fprintf(os.Stderr, "fake gh: pr edit expects --body-file -\n")
+			return "", false, 1
+		}
+		for _, pr := range st.PRs {
+			if strconv.Itoa(pr.Number) == at(2) {
+				b, err := io.ReadAll(os.Stdin)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "fake gh: %v\n", err)
+					return "", false, 1
+				}
+				pr.Body = string(b)
+				return "", true, 0
+			}
 		}
 		fmt.Fprintf(os.Stderr, "no PR #%s\n", at(2))
 		return "", false, 1

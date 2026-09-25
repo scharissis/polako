@@ -126,9 +126,10 @@ func preflightShared(ctx context.Context, cfg *config, gate func(visibility stri
 		}
 	}
 	cfg.claudeVersion = claudeVersion(ctx, *cfg)
-	// Only the records read provider, so a run that writes none skips the
-	// extra process — and the account details its reply carries.
-	if cfg.rec.enabled() && !cfg.dryRun {
+	// The records and each PR's ran-on block read provider, the block even
+	// under -metrics off; a dry run writes neither, so it skips the extra
+	// process — and the account details its reply carries.
+	if !cfg.dryRun {
 		cfg.provider = claudeProvider(ctx, *cfg)
 	}
 	cfg.pluginVersion, _, _ = pluginVersion(ctx, *cfg)
