@@ -454,10 +454,9 @@ When nobody chooses, the defaults are:
 | `work`, remediation runs | inherit — until a ledger row says otherwise | inherit — until a ledger row says otherwise |
 | `plan`, `health` | `opus` | inherit |
 
-`opus` on `plan` and `health` is the strong default; `best` is the strongest
-tier, and [experiments.md](experiments.md)'s `plan-best` row says if it pays.
-The rest inherits, so it moves with the account tier and with Claude Code's
-releases — no pinned id to go stale.
+`opus` on `plan` and `health` is the strong default; `best` is the strongest tier, and
+[experiments.md](experiments.md)'s `plan-best` row says if it pays. The rest inherits, so
+it moves with the account tier and with Claude Code's releases — no pinned id to go stale.
 
 A dispatch logs one line, and only when something other than inherit resolved:
 
@@ -468,6 +467,7 @@ issue #42: model sonnet (label), effort medium (epic)
 The word in parentheses is the level that won — `label`, `epic`, `size`,
 `remediation`, `flag`. The session line then says `inherited` or `asked for <value>`, and
 warns once if an asked-for `opus`, `sonnet`, `haiku` or `fable` ran as another tier.
+A PR's body ends with one `Ran on <provider> · <model> · effort <level>` line per mix.
 
 **Two label families let a maintainer steer one issue's run.** `model:<value>`
 — `model:opus`, `model:sonnet`, `model:haiku`, `model:best`, `model:default`,

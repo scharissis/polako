@@ -165,11 +165,10 @@ skill carries the same posture paragraph `implement-issue` does. See
 
 ## What leaves the machine
 
-Two things, one of them only on request:
-
 | What | Where it goes | Default |
 | --- | --- | --- |
 | [`-post-summary`](run-data.md#putting-it-on-the-pr--post-summary) | One line of run numbers, as a comment on your own merged PR — readable by exactly the people who can already see that PR. | Off. |
+| Ran-on block | One line per provider · model · effort that worked on a PR, in a marked block at the end of that PR's body — a provider name, a model id, an effort level. No cost, tokens or account. Not a new destination: the body already carries the skill's text. | On, no switch. `-dry-run` writes none. |
 | Evidence images | A PNG a run captured as real output, pushed to the `polako-evidence` orphan branch on your own origin and embedded by commit sha — in the PR body from the skill, in a PR comment from a review remediation — readable by anyone who can already read that repo. | On, for a run whose diff touches browser-rendered files in a repo with a script to serve them, and for a review remediation whose review asks for shots or whose fix changes those files. [`-visual-evidence`](reference.md) on `polako work`, default on, is the off switch — it appends `no-evidence`, the skill's own second argument, to the invocation, and leaves the screenshot steps out of the review prompt. |
 | [`-remote`](reference.md#watching-a-shift-from-anywhere--remote) | Each run's session, registered with Remote Control through the operator's own claude.ai account — watchable and typeable from claude.ai/code or the app, the same visibility an interactive `claude --remote-control` session has. | On. `-remote=false` keeps runs to this machine. |
 

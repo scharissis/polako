@@ -90,9 +90,16 @@ in the PR body rather than doing it quietly.
   fix changes rendered files: its prompt carries a compact copy of the
   recipe (`reviewShotsHow`, `reviewshots.go`) under the same
   `-visual-evidence` switch, never on a design run, and links the shots in
-  a PR comment — still nothing edits a PR body. The
+  a PR comment — still nothing edits a PR body for shots. The
   destination still isn't new. The content is pixels, sha-pinned and, on a
-  public repo, not retractable in practice. A new destination beyond these
+  public repo, not retractable in practice. New content, not a new
+  destination: the ran-on block (`prranon.go`, issue #614). After the run
+  that opens a PR and each remediation that pushes to it, the binary writes
+  one line per provider · model · effort into the PR body, between
+  `<!-- polako:ran-on -->` markers — identifiers only, never cost, tokens
+  or account; on with no switch, as the operator asked; best-effort like
+  `-post-summary`; and nothing read from the body enters a record or the
+  shift log. A new destination beyond these
   three, or widening `-post-summary`, is a change to argue for out loud,
   not slip in.
 - **`update` runs only between shifts, and its write surface is the two
