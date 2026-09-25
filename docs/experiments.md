@@ -93,7 +93,7 @@ change.
 | --- | --- | --- | --- | --- |
 | `remediation-effort-medium` | A rebase, a red-check fix or a review reply finishes at the same rate at `medium` as at the inherited effort, for less. | `-remediation-effort medium` for a whole batch, same model as the implementation runs, against a batch at the default. | *pending* — compare the `checks` / `review` / `remediate` run park rate and cost per merged PR against the baseline, split on `effort_source`. | *open* |
 | `remediation-sonnet` | Remediation runs — rebasing a conflict, fixing red checks, answering a review — are mechanical next to implementing an issue, so a smaller model finishes them at the same rate for less money. | `-remediation-model sonnet` for a whole batch, against a batch at the default. Runs only if the `remediation-effort-medium` row above did not already take the saving. | *pending* — `reason` splits `remediate`, `checks` and `review` runs from `implement` ones, and `model_usage` prices each, so the baseline half is already answerable from records on disk. | *open* |
-| `plan-best` | A `plan` run on the strongest tier the account reaches proposes a better-cut backlog than `opus`, at a cost a once-per-batch run can carry. | `polako plan -model best`, against a batch of proposals cut by `opus`. | *pending* — judge the backlog it proposes on whether the cuts are better, and price the run against a batch's total. | *open* |
+| `plan-best` | A `plan` run on the strongest tier the account reaches proposes a better-cut backlog than `opus`, at a cost a once-per-batch run can carry. | `polako plan -model best`, against a batch of proposals cut by `opus`. | *pending* — judge the backlog it proposes on whether the cuts are better, and price the run against a batch's total with the `jq` line under "Plan and health runs". | *open* |
 | `stall-30m` | The default `-stall` of 15m kills more healthy-but-quiet runs than it rescues hung ones, and the resume that follows pays to read the whole context again. Doubling it costs less than the resumes it avoids. | `-stall 30m` for a whole batch, against a batch at the default. | *pending* — compare the `stalled` status count and total cost per merged PR across the two tags. Watch wall clock too: a longer watchdog also means a genuinely hung run burns 30m before anyone notices. | *open* |
 | `poll-floor` | The one-turn wait had no polling floor, so a run polled `/code-review`'s fan-out once a second — 13% of one shift's tool calls on `sleep` and `ListAgents`, at full late-session context each. Telling the run the Skill call already blocks, and to space any real poll a minute or two apart, cuts tool calls and cost per merged PR without losing a stall rescue. | `skills/implement-issue/SKILL.md` (#217): polling floor in "This run gets one turn", plus a line in the review gate that the `/code-review` call blocks and its subagents are not polled. | *pending* — compare `tool_use` count and cost per merged PR against the pre-#217 batch, and check the `stalled` count did not rise. | *open* |
 | `review-worktree` | The review gate named the branch but not the worktree, so the review's forked agent and the finder subagents under it worked in the main checkout — reading the default-branch copy of the changed files, and once writing to it. Naming `<worktree>` on the invocation too points them at the copy that holds the change, without moving the merge rate. | `skills/implement-issue/SKILL.md` (#219): Phase 3 step 2c's `/code-review` invocation names `<worktree>` alongside the branch, with the why. | *pending* — compare the `review` and `checks` run counts and the park rate against the pre-#219 batch, and spot-check a few shift logs for a main-checkout write during the gate. | *open* |
@@ -125,6 +125,17 @@ The `remediation-effort-medium` and `plan-best` rows come from the model/effort
 design in [behaviour.md](behaviour.md#which-model-and-effort-a-run-gets);
 `remediation-effort-medium` waited on the `-remediation-effort` knob and could
 not be filed until it shipped (#365).
+
+### Plan and health runs
+
+`stats` skips `plan` and `health` records, so `stats -by tag` can't settle
+`plan-best`. This can — each tag and model's runs, spend and issues filed:
+
+```bash
+jq -s 'map(select(.kind == "plan")) | group_by([.tag, .model]) | map({tag: .[0].tag, model: .[0].model, runs: length, cost_usd: (map(.cost_usd) | add), issues_created: (map(.issues_created) | add)})' ~/.polako/metrics/*.jsonl
+```
+
+Swap `"plan"` for `"health"` to compare `health` runs the same way.
 
 The `visual-evidence-on`, `evidence-preview` and `evidence-webserver` rows
 come from `docs/plans/visual-evidence.md` (retired: every issue it proposed —

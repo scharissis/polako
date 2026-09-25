@@ -282,7 +282,7 @@ polako plan -design docs/VISION.md            # the real thing
 | `-max-cost` | `0` | Warn once the run has cost this many dollars. Advisory only: a plan run is one `claude` invocation with no next run to decline, so unlike `polako work` there is nothing for the cap to stop — it is reported, not enforced. |
 | `-dir`, `-claude`, `-permission-mode`, `-dry-run` | | Same meaning as `polako work`'s flags above. |
 | `-metrics` | `~/.polako/metrics` | Directory for the one `kind:"plan"` record the run writes, or `off`. Same meaning and default as `polako work`'s. |
-| `-run-tag` | *(none)* | Label recorded with the `plan` record, so one batch's plan run can be compared against another in `polako stats`. |
+| `-run-tag` | *(none)* | Label recorded with the `plan` record, so one batch's plan run can be compared against another. `stats` skips plan records; compare them with the `jq` line in [experiments.md](experiments.md#plan-and-health-runs). |
 | `-notify` | *(none)* | Command run when the plan run finishes with proposals to curate — the `proposed` event above. Checked at preflight like `polako work`'s. |
 
 ## Auditing repository health unattended: `polako health`
@@ -319,7 +319,7 @@ polako health -dir ~/code/some-repo            # the real thing
 | `-max-cost` | `0` | Warn once the run has cost this many dollars. Advisory only, the same reasoning `plan`'s carries. |
 | `-dir`, `-claude`, `-permission-mode`, `-dry-run` | | Same meaning as `polako work`'s flags above. |
 | `-metrics` | `~/.polako/metrics` | Directory for the one `kind:"health"` record the run writes, or `off`. |
-| `-run-tag` | *(none)* | Label recorded with the `health` record, so one run can be compared against another in `polako stats`. |
+| `-run-tag` | *(none)* | Label recorded with the `health` record, so one run can be compared against another. `stats` skips health records; compare them with the `jq` line in [experiments.md](experiments.md#plan-and-health-runs), `"plan"` swapped for `"health"`. |
 | `-notify` | *(none)* | Command run when the health run finishes with proposals to curate — the `proposed` event. Checked at preflight like `polako work`'s. |
 
 ## Designing a plan document: `polako design`
