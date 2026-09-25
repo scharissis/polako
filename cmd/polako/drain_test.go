@@ -192,6 +192,15 @@ type fakeIssue struct {
 	// from now, and the wait must not end because of it.
 	BotOnRead int `json:"bot_on_read"`
 
+	// ReplyOnPeek and BotOnPeek are the same two comments landing on the Nth
+	// free check of the issue (answerPeek) rather than the Nth comments read.
+	ReplyOnPeek int `json:"reply_on_peek"`
+	BotOnPeek   int `json:"bot_on_peek"`
+	// EditOnPeek is a change that isn't a comment — a label taken off, an
+	// edit — landing on the Nth free check; Edits counts them into the ETag.
+	EditOnPeek int `json:"edit_on_peek"`
+	Edits      int `json:"edits"`
+
 	// CloseOnRead is the fourth ending (#210), standing in for the skill's own
 	// `gh issue close`: this issue closes on the Nth `issue view` read from
 	// now, counted the same way ReplyOnRead is. Distinct from CloseOnList,
@@ -270,6 +279,13 @@ type fakePR struct {
 	// reports MERGED on the Nth `pr view` from now. Counted in reads rather
 	// than wall clock for the same reason as ReplyOnRead.
 	MergeOnRead int `json:"merge_on_read"`
+	// MergeOnPeek is the same merge, landing on the Nth free check
+	// (answerPeek) instead, so a test proves the peek noticed it.
+	MergeOnPeek int `json:"merge_on_peek"`
+	// NoETag is a PR whose peek answers with no ETag header, and SameETag200
+	// one that answers 200 with an unchanged ETag instead of a 304.
+	NoETag      bool `json:"no_etag"`
+	SameETag200 bool `json:"same_etag_200"`
 }
 
 // fakeReview is one entry of `pr view --json reviews`. Author is optional:
@@ -387,6 +403,11 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 	}
 	issue := func() *fakeIssue { return st.Issues[at(2)] }
 
+	if at(0) == "api" && slices.Contains(args, "-i") {
+		// The free check between full polls (peek.go), the only api call that
+		// asks for headers.
+		return answerPeek(st, args)
+	}
 	call := at(0) + " " + at(1)
 	// `gh api` names its target in a URL path, so the second word is no use as a
 	// call name. The drain makes exactly one api call; give it a readable name so

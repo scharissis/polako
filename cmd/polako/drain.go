@@ -51,6 +51,9 @@ type issueState struct {
 	answered bool  // a reply landed, so the next run folds it in
 	awaiting bool  // this drain left it flagged for a human
 	baseline int64 // newest comment on the thread when the question was flagged
+	// thread is awaitAnswer's free check on this issue, kept here so its ETag
+	// outlives each pass round the drain loop. Memory only, like the rest.
+	thread *etagWatch
 	// session is the resume target: the last session any run on this issue
 	// reported. It outlives a single processIssue call so that a run dispatched
 	// once an answer lands, and then dying before it reports a session of its
@@ -453,54 +456,6 @@ func sessionSpend(results []issueResult, states map[int]*issueState) float64 {
 		total += st.tally.costUSD
 	}
 	return total
-}
-
-// awaitAnswer decides which of the issues waiting on a human is worth running
-// now, and blocks until one of them is. It returns 0 when the queue itself
-// moved instead — a label removed by hand, a new issue opened — because
-// re-deriving the queue outranks going on waiting.
-//
-// An issue this drain did not flag itself is run straight away. Its answer may
-// already be sitting on the thread — left before this process started, or while
-// an earlier one was down — and nothing on GitHub says whether it is. Which
-// comment is this drain's own question is exactly what it cannot tell, running
-// as it does under the credentials of the person it is asking. One run settles
-// it for a price the skill keeps low: it re-reads the thread and stops again
-// without re-asking when the answer is not there. From then on this drain holds
-// a baseline to compare against, so the question is only paid for once.
-func awaitAnswer(ctx context.Context, cfg config, blocked []int, states map[int]*issueState) (int, error) {
-	for _, issue := range blocked {
-		if st := states[issue]; st == nil || !st.awaiting {
-			cfg.logf("issue #%d was already labelled %q when this shift reached it — re-running it "+
-				"to see whether the answer is on the thread", issue, awaitingAnswerLabel)
-			return issue, nil
-		}
-	}
-	cfg.logf("nothing else to work — waiting for a reply on %s, next check in %s",
-		issueRefs(blocked), cfg.poll)
-	if err := sleep(ctx, cfg.poll); err != nil {
-		return 0, err
-	}
-	for _, issue := range blocked {
-		comments, err := issueComments(ctx, cfg, issue)
-		if err != nil {
-			if ctx.Err() != nil {
-				return 0, ctx.Err()
-			}
-			cfg.narrate(sevWarning, "transient: checking #%d comments failed (%v) — will retry", issue, err)
-			continue
-		}
-		baseline := states[issue].baseline
-		if replyArrived(comments, baseline) {
-			cfg.logf("somebody replied on #%d — re-running to fold the answers in", issue)
-			states[issue].answered = true
-			return issue, nil
-		}
-		if note := botsOnly(comments, baseline); note != "" {
-			cfg.logf("issue #%d still awaiting a reply%s", issue, note)
-		}
-	}
-	return 0, nil
 }
 
 // stillWaiting is what the summary owes an operator about the issues this drain

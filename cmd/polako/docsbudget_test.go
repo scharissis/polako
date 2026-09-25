@@ -117,9 +117,13 @@ const docsBudget = 500
 // as the design conversation, `draft` after the merge — and every other verb
 // that runs a model has a section here; no existing paragraph to cut in its
 // place.
+//
+// behaviour.md moved again in issue #615 (2026-09-25), +8: `-poll` stopped
+// meaning "how long a merge takes to notice", and the issue asked this page
+// to say so — one paragraph, no existing one saying anything it replaces.
 var docsDebt = map[string]int{
 	"reference.md": 623,
-	"behaviour.md": 566,
+	"behaviour.md": 574,
 }
 
 func TestDocsStayWithinLineBudget(t *testing.T) {

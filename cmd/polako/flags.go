@@ -35,6 +35,11 @@ type config struct {
 	// preference anyone has, and the suite sets it low so a proved retry costs
 	// no wall clock. parseFlags pins it to ghRetryDelay.
 	ghRetryWait time.Duration
+	// peek is the gap between the free conditional checks a wait makes between
+	// full polls (peek.go). A seam like ghRetryWait, not a flag: pinConfig pins
+	// it to defaultPeekInterval, and zero — every config a test builds by
+	// hand — or anything at or above poll turns it off.
+	peek time.Duration
 	// resumeCeiling is the backstop below, and a seam for the same reason
 	// ghRetryWait is: reaching it costs one process per resume, and the suite
 	// proves the ceiling stops the loop rather than proving its size.
@@ -433,7 +438,8 @@ func registerIssueFlags(fs *flag.FlagSet, cfg *config, skill, tools string, loca
 	fs.StringVar(&cfg.addTools, "add-tools", "",
 		"extra --allowedTools entries, appended to -tools instead of replacing it")
 	fs.StringVar(&cfg.permissionMode, "permission-mode", "acceptEdits", "claude --permission-mode")
-	fs.DurationVar(&cfg.poll, "poll", 5*time.Minute, "interval between GitHub checks while waiting")
+	fs.DurationVar(&cfg.poll, "poll", 5*time.Minute, "interval between full GitHub checks while waiting on a PR or a reply, with a free check every "+
+		defaultPeekInterval.String()+" in between")
 	fs.IntVar(&cfg.retries, "retries", 3, "resume attempts after a crashed claude run (nonzero exit)")
 	fs.DurationVar(&cfg.retryWait, "retry-wait", 30*time.Second, "wait before each resume attempt")
 	fs.DurationVar(&cfg.stall, "stall", 15*time.Minute, "kill and resume a run with no output events for this long (0 disables)")
@@ -477,6 +483,7 @@ func pinConfig(cfg *config, local localFlags) error {
 	cfg.queue = new(queueMemo)
 	cfg.ghBin = "gh"
 	cfg.ghRetryWait = ghRetryDelay
+	cfg.peek = defaultPeekInterval
 	cfg.resumeCeiling = defaultResumeCeiling
 	cfg.usageTimeout = defaultUsageProbeTimeout
 	abs, err := filepath.Abs(cfg.dir)
