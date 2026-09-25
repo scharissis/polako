@@ -123,10 +123,17 @@ func TestStatsResolvedCountsReachJSONAndTheByTable(t *testing.T) {
 	if err := runStatsWith(cfg, []string{"-metrics", dir, "-by", byIssue}, &out, io.Discard, fixtureNow, report{}); err != nil {
 		t.Fatalf("stats -by issue: %v", err)
 	}
+	found := false
 	for _, line := range strings.Split(out.String(), "\n") {
-		if strings.Contains(line, "example/one#1 ") && !strings.Contains(line, "merged") {
-			t.Errorf("-by issue row for #1 should read merged: %q", line)
+		if strings.Contains(line, "example/one#1 ") {
+			found = true
+			if !strings.Contains(line, "merged") {
+				t.Errorf("-by issue row for #1 should read merged: %q", line)
+			}
 		}
+	}
+	if !found {
+		t.Errorf("no -by issue row for example/one#1:\n%s", out.String())
 	}
 }
 
