@@ -27,6 +27,34 @@ func TestClaudeProviderReadsOnlyTheProvider(t *testing.T) {
 	}
 }
 
+// The wiring: preflight fills cfg.provider when a record will be written, and
+// skips the probe on a dry run or under -metrics off.
+func TestPreflightReadsTheProviderOnlyForRecords(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	for _, tc := range []struct {
+		name    string
+		metrics string
+		dryRun  bool
+		want    string
+	}{
+		{"recording", t.TempDir(), false, "anthropic"},
+		{"dry run", t.TempDir(), true, ""},
+		{"metrics off", metricsOff, false, ""},
+	} {
+		cfg, _ := drainConfig(t, "stream", &ghState{Visibility: "PRIVATE"})
+		cfg.dir = checkout
+		cfg.rec = newRecorder(tc.metrics)
+		cfg.dryRun = tc.dryRun
+		if err := preflightShared(context.Background(), &cfg, nil); err != nil {
+			t.Fatalf("%s: preflightShared: %v", tc.name, err)
+		}
+		if cfg.provider != tc.want {
+			t.Errorf("%s: provider = %q, want %q", tc.name, cfg.provider, tc.want)
+		}
+	}
+}
+
 // The same reply carries the account's email and org. Neither may reach a
 // record: run and plan records both, marshalled the way the recorder writes.
 func TestProviderRecordCarriesNoAccountDetails(t *testing.T) {
