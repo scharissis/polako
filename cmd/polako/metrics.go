@@ -263,6 +263,9 @@ type runRecord struct {
 	Tokens      tokenCounts            `json:"tokens"`
 	ModelUsage  map[string]modelTokens `json:"model_usage,omitempty"`
 
+	// Provider is config.provider: anthropic, a third-party provider's name,
+	// or empty when the probe couldn't answer. No event reports it.
+	Provider        string `json:"provider"`
 	Model           string `json:"model"`
 	RequestedModel  string `json:"requested_model"`
 	RequestedEffort string `json:"requested_effort"`
@@ -476,6 +479,7 @@ func newRunRecord(cfg config, rc runContext, rep runReport) runRecord {
 		Tokens:      rep.usage,
 		ModelUsage:  rep.modelUsage,
 
+		Provider:        cfg.provider,
 		Model:           rep.model,
 		RequestedModel:  rc.model,
 		RequestedEffort: rc.effort,
@@ -579,6 +583,7 @@ type proposalRunHead struct {
 	Tokens      tokenCounts            `json:"tokens"`
 	ModelUsage  map[string]modelTokens `json:"model_usage,omitempty"`
 
+	Provider        string `json:"provider"`
 	Model           string `json:"model"`
 	RequestedModel  string `json:"requested_model"`
 	RequestedEffort string `json:"requested_effort"`
@@ -646,6 +651,7 @@ func proposalHead(base runRecord, kind string) proposalRunHead {
 		Tokens:      base.Tokens,
 		ModelUsage:  base.ModelUsage,
 
+		Provider:        base.Provider,
 		Model:           base.Model,
 		RequestedModel:  base.RequestedModel,
 		RequestedEffort: base.RequestedEffort,

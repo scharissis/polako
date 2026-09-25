@@ -126,6 +126,11 @@ func preflightShared(ctx context.Context, cfg *config, gate func(visibility stri
 		}
 	}
 	cfg.claudeVersion = claudeVersion(ctx, *cfg)
+	// Only the records read provider, so a run that writes none skips the
+	// extra process — and the account details its reply carries.
+	if cfg.rec.enabled() && !cfg.dryRun {
+		cfg.provider = claudeProvider(ctx, *cfg)
+	}
 	cfg.pluginVersion, _, _ = pluginVersion(ctx, *cfg)
 	warnClaudeModelEnv(*cfg)
 	if err := refuseOrNote(*cfg, effortFlagGate(ctx, *cfg), cfg.dryRun); err != nil {

@@ -36,6 +36,7 @@ func metricsConfig(t *testing.T, spec string) config {
 		retryWait:      30 * time.Second,
 		stall:          15 * time.Minute,
 		claudeVersion:  "2.1.34",
+		provider:       "anthropic",
 		pluginVersion:  "0.3.0",
 		shiftID:        "d1d2d3d4",
 		rec:            newRecorder(spec),
@@ -114,6 +115,7 @@ func TestPlanRecordIsSelfDescribing(t *testing.T) {
 		"api_ms":           float64(812000),
 		"cost_usd":         4.12,
 		"usage_source":     usageResult,
+		"provider":         "anthropic",
 		"model":            "claude-opus-5",
 		"requested_model":  "claude-opus-5",
 		"requested_effort": "",
@@ -183,14 +185,15 @@ func TestPlanRecordFallsBackToObservedUsage(t *testing.T) {
 // struct order — no nesting, no reordering. Golden strings captured from that
 // form; regenerate them only for a deliberate change to what these records
 // emit, never to make an accidental one pass. Last regenerated for issue #554,
-// which renamed the plan record's `vision` field to `design`.
+// which renamed the plan record's `vision` field to `design`, then for
+// issue #613, which added `provider`.
 func TestPlanAndHealthRecordsMarshalUnchanged(t *testing.T) {
 	t.Parallel()
 	cfg := metricsConfig(t, metricsOff)
 	cfg.skill = "skill-x"
 
-	const wantPlan = `{"v":1,"kind":"plan","ts":"2026-08-24T10:15:00Z","ended":"2026-08-24T10:22:02Z","shift":"d1d2d3d4","repo":"scharissis/polako","status":"ok","exit_code":0,"turns":74,"tool_uses":63,"wall_ms":1141000,"api_ms":812000,"cost_usd":4.12,"usage_source":"result","tokens":{"in":2143,"out":48210,"cache_read":8123400,"cache_write":401200},"model_usage":{"claude-opus-5":{"in":2143,"out":47000,"cache_read":0,"cache_write":0,"cost_usd":4.01}},"model":"claude-opus-5","requested_model":"claude-opus-5","requested_effort":"","skill":"skill-x","permission_mode":"acceptEdits","tag":"baseline","tools_hash":"68b396fe","design":"docs/VISION.md","milestone":"VISION 2026-08","issues_created":7,"epics_created":1,"cap":10,"labels_enforced":2,"polako_version":"","claude_version":"2.1.34","plugin_version":"0.3.0"}`
-	const wantHealth = `{"v":1,"kind":"health","ts":"2026-08-24T10:15:00Z","ended":"2026-08-24T10:22:02Z","shift":"d1d2d3d4","repo":"scharissis/polako","status":"ok","exit_code":0,"turns":74,"tool_uses":63,"wall_ms":1141000,"api_ms":812000,"cost_usd":4.12,"usage_source":"result","tokens":{"in":2143,"out":48210,"cache_read":8123400,"cache_write":401200},"model_usage":{"claude-opus-5":{"in":2143,"out":47000,"cache_read":0,"cache_write":0,"cost_usd":4.01}},"model":"claude-opus-5","requested_model":"claude-opus-5","requested_effort":"","skill":"skill-x","permission_mode":"acceptEdits","tag":"baseline","tools_hash":"68b396fe","issues_created":7,"epics_created":1,"cap":10,"labels_enforced":2,"polako_version":"","claude_version":"2.1.34","plugin_version":"0.3.0"}`
+	const wantPlan = `{"v":1,"kind":"plan","ts":"2026-08-24T10:15:00Z","ended":"2026-08-24T10:22:02Z","shift":"d1d2d3d4","repo":"scharissis/polako","status":"ok","exit_code":0,"turns":74,"tool_uses":63,"wall_ms":1141000,"api_ms":812000,"cost_usd":4.12,"usage_source":"result","tokens":{"in":2143,"out":48210,"cache_read":8123400,"cache_write":401200},"model_usage":{"claude-opus-5":{"in":2143,"out":47000,"cache_read":0,"cache_write":0,"cost_usd":4.01}},"provider":"anthropic","model":"claude-opus-5","requested_model":"claude-opus-5","requested_effort":"","skill":"skill-x","permission_mode":"acceptEdits","tag":"baseline","tools_hash":"68b396fe","design":"docs/VISION.md","milestone":"VISION 2026-08","issues_created":7,"epics_created":1,"cap":10,"labels_enforced":2,"polako_version":"","claude_version":"2.1.34","plugin_version":"0.3.0"}`
+	const wantHealth = `{"v":1,"kind":"health","ts":"2026-08-24T10:15:00Z","ended":"2026-08-24T10:22:02Z","shift":"d1d2d3d4","repo":"scharissis/polako","status":"ok","exit_code":0,"turns":74,"tool_uses":63,"wall_ms":1141000,"api_ms":812000,"cost_usd":4.12,"usage_source":"result","tokens":{"in":2143,"out":48210,"cache_read":8123400,"cache_write":401200},"model_usage":{"claude-opus-5":{"in":2143,"out":47000,"cache_read":0,"cache_write":0,"cost_usd":4.01}},"provider":"anthropic","model":"claude-opus-5","requested_model":"claude-opus-5","requested_effort":"","skill":"skill-x","permission_mode":"acceptEdits","tag":"baseline","tools_hash":"68b396fe","issues_created":7,"epics_created":1,"cap":10,"labels_enforced":2,"polako_version":"","claude_version":"2.1.34","plugin_version":"0.3.0"}`
 
 	plan, err := json.Marshal(newPlanRecord(cfg, sampleReport(), samplePlanFacts()))
 	if err != nil {

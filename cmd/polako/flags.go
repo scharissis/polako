@@ -245,6 +245,9 @@ type config struct {
 	repo          string
 	claudeVersion string
 	pluginVersion string
+	// provider is claudeProvider's answer, read once per shift beside
+	// claudeVersion: anthropic, a third-party provider's own name, or empty.
+	provider string
 	// goBin is a test seam like ghBin: `polako update` is the one caller, for
 	// `go env` and `go install`. No flag sets it — updateConfig pins it to
 	// "go".

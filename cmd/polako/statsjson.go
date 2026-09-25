@@ -151,6 +151,9 @@ type statsDocRuns struct {
 	Turns        int            `json:"turns"`
 	ToolUses     int            `json:"tool_uses"`
 	Approximated int            `json:"approximated"`
+	// RanOn is the text report's `ran on` line: always present, [] only when
+	// no run is in scope.
+	RanOn []statsDocRanOn `json:"ran_on"`
 }
 
 type statsDocCost struct {
@@ -224,6 +227,9 @@ type statsDocRun struct {
 	Reason      string  `json:"reason"`
 	Status      string  `json:"status"`
 	Outcome     string  `json:"outcome"`
+	Provider    string  `json:"provider"`
+	Model       string  `json:"model"`
+	Effort      string  `json:"effort"`
 	Session     string  `json:"session,omitempty"`
 	Attempt     int     `json:"attempt"`
 	CostUSD     float64 `json:"cost_usd"`
@@ -376,6 +382,7 @@ func statsDocRunsFrom(s runsSummary) statsDocRuns {
 		Turns:        s.turns,
 		ToolUses:     s.tools,
 		Approximated: s.approximated,
+		RanOn:        statsDocRanOnFrom(s.ranOn),
 	}
 }
 
@@ -456,9 +463,10 @@ func statsDocByFrom(ds dataset, issues []*issueStats, by string) statsDocBy {
 func statsDocRunsLogFrom(ds dataset) []statsDocRun {
 	rows := make([]statsDocRun, 0, len(ds.runs))
 	for _, r := range ds.runs {
+		provider, model, effort := ranOn(r)
 		rows = append(rows, statsDocRun{
 			Started: r.TS, Repo: r.Repo, Issue: r.Issue, Reason: r.Reason, Status: r.Status,
-			Outcome: r.Outcome, Session: r.Session, Attempt: r.Attempt,
+			Outcome: r.Outcome, Provider: provider, Model: model, Effort: effort, Session: r.Session, Attempt: r.Attempt,
 			CostUSD: r.CostUSD, Tokens: r.Tokens.total(), WallSeconds: r.WallMS / 1000,
 		})
 	}

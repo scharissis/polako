@@ -8,9 +8,9 @@ with the repo and issue number, a random shift id, why the run happened and
 what it left behind (a PR, questions, a closed issue, or neither), status,
 exit code, turns, tool-use count, wall and API duration, tokens (in / out /
 cache read / cache write, per model), dollars, and the configuration under
-test (skill, the model and effort asked for, permission mode, `-run-tag`, a tool-allowlist hash, the
-strategy knobs, and the three versions of binary, skill and Claude CLI in
-play). One more object per issue records how it ended (`merged`,
+test (skill, the model and effort asked for, the API `provider`, permission
+mode, `-run-tag`, a tool-allowlist hash, the strategy knobs, and the three
+versions of binary, skill and Claude CLI in play). One more object per issue records how it ended (`merged`,
 `closed_no_change`, `closed_unmerged` or `needs_human`, with a
 `park_reason` when parked) and, when GitHub can answer (one extra `gh pr
 view`, skipped under `-metrics off`), the PR's additions, deletions,
@@ -156,6 +156,7 @@ runs
   outcomes      opened pr 3, posted questions 1, nothing 3
   work          131 turns, 115 tool uses
   approximated  1 of 7 runs priced from the streamed tally, not a result event
+  ran on        anthropic · claude-opus-5 · inherited, 5 runs; anthropic · claude-sonnet-5 · inherited, 2 runs
   models        claude-opus-5 2026-08-20 → 2026-08-23, 4 runs; claude-sonnet-5 2026-08-22 → 2026-08-24, 2 runs
 
 cost
@@ -218,16 +219,17 @@ over several lines and omits subagent turns.
 are the tally seen streaming past, dollars read zero — counted out
 separately so a crash-prone configuration doesn't get to look cheap.
 
-**On models:** the `models` line lists each model inherited runs resolved
-to — first and last day seen, run count, and the CLI version it first
-showed up on. It appears only when there are two or more: a Claude Code
-release can move the inherited model, and nothing else in the report says
-so. It counts fresh runs that asked for no model — any run with a
-`requested_model` is out, whatever set it, and so is any `--resume`, which
-can report the bare id where the fresh run reported `[1m]`. It lists models,
-not a timeline: inherit can differ per repo. `stats -by model` then prices
-each side. `claude_version` comes from the run's own init event, falling
-back to the version read at shift start.
+**On models:** `ran on` counts every run by provider · model · effort, most
+runs first, always printed. Provider is read once per shift from `claude auth
+status` (`firstParty` shows as `anthropic`, a gateway too); effort is what was
+asked for, `inherited` if nothing, since no event reports what ran. Older
+records read `unrecorded`. The `models` line lists each model *inherited*
+runs resolved to — first and last day seen, run count, the CLI version it
+first showed up on — only when there are two or more: a Claude Code release
+can move the inherited model silently. It counts fresh runs that asked for
+no model; a `--resume` is out too, as it can report the bare id where the
+fresh run reported `[1m]`. `claude_version` comes from the init event,
+falling back to the version read at shift start.
 
 **On dollars:** `cost_usd` is the CLI's API-equivalent pricing — real money
 on API-key auth, notional on a subscription plan. Tokens are the ground
@@ -335,11 +337,11 @@ polako stats -runs -since 48h
 
 ```
 run log
-  started               issue                 reason     status    outcome           session                               attempt   cost  tokens  wall
-  2026-08-24T09:00:00Z  scharissis/polako#48  implement  ok        posted questions  0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9        0  $1.10    4.2M   20m
-  2026-08-24T12:30:00Z  scharissis/polako#48  answers    ok        opened pr         6a1d90f3-77b2-4e58-8a0c-1b93ce4d2f71        0  $2.50    6.4M   30m
-  2026-08-25T09:00:00Z  scharissis/polako#49  implement  crash     nothing           b2e7c045-19af-4d6a-b7f1-8c02ea3169d4        0  $0.00  746.5k    5m
-  2026-08-25T09:06:00Z  scharissis/polako#49  resume     ok        opened pr         b2e7c045-19af-4d6a-b7f1-8c02ea3169d4        1  $3.00    5.5M   34m
+  started               issue                 reason     status    outcome           provider   model          effort     session                               attempt   cost  tokens  wall
+  2026-08-24T09:00:00Z  scharissis/polako#48  implement  ok        posted questions  anthropic  claude-opus-5  inherited  0f8c1e22-6b4d-4a01-9c3e-2d5f77a1b0e9        0  $1.10    4.2M   20m
+  2026-08-24T12:30:00Z  scharissis/polako#48  answers    ok        opened pr         anthropic  claude-opus-5  inherited  6a1d90f3-77b2-4e58-8a0c-1b93ce4d2f71        0  $2.50    6.4M   30m
+  2026-08-25T09:00:00Z  scharissis/polako#49  implement  crash     nothing           anthropic  claude-opus-5  high       b2e7c045-19af-4d6a-b7f1-8c02ea3169d4        0  $0.00  746.5k    5m
+  2026-08-25T09:06:00Z  scharissis/polako#49  resume     ok        opened pr         anthropic  claude-opus-5  high       b2e7c045-19af-4d6a-b7f1-8c02ea3169d4        1  $3.00    5.5M   34m
 ```
 
 `session` is the point of it — a session id is what the Claude CLI keeps the
@@ -424,7 +426,9 @@ polako stats -json | jq .
     "outcomes": { "nothing": 3, "opened_pr": 3, "posted_questions": 1 },
     "turns": 131,
     "tool_uses": 115,
-    "approximated": 1
+    "approximated": 1,
+    "ran_on": [{ "provider": "anthropic", "model": "claude-opus-5", "effort": "inherited", "runs": 5 },
+               { "provider": "anthropic", "model": "claude-sonnet-5", "effort": "inherited", "runs": 2 }]
   },
   "cost": {
     "total_usd": 8.1,
@@ -447,10 +451,10 @@ polako stats -json | jq .
 
 Field for field, this is `polako stats` above: `source` is the
 `read`/`window`/`repos` line, `issues`/`runs`/`cost`/`latency` the four
-summary sections, `epochs` the `models` line — always there, `[]` when
-the line isn't printed, each entry adding `first_claude_version` when the
-records have one. `-by` and `run_log` are top-level fields present only
-when given:
+summary sections (`runs.ran_on` the `ran on` line), `epochs` the `models`
+line — always there, `[]` when the line isn't printed, each entry adding
+`first_claude_version` when the records have one. `-by` and `run_log` are
+top-level fields present only when given:
 
 ```bash
 polako stats -json -by tag -runs | jq '.by, .run_log[0]'
@@ -466,8 +470,9 @@ polako stats -json -by tag -runs | jq '.by, .run_log[0]'
 }
 {
   "started": "2026-08-20T09:00:00Z", "repo": "scharissis/polako", "issue": 12,
-  "reason": "implement", "status": "ok", "outcome": "posted_questions",
-  "session": "s12a", "attempt": 0, "cost_usd": 1.1, "tokens": 4232000, "wall_seconds": 1200
+  "reason": "implement", "status": "ok", "outcome": "posted_questions", "provider": "anthropic",
+  "model": "claude-opus-5", "effort": "inherited", "session": "s12a", "attempt": 0,
+  "cost_usd": 1.1, "tokens": 4232000, "wall_seconds": 1200
 }
 ```
 
