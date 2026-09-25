@@ -410,6 +410,14 @@ re-reading the same comments every poll. It needs no branch-protection
 review rule either: it reads the reviews themselves, not GitHub's summary
 `reviewDecision`, empty in that case.
 
+**`-poll` is the full-check interval, with a free check in between.** Every
+15s a wait on a PR or a reply asks GitHub whether it changed, sending back
+the last ETag; unchanged is a 304, which costs no rate limit. A change runs
+the full check at once, so a merge or a reply shows in seconds; a bot's
+comment wakes it but the wait goes on. Red checks don't reliably change the
+PR, so they still wait for `-poll`. The log line says both: `next full check
+in 5m0s, a free one every 15s`.
+
 ## Which model and effort a run gets
 
 Every run is one `claude -p` process; its model and effort decide most of
