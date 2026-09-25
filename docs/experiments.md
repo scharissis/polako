@@ -126,17 +126,6 @@ design in [behaviour.md](behaviour.md#which-model-and-effort-a-run-gets);
 `remediation-effort-medium` waited on the `-remediation-effort` knob and could
 not be filed until it shipped (#365).
 
-### Plan and health runs
-
-`stats` skips `plan` and `health` records, so `stats -by tag` can't settle
-`plan-best`. This can — each tag and model's runs, spend and issues filed:
-
-```bash
-jq -s 'map(select(.kind == "plan")) | group_by([.tag, .model]) | map({tag: .[0].tag, model: .[0].model, runs: length, cost_usd: (map(.cost_usd) | add), issues_created: (map(.issues_created) | add)})' ~/.polako/metrics/*.jsonl
-```
-
-Swap `"plan"` for `"health"` to compare `health` runs the same way.
-
 The `visual-evidence-on`, `evidence-preview` and `evidence-webserver` rows
 come from `docs/plans/visual-evidence.md` (retired: every issue it proposed —
 #399's six children, #400-#405 — closed). Its durable design already lives in
@@ -174,3 +163,14 @@ the model's doing, such as a refused git credential:
 ```bash
 jq -s '(map(select(.kind == "run" and .reason == "implement")) | map({key: "\(.repo)#\(.issue)", value: .model}) | from_entries) as $m | map(select(.kind == "issue")) | group_by($m["\(.repo)#\(.issue)"]) | map({model: $m["\(.[0].repo)#\(.[0].issue)"], merged: map(select(.outcome == "merged")) | length, parked: map(select(.outcome == "needs_human") | .park_reason)})' ~/.polako/metrics/*.jsonl
 ```
+
+### Plan and health runs
+
+`stats` skips `plan` and `health` records, so `stats -by tag` can't settle
+`plan-best`. This can — each tag and model's runs, spend and issues filed:
+
+```bash
+jq -s 'map(select(.kind == "plan")) | group_by([.tag, .model]) | map({tag: .[0].tag, model: .[0].model, runs: length, cost_usd: (map(.cost_usd) | add), issues_created: (map(.issues_created) | add)})' ~/.polako/metrics/*.jsonl
+```
+
+Swap `"plan"` for `"health"` to compare `health` runs the same way.
