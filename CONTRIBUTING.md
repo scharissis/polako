@@ -163,9 +163,10 @@ claude --plugin-dir C:\path\to\polako %*
 chmod +x ~/bin/claude-tip && polako -claude ~/bin/claude-tip
 ```
 
-Both startup probes are ordinary `claude` invocations — `claude --version` and
-`claude plugin list --json` — so a wrapper that `exec`s the real thing carries
-them through — and the second one then lists the tree's copy at `session` scope
+The startup probes are ordinary `claude` invocations — `claude --version`,
+`claude auth status --json` (only its `apiProvider` is kept) and `claude plugin
+list --json` — so a wrapper that `exec`s the real thing carries them through —
+and the last one then lists the tree's copy at `session` scope
 beside whatever is installed. That session copy is the version the supervisor
 reports and records, because it is the one replacing the install for the run; a
 stale install left behind does not shadow it. The `init` event above still names
