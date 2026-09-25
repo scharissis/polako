@@ -294,7 +294,7 @@ func TestStatsWindowTodayFiltersToLocalMidnight(t *testing.T) {
 		`{"v":1,"kind":"run","ts":"2026-08-25T09:00:00Z","repo":"r/r","issue":2,"status":"ok","cost_usd":2,"outcome":"opened_pr"}`,
 	)
 	var out strings.Builder
-	if err := runStats([]string{"-metrics", dir, "-window", "today"}, &out, io.Discard, now, report{}); err != nil {
+	if err := runStatsWith(offlineStats, []string{"-metrics", dir, "-window", "today"}, &out, io.Discard, now, report{}); err != nil {
 		t.Fatalf("stats -window today: %v", err)
 	}
 	got := out.String()
@@ -422,7 +422,7 @@ func TestPlanCostNoProbeCallWithoutSamples(t *testing.T) {
 func TestExplicitSinceBeatsAWindowEnvDefault(t *testing.T) {
 	t.Setenv(envVarName("window"), "week")
 	var out bytes.Buffer
-	if err := runStats([]string{"-since", "1h", "-metrics", fixtureDir(t)}, &out, io.Discard, fixtureNow, report{}); err != nil {
+	if err := runStatsWith(offlineStats, []string{"-since", "1h", "-metrics", fixtureDir(t)}, &out, io.Discard, fixtureNow, report{}); err != nil {
 		t.Fatalf("runStats: %v", err)
 	}
 	if strings.Contains(out.String(), "for week") || strings.Contains(out.String(), "anchor:") {
@@ -437,7 +437,7 @@ func TestExplicitSinceBeatsAWindowEnvDefault(t *testing.T) {
 func TestExplicitWindowBeatsASinceEnvDefault(t *testing.T) {
 	t.Setenv(envVarName("since"), "1h")
 	var out bytes.Buffer
-	if err := runStats([]string{"-window", "today", "-metrics", fixtureDir(t)}, &out, io.Discard, fixtureNow, report{}); err != nil {
+	if err := runStatsWith(offlineStats, []string{"-window", "today", "-metrics", fixtureDir(t)}, &out, io.Discard, fixtureNow, report{}); err != nil {
 		t.Fatalf("runStats: %v", err)
 	}
 	if strings.Contains(out.String(), "in the last") {

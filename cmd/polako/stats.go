@@ -101,6 +101,14 @@ type statsOptions struct {
 // stdout can carry exactly one JSON document and nothing else; in text mode
 // the confirmation still goes to out, unchanged.
 func runStats(args []string, out, errOut io.Writer, now time.Time, rpt report) error {
+	cfg := config{claudeBin: "claude", ghBin: "gh", usageTimeout: defaultUsageProbeTimeout}
+	return runStatsWith(cfg, args, out, errOut, now, rpt)
+}
+
+// runStatsWith is runStats with the binaries it reaches for passed in — the
+// seam a test uses to leave gh out (an empty ghBin resolves nothing) or
+// point it at the fake.
+func runStatsWith(cfg config, args []string, out, errOut io.Writer, now time.Time, rpt report) error {
 	fs := flag.NewFlagSet("stats", flag.ContinueOnError)
 	fs.SetOutput(out)
 	var opt statsOptions
@@ -181,11 +189,10 @@ func runStats(args []string, out, errOut io.Writer, now time.Time, rpt report) e
 		return err
 	}
 	// context.Background() rather than a param this function would have to
-	// grow: the one thing here that reaches outside the process is
-	// probeUsage, best-effort and bounded by its own usageTimeout, so nothing
-	// downstream needs external cancellation the way a long-running drain
-	// does.
-	cfg := config{claudeBin: "claude", usageTimeout: defaultUsageProbeTimeout}
+	// grow: the two things here that reach outside the process, probeUsage
+	// and resolveInFlight, are best-effort and bounded by their own
+	// timeouts, so nothing downstream needs external cancellation the way a
+	// long-running drain does.
 	ds, issues, summary, err := statsReport(context.Background(), cfg, opt, dir, now)
 	if err != nil {
 		return err
@@ -245,6 +252,7 @@ func statsReport(ctx context.Context, cfg config, opt statsOptions, dir string, 
 		return dataset{}, nil, statsSummary{}, err
 	}
 	issues := rollUpIssues(ds)
+	resolution := resolveInFlight(ctx, cfg, issues)
 
 	// The plan-cost cross-check needs the same probe attribution -window
 	// week may already have fetched above, reused here rather than asked
@@ -261,6 +269,7 @@ func statsReport(ctx context.Context, cfg config, opt statsOptions, dir string, 
 	}
 
 	summary := buildStatsSummary(ds, issues, opt, now, bounds, probe)
+	summary.issues.fromGitHub, summary.issues.githubNote = resolution.resolved, resolution.note()
 	return ds, issues, summary, nil
 }
 
@@ -545,6 +554,8 @@ type issuesSummary struct {
 	tokensSplitSum tokenCounts
 	tokensSplitN   int64
 	change         *changeSummary // nil when no terminal issue carries PR data
+	fromGitHub     int            // terminal outcomes resolveInFlight supplied
+	githubNote     string         // why some couldn't be; "" when every lookup answered
 }
 
 type changeSummary struct {
