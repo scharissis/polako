@@ -822,7 +822,7 @@ func checksCell(p statusPR) string {
 	return p.view.checks
 }
 
-// reviewCell says where a PR's reviews stand, in all four cases — including the
+// reviewCell says where a PR's reviews stand, in every case — including the
 // one prView.reviewNote leaves blank, because supervisePR is about to log a
 // remediation for it and has somewhere else to say so. A snapshot has nowhere
 // else.
@@ -830,6 +830,8 @@ func reviewCell(p statusPR) string {
 	switch {
 	case !p.detailed:
 		return unknownCell
+	case !p.view.changesRequested && p.view.outsiderRequest:
+		return outsiderNote
 	case !p.view.changesRequested:
 		return "clear"
 	case p.view.reviewOutstanding():
