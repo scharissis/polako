@@ -144,7 +144,9 @@ func TestNextShiftLine(t *testing.T) {
 			leftWork{}, "waits on PR #84 and remediates its red CI"},
 		{"open PR, green", parkWork{read: true, prNumber: 84, prState: "OPEN", checks: checksPassing},
 			leftWork{}, "waits on PR #84"},
-		{"closed PR", parkWork{read: true, prNumber: 90, prState: "CLOSED"}, leftWork{}, "waits on PR #90"},
+		// Closed unmerged: still a PR to waitsOnPR, but the drain parks it
+		// again on sight rather than waiting on it.
+		{"closed PR", parkWork{read: true, prNumber: 90, prState: "CLOSED"}, leftWork{}, "parks again — PR #90 is still closed"},
 		{"pushed branch, no PR", parkWork{read: true, branch: "issue-22", onOrigin: true, ahead: 4},
 			leftWork{}, "resumes issue-22 from its 4 commits"},
 		{"nothing pushed", parkWork{read: true, branch: "issue-30"}, leftWork{}, "starts over — nothing was pushed"},

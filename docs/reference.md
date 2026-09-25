@@ -83,10 +83,9 @@ issue #12 already has PR #40 (OPEN) on branch issue-12 — it would wait on that
 
 ### Being told when it needs you: `-notify`
 
-A shift left running overnight goes quiet about what you most want to
-know — an issue parks, or a run stops to ask something — leaving only a
-label on a thread nobody's watching. `-notify` runs a command at each of
-those moments:
+A shift left running overnight goes quiet about what you most want to know —
+an issue parks, or a run stops to ask something — leaving only a label on a
+thread nobody's watching. `-notify` runs a command at each of those moments:
 
 ```bash
 polako work -notify ~/bin/tell-me
@@ -598,12 +597,13 @@ POLAKO_ADD_TOOLS=Bash(echo:*)
 Both the one-issue view and this per-issue print say what happens once the
 label is gone, via the drain's own restart-safety call (`waitsOnPR`,
 issue.go): `waits on PR #84` (`and remediates its red CI` if open and red),
-`resumes issue-390 from its 4 commits` (pushed, no PR), or `starts over —
-nothing was pushed`. A `checks_remediation` park still red warns it will
-likely park again, so fix the branch first. Each names a next step per
-category, `read the thread` with none. A parked `design` request names the
-verb that works it, `polako design -issue 7 resumes issue-7 from its 2
-commits`; `status` ends `polako unpark 7, then polako design -issue 7`.
+`parks again — PR #90 is still closed`, `resumes issue-390 from its 4
+commits` (pushed, no PR), or `starts over — nothing was pushed`. A
+`checks_remediation` park still red warns it will likely park again, so fix
+the branch first. Each names a next step per category, `read the thread`
+with none. A parked `design` request names the verb that works it, `polako
+design -issue 7 resumes issue-7 from its 2 commits`; `status` ends `polako
+unpark 7, then polako design -issue 7`.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |

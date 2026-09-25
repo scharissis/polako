@@ -64,8 +64,10 @@ away a conflict, stayed red on CI, or ran past a cap you set — see
 [Capping what a shift spends](run-data.md#capping-what-a-shift-spends) —
 gets *parked*: `needs-human` goes on, a comment explains why and ends with a
 `Park: <category>` line, and the drain moves on. The label takes it out of
-the queue; remove it to put the issue back. The process exits 0 and
-summarizes what merged, what parked, and why:
+the queue; remove it to put the issue back. Behind a closed PR it just parks
+again, since GitHub can't delete one: reopen the PR first, or file a fresh
+issue and close this one to start over. The process exits 0 and summarizes
+what merged, what parked, and why:
 
 ```
 summary: 3 issues merged, 1 issue parked, $18.40 spent, 6h12m of wall clock
@@ -134,8 +136,7 @@ is the attended step that line runs.
 
 When the ask was only an earlier turn, polako resumes first if there's work
 to resume into, telling it outright that its turn ends the process. If it
-finds nothing, it parks — a machine can't tell what "decided nothing"
-meant.
+finds nothing, it parks — a machine can't tell what "decided nothing" meant.
 
 Resumes are capped at **two per issue**, off the same allowance a crash
 resume uses, not `-retries` (which counts consecutive *fruitless crashes*
@@ -392,11 +393,10 @@ at `ACTION_REQUIRED` or `WAITING`) reports as `needs a human` instead, so a
 real failure beside a gated check is still seen.
 
 **Requesting changes on the PR is an instruction, not a dead end.** Review
-it as you would anyone's; asking for changes gets the next poll to
-dispatch a run that reads what you wrote — bodies and line comments —
-makes the changes, gets the suite passing, and pushes, then waits again: a
-re-review is yours to give, and the run may not dismiss, resolve, or merge
-it.
+it as you would anyone's; asking for changes gets the next poll to dispatch
+a run that reads what you wrote — bodies and line comments — makes the
+changes, gets the suite passing, and pushes, then waits again: a re-review
+is yours to give, and the run may not dismiss, resolve, or merge it.
 
 Whether a review's answered is read off GitHub, not remembered, so a
 restarted shift reaches the same conclusion: a review counts as outstanding

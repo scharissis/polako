@@ -1228,6 +1228,54 @@ func TestDrainParksADeadIssueAndKeepsGoing(t *testing.T) {
 	}
 }
 
+// A PR closed without merging parks its issue without a claude run: restart
+// safety covers any PR on issue-N, closed ones included. GitHub can't delete
+// that PR, so the park comment's own "remove the label" would only park the
+// issue again — the reason has to name the two ways out that work.
+func TestDrainParksAClosedUnmergedPRAndNamesTheWayOut(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		PRs:    map[string]*fakePR{"issue-1": {Number: 9, State: "CLOSED"}},
+		Labels: []string{needsHumanLabel},
+	})
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a closed PR must park its issue, not end the drain: %v", err)
+	}
+
+	for _, line := range readRecords(t, records, cfg.repo) {
+		if strings.Contains(line, `"kind":"run"`) {
+			t.Errorf("a closed PR must not start a run:\n%s", line)
+		}
+	}
+	if recs := terminalRecords(t, records, cfg.repo); len(recs) != 1 || recs[0].Outcome != issueClosed {
+		t.Errorf("terminal records = %+v, want one %s", recs, issueClosed)
+	}
+
+	st := finalGhState(t, path)
+	is := st.Issues["1"]
+	if !slices.Contains(is.Labels, needsHumanLabel) {
+		t.Errorf("issue 1 labels = %v, want %s", is.Labels, needsHumanLabel)
+	}
+	body := is.Bodies[is.Comments]
+	for _, want := range []string{
+		"PR #9 was closed without merging",
+		"Reopen it to carry on, or file a fresh issue and close this one to start over.",
+		parkCategoryFooter(parkPRClosed),
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("park comment is missing %q\ngot:\n%s", want, body)
+		}
+	}
+	if want := "issue #1 needs a human: PR #9 was closed without merging"; !strings.Contains(buf.String(), want) {
+		t.Errorf("log is missing %q\ngot:\n%s", want, buf.String())
+	}
+}
+
 // An origin that cannot be fetched stops the shift before a run is paid for:
 // the run would work from a base of unknown age and could not push. Stopped, not
 // parked — issue 2 would meet the same dead remote, and a park apiece would

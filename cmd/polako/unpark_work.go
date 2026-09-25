@@ -145,12 +145,17 @@ func (w parkWork) pr() *pullRequest {
 // nothing was pushed. local is the zero value unless readParkedIssues was
 // asked to read it (issue #534) — a zero value never
 // satisfies salvageable(), so this falls through to today's wording exactly
-// as before wherever local work wasn't read.
+// as before wherever local work wasn't read. A closed PR is still a PR to
+// waitsOnPR, but superviseToClose parks it again on sight, so the line says
+// that rather than promise a wait.
 func nextShiftLine(w parkWork, local leftWork) string {
 	if !w.read {
 		return "not read"
 	}
 	if pr := w.pr(); waitsOnPR(pr) {
+		if pr.State == "CLOSED" {
+			return fmt.Sprintf("parks again — PR #%d is still closed", pr.Number)
+		}
 		line := fmt.Sprintf("waits on PR #%d", pr.Number)
 		if w.checks == checksFailing {
 			// readParkWork only ever sets w.checks once it has confirmed the
@@ -196,6 +201,13 @@ func parkNextShift(it parkListItem) string {
 // here is a bug: TestParkNextStepCoversEveryCategory walks parkReasonOrder
 // and fails if any of them turns up without a sentence, so a new category
 // can't ship without one.
+//
+// parkPRClosed can't say "delete the PR": GitHub has no such thing, and a
+// closed PR on issue-N blocks every rerun (waitsOnPR), so unparking alone
+// parks it straight back. A fresh issue gets a fresh branch — the one way to
+// start over that keeps restart safety intact. The unpark half goes last in
+// both PR sentences because printUnparkNextStep appends "then: polako unpark
+// -apply N" to whatever the sentence ends with.
 var parkNextStepTable = map[string]string{
 	parkBudget:    "the work is on the branch — finish it by hand, or rerun with a higher -max-issue-time or -max-cost",
 	parkChecks:    "fix the failing check on the PR, then unpark",
@@ -203,8 +215,8 @@ var parkNextStepTable = map[string]string{
 	parkReview:    "resolve the review on the PR, then unpark",
 	parkNothing:   "check the issue says what to change, then unpark to retry",
 	parkRetries:   "check claude runs at all on this machine, then unpark to retry",
-	parkPRClosed:  "reopen or delete the PR, then unpark",
-	parkPRState:   "reopen or delete the PR, then unpark",
+	parkPRClosed:  "to start over, file a fresh issue and close this one; or reopen the PR, then unpark",
+	parkPRState:   "check the PR on GitHub, then unpark once it's open or merged",
 	parkNoSkill:   "read the thread — these end a shift, they rarely park",
 	parkAuth:      "read the thread — these end a shift, they rarely park",
 	parkUnknown:   "read the thread — these end a shift, they rarely park",
