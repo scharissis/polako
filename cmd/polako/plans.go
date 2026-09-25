@@ -17,8 +17,12 @@ package main
 // edited after the fact. canonicalPlanDocPath resolves that alias before
 // grouping, so an old and a new footer for the same document still group
 // together, and planDocArchived checks docs/designs/done/ too before
-// anything is reported gone — the done/ move itself is a separate,
-// not-yet-built feature, but the alias has to look there already.
+// anything is reported gone.
+//
+// A finished design moves to docs/designs/done/<x>.md, unchanged (issue
+// #620). The folder is the status: a file there reads done whatever its
+// footers say, and its footers still name docs/designs/<x>.md, the path it
+// had when they were filed.
 
 import (
 	"context"
@@ -41,10 +45,11 @@ const planDocsLimit = 200
 
 // planDocsDir is where design documents live today. planDocsDirAlias is
 // where an issue's footer may still say they live — see the package doc
-// comment above.
+// comment above. planDocsDoneDir is where a finished one moves to.
 const (
 	planDocsDir      = "docs/designs"
 	planDocsDirAlias = "docs/plans"
+	planDocsDoneDir  = planDocsDir + "/done"
 )
 
 // planFooterSearchPhrase is what the gh search asks for: planFooterPrefix,
@@ -164,6 +169,11 @@ func readPlanDocs(ctx context.Context, cfg config) (planDocsSnapshot, error) {
 		for _, path := range local {
 			snap.docs = append(snap.docs, planDocStatusFrom(path, byDoc[path]))
 		}
+		for _, path := range localDoneDocs(cfg.dir) {
+			d := planDocStatusFrom(path, byDoc[planDocsDir+"/"+strings.TrimPrefix(path, planDocsDoneDir+"/")])
+			d.state = planDone
+			snap.docs = append(snap.docs, d)
+		}
 		for _, doc := range sortedKeys(byDoc) {
 			if localSet[doc] || planDocArchived(cfg.dir, doc) {
 				continue
@@ -224,16 +234,14 @@ func canonicalPlanDocPath(doc string) string {
 }
 
 // planDocArchived reports whether doc — already canonicalized to
-// docs/designs/<name>.md — has been moved under docs/designs/done/. Moving
-// documents there once they're done is a separate, not-yet-built feature;
-// this only keeps the gone check from misreporting one that already made
-// that move by hand.
+// docs/designs/<name>.md — has been moved under docs/designs/done/, so the
+// gone check doesn't report a finished design as deleted.
 func planDocArchived(dir, doc string) bool {
 	rest, ok := strings.CutPrefix(doc, planDocsDir+"/")
 	if !ok {
 		return false
 	}
-	_, err := os.Stat(filepath.Join(dir, filepath.FromSlash(planDocsDir), "done", rest))
+	_, err := os.Stat(filepath.Join(dir, filepath.FromSlash(planDocsDoneDir), rest))
 	return err == nil
 }
 
@@ -248,8 +256,9 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-// localPlanDocs lists the *.md files under docs/designs in the given
-// checkout, logical forward-slash paths (docs/designs/foo.md) matching how a
+// localPlanDocs lists the *.md files directly under docs/designs in the given
+// checkout — not done/, which localDoneDocs reads, so a finished design is
+// never mistaken for a draft — logical forward-slash paths (docs/designs/foo.md) matching how a
 // footer names them regardless of host OS. ok is false when the directory
 // could not be read at all — distinct from a real, empty directory — so the
 // caller never mistakes "couldn't check" for "confirmed gone".
@@ -266,6 +275,24 @@ func localPlanDocs(dir string) (docs []string, ok bool) {
 	}
 	slices.Sort(docs)
 	return docs, true
+}
+
+// localDoneDocs lists the *.md files under docs/designs/done, the same shape
+// as localPlanDocs. A missing done/ is the common case and just means none.
+func localDoneDocs(dir string) []string {
+	entries, err := os.ReadDir(filepath.Join(dir, filepath.FromSlash(planDocsDoneDir)))
+	if err != nil {
+		return nil
+	}
+	var docs []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		docs = append(docs, planDocsDoneDir+"/"+e.Name())
+	}
+	slices.Sort(docs)
+	return docs
 }
 
 // planDocStatusFrom derives one document's line from the issues whose

@@ -128,7 +128,7 @@ design in [behaviour.md](behaviour.md#which-model-and-effort-a-run-gets);
 not be filed until it shipped (#365).
 
 The `visual-evidence-on`, `evidence-preview` and `evidence-webserver` rows
-come from `docs/plans/visual-evidence.md` (retired: every issue it proposed —
+come from [`docs/designs/done/visual-evidence.md`](designs/done/visual-evidence.md) (retired: every issue it proposed —
 #399's six children, #400-#405 — closed). Its durable design already lives in
 `skills/implement-issue/SKILL.md`'s Evidence ref section, `docs/security.md`
 and `docs/reference.md`; these three rows are the only part of the plan that
@@ -140,14 +140,14 @@ on a PR opened before capture existed, and the review run said it had no
 browser. The `review-shots` row is its batch.
 
 The `model-by-size`, `size-backfill` and `long-tail` rows come from
-`docs/plans/tiered-orchestration.md` (retired: every issue it proposed —
+[`docs/designs/done/tiered-orchestration.md`](designs/done/tiered-orchestration.md) (retired: every issue it proposed —
 #393's three children — closed). That assessment said no to a triage tier and
 an orchestrator, drafted `-model-by-size` and the escalation-by-label passage
 instead (both shipped: #395, #396), and left two further tickets gated behind
 these two rows rather than filing them — a per-issue triage run, and a single
 awaited subagent — pending on the data these rows produce.
 
-The `setup-claude-md` row comes from `docs/plans/setup.md` (retired: every
+The `setup-claude-md` row comes from [`docs/designs/done/setup.md`](designs/done/setup.md) (retired: every
 issue it proposed — #411's seven children — closed). Its durable design
 already lives in `docs/setup.md`, `docs/behaviour.md` and CLAUDE.md's own
 `setup` invariant; this row is the only part of the plan the tickets

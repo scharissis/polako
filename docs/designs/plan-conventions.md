@@ -25,8 +25,10 @@ written down. It is derived from the issues that name the plan.**
 - **Phases are task lists.** `- [x]` / `- [ ]` inside the document, which
   GitHub renders. This is the one hand-maintained progress marker, and it is
   optional.
-- **A done plan leaves.** Its durable content moves into `docs/` proper before
-  it goes. Git keeps the design record.
+- **A done design moves to `docs/designs/done/`, unchanged.** Behaviour that
+  is now true moves into `docs/` proper; the rationale stays where a path can
+  reach it. Nothing is deleted. The folder is the status, and done is
+  terminal, so it can't rot.
 
 The header keeps `Scope:` and `Behavior change:`. Those describe the plan,
 not its progress, and do not go stale.
@@ -49,9 +51,10 @@ document's state falls out of GitHub alone:
 
 `polako status` gains a plans section: one line per file under
 `docs/designs/`, its derived state, its container issues, and the count of open
-children. A document with no issues prints as draft. An issue whose footer
-names a document that no longer exists prints under a final "gone" line so a
-deleted plan's leftovers are visible.
+children. A document with no issues prints as draft. A document under
+`docs/designs/done/` prints as done, whatever its footers say. An issue whose
+footer names a document found in neither place prints under a final "gone"
+line so a deleted plan's leftovers are visible.
 
 Performance: one call, not one per document. `gh issue list --state all
 --search '"Proposed by polako plan from" in:body' --json
@@ -74,11 +77,12 @@ comments on the thread first (`closeFinishedContainers`). Extend that step:
 after the close, if the container's footer names a document and no other open
 issue names it, file one issue:
 
-    docs: retire docs/designs/foo.md — every issue it proposed is closed
+    docs: move docs/designs/foo.md to done/ — every issue it proposed is closed
 
 Labelled `proposed`, like everything a machine creates. Its body names the
-container that just closed, the document, and the rule: move what is still
-true into `docs/`, delete the file, fix inbound links. The human lifts the
+container that just closed, the document, and the rule: `git mv` it to
+`docs/designs/done/`, fix inbound links, move behaviour that is now true into
+`docs/`. The human lifts the
 gate with one label removal and `implement-issue` does the work. That is
 cleanup through the same gate as everything else. No commit lands on the
 default branch by the drain's hand, and a human still decides.

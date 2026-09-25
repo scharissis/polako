@@ -396,16 +396,16 @@ Below that table, `plan documents` adds one row per file under `docs/designs/`:
 state derived from the naming issues (`docs/designs/plan-conventions.md`'s
 table), their `(completed/total closed)` container epics and open children
 (shape in the JSON example below), and a `gone` line for a footer naming a
-deleted document. Rows sort `active`, `proposed`, `draft`, `done`, then path.
-A closed container renders `#321 (closed)`, not the open-container wording.
-The `gone` line names only a deleted document with an open issue still
-naming it, by that issue; the rest collapse into `(N deleted plans, every
-issue closed)` — `-json` always keeps the full issue list plus a
-per-document `open` count. One capped `gh issue list` call for the section.
-A `done` document still on disk gets its own `needs you` clause: `retire
-docs/designs/foo.md (done — move what's still true into docs/, delete the
-file)` — the same nudge a closing container already gives automatically
-(`docs/designs/plan-conventions.md`'s "Retire on close"), for a document
+deleted document. A file under `docs/designs/done/` is always `done`.
+Rows sort `active`, `proposed`, `draft`, `done`, then path. A closed
+container renders `#321 (closed)`, not the open-container wording. The
+`gone` line names only a deleted document with an open issue still naming
+it, by that issue; the rest collapse into `(N deleted plans, every issue
+closed)` — `-json` always keeps the full issue list plus a per-document
+`open` count. One capped `gh issue list` call for the section. A `done`
+document not yet under `done/` gets its own `needs you` clause: `move
+docs/designs/foo.md to done/ (every issue closed — git mv it, fix inbound
+links)` — the nudge a closing container gives on its own, for a document
 whose issues were never a container.
 
 What it prints is what a shift starting right now would do next, the same

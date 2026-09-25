@@ -970,16 +970,15 @@ func needsYouParts(snap statusSnapshot) []string {
 		parts = append(parts, fmt.Sprintf("close %s (every sub-issue closed; held open by %s or %s)",
 			issueRefs(heldEpics), needsHumanLabel, proposedLabel))
 	}
-	// A done plan document is supposed to leave (docs/designs/plan-conventions.md):
-	// its durable content moves into docs/ and the file goes. The container
-	// route (retire.go) files an issue for this automatically, but only when
-	// a container closes — a document whose issues were all plain, no epic
-	// among them, has nothing filing that issue on its own, so it sits done
-	// and un-retired until a person notices. This is that notice.
+	// A done design moves to docs/designs/done/ (docs/designs/plan-conventions.md).
+	// The container route (retire.go) files an issue for this automatically,
+	// but only when a container closes — a document whose issues were all
+	// plain, no epic among them, has nothing filing that issue on its own, so
+	// it sits done and unmoved until a person notices. This is that notice.
 	for _, d := range snap.plans.docs {
-		if d.state == planDone {
+		if d.state == planDone && !strings.HasPrefix(d.path, planDocsDoneDir+"/") {
 			parts = append(parts, fmt.Sprintf(
-				"retire %s (done — move what's still true into docs/, delete the file)", d.path))
+				"move %s to done/ (every issue closed — git mv it, fix inbound links)", d.path))
 		}
 	}
 	return parts

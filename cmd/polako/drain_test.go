@@ -4545,11 +4545,14 @@ func TestDrainFilesARetireIssueWhenAContainerCloses(t *testing.T) {
 	if !strings.Contains(retired.Body, planFooterPrefix+"docs/designs/foo.md") {
 		t.Errorf("retire issue body = %q, want it to carry the same footer", retired.Body)
 	}
+	if !strings.Contains(retired.Body, "`git mv docs/designs/foo.md docs/designs/done/foo.md`") {
+		t.Errorf("retire issue body = %q, want it to ask for the move to done/", retired.Body)
+	}
 	argv, err := os.ReadFile(calls)
 	if err != nil {
 		t.Fatalf("reading the gh call log: %v", err)
 	}
-	if !strings.Contains(string(argv), "docs: retire docs/designs/foo.md — every issue it proposed is closed") {
+	if !strings.Contains(string(argv), "docs: move docs/designs/foo.md to done/ — every issue it proposed is closed") {
 		t.Errorf("no call carried the expected title\ngot:\n%s", argv)
 	}
 	want := "retire  #114: docs/designs/foo.md — every issue it proposed is closed"
@@ -4735,6 +4738,30 @@ func TestDrainFilesNoRetireIssueWithoutAPlanFooter(t *testing.T) {
 	}
 	if len(st.Issues) != 1 {
 		t.Errorf("issues = %v, want no retire issue filed", st.Issues)
+	}
+}
+
+// A footer naming a document outside docs/designs/ — the vision, which is
+// never done — has no done/ to move to, so nothing is filed for it.
+func TestDrainFilesNoRetireIssueForADocOutsideDesigns(t *testing.T) {
+	t.Parallel()
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/VISION.md")},
+		},
+		Labels: []string{proposedLabel},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if st.Issues["113"].Open {
+		t.Error("the finished container should still have closed")
+	}
+	if len(st.Issues) != 1 {
+		t.Errorf("issues = %v, want no retire issue filed for docs/VISION.md", st.Issues)
 	}
 }
 
