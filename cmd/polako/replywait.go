@@ -24,9 +24,7 @@ func waitForReply(ctx context.Context, cfg config, issue int, baseline int64) er
 		}
 		comments, err := issueComments(ctx, cfg, issue)
 		if err != nil {
-			if full {
-				cfg.narrate(sevWarning, "transient: checking #%d comments failed (%v) — will retry", issue, err)
-			}
+			cfg.narrate(sevWarning, "transient: checking #%d comments failed (%v) — will retry", issue, err)
 			continue
 		}
 		if replyArrived(comments, baseline) {
@@ -104,7 +102,7 @@ func awaitAnswer(ctx context.Context, cfg config, blocked []int, states map[int]
 				toRead = append(toRead, blocked[i])
 			}
 		}
-		if issue, err := replyOn(ctx, cfg, toRead, states, len(changed) == 0); issue != 0 || err != nil {
+		if issue, err := replyOn(ctx, cfg, toRead, states); issue != 0 || err != nil {
 			return issue, err
 		}
 		if len(changed) == 0 {
@@ -114,18 +112,15 @@ func awaitAnswer(ctx context.Context, cfg config, blocked []int, states map[int]
 }
 
 // replyOn reads each issue's thread and returns the first one a person has
-// answered. full is the -poll check, the only one that reports a read that
-// failed — a failed read after a free check is left to the next full one.
-func replyOn(ctx context.Context, cfg config, issues []int, states map[int]*issueState, full bool) (int, error) {
+// answered.
+func replyOn(ctx context.Context, cfg config, issues []int, states map[int]*issueState) (int, error) {
 	for _, issue := range issues {
 		comments, err := issueComments(ctx, cfg, issue)
 		if err != nil {
 			if ctx.Err() != nil {
 				return 0, ctx.Err()
 			}
-			if full {
-				cfg.narrate(sevWarning, "transient: checking #%d comments failed (%v) — will retry", issue, err)
-			}
+			cfg.narrate(sevWarning, "transient: checking #%d comments failed (%v) — will retry", issue, err)
 			continue
 		}
 		baseline := states[issue].baseline
