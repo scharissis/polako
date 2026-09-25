@@ -214,6 +214,16 @@ func capture(ctx context.Context, dir string, env []string, name string, args ..
 
 // captureIn is capture with stdin; nil reads nothing, as capture does.
 func captureIn(ctx context.Context, dir string, env []string, stdin io.Reader, name string, args ...string) ([]byte, error) {
+	out, err := captureAll(ctx, dir, env, stdin, name, args...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// captureAll is captureIn that keeps stdout when the command fails, for
+// `gh api -i`: a 304 exits 1 with its status line on stdout (peek.go).
+func captureAll(ctx context.Context, dir string, env []string, stdin io.Reader, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = childEnv(env)
@@ -223,9 +233,9 @@ func captureIn(ctx context.Context, dir string, env []string, stdin io.Reader, n
 	out, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return out, ctx.Err()
 		}
-		return nil, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err,
+		return out, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err,
 			strings.TrimSpace(errBuf.String()))
 	}
 	return out, nil

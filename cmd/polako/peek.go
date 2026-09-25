@@ -17,7 +17,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -126,13 +125,9 @@ func (w *etagWatch) check(ctx context.Context, cfg config) bool {
 		// A weak W/"…" ETag works sent back as-is.
 		args = append(args, "-H", "If-None-Match: "+w.etag)
 	}
-	// Not capture: gh exits 1 on a 304 (stderr "gh: HTTP 304", gh 2.101.0),
-	// and capture drops stdout on a non-zero exit. The status line is read off
-	// stdout instead, whatever the exit code.
-	cmd := exec.CommandContext(ctx, cfg.ghBin, ghArgs(cfg.ghRepo, args)...)
-	cmd.Dir = cfg.dir
-	cmd.Env = childEnv(cfg.env)
-	out, _ := cmd.Output()
+	// gh exits 1 on a 304 (stderr "gh: HTTP 304", gh 2.101.0), so the status
+	// line is read off stdout whatever the exit code.
+	out, _ := captureAll(ctx, cfg.dir, cfg.env, nil, cfg.ghBin, ghArgs(cfg.ghRepo, args)...)
 	status, etag := parsePeek(out)
 	switch {
 	case status != 200:
