@@ -106,40 +106,53 @@ func awaitAnswer(ctx context.Context, cfg config, blocked []int, states map[int]
 				toRead = append(toRead, blocked[i])
 			}
 		}
-		if issue, err := replyOn(ctx, cfg, toRead, states, notes, full); issue != 0 || err != nil {
+		issue, newBots, err := replyOn(ctx, cfg, toRead, states, notes, full)
+		if issue != 0 || err != nil {
 			return issue, err
 		}
-		if full {
+		// A new bot comment is the one change that means keep waiting. Anything
+		// else — a label taken off, the issue closed, an edit — may have moved
+		// the queue, and re-deriving it outranks waiting, so say so now rather
+		// than at -poll.
+		if full || !newBots {
 			return 0, nil
 		}
 	}
 }
 
 // replyOn reads each issue's thread and returns the first one a person has
-// answered. notes is the bot note each thread last logged, so an early wake
-// repeats one only when a new bot comment is behind it; the full check logs
-// it regardless, as it always has.
+// answered, and whether any thread gained a bot comment since the last read.
+// notes is the bot note each thread last logged, so an early wake repeats one
+// only when a new bot comment is behind it; the full check logs it regardless,
+// as it always has.
 func replyOn(ctx context.Context, cfg config, issues []int, states map[int]*issueState,
-	notes map[int]string, full bool) (int, error) {
+	notes map[int]string, full bool) (int, bool, error) {
+	newBots := false
 	for _, issue := range issues {
 		comments, err := issueComments(ctx, cfg, issue)
 		if err != nil {
 			if ctx.Err() != nil {
-				return 0, ctx.Err()
+				return 0, false, ctx.Err()
 			}
 			cfg.narrate(sevWarning, "transient: checking #%d comments failed (%v) — will retry", issue, err)
+			// Unread, so not known to be anything but a bot: keep waiting.
+			newBots = true
 			continue
 		}
 		baseline := states[issue].baseline
 		if replyArrived(comments, baseline) {
 			cfg.logf("somebody replied on #%d — re-running to fold the answers in", issue)
 			states[issue].answered = true
-			return issue, nil
+			return issue, false, nil
 		}
-		if note := botsOnly(comments, baseline); note != "" && (full || note != notes[issue]) {
+		note := botsOnly(comments, baseline)
+		if note != notes[issue] {
+			newBots = true
+		}
+		if note != "" && (full || note != notes[issue]) {
 			cfg.logf("issue #%d still awaiting a reply%s", issue, note)
 			notes[issue] = note
 		}
 	}
-	return 0, nil
+	return 0, newBots, nil
 }

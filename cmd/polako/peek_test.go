@@ -50,7 +50,13 @@ func answerPeek(st *ghState, args []string) (string, bool, int) {
 			fmt.Fprintf(os.Stderr, "gh: Not Found (HTTP 404)\n")
 			return "HTTP/2.0 404 Not Found\r\n\r\n{}", false, 1
 		}
-		changed = is.ReplyOnPeek > 0 || is.BotOnPeek > 0
+		changed = is.ReplyOnPeek > 0 || is.BotOnPeek > 0 || is.EditOnPeek > 0
+		if is.EditOnPeek > 0 {
+			is.EditOnPeek--
+			if is.EditOnPeek == 0 {
+				is.Edits++
+			}
+		}
 		if is.ReplyOnPeek > 0 {
 			is.ReplyOnPeek--
 			if is.ReplyOnPeek == 0 {
@@ -64,7 +70,7 @@ func answerPeek(st *ghState, args []string) (string, bool, int) {
 				is.Bots = append(is.Bots, is.Comments)
 			}
 		}
-		etag = fmt.Sprintf(`W/"%d"`, is.Comments)
+		etag = fmt.Sprintf(`W/"%d-%d"`, is.Comments, is.Edits)
 	}
 	if !noETag && !always200 && inm == etag {
 		fmt.Fprintln(os.Stderr, "gh: HTTP 304")
@@ -219,6 +225,26 @@ func TestPeekBotDoesNotEndAwaitAnswer(t *testing.T) {
 	}
 	if states[1].thread == nil || states[1].thread.etag == "" {
 		t.Error("the thread's ETag should outlive the call, for the drain's next pass")
+	}
+}
+
+// A change that isn't a comment — a label taken off, the issue closed — may
+// have moved the queue, so awaitAnswer hands back to the drain at once.
+func TestPeekOtherIssueChangeReDerivesQueueEarly(t *testing.T) {
+	t.Parallel()
+	cfg, _ := peekConfig(t, &ghState{Issues: map[string]*fakeIssue{
+		"1": {Open: true, EditOnPeek: 2},
+	}}, time.Hour, 10*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	states := map[int]*issueState{1: {awaiting: true}}
+
+	issue, err := awaitAnswer(ctx, cfg, []int{1}, states)
+	if err != nil || issue != 0 {
+		t.Fatalf("awaitAnswer = %d, %v; want 0 well before -poll", issue, err)
+	}
+	if states[1].answered {
+		t.Error("an edit is not an answer")
 	}
 }
 

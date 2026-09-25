@@ -196,6 +196,10 @@ type fakeIssue struct {
 	// free check of the issue (answerPeek) rather than the Nth comments read.
 	ReplyOnPeek int `json:"reply_on_peek"`
 	BotOnPeek   int `json:"bot_on_peek"`
+	// EditOnPeek is a change that isn't a comment — a label taken off, an
+	// edit — landing on the Nth free check; Edits counts them into the ETag.
+	EditOnPeek int `json:"edit_on_peek"`
+	Edits      int `json:"edits"`
 
 	// CloseOnRead is the fourth ending (#210), standing in for the skill's own
 	// `gh issue close`: this issue closes on the Nth `issue view` read from
