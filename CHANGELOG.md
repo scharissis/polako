@@ -13,6 +13,31 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.35.0]
+
+### What's Changed
+* fix: plan and health tell their skill the -max-issues cap by @scharissis in https://github.com/scharissis/polako/pull/634 (closes #589)
+* fix: review-health eval fails a gh read the skill forbids by @scharissis in https://github.com/scharissis/polako/pull/635 (closes #590)
+* fix: don't start a run after polako's own fetch fails on auth by @scharissis in https://github.com/scharissis/polako/pull/636 (closes #595)
+* fix: name all three run-data readers and show remediation settings at startup by @scharissis in https://github.com/scharissis/polako/pull/637 (closes #600)
+* fix: pass effort on a resume, and refuse an effort the env overrides by @scharissis in https://github.com/scharissis/polako/pull/638 (closes #605)
+* feat: stats lists the models inherited runs ran on by @scharissis in https://github.com/scharissis/polako/pull/639 (closes #606)
+* test: port the eval suite to claude plugin eval by @scharissis in https://github.com/scharissis/polako/pull/646 (closes #77)
+* feat: stats -by tag notes a batch whose model moved under it by @scharissis in https://github.com/scharissis/polako/pull/649 (closes #607)
+* feat: the session line says where its model came from by @scharissis in https://github.com/scharissis/polako/pull/650 (closes #608)
+* feat: status's last-shift line names the model by @scharissis in https://github.com/scharissis/polako/pull/651 (closes #609)
+* docs: plan and health runs compare by a jq recipe, not stats by @scharissis in https://github.com/scharissis/polako/pull/652 (closes #610)
+* docs: the improvement ritual learns about model changes by @scharissis in https://github.com/scharissis/polako/pull/653 (closes #611)
+* docs: retire docs/designs/status.md — every issue it proposed is closed by @scharissis in https://github.com/scharissis/polako/pull/654 (closes #612)
+* feat: a review remediation can take and post screenshots by @scharissis in https://github.com/scharissis/polako/pull/655
+* fix: a closed PR's park names a way out that works by @scharissis in https://github.com/scharissis/polako/pull/656
+* fix: only a collaborator's review dispatches a review run by @scharissis in https://github.com/scharissis/polako/pull/657
+* feat: stats always shows each run's provider, model and effort by @scharissis in https://github.com/scharissis/polako/pull/658 (closes #613)
+* feat: every PR says which provider, model and effort worked on it by @scharissis in https://github.com/scharissis/polako/pull/659 (closes #614)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.34.0...v0.35.0
+
 ## [0.34.0]
 
 ### What's Changed
