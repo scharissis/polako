@@ -45,7 +45,7 @@ func render(w io.Writer, rpt report, ds dataset, issues []*issueStats, summary s
 	switch opt.by {
 	case byIssue:
 		printIssueTable(w, rpt, issues)
-	case byModel, byTag, byShift, byReason:
+	case byModel, byTag, byShift, byReason, byVersion:
 		printGroupTable(w, rpt, ds, issues, opt.by)
 	}
 	// Last, because it is the rawest view of the same rows every summary above

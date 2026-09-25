@@ -38,15 +38,16 @@ import (
 // food, so this command answers the questions worth a flag and leaves the long
 // tail to those.
 const (
-	byIssue  = "issue"
-	byModel  = "model"
-	byTag    = "tag"
-	byShift  = "shift"
-	byReason = "reason"
+	byIssue   = "issue"
+	byModel   = "model"
+	byTag     = "tag"
+	byShift   = "shift"
+	byReason  = "reason"
+	byVersion = "version"
 )
 
 // byGroups is the whitelist and the order the error message lists them in.
-var byGroups = []string{byIssue, byModel, byTag, byShift, byReason}
+var byGroups = []string{byIssue, byModel, byTag, byShift, byReason, byVersion}
 
 // The -window values. Each resolves to a from/periodEnd pair rather than a
 // bare cutoff — the calendar boundary is what the header's progress line

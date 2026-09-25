@@ -1,7 +1,7 @@
 package main
 
 // The `-by` breakdown: grouping run records by whatever configuration or
-// provenance value is under test (model, tag, shift, reason) and rendering
+// provenance value is under test (model, tag, shift, reason, version) and rendering
 // one row per group. Split out of stats.go (issue #149's accretion debt) as
 // a verbatim, self-contained unit — nothing here reaches back into the rest
 // of that file beyond the shared types and helpers every renderer uses.
@@ -128,6 +128,10 @@ func groupTotals(ds dataset, by string) (groups map[string]*statGroup, order []s
 			// "reasons" summary line render reason this same way, and a group
 			// name is exactly the kind of place that convention exists for.
 			name = label(r.Reason)
+		case byVersion:
+			// The plugin's version, not the binary's: Claude Code caches a
+			// plugin by version, so this is the one that pins the skill's text.
+			name = r.PluginVersion
 		default:
 			name = r.Tag
 		}
@@ -144,6 +148,10 @@ func groupTotals(ds dataset, by string) (groups map[string]*statGroup, order []s
 		g.tokens += r.Tokens.total()
 		g.issues[issueKey{r.Repo, r.Issue}] = true
 	}
+	if by == byVersion {
+		sort.SliceStable(order, func(i, j int) bool { return versionBefore(order[i], order[j]) })
+		return groups, order
+	}
 	sort.SliceStable(order, func(i, j int) bool {
 		a, b := groups[order[i]], groups[order[j]]
 		if a.cost != b.cost {
@@ -152,6 +160,25 @@ func groupTotals(ds dataset, by string) (groups map[string]*statGroup, order []s
 		return a.name < b.name
 	})
 	return groups, order
+}
+
+// versionBefore orders -by version rows oldest first, so the runs before and
+// after a skill change read as two adjacent stretches rather than wherever
+// cost puts them. (none) leads, since it is mostly records older than the
+// field; a string that names no release (a hand-built plugin) trails, by name.
+func versionBefore(a, b string) bool {
+	if (a == noneGroup) != (b == noneGroup) {
+		return a == noneGroup
+	}
+	_, ap, aok := releaseVersion(a)
+	_, bp, bok := releaseVersion(b)
+	switch {
+	case aok && bok:
+		return semverLess(ap, bp)
+	case aok != bok:
+		return aok
+	}
+	return a < b
 }
 
 // mergedIssues is the issue's own final outcome, so every group that worked
