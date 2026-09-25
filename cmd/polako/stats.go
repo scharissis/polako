@@ -252,7 +252,13 @@ func statsReport(ctx context.Context, cfg config, opt statsOptions, dir string, 
 		return dataset{}, nil, statsSummary{}, err
 	}
 	issues := rollUpIssues(ds)
-	resolution := resolveInFlight(ctx, cfg, issues)
+	// -shift reports that shift's verdict, not the issue's fate: another
+	// shift's terminal record was filtered out on purpose, and asking GitHub
+	// would fill it back in — counting one merge under both shifts.
+	var resolution prResolution
+	if opt.shift == "" {
+		resolution = resolveInFlight(ctx, cfg, issues)
+	}
 
 	// The plan-cost cross-check needs the same probe attribution -window
 	// week may already have fetched above, reused here rather than asked

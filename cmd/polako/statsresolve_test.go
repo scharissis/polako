@@ -122,6 +122,20 @@ func TestStatsResolvedCountsReachJSONAndTheByTable(t *testing.T) {
 	}
 }
 
+// -shift is that shift's verdict: another shift's merge record was filtered
+// out on purpose, so GitHub isn't asked to fill it back in.
+func TestStatsShiftFilterLeavesResolutionOff(t *testing.T) {
+	t.Parallel()
+	cfg, dir := resolveCfg(t), resolveDir(t)
+	var out bytes.Buffer
+	if err := runStatsWith(cfg, []string{"-metrics", dir, "-shift", noneGroup}, &out, io.Discard, fixtureNow, report{}); err != nil {
+		t.Fatalf("stats -shift: %v", err)
+	}
+	if got := out.String(); strings.Contains(got, "from GitHub") || !hasLine(got, "in flight 5") {
+		t.Errorf("-shift should leave every issue in flight, unresolved:\n%s", got)
+	}
+}
+
 // An unreachable gh — here, one that isn't there at all — leaves every issue
 // in flight and still prints the report.
 func TestStatsUnreachableGitHubNeverFailsTheReport(t *testing.T) {
