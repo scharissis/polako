@@ -7,8 +7,9 @@ import (
 	"testing"
 )
 
-// firstParty reads as anthropic, an unprobed provider passes through verbatim,
-// and a CLI without `auth status` leaves the field empty rather than failing.
+// firstParty reads as anthropic, an unprobed provider passes through verbatim
+// — even on the exit 1 a CLI with no claude.ai login answers with — and a CLI
+// without `auth status` leaves the field empty rather than failing.
 func TestClaudeProviderReadsOnlyTheProvider(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ reply, want string }{

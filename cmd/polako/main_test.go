@@ -328,8 +328,13 @@ func fakeClaude(mode string) int {
 		if provider == "fail" {
 			return 1 // an older CLI with no such command
 		}
-		emit(`{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"` + provider + `",` +
+		emit(`{"loggedIn":` + strconv.FormatBool(provider == "firstParty") + `,"authMethod":"claude.ai","apiProvider":"` + provider + `",` +
 			`"email":"` + fakeAuthEmail + `","orgId":"org-123","orgName":"Fake Org","subscriptionType":"max"}`)
+		// Any provider but firstParty models no claude.ai login, which the
+		// real CLI reports with exit 1 and the JSON still printed.
+		if provider != "firstParty" {
+			return 1
+		}
 		return 0
 	}
 	// `claude --help` is effortFlagGate's capability probe — argv-dispatched
