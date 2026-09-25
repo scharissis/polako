@@ -62,7 +62,9 @@ func retireOrphanedDoc(ctx context.Context, cfg config, c containerInfo, filedTh
 	// it the same way readPlanDocs (plans.go) does, so this step's own search
 	// and its retire issue both name today's docs/designs/<x>.md.
 	footer.doc = canonicalPlanDocPath(footer.doc)
-	if filedThisCall[footer.doc] {
+	// Only a design has a done/ to move to. A footer naming anything else —
+	// docs/VISION.md, which is never done — gets no issue.
+	if !strings.HasPrefix(footer.doc, planDocsDir+"/") || filedThisCall[footer.doc] {
 		return retiredDoc{}, false, nil
 	}
 

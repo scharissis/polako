@@ -4741,6 +4741,30 @@ func TestDrainFilesNoRetireIssueWithoutAPlanFooter(t *testing.T) {
 	}
 }
 
+// A footer naming a document outside docs/designs/ — the vision, which is
+// never done — has no done/ to move to, so nothing is filed for it.
+func TestDrainFilesNoRetireIssueForADocOutsideDesigns(t *testing.T) {
+	t.Parallel()
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"113": {Open: true, SubIssues: 6, SubIssuesCompleted: 6, Body: planFooterLine("docs/VISION.md")},
+		},
+		Labels: []string{proposedLabel},
+	})
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	st := finalGhState(t, path)
+	if st.Issues["113"].Open {
+		t.Error("the finished container should still have closed")
+	}
+	if len(st.Issues) != 1 {
+		t.Errorf("issues = %v, want no retire issue filed for docs/VISION.md", st.Issues)
+	}
+}
+
 // Scope is the queue's scope: a finished container outside -label is neither
 // commented nor closed — it was never this shift's business.
 func TestDrainDoesNotCloseAFinishedContainerOutsideLabelScope(t *testing.T) {
