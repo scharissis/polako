@@ -158,3 +158,48 @@ func TestUnparkPermissionWithOnlyIgnoredEntry(t *testing.T) {
 		t.Errorf("parkNextStep(ignored-only) = %q, want %q", got, parkNextStepUngrantable)
 	}
 }
+
+// GitHub can't delete a PR, and while a closed one sits on issue-N,
+// unparking alone just parks the issue again. So neither PR sentence may
+// say "delete", pr_closed's has to name the fresh issue as the way to start
+// over, and its unpark half has to come last, so the footer's "then: polako
+// unpark -apply N" follows the reopen rather than the fresh issue.
+func TestUnparkClosedPRNamesAWayOutThatWorks(t *testing.T) {
+	t.Parallel()
+	for _, category := range []string{parkPRClosed, parkPRState} {
+		if got := parkNextStepTable[category]; strings.Contains(got, "delete") {
+			t.Errorf("parkNextStep(%q) = %q — GitHub can't delete a PR", category, got)
+		}
+	}
+
+	st := &ghState{
+		Issues: map[string]*fakeIssue{
+			"40": {Open: true, Labels: []string{needsHumanLabel}, Comments: 1,
+				Bodies: map[int]string{1: parkCommentBody(40, "PR #90 was closed without merging", nil, parkPRClosed)}},
+		},
+		PRs: map[string]*fakePR{"issue-40": {Number: 90, State: "CLOSED"}},
+	}
+	cfg := unparkCfg(t, st)
+	items, err := readParkedIssues(context.Background(), cfg, 40, false)
+	if err != nil {
+		t.Fatalf("readParkedIssues: %v", err)
+	}
+	it := findParkListItem(t, items, 40)
+	if it.category != parkPRClosed {
+		t.Fatalf("category = %q, want %q", it.category, parkPRClosed)
+	}
+
+	var one strings.Builder
+	renderUnpark(&one, report{}, cfg, []parkListItem{it}, true)
+	for _, want := range []string{"parks again — PR #90 is still closed", "file a fresh issue and close this one"} {
+		if !strings.Contains(one.String(), want) {
+			t.Errorf("one-issue view missing %q:\n%s", want, one.String())
+		}
+	}
+
+	var footer strings.Builder
+	printUnparkNextStep(&footer, []parkListItem{it}, true)
+	if want := "reopen the PR, then unpark, then: polako unpark -apply 40"; !strings.Contains(footer.String(), want) {
+		t.Errorf("footer missing %q:\n%s", want, footer.String())
+	}
+}

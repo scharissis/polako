@@ -544,8 +544,12 @@ func (r *issueLoop) superviseToClose(pr *pullRequest) error {
 			return ensureIssueClosed(ctx, cfg, issue, pr.Number)
 		}
 		r.terminal(pr.Number, issueClosed, "")
+		// The park comment's own "remove the label" isn't enough here: GitHub
+		// can't delete the closed PR, and it blocks every rerun of issue-N
+		// (waitsOnPR), so the reason names the two ways out that work.
 		return park(parkPRClosed,
-			"PR #%d was closed without merging, which is a decision only a human can make",
+			"PR #%d was closed without merging, which is a decision only a human can make. "+
+				"Reopen it to carry on, or file a fresh issue and close this one to start over.",
 			pr.Number)
 	default:
 		return r.parked(pr.Number,
