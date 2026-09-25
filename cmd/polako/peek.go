@@ -22,7 +22,7 @@ import (
 	"time"
 )
 
-// defaultPeekInterval is the gap between free checks. What parseFlags pins
+// defaultPeekInterval is the gap between free checks. What pinConfig pins
 // config.peek to.
 const defaultPeekInterval = 15 * time.Second
 
@@ -52,10 +52,15 @@ func issueWatch(issue int) *etagWatch {
 	return &etagWatch{path: fmt.Sprintf("repos/{owner}/{repo}/issues/%d", issue)}
 }
 
-// peeking says whether a wait should peek at all: the seam set, shorter than
-// the full poll, and something left to watch.
+// peekOn says whether the seam is set and shorter than the full poll.
+func peekOn(cfg config) bool {
+	return cfg.peek > 0 && cfg.peek < cfg.poll
+}
+
+// peeking says whether a wait should peek at all: peekOn, and something left
+// to watch.
 func peeking(cfg config, watches []*etagWatch) bool {
-	if cfg.peek <= 0 || cfg.peek >= cfg.poll {
+	if !peekOn(cfg) {
 		return false
 	}
 	for _, w := range watches {
@@ -69,7 +74,7 @@ func peeking(cfg config, watches []*etagWatch) bool {
 // nextCheck is the tail of every wait's log line, so the log says which clock
 // is which.
 func nextCheck(cfg config) string {
-	if cfg.peek <= 0 || cfg.peek >= cfg.poll {
+	if !peekOn(cfg) {
 		return "next check in " + cfg.poll.String()
 	}
 	return fmt.Sprintf("next full check in %s, a free one every %s", cfg.poll, cfg.peek)
