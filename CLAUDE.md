@@ -54,7 +54,11 @@ in the PR body rather than doing it quietly.
   these files anywhere else turns telemetry back into state.
   No run-data record leaves the machine except by explicit request:
   `-post-summary`, default off, comments those same numbers on the
-  operator's own merged PR.
+  operator's own merged PR. `stats` does name each record's repository to
+  GitHub, on by default (issue #621): one `gh pr list` per repo, to learn
+  how in-flight PRs ended. That's GitHub's own identifier going back to
+  GitHub on the operator's token — no number, cost or other field goes
+  with it, and nothing it reads is written back.
   The per-shift log (`ui.go`, under `~/.polako/logs`) is the second write-only
   artifact — the one that *does* hold transcript text, the full claude event
   stream, which is why it gets the recorder's 0700/0600 permissions. Same
