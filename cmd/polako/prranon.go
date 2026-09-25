@@ -96,14 +96,11 @@ func parseRanOn(line string) (prRanOn, bool) {
 // the block stay, so a restarted supervisor or a later remediation adds to it
 // rather than replacing it. Everything outside the markers is left byte for
 // byte. With no block yet, one is appended at the very end — after the
-// skill's own `Closes #N`. The last complete block wins, so a stray marker a
-// human pasted earlier in the body is just text.
+// skill's own `Closes #N`. A marker counts only on a line of its own, and the
+// last complete block wins, so a PR body that quotes the markers in prose or
+// code — this feature's own PRs do — is just text.
 func spliceRanOn(body string, ours []prRanOn) string {
-	end := strings.LastIndex(body, ranOnEnd)
-	begin := -1
-	if end >= 0 {
-		begin = strings.LastIndex(body[:end], ranOnBegin)
-	}
+	begin, end := ranOnMarkers(body)
 	var lines []prRanOn
 	if begin >= 0 {
 		for _, l := range strings.Split(body[begin+len(ranOnBegin):end], "\n") {
@@ -138,6 +135,27 @@ func spliceRanOn(body string, ours []prRanOn) string {
 		block = "\n\n" + block
 	}
 	return body + block + "\n"
+}
+
+// ranOnMarkers finds the last begin line followed by an end line, returning
+// the offset where each marker starts; (-1, -1) when there is no such pair.
+func ranOnMarkers(body string) (begin, end int) {
+	begin, end = -1, -1
+	cand := -1
+	for off := 0; off < len(body); {
+		line, _, _ := strings.Cut(body[off:], "\n")
+		switch strings.TrimSpace(line) {
+		case ranOnBegin:
+			cand = off + strings.Index(line, ranOnBegin)
+		case ranOnEnd:
+			if cand >= 0 {
+				begin, end = cand, off+strings.Index(line, ranOnEnd)
+				cand = -1
+			}
+		}
+		off += len(line) + 1
+	}
+	return begin, end
 }
 
 // writeRanOn puts the issue's lines on its PR. Best-effort like postSummary:

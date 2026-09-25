@@ -44,6 +44,18 @@ func TestSpliceRanOnAppendsAtTheEnd(t *testing.T) {
 	}
 }
 
+// Markers quoted inline — this feature's own PR bodies do it — aren't a block:
+// the body is left alone and the real block goes on the end.
+func TestSpliceRanOnIgnoresQuotedMarkers(t *testing.T) {
+	t.Parallel()
+	body := "Writes between `" + ranOnBegin + "` and `" + ranOnEnd + "`.\n\nCloses #7\n"
+	got := spliceRanOn(body, []prRanOn{{combo: "c", reasons: []string{"implement"}}})
+	want := body + "\n" + ranOnBegin + "\nRan on c (implement)\n" + ranOnEnd + "\n"
+	if got != want {
+		t.Errorf("spliceRanOn:\n got %q\nwant %q", got, want)
+	}
+}
+
 func TestPRComboNamesWhatRanAndWhatWasAskedFor(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
