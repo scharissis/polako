@@ -15,7 +15,7 @@ Both have a supervisor verb: `plan` and `health`. A fourth skill,
 request into a plan document under `docs/designs/`, behind a PR a human
 merges; its verb is `design`. Four skills, ten verbs. The binary's other six
 verbs start no runs: `status` reads GitHub (plus one line of local run data),
-`stats` reads the run data, `tidy`
+`stats` reads the run data (and asks GitHub how in-flight PRs ended), `tidy`
 reclaims finished worktrees and branches, `unpark` lists parked issues and
 clears the ones the operator approves, `update` moves both halves to the
 published release,
