@@ -195,7 +195,8 @@ type config struct {
 	// visualEvidence is the skill's own `evidence` argument, minted per run:
 	// true (the default) sends nothing extra, so the prompt stays
 	// byte-identical to before this flag existed; false appends `no-evidence`,
-	// which SKILL.md reads as turning the whole evidence-ref channel off. See
+	// which SKILL.md reads as turning the whole evidence-ref channel off. It
+	// also gates a review remediation's screenshot steps (reviewShoots). See
 	// issueRun and docs/security.md's evidence-ref section.
 	visualEvidence bool
 	// queue is what a shift learns about listing its own backlog and only wants
@@ -363,7 +364,7 @@ func parseFlags() config {
 	fs.BoolVar(&cfg.dryRun, "dry-run", false,
 		"resolve the next issue, print the claude invocation it would get, and exit without running or writing anything")
 	fs.BoolVar(&cfg.visualEvidence, "visual-evidence", true,
-		"let the skill publish before/after screenshots to the polako-evidence ref (false appends no-evidence to the skill invocation)")
+		"let the skill, and a review remediation asked for them, publish before/after screenshots to the polako-evidence ref (false appends no-evidence to the skill invocation and drops the review prompt's screenshot steps)")
 	flag.Usage = func() {
 		fmt.Fprint(flag.CommandLine.Output(),
 			"Usage: polako work [flags]\n\n"+

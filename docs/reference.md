@@ -40,7 +40,7 @@ These are `polako work`'s own; the other nine verbs take smaller sets —
 | `-dry-run` | `false` | Resolve the next issue, print the `claude` invocation it would get, and exit. Runs nothing and writes nothing — see [Looking before you leap](#looking-before-you-leap--dry-run). |
 | `-notify` | *(none)* | Command to run whenever polako needs a human, with context in `POLAKO_NOTIFY_*` — see [Being told when it needs you](#being-told-when-it-needs-you--notify). |
 | `-remote` | `true` | Register each run with Remote Control, watchable and typeable from claude.ai/code or the app. See [Watching a shift from anywhere](#watching-a-shift-from-anywhere--remote). |
-| `-visual-evidence` | `true` | Let the skill publish before/after screenshots to the `polako-evidence` ref. `false` appends `no-evidence` to the skill invocation instead. See [Security](security.md#the-evidence-ref). |
+| `-visual-evidence` | `true` | Let the skill publish before/after screenshots to the `polako-evidence` ref, and let a review remediation shoot them when the review asks or its fix changes rendered files, linked in a PR comment. `false` appends `no-evidence` to the skill invocation and leaves the screenshot steps out of the review prompt. See [Security](security.md#the-evidence-ref). |
 | `-run-tag` | *(none)* | Freeform label recorded with every run, so one batch can be compared against another. |
 | `-metrics` | `~/.polako/metrics` | Directory for run-data records, or `off` to write nothing. |
 | `-log` | `~/.polako/logs` | Directory for the full per-shift log, or `off` to write none — see [The shift log](#the-shift-log--log). |

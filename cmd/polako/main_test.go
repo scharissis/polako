@@ -911,6 +911,14 @@ func fakeClaude(mode string) int {
 			return 1
 		}
 		return fakeClaude("stream")
+	case "shootreview":
+		// A review remediation that answered with screenshots alone: shots
+		// published and linked in a PR comment, nothing pushed to the branch.
+		if err := fakeReviewShots(); err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		return fakeClaude("stream")
 	case "implementmerged":
 		// A fresh implement run whose PR is already merged by the time the
 		// supervisor looks — the shortest path from pickup to a closed issue,
@@ -1274,6 +1282,36 @@ func fakeReviewFix() error {
 		}
 		pr.Head += "+"                          // the push
 		pr.CommittedAt = "2026-08-20T12:00:00Z" // after every review the tests write
+	}
+	return writeGhState(path, st)
+}
+
+// fakeReviewShots stands in for a review remediation whose answer was
+// screenshots alone: it leaves the head where it was and adds one comment,
+// posted as the viewer, linking a before/after pair of the current head on the
+// evidence ref — the table reviewShotsHow asks for. Every PR with a review
+// outstanding, for the same reason fakeReviewFix gives.
+func fakeReviewShots() error {
+	path := os.Getenv(fakeGhEnv)
+	st, err := readGhState(path)
+	if err != nil {
+		return err
+	}
+	for _, pr := range st.PRs {
+		if !slices.ContainsFunc(pr.Reviews, func(r fakeReview) bool {
+			return r.State == reviewChangesRequested
+		}) || len(pr.Head) < 7 {
+			continue
+		}
+		dir := fmt.Sprintf("https://github.com/%s/blob/%s/issue-1/%s/", st.Repo,
+			"0123456789abcdef0123456789abcdef01234567", pr.Head[:7])
+		pr.Comments = append(pr.Comments, fakeComment{
+			Author: viewerLogin(st),
+			Body: "Shots of `/` at 1280x800.\n\n| Before | After |\n| --- | --- |\n" +
+				"| ![before /](" + dir + "before-home.png?raw=true) | ![after /](" + dir +
+				"after-home.png?raw=true) |\n",
+			CreatedAt: "2026-08-20T12:00:00Z", // after every review the tests write
+		})
 	}
 	return writeGhState(path, st)
 }

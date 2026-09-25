@@ -253,6 +253,13 @@ type fakePR struct {
 	Reviews     []fakeReview `json:"reviews"`
 	CommittedAt string       `json:"committed_at"`
 
+	// Author opened the PR — the viewer when empty, the way polako's own PRs
+	// are opened — and Comments are its conversation, oldest first. A review
+	// answered with screenshots alone adds one and moves nothing else; see the
+	// "shootreview" fake CLI.
+	Author   string        `json:"author"`
+	Comments []fakeComment `json:"comments"`
+
 	// MergeOnRead is a human merging the PR while the supervisor polls: it
 	// reports MERGED on the Nth `pr view` from now. Counted in reads rather
 	// than wall clock for the same reason as ReplyOnRead.
@@ -266,6 +273,13 @@ type fakeReview struct {
 	Author      string `json:"author"`
 	State       string `json:"state"`
 	SubmittedAt string `json:"submitted_at"`
+}
+
+// fakeComment is one entry of `pr view --json comments`.
+type fakeComment struct {
+	Author    string `json:"author"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"created_at"`
 }
 
 // viewerLogin is the account every fake gh call in this test runs as: the
@@ -799,11 +813,17 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			}
 			// The countdown has to be persisted even on the reads before the
 			// merge, or every read would start it over.
+			author := pr.Author
+			if author == "" {
+				author = viewerLogin(st)
+			}
 			return fmt.Sprintf(
 					`{"state":%q,"mergeable":%q,"headRefOid":%q,"statusCheckRollup":%s,`+
-						`"reviewDecision":"","reviews":%s,"commits":%s}`,
+						`"reviewDecision":"","reviews":%s,"commits":%s,`+
+						`"author":{"login":%q},"comments":%s}`,
 					pr.State, pr.Mergeable, pr.Head, rollupJSON(pr.Checks),
-					reviewsJSON(pr.Reviews), commitsJSON(pr.CommittedAt)),
+					reviewsJSON(pr.Reviews), commitsJSON(pr.CommittedAt),
+					author, commentsJSON(pr.Comments)),
 				merging, 0
 		}
 		fmt.Fprintf(os.Stderr, "no PR #%s\n", at(2))
@@ -935,6 +955,17 @@ func reviewsJSON(reviews []fakeReview) string {
 	for _, r := range reviews {
 		nodes = append(nodes, fmt.Sprintf(`{"author":{"login":%q},"state":%q,"submittedAt":%q}`,
 			r.Author, r.State, r.SubmittedAt))
+	}
+	return "[" + strings.Join(nodes, ",") + "]"
+}
+
+// commentsJSON renders the conversation half: author, body and date, the
+// three fields latestShots reads.
+func commentsJSON(comments []fakeComment) string {
+	nodes := make([]string, 0, len(comments))
+	for _, c := range comments {
+		nodes = append(nodes, fmt.Sprintf(`{"author":{"login":%q},"body":%q,"createdAt":%q}`,
+			c.Author, c.Body, c.CreatedAt))
 	}
 	return "[" + strings.Join(nodes, ",") + "]"
 }

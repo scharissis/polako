@@ -400,15 +400,15 @@ it.
 
 Whether a review's answered is read off GitHub, not remembered, so a
 restarted shift reaches the same conclusion: a review counts as outstanding
-until the branch carries a commit newer than it. A rebase gives every
-commit a fresh date, so it reads as an answer — deliberate, since the
-review then points at a diff that no longer exists — and a conflicting PR
-with an open review comes back to you for a fresh look. The same treadmill
-rule applies: a run that finishes without moving the branch parks rather
-than re-reading the same comments every poll. This works with no
-branch-protection review requirement too, since it reads the reviews
-themselves rather than GitHub's summary `reviewDecision`, empty in that
-case.
+until the branch carries a commit newer than it, or the PR's author has
+since posted shots of the current head. A rebase gives every commit a fresh
+date, so it reads as an answer — deliberate, since the review then points
+at a diff that no longer exists — and a conflicting PR with an open review
+comes back to you for a fresh look. The same treadmill rule applies: a run
+that finishes without moving the branch or posting shots parks rather than
+re-reading the same comments every poll. It needs no branch-protection
+review rule either: it reads the reviews themselves, not GitHub's summary
+`reviewDecision`, empty in that case.
 
 ## Which model and effort a run gets
 
@@ -529,13 +529,13 @@ set, for that pass.
 
 **A PR for a visual change carries a screenshot, not just a claim.** Once a
 run's diff touches browser-rendered files and a script serves them, it
-shoots up to four routes from the repo's own routing code, before the
-first edit and again at the end, and pushes the PNGs to one orphan branch
-on your origin, `polako-evidence`, embedded in the PR body as a
-before/after pair per route — or the after shot alone if the before
-attempt came up empty. A route that gets no shot at all drops back to no
-image and one `## Verification` line; it never parks the issue or asks a
-question. `-visual-evidence=false` on `work` turns the whole thing off.
+shoots up to four routes from the repo's routing code, before the first
+edit and at the end, pushes them to the `polako-evidence` orphan branch on
+your origin, and embeds a before/after pair per route in the PR body, or
+the after alone if the before came up empty. A route with no shot gets one
+`## Verification` line instead, never a park or a question. A review can
+ask for shots too: the review run posts them in a PR comment.
+`-visual-evidence=false` on `work` turns it all off.
 
 ## Human touchpoints
 
