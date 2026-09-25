@@ -1172,6 +1172,13 @@ func TestReviewCell(t *testing.T) {
 		{"undated", statusPR{detailed: true, view: prView{changesRequested: true}}, "changes requested"},
 		{"answered", statusPR{detailed: true, view: prView{
 			changesRequested: true, reviewedAt: earlier, branchAt: statusNow}}, "answered, awaiting re-review"},
+		// Shown, so nobody wonders why a red review sits there untouched, but
+		// never as "changes requested", which reads as a run on its way.
+		{"outsider only", statusPR{detailed: true, view: prView{outsiderRequest: true}}, outsiderNote},
+		// A trusted request says what it always said; the outsider's adds nothing.
+		{"outsider beside a trusted request", statusPR{detailed: true, view: prView{
+			changesRequested: true, outsiderRequest: true, reviewedAt: statusNow, branchAt: earlier}},
+			"changes requested"},
 	} {
 		if got := reviewCell(tc.pr); got != tc.want {
 			t.Errorf("%s: reviewCell = %q, want %q", tc.name, got, tc.want)
@@ -1193,7 +1200,8 @@ func TestChecksCellNamesWhatFailed(t *testing.T) {
 }
 
 // A PR a drain would remediate itself is not yours yet, and one whose checks
-// are still running is nobody's.
+// are still running is nobody's. An outsider's request for changes is yours:
+// no drain will act on it, so the PR is waiting on your review and merge.
 func TestNeedsYouOnlyNamesWhatAPersonMustMove(t *testing.T) {
 	t.Parallel()
 	detailed := func(n int, v prView) statusPR { return statusPR{number: n, detailed: true, view: v} }
@@ -1203,9 +1211,10 @@ func TestNeedsYouOnlyNamesWhatAPersonMustMove(t *testing.T) {
 		detailed(3, prView{mergeable: "MERGEABLE", checks: checksFailing, failing: []string{"build"}}),
 		detailed(4, prView{mergeable: "MERGEABLE", checks: checksPending}),
 		detailed(5, prView{mergeable: "MERGEABLE", checks: checksHuman}),
+		detailed(6, prView{mergeable: "MERGEABLE", checks: checksPassing, outsiderRequest: true}),
 	}}
 	got := needsYou(snap)
-	if want := "needs you: review and merge PR #1; approve the checks waiting on you on PR #5"; got != want {
+	if want := "needs you: review and merge PR #1, #6; approve the checks waiting on you on PR #5"; got != want {
 		t.Errorf("needsYou = %q, want %q", got, want)
 	}
 	if needsYou(statusSnapshot{}) != "" {

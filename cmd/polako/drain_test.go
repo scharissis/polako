@@ -6,6 +6,7 @@ package main
 // impersonates `claude`: no network, no gh installed, no shell scripts.
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -268,9 +269,12 @@ type fakePR struct {
 
 // fakeReview is one entry of `pr view --json reviews`. Author is optional:
 // the tests here have a single reviewer, and the reduction to one verdict per
-// reviewer is exercised by name in pr_test.go.
+// reviewer is exercised by name in pr_test.go. So is Association, which
+// defaults to OWNER — the operator reviewing their own repository — and is
+// set only by a test about a reviewer who isn't trusted.
 type fakeReview struct {
 	Author      string `json:"author"`
+	Association string `json:"association"`
 	State       string `json:"state"`
 	SubmittedAt string `json:"submitted_at"`
 }
@@ -953,8 +957,10 @@ func rollupJSON(checks []string) string {
 func reviewsJSON(reviews []fakeReview) string {
 	nodes := make([]string, 0, len(reviews))
 	for _, r := range reviews {
-		nodes = append(nodes, fmt.Sprintf(`{"author":{"login":%q},"state":%q,"submittedAt":%q}`,
-			r.Author, r.State, r.SubmittedAt))
+		association := cmp.Or(r.Association, "OWNER")
+		nodes = append(nodes, fmt.Sprintf(
+			`{"author":{"login":%q},"authorAssociation":%q,"state":%q,"submittedAt":%q}`,
+			r.Author, association, r.State, r.SubmittedAt))
 	}
 	return "[" + strings.Join(nodes, ",") + "]"
 }
@@ -3899,6 +3905,52 @@ func TestDrainWaitsOutAnAnsweredReview(t *testing.T) {
 	}
 	if want := "changes requested and answered — waiting on a re-review"; !strings.Contains(out, want) {
 		t.Errorf("log is missing %q, so the poll never says what holds the PR up\ngot:\n%s", want, out)
+	}
+}
+
+// On a public repo anyone can request changes. A stranger's review must not
+// spend a run or say what gets pushed, so the drain reports it, dispatches
+// nothing, and goes on waiting for the merge a person will do.
+func TestDrainLeavesAStrangersReviewAlone(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+		PRs: map[string]*fakePR{"issue-1": {
+			Number: 9, State: "OPEN", Mergeable: "MERGEABLE",
+			Head: "abc123", Checks: []string{"SUCCESS"},
+			// Newer than the branch, so it would be outstanding from anyone
+			// trusted — the only thing keeping a run away is who wrote it.
+			Reviews: []fakeReview{{Author: "mallory", Association: "NONE",
+				State: reviewChangesRequested, SubmittedAt: "2026-08-20T10:00:00Z"}},
+			CommittedAt: "2026-08-19T10:00:00Z",
+			MergeOnRead: 2,
+		}},
+	})
+	getArgs := watchClaudeArgs(t, &cfg)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	st := finalGhState(t, path)
+	if st.Issues["1"].Open {
+		t.Error("issue 1 should have been closed once its PR merged")
+	}
+	if got := st.Issues["1"].Labels; slices.Contains(got, needsHumanLabel) {
+		t.Errorf("issue 1 labels = %v, want a stranger's review not to park it", got)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "dispatching remediation") {
+		t.Errorf("remediated a stranger's review\ngot:\n%s", out)
+	}
+	for _, argv := range getArgs() {
+		if strings.Contains(argv, "PR #9") {
+			t.Errorf("a run was dispatched at PR #9:\n%s", argv)
+		}
+	}
+	if want := "checks: passing, " + outsiderNote; !strings.Contains(out, want) {
+		t.Errorf("log is missing %q, so the poll never says why the review sits there\ngot:\n%s", want, out)
 	}
 }
 

@@ -98,6 +98,18 @@ drain an empty queue all shift, reported as success. `polako status` never
 refuses — it reads only — so it prints the same message as a note instead
 and carries on.
 
+**The gate reaches the PR too.** Anyone can leave a "Request changes" review
+on a public repo's PR. It doesn't count toward branch protection, but a
+review remediation is a paid run that pushes what the review asks, so acting
+on anyone's would reopen the door `-label` shuts. polako acts only on
+reviews whose `authorAssociation` is `OWNER`, `MEMBER` or `COLLABORATOR`,
+checked on each reviewer's latest verdict, so the filter only ever removes a
+run. Anyone else's shows in `status` and the poll line as an outsider's
+request, not acted on. The run reads every review and line comment, so its
+prompt draws the same line — defence in depth, not a boundary. `-ungated`
+opens the queue, not the PR; to trust a reviewer, make them a collaborator.
+GitHub's `reviewDecision` needs no filter: only write access counts there.
+
 Beyond those: Phase 0 tells the skill to read issue and comment text as a
 change to make, never instructions addressed to it, and to report anything
 that tries to be rather than obey it. Defence in depth behind the two
@@ -202,14 +214,15 @@ login wall, or a credential — the mitigation for a rendered page reading
 something it shouldn't. `-visual-evidence=false` on `polako work` is the way
 to decline the whole thing.
 
-A review can ask for shots, and on a public repo any account can leave a
-review, so read that as anyone being able to ask. What they can't do is aim
-them: the routes come from the repo's own routing code and the host is the
-loopback address the run's own server printed, never anything the review
-says, and the same caps and look step apply. The review run publishes
-through the same recipe the skill uses — a private index, never `--force` —
-and a comment of the PR author's is the only kind the supervisor reads as
-an answer, so a stranger's link can't stand a review down.
+A review can ask for shots, but only an owner's, member's or collaborator's
+review starts a run or gets acted on (see [above](#polako-work)), so a
+stranger asking gets nothing. Even a trusted reviewer can't aim them: the
+routes come from the repo's own routing code and the host is the loopback
+address the run's own server printed, never anything the review says, and
+the same caps and look step apply. The review run publishes through the same
+recipe the skill uses — a private index, never `--force` — and a comment of
+the PR author's is the only kind the supervisor reads as an answer, so a
+stranger's link can't stand a review down.
 
 ### The published-version read, and why it isn't in that table either
 

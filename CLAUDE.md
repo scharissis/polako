@@ -258,7 +258,11 @@ in the PR body rather than doing it quietly.
   unfiltered drain on one. `-label` scopes the queue to issues a maintainer
   opted in; `-ungated` is the operator overruling the gate out loud. A
   `-dry-run` may still look, since it runs nothing. Softening the refusal to a
-  warning is a change to argue for out loud, not slip in.
+  warning is a change to argue for out loud, not slip in. The gate reaches
+  the PR too: only an `OWNER`, `MEMBER` or `COLLABORATOR`'s request for
+  changes dispatches a review run (`trustedReviewer`), and its prompt holds
+  the run to the same three (`reviewersToHeed`). `-ungated` opens the queue,
+  not the PR.
 - **The two halves ship from one tagged commit.** One version number in
   `plugin.json` covers plugin and binary, and the marketplace entry's `ref`
   enforces it: installs resolve to a release tag, never to `main`. Pointing

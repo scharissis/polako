@@ -392,11 +392,11 @@ green, and a check stopped on a person (`CANCELLED`, or a deployment gate
 at `ACTION_REQUIRED` or `WAITING`) reports as `needs a human` instead, so a
 real failure beside a gated check is still seen.
 
-**Requesting changes on the PR is an instruction, not a dead end.** Review
-it as you would anyone's; asking for changes gets the next poll to dispatch
-a run that reads what you wrote — bodies and line comments — makes the
-changes, gets the suite passing, and pushes, then waits again: a re-review
-is yours to give, and the run may not dismiss, resolve, or merge it.
+**Requesting changes on the PR is an instruction, not a dead end** — from
+the repo's owner, an org member or a collaborator. The next poll sends a run
+that reads what they wrote, line comments too, makes the changes, gets the
+suite green and pushes: a re-review is yours, and the run may not dismiss,
+resolve or merge it. Anyone else's request shows in `status`, not acted on.
 
 Whether a review's answered is read off GitHub, not remembered, so a
 restarted shift reaches the same conclusion: a review counts as outstanding

@@ -86,10 +86,14 @@ func TestReviewOutstandingReadsOnePRView(t *testing.T) {
 			`{"state":"OPEN","mergeable":"MERGEABLE","headRefOid":"abc","statusCheckRollup":[],`+
 				`"reviewDecision":%q,"reviews":[%s],"commits":[%s]}`, decision, reviews, commits))
 	}
-	review := func(author, state, at string) string {
-		return fmt.Sprintf(`{"author":{"login":%q},"state":%q,"submittedAt":%q}`, author, state, at)
+	reviewAs := func(association, author, state, at string) string {
+		return fmt.Sprintf(`{"author":{"login":%q},"authorAssociation":%q,"state":%q,"submittedAt":%q}`,
+			author, association, state, at)
 	}
+	// A maintainer's review, unless a case says otherwise.
+	review := func(author, state, at string) string { return reviewAs("MEMBER", author, state, at) }
 	commit := func(at string) string { return fmt.Sprintf(`{"committedDate":%q}`, at) }
+	outsider := ", " + outsiderNote
 
 	cases := []struct {
 		name string
@@ -161,6 +165,56 @@ func TestReviewOutstandingReadsOnePRView(t *testing.T) {
 		name: "an unparseable commit date",
 		raw:  payload("", review("ann", reviewChangesRequested, newer), commit("not a date")),
 		want: true,
+	}, {
+		// The gap this guards: on a public repo anyone can request changes,
+		// and a run is paid for and pushes what the review asks.
+		name: "an outsider's request for changes",
+		raw:  payload("", reviewAs("NONE", "mallory", reviewChangesRequested, newer), commit(old)),
+		want: false,
+		note: outsider,
+	}, {
+		// Having committed to the repo once is not being let in.
+		name: "a past contributor's request for changes",
+		raw:  payload("", reviewAs("CONTRIBUTOR", "carl", reviewChangesRequested, newer), commit(old)),
+		want: false,
+		note: outsider,
+	}, {
+		// A gh that never sent the field reads as an outsider: reported, not acted on.
+		name: "no association at all",
+		raw: payload("", fmt.Sprintf(`{"author":{"login":"ann"},"state":%q,"submittedAt":%q}`,
+			reviewChangesRequested, newer), commit(old)),
+		want: false,
+		note: outsider,
+	}, {
+		// The outsider's later date must not make the collaborator's answered
+		// review look unanswered: only a trusted review dates the request.
+		name: "an outsider's newer request beside an answered one",
+		raw: payload("", reviewAs("COLLABORATOR", "ann", reviewChangesRequested, old)+","+
+			reviewAs("NONE", "mallory", reviewChangesRequested, newest), commit(newer)),
+		want: false,
+		note: ", changes requested and answered — waiting on a re-review",
+	}, {
+		// A trusted request still dispatches, whoever else asked beside it.
+		name: "a collaborator's request beside an outsider's",
+		raw: payload("", reviewAs("NONE", "mallory", reviewChangesRequested, newer)+","+
+			reviewAs("COLLABORATOR", "ann", reviewChangesRequested, newer), commit(old)),
+		want: true,
+	}, {
+		// Reduced before it's filtered: a reviewer's own latest verdict stands,
+		// so an approval withdraws their earlier request even when GitHub no
+		// longer counts them as a collaborator.
+		name: "a reviewer who approved after losing access",
+		raw: payload("", reviewAs("COLLABORATOR", "ann", reviewChangesRequested, newer)+","+
+			reviewAs("CONTRIBUTOR", "ann", reviewApproved, newest), commit(old)),
+		want: false,
+	}, {
+		// The other way round: the reviewer's latest verdict is a request made
+		// as an outsider, so it is reported, not acted on.
+		name: "a reviewer who requested changes after losing access",
+		raw: payload("", reviewAs("COLLABORATOR", "ann", reviewApproved, newer)+","+
+			reviewAs("CONTRIBUTOR", "ann", reviewChangesRequested, newest), commit(old)),
+		want: false,
+		note: outsider,
 	}}
 
 	for _, tc := range cases {
@@ -176,6 +230,46 @@ func TestReviewOutstandingReadsOnePRView(t *testing.T) {
 				t.Errorf("reviewNote = %q, want %q", got, tc.note)
 			}
 		})
+	}
+}
+
+// Every value of GitHub's CommentAuthorAssociation, sorted into the three let
+// in by name and everyone else. A value GitHub adds later is an outsider until
+// someone decides otherwise here.
+func TestTrustedReviewerOverGitHubsWholeEnum(t *testing.T) {
+	t.Parallel()
+	for association, want := range map[string]bool{
+		"OWNER":                  true,
+		"MEMBER":                 true,
+		"COLLABORATOR":           true,
+		"CONTRIBUTOR":            false,
+		"FIRST_TIME_CONTRIBUTOR": false,
+		"FIRST_TIMER":            false,
+		"MANNEQUIN":              false,
+		"NONE":                   false,
+		"":                       false,
+		"SOMETHING_NEW":          false,
+	} {
+		if got := trustedReviewer(association); got != want {
+			t.Errorf("trustedReviewer(%q) = %v, want %v", association, got, want)
+		}
+	}
+}
+
+// The binary dispatches only for a trusted reviewer, but the run reads every
+// review and line comment on the PR. Its prompt has to name the same three
+// and the fields that carry them, or an outsider's ask rides along on a run a
+// maintainer started.
+func TestReviewPromptHeedsOnlyTrustedReviewers(t *testing.T) {
+	t.Parallel()
+	for _, visual := range []bool{false, true} {
+		prompt := reviewPrompt(config{branchPrefix: "issue-", repo: "o/r", visualEvidence: visual}, 46, 9)
+		markers := append(slices.Clone(trustedAssociations), "`authorAssociation`", "`author_association`")
+		for _, marker := range markers {
+			if !strings.Contains(prompt, marker) {
+				t.Errorf("visual-evidence=%v: review prompt doesn't name %s:\n%s", visual, marker, prompt)
+			}
+		}
 	}
 }
 

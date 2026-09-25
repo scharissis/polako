@@ -24,7 +24,8 @@ func TestReviewShotsAnswerAReview(t *testing.T) {
 	payload := func(author string, comments ...string) []byte {
 		return []byte(fmt.Sprintf(
 			`{"state":"OPEN","mergeable":"MERGEABLE","headRefOid":%q,"statusCheckRollup":[],`+
-				`"reviewDecision":"","reviews":[{"author":{"login":"ann"},"state":%q,"submittedAt":%q}],`+
+				`"reviewDecision":"","reviews":[{"author":{"login":"ann"},"authorAssociation":"OWNER",`+
+				`"state":%q,"submittedAt":%q}],`+
 				`"commits":[{"committedDate":%q}],"author":{"login":%q},"comments":[%s]}`,
 			head, reviewChangesRequested, reviewed, old, author, strings.Join(comments, ",")))
 	}
