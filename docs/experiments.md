@@ -47,8 +47,8 @@ polako work -model opus -run-tag baseline
 
 Change one thing — model, skill wording, `-stall` — tag the next batch
 differently, and the two sets of records are comparable. The binary's
-version doesn't pin the skill's text, so tag discipline is what makes
-skill-wording experiments mean anything.
+version doesn't pin the skill's text; the plugin's does, since Claude Code
+caches a plugin by version, and every record carries it as `plugin_version`.
 
 ```bash
 polako stats -by tag
@@ -60,6 +60,13 @@ by tag
   baseline         3       2     5  $6.70     $3.35   16.9M
   terse-plan       2       1     2  $1.40     $1.40    2.2M
 ```
+
+Use a tag for a batch you set up on purpose. For history nobody tagged,
+use `stats -by version`: one row per skill release, oldest first, so the
+runs before and after a skill change sit next to each other. Every skill
+change ships in a release, so this works after the fact. A run on a
+hand-installed `-skill`, or from before the field existed, shows as
+`(none)`.
 
 A change nobody chose — Claude Code moving the inherited model — needs no
 tag: the default `stats` report's `models` line shows each model's first

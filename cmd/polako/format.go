@@ -18,8 +18,8 @@ import (
 )
 
 // orList renders a choice the way the flag's help and its error both want it:
-// "issue, model, tag, shift or reason", so a message that lists five reads as
-// English rather than as a dump of the slice behind it.
+// "issue, model, tag, shift, reason or version", so a message that lists six
+// reads as English rather than as a dump of the slice behind it.
 func orList(items []string) string {
 	if len(items) < 2 {
 		return strings.Join(items, "")

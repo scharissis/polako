@@ -128,7 +128,8 @@ the labels honest, and the ledger that stops the results evaporating:
 
 - **The rule:** any change to a `SKILL.md`, the model, or a strategy knob
   (`-stall`, `-retries`, `-poll`, the caps) runs its next batch under a fresh
-  tag. An untagged batch after a change is a batch that can never be compared.
+  tag. An untagged batch after a skill change can still be read by
+  `stats -by version`, but only for skill text; any other change is lost.
 - **The ledger:** `docs/experiments.md`, one row per experiment — tag,
   hypothesis, what changed, the `stats -by tag` verdict, decision. It is a
   document, versioned and reviewed like the rest of the docs; it is not
@@ -290,8 +291,7 @@ landing page and moved the checklist, tag rule and both recipes here, into
 this document's own "The cadence" and "Recipes" sections above — the README
 now just points at them.)
 
-**Phase 4 — pulled-for, not promised.** A `-by` group for versions; an audit
-verb; eval-score history beyond PR bodies; any retro automation (a skill that
+**Phase 4 — pulled-for, not promised.** An audit verb; eval-score history beyond PR bodies; any retro automation (a skill that
 drafts the finding issue from a transcript the operator hands it) — each
 waits for the manual form to demonstrate the need.
 
