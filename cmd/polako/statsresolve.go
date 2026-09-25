@@ -14,6 +14,7 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -22,8 +23,9 @@ import (
 const statsResolveTimeout = 10 * time.Second
 
 // statsResolveLimit is how many PRs one listing reads back, newest first. An
-// issue whose PR is older than that stays in flight — the same answer as
-// GitHub being unreachable, and only on a repo with that many PRs.
+// issue whose PR is older than that stays in flight, silently — only on a
+// repo with that many PRs since the one in question. A per-PR GraphQL alias
+// query would be exact, but this is the batched listing the issue asked for.
 const statsResolveLimit = 1000
 
 // prResolution is what the lookup came to: how many in-flight issues it
@@ -64,8 +66,18 @@ func resolveInFlight(ctx context.Context, cfg config, issues []*issueStats) prRe
 	}
 	ctx, cancel := context.WithTimeout(ctx, statsResolveTimeout)
 	defer cancel()
-	for _, repo := range slices.Sorted(maps.Keys(byRepo)) {
-		states, err := listPRStates(ctx, cfg, repo)
+	// All at once, so one slow repo can't spend the others' share of the
+	// timeout and get them reported as unreachable.
+	repos := slices.Sorted(maps.Keys(byRepo))
+	lists := make([]map[int]prState, len(repos))
+	errs := make([]error, len(repos))
+	var wg sync.WaitGroup
+	for i, repo := range repos {
+		wg.Go(func() { lists[i], errs[i] = listPRStates(ctx, cfg, repo) })
+	}
+	wg.Wait()
+	for i, repo := range repos {
+		states, err := lists[i], errs[i]
 		if err != nil {
 			res.unreached = append(res.unreached, repo)
 			continue
