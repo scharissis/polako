@@ -95,7 +95,7 @@ func runPlan(ctx context.Context, args []string, out io.Writer) error {
 	fs.StringVar(&opt.design, "design", "", "path (under -dir) to the design or roadmap document to plan from — docs/VISION.md included")
 	fs.StringVar(&opt.brief, "brief", "", "inline design text, in place of -design — exactly one of the two is required")
 	fs.StringVar(&opt.milestone, "milestone", "",
-		"batch milestone title, or \"off\" to skip it (default: the design file's name, or the brief's first words)")
+		"batch milestone title, or \"off\" to skip it (default: the design file's name, or for a brief, a title the run picks)")
 	registerIntakeFlags(fs, &opt.intakeOptions, planVerb)
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako plan (-design <doc> | -brief \"<text>\") [flags]\n\n"+
@@ -138,19 +138,60 @@ func runPlan(ctx context.Context, args []string, out io.Writer) error {
 // own pieces: the plan-backlog prompt, the batch milestone, the "from <doc>"
 // announce, and a planFacts record carrying what it planned from.
 func planRun(ctx context.Context, cfg config, opt planOptions, milestone string, _ io.Writer) error {
-	return intakeRun(ctx, cfg, opt.intakeOptions, intakeRunSpec{
+	spec := intakeRunSpec{
 		verb:           "plan",
 		milestone:      milestone,
 		announceTarget: "from " + planPromptLabel(opt),
 		prompt:         planPrompt(cfg, opt),
-		record: func(cfg config, rep runReport, pf proposalFacts) {
+		record: func(cfg config, rep runReport, pf proposalFacts, used string) {
 			cfg.rec.recordPlan(cfg, rep, planFacts{
 				proposalFacts: pf,
 				design:        planDesignField(opt),
-				milestone:     milestone,
+				milestone:     used,
 			})
 		},
-	})
+	}
+	if planRunNamesMilestone(&opt) {
+		spec.nameMilestone = func(ctx context.Context, cfg config, rep runReport) string {
+			return ensureRunMilestone(ctx, cfg, planRunMilestone(rep.lastResultText, milestone))
+		}
+	}
+	return intakeRun(ctx, cfg, opt.intakeOptions, spec)
+}
+
+// planRunNamesMilestone reports whether the run, not preflight, picks the
+// batch milestone's title: a -brief with no -milestone. A brief's first words
+// make a poor title ("i dont like the location of the PR provider/model"), and
+// only the run knows what the batch turned out to be (issue #674). A -design
+// run keeps its file name, and an explicit -milestone is the operator's.
+func planRunNamesMilestone(opt *planOptions) bool {
+	return opt.design == "" && strings.TrimSpace(opt.milestone) == ""
+}
+
+// planRunMilestone is the title a brief run's milestone gets: the run's own
+// `Milestone:` line, cleaned and capped the way a brief is, or fallback when
+// the run wrote none. The line is run output from a session that read issue
+// text anyone can write, so it is only ever a capped, quote-stripped label.
+func planRunMilestone(resultText, fallback string) string {
+	if t := briefTitle(cleanBrief(parseMilestoneLine(resultText))); t != "" {
+		return t
+	}
+	return fallback
+}
+
+// ensureRunMilestone creates the milestone a brief run named, after the run —
+// preflight could not, since the title did not exist yet. A failure here can't
+// stop a run that has already filed its issues, so it warns and attaches
+// nothing: the issues stay labelled, just unbatched.
+func ensureRunMilestone(ctx context.Context, cfg config, title string) string {
+	if title == "" {
+		return ""
+	}
+	if err := ensureMilestone(ctx, cfg, title); err != nil {
+		cfg.narrate(sevWarning, "plan: could not ensure the %q milestone (%v) — the batch is labelled but has no milestone", title, err)
+		return ""
+	}
+	return title
 }
 
 // planPromptLabel names what a run is planning from, for the one log line that
@@ -215,7 +256,9 @@ func planConfig(opt *planOptions) (config, error) {
 
 // planPreflight is intakePreflight plus the two checks that are plan's alone:
 // the -design document resolves to a file under -dir, and — for a real run —
-// the batch milestone is ensured. The -design stat runs first so a mistyped
+// the batch milestone is ensured — unless the run names it (planRunNamesMilestone),
+// in which case the title returned is only the fallback and planRun ensures
+// whichever title it ends up with. The -design stat runs first so a mistyped
 // path fails before intakePreflight's real run declares the `proposed` label —
 // a failed `polako plan` must not leave orchestration state on a repo the
 // operator only pointed at. A dry run declares nothing: intakePreflight runs
@@ -240,7 +283,7 @@ func planPreflight(ctx context.Context, cfg *config, opt *planOptions) (mileston
 	}
 
 	milestone = planMilestoneTitle(opt)
-	if !opt.dryRun && milestone != "" {
+	if !opt.dryRun && milestone != "" && !planRunNamesMilestone(opt) {
 		if err := ensureMilestone(ctx, *cfg, milestone); err != nil {
 			return "", false, fmt.Errorf("could not ensure the %q milestone: %w — "+
 				"pass -milestone off to skip it", milestone, err)
@@ -251,7 +294,8 @@ func planPreflight(ctx context.Context, cfg *config, opt *planOptions) (mileston
 
 // planMilestoneTitle is the batch milestone's title: -milestone when set,
 // "" when it is "off", and otherwise derived — the design file's base name
-// without its extension, or the brief's first words.
+// without its extension, or the brief's first words. For a brief that last
+// one is only the fallback: the run names the milestone (planRunMilestone).
 func planMilestoneTitle(opt *planOptions) string {
 	if m := strings.TrimSpace(opt.milestone); m != "" {
 		if strings.EqualFold(m, "off") {
@@ -380,9 +424,12 @@ func planDryRun(cfg config, opt planOptions, milestone string, hierarchical bool
 		cfg.logf("focus: %s", opt.focus)
 	}
 	cfg.logf("issue cap: %d, epics included", opt.maxIssues)
-	if milestone == "" {
+	switch {
+	case milestone == "":
 		cfg.logf("milestone: off")
-	} else {
+	case planRunNamesMilestone(&opt):
+		cfg.logf("milestone: named by the run once it has shaped the batch — %q if it names none", milestone)
+	default:
 		cfg.logf("milestone: %q — a real run would create it at preflight", milestone)
 	}
 	if hierarchical {

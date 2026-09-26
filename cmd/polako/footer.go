@@ -177,3 +177,21 @@ func parseParkCategory(body string) string {
 	}
 	return category
 }
+
+// milestoneLinePrefix is the fixed leading phrase plan-backlog's Phase 5
+// report ends with, naming the batch in a few words. A contract like
+// planFooterPrefix: the skill writes it, parseMilestoneLine reads it back
+// out of the run's final text, and repo_test.go holds both to the same
+// wording. Issue #674.
+const milestoneLinePrefix = "Milestone: "
+
+// parseMilestoneLine reads the title off the last `Milestone:` line of a
+// run's final text, raw — the caller cleans and caps it. "" for text with no
+// such line, or a blank one.
+func parseMilestoneLine(text string) string {
+	line := lastFooterLine(text, milestoneLinePrefix)
+	if line == "" {
+		return ""
+	}
+	return strings.TrimSpace(line[len(milestoneLinePrefix):])
+}
