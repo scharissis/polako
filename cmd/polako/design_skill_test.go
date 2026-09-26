@@ -1,8 +1,8 @@
 package main
 
 // Contract tests for the design-plan skill, which works one design request into
-// a plan document under docs/designs/ behind a PR (docs/designs/design.md,
-// ticket 2). It is implement-issue's shape aimed at a document: a worktree on
+// a plan document under docs/designs/ behind a PR
+// (docs/designs/done/design.md, ticket 2). It is implement-issue's shape aimed at a document: a worktree on
 // issue-N, a PLAN.md resume point, the asking-a-question recipe, a PR ending
 // Closes #N. So most assertions below mirror one implement-issue already
 // carries in repo_test.go, and the rest mirror health_skill_test.go's
@@ -178,8 +178,8 @@ func TestDesignSkillKeepsTheBranchAndScratchContracts(t *testing.T) {
 	}
 }
 
-// The write surface is the design's own promise (docs/designs/design.md, "What
-// this may read and write"): no issue filed — `polako plan` does that later,
+// The write surface is the design's own promise (docs/designs/done/design.md,
+// "What this may read and write"): no issue filed — `polako plan` does that later,
 // behind its dedup and label pass — no merge, no raw API, no evidence ref. A
 // skill that spells a command is one step from a run that runs it, so the
 // spelling itself is refused, not only the instruction.
