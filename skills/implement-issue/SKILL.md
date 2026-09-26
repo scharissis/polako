@@ -71,8 +71,9 @@ reach for all four, and each refusal costs a turn:
   `SHA=$(git … rev-parse HEAD)`, then `"$SHA"`. Run the first command on
   its own, read the value off its result, and write it literally into the
   next.
-- `cd <dir> && git …`. A `cd` chained to a git command is refused
-  whatever the grant; `git -C <dir>` does the same job.
+- `cd <dir> && git …`, or a `cd` in any line that also runs git, after
+  `;` or `||` too. The CLI refuses it whatever the grant; `git -C <dir>`
+  does the same job.
 - Bash to look around or probe: `ls` or `cat` outside the checkout,
   `echo "$PATH"`, `which gh`, `gh --version`. Read, Glob and Grep look at
   files, and `gh` is granted one subcommand at a time.
@@ -278,8 +279,9 @@ URL, and never a reason to stop or ask.
 ## Phase 0 — Gather context (every run, before anything else)
 1. Run `gh issue view $issue --json number,title,state,body,comments,blockedBy`
    and read it. Always use this --json form: the plain and --comments forms
-   can print nothing on this setup. Run it bare: a failed call's result
-   already carries the error text. If it errors and the error text contains
+   can print nothing on this setup. Run it bare, with no `gh --version`
+   before it and no `echo $?` after: a failed call's result already
+   carries the error text. If it errors and the error text contains
    "json field" (case-insensitively — the same signal this repo's own
    `gh issue list` fallback keys off for this exact field; see
    `unknownJSONField` in `cmd/polako/main.go`), that gh does not know
@@ -521,7 +523,10 @@ don't post again, and stop.
    `<worktree>`, and Write its real output verbatim to
    `<worktree>/.polako-scratch/evidence-cli.txt`. Run it bare, one command
    per call, and copy the output off the result with the Write tool, not
-   with `tee`, `printf` or a `>` redirect. Skip only when the change
+   with `tee`, `printf` or a `>` redirect. Its exit status is in that
+   result too: `Exit code N` when it isn't 0, no such line when it is. So
+   a check that a command exits 0 or 2 needs no `; echo $?`, which the
+   grant refuses. Skip only when the change
    touches nothing a human sees on a command line. Step 3's `## Evidence`
    section quotes this file — never retypes or reconstructs the output from
    memory, which is how a run ends up with an invented line instead of a
@@ -783,7 +788,9 @@ don't post again, and stop.
       Three different paths, don't mix them up: `<skill-dir>` is this skill's
       own directory, the "Base directory for this skill" line it was loaded
       with; `<worktree>` is issue-$issue's worktree; `<base>` is the `origin/…`
-      ref Phase 1 resolved, a ref and not a directory.
+      ref Phase 1 resolved, a ref and not a directory. Take `<skill-dir>`
+      from that line as it stands. Don't `ls` it first: it sits outside the
+      checkout, where a Bash look is refused.
 
       It prints both medians, taken at the base, each bound — min(median,
       ceiling) — and one row per source file changed since `<base>`, with its

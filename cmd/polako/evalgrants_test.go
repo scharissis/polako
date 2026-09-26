@@ -196,6 +196,13 @@ func TestSkillNamesTheHabitsTheGrantRefuses(t *testing.T) {
 			t.Errorf("\"No prompts, ever\" no longer says %q: %s", want.text, want.why)
 		}
 	}
+	// The general rule didn't reach the step where a run checks its own
+	// command's exit status by hand. Most of what was still refused after it
+	// landed was there, so the step says it too.
+	if !strings.Contains(strings.Join(strings.Fields(skill), " "), "Its exit status is in that result too") {
+		t.Error("Phase 2's hand run of the changed command no longer says where its exit status is — " +
+			"runs checking an exit code fall back to `; echo $?`, which the grant refuses")
+	}
 }
 
 // Every implement-issue case fails a run that met a refusal, so a new case
