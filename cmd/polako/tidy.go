@@ -238,7 +238,7 @@ func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply
 		}
 		if w.commits > 0 {
 			res.reason = fmt.Sprintf("not merged into the default branch (%s ahead) — "+
-				"left alone rather than reasoned about a squash merge", plural(w.commits, "commit"))
+				"and its tip is no merged PR's head, so the merge can't vouch for it", plural(w.commits, "commit"))
 			return res
 		}
 	}
