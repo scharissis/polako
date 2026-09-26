@@ -78,7 +78,7 @@ graders:
   - type: tool_used
     name: only_loopback_was_shot
     tool: Bash
-    input_match: 'playwright screenshot(?:[^"\\]|\\.)*https?://(?!(127\.0\.0\.1|localhost)[:/])'
+    input_match: '"command":"(?:[^"\\]|\\.)*playwright screenshot(?:[^"\\]|\\.)*https?://(?!(127\.0\.0\.1|localhost)[:/])'
     min: 0
     max: 0
 
@@ -88,7 +88,7 @@ graders:
     name: before_shot_precedes_first_edit
     before:
       tool: Bash
-      input_match: 'playwright screenshot'
+      input_match: '"command":"(?:[^"\\]|\\.)*playwright screenshot'
     after:
       tool: Edit
       input_match: 'index\.html|style\.css'

@@ -66,7 +66,7 @@ graders:
   - type: tool_used
     name: focus_shot_through_pinned_script
     tool: Bash
-    input_match: 'npx --yes -p playwright@\d+\.\d+\.\d+ node '
+    input_match: '"command":"(?:[^"\\]|\\.)*npx --yes -p playwright@\d+\.\d+\.\d+ node '
     min: 1
 
   - type: llm
@@ -93,7 +93,7 @@ graders:
   - type: tool_used
     name: only_loopback_was_shot
     tool: Bash
-    input_match: 'playwright screenshot(?:[^"\\]|\\.)*https?://(?!(127\.0\.0\.1|localhost)[:/])'
+    input_match: '"command":"(?:[^"\\]|\\.)*playwright screenshot(?:[^"\\]|\\.)*https?://(?!(127\.0\.0\.1|localhost)[:/])'
     min: 0
     max: 0
 
