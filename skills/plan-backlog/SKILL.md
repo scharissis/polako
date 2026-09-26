@@ -284,6 +284,15 @@ implement skill — can respect them.
       Curate on GitHub: edit freely, remove the `proposed` label to queue an
       issue, close it to reject.
 
+- Last, one line naming the batch in two to five words — what the work does,
+  not the first words of the request that asked for it:
+
+      Milestone: Ran-On Lines Section
+
+  Exactly that spelling, on its own line, nothing after it. `polako plan`
+  reads it to title the batch milestone when it planned from an inline brief,
+  and ignores it otherwise.
+
 Nothing is assigned, and no queue-gating label is ever applied — that one is
 humans-only, and applying it here would hand out the gate this whole label
 exists to be.
