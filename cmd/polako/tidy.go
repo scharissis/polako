@@ -233,9 +233,14 @@ func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply
 		res.reason = plural(w.dirty, "uncommitted file")
 		return res
 	}
-	if reason := unpushedReason(ctx, cfg, branch); reason != "" {
-		res.reason = reason
-		return res
+	// A shipped tip is on GitHub by definition, so origin's tracking ref has
+	// nothing to add — and one left stale by a failed fetch, or by a push to a
+	// URL that never moved it, would refuse a branch that provably merged.
+	if !shipped {
+		if reason := unpushedReason(ctx, cfg, branch); reason != "" {
+			res.reason = reason
+			return res
+		}
 	}
 
 	if !apply {

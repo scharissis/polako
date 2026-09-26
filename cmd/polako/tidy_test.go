@@ -543,6 +543,33 @@ func TestReclaimTrustsThePRHeadOverAStaleMirrorAndNoTrackingRef(t *testing.T) {
 	}
 }
 
+// A tracking ref left behind by an earlier push through origin, stale because
+// the push that merged went to a URL and the fetch that would prune it failed,
+// must not outvote GitHub's head SHA.
+func TestReclaimIgnoresAStaleTrackingRefWhenThePRHeadMatches(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	gitAt(t, checkout, "checkout", "-b", "issue-7")
+	commit(t, checkout, "feature-7")
+	gitAt(t, checkout, "push", "origin", "issue-7")
+	commit(t, checkout, "review-fix") // reached GitHub, but not through origin
+	tip := gitAt(t, checkout, "rev-parse", "HEAD")
+	gitAt(t, checkout, "checkout", "main")
+	unreachableOrigin(t, checkout)
+
+	cfg := tidyCfg(t, &ghState{
+		Issues: map[string]*fakeIssue{"7": {Open: false}},
+		PRs:    map[string]*fakePR{"issue-7": {Number: 9, State: "MERGED", Head: tip}},
+	}, checkout)
+	results, err := reclaim(context.Background(), cfg, true)
+	if err != nil {
+		t.Fatalf("reclaim: %v", err)
+	}
+	if r := findTidyResult(t, results, 7); !r.reclaimed {
+		t.Fatalf("a stale origin/issue-7 must not refuse a branch matching its merged PR's head: %+v", r)
+	}
+}
+
 // The PR head vouches for what merged, nothing more. A commit past it, a dirty
 // worktree, or a PR list gh could not read each keep the branch.
 func TestReclaimRefusesWhatThePRHeadDoesNotCover(t *testing.T) {
