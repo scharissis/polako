@@ -7,9 +7,15 @@ import (
 	"time"
 )
 
+// ranOnBlock is the block as spliceRanOn renders it, bullets given in order.
+func ranOnBlock(bullets ...string) string {
+	return ranOnBegin + "\n" + ranOnHeading + "\n\n" + strings.Join(bullets, "\n") + "\n" + ranOnEnd
+}
+
 // A remediation on the same combo adds its reason to the line already there
 // rather than repeating it; a new combo goes last; a line nobody can parse
-// stays where it was, verbatim.
+// stays where it was, verbatim. A block with text after it stays put, and
+// one in the pre-#673 shape comes back in the new one.
 func TestSpliceRanOnMergesIntoTheBlock(t *testing.T) {
 	t.Parallel()
 	body := "Summary.\r\n\r\nCloses #7\r\n\r\n" + ranOnBegin + "\r\n" +
@@ -19,10 +25,13 @@ func TestSpliceRanOnMergesIntoTheBlock(t *testing.T) {
 		{combo: "anthropic · m1 · effort inherited", reasons: []string{"implement", "checks"}},
 		{combo: "anthropic · m2 (asked for sonnet) · effort medium", reasons: []string{"review"}},
 	})
-	want := "Summary.\r\n\r\nCloses #7\r\n\r\n" + ranOnBegin + "\n" +
-		"Ran on anthropic · m1 · effort inherited (implement, checks)\n\n" +
-		"a hand edit\n\n" +
-		"Ran on anthropic · m2 (asked for sonnet) · effort medium (review)\n" + ranOnEnd + "\r\nfooter\r\n"
+	want := "Summary.\r\n\r\nCloses #7\r\n\r\n" + ranOnBlock(
+		"- anthropic · m1 · effort inherited (implement, checks)",
+		"",
+		"a hand edit",
+		"",
+		"- anthropic · m2 (asked for sonnet) · effort medium (review)",
+	) + "\r\nfooter\r\n"
 	if got != want {
 		t.Errorf("spliceRanOn:\n got %q\nwant %q", got, want)
 	}
@@ -31,16 +40,67 @@ func TestSpliceRanOnMergesIntoTheBlock(t *testing.T) {
 	}
 }
 
-// The first write appends after whatever the body ends with — the skill's own
-// `Closes #N` — with a blank line between, however the body ended.
+// With no closing trailers the first write goes at the end, with a blank
+// line between, however the body ended.
 func TestSpliceRanOnAppendsAtTheEnd(t *testing.T) {
 	t.Parallel()
 	line := []prRanOn{{combo: "anthropic · m · effort high", reasons: []string{"implement"}}}
-	block := ranOnBegin + "\nRan on anthropic · m · effort high (implement)\n" + ranOnEnd + "\n"
-	for _, body := range []string{"Closes #7", "Closes #7\n", "Closes #7\n\n"} {
+	block := ranOnBlock("- anthropic · m · effort high (implement)") + "\n"
+	for _, body := range []string{"Summary.", "Summary.\n", "Summary.\n\n", "Closes #7\n\nThen more.\n"} {
 		if got, want := spliceRanOn(body, line), strings.TrimRight(body, "\n")+"\n\n"+block; got != want {
 			t.Errorf("body %q:\n got %q\nwant %q", body, got, want)
 		}
+	}
+	if got, want := spliceRanOn("", line), block; got != want {
+		t.Errorf("empty body:\n got %q\nwant %q", got, want)
+	}
+}
+
+// The first write goes above the body's closing run of trailers, so
+// `Closes #N` and the attribution still end the PR.
+func TestSpliceRanOnGoesAboveTheTrailers(t *testing.T) {
+	t.Parallel()
+	line := []prRanOn{{combo: "c", reasons: []string{"implement"}}}
+	block := ranOnBlock("- c (implement)")
+	for _, tc := range []struct{ head, trailers string }{
+		{"Summary.\n\n", "Closes #7\n"},
+		{"Summary.\n\n", "Closes #7\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"},
+		{"Summary.\n", "Fixes #7"},
+		{"Summary.\r\n\r\n", "resolved owner/repo#7\r\nCo-Authored-By: someone <a@b.c>\r\n"},
+		{"", "Closes #7\n"},
+	} {
+		body := tc.head + tc.trailers
+		gap := "\n"
+		if tc.head == "" || strings.HasSuffix(tc.head, "\n\n") || strings.HasSuffix(tc.head, "\r\n\r\n") {
+			gap = ""
+		}
+		want := tc.head + gap + block + "\n\n" + tc.trailers
+		got := spliceRanOn(body, line)
+		if got != want {
+			t.Errorf("body %q:\n got %q\nwant %q", body, got, want)
+		}
+		if again := spliceRanOn(got, line); again != got {
+			t.Errorf("body %q: a second splice changed it:\n got %q\nwant %q", body, again, got)
+		}
+	}
+}
+
+// A block written before #673 — old lines, at the very end, below the
+// trailers — is merged, reshaped and moved above them, not doubled.
+func TestSpliceRanOnMovesAnOldBlockAboveTheTrailers(t *testing.T) {
+	t.Parallel()
+	trailers := "Closes #7\n\n🤖 Generated with X\n"
+	body := "Summary.\n\n" + trailers + "\n" + ranOnBegin + "\nRan on c (implement)\n" + ranOnEnd + "\n"
+	got := spliceRanOn(body, []prRanOn{
+		{combo: "c", reasons: []string{"remediate"}},
+		{combo: "d", reasons: []string{"review"}},
+	})
+	want := "Summary.\n\n" + ranOnBlock("- c (implement, remediate)", "- d (review)") + "\n\n" + trailers
+	if got != want {
+		t.Errorf("spliceRanOn:\n got %q\nwant %q", got, want)
+	}
+	if again := spliceRanOn(got, nil); again != got {
+		t.Errorf("a second splice with nothing new changed the body:\n got %q\nwant %q", again, got)
 	}
 }
 
@@ -61,12 +121,12 @@ func TestNoteRanOnSkipsARunThatDidNothing(t *testing.T) {
 }
 
 // Markers quoted inline — this feature's own PR bodies do it — aren't a block:
-// the body is left alone and the real block goes on the end.
+// the body is left alone and the real block goes in above `Closes #N`.
 func TestSpliceRanOnIgnoresQuotedMarkers(t *testing.T) {
 	t.Parallel()
-	body := "Writes between `" + ranOnBegin + "` and `" + ranOnEnd + "`.\n\nCloses #7\n"
-	got := spliceRanOn(body, []prRanOn{{combo: "c", reasons: []string{"implement"}}})
-	want := body + "\n" + ranOnBegin + "\nRan on c (implement)\n" + ranOnEnd + "\n"
+	prose := "Writes between `" + ranOnBegin + "` and `" + ranOnEnd + "`.\n\n"
+	got := spliceRanOn(prose+"Closes #7\n", []prRanOn{{combo: "c", reasons: []string{"implement"}}})
+	want := prose + ranOnBlock("- c (implement)") + "\n\nCloses #7\n"
 	if got != want {
 		t.Errorf("spliceRanOn:\n got %q\nwant %q", got, want)
 	}
@@ -91,7 +151,7 @@ func TestPRComboNamesWhatRanAndWhatWasAskedFor(t *testing.T) {
 }
 
 // The whole round trip, under -metrics off: the implement run's line lands
-// after `Closes #1`, the remediation run's joins it, and the body outside the
+// above `Closes #1`, the remediation run's joins it, and the body outside the
 // markers is what the skill wrote.
 func TestDrainNotesRanOnInThePRBody(t *testing.T) {
 	t.Parallel()
@@ -108,10 +168,10 @@ func TestDrainNotesRanOnInThePRBody(t *testing.T) {
 		t.Fatalf("drain: %v", err)
 	}
 	got := finalGhState(t, path).PRs["issue-1"].Body
-	want := "Summary.\n\nCloses #1\n\n" + ranOnBegin + "\n" +
-		"Ran on anthropic · claude-opus-5 · effort inherited (implement)\n\n" +
-		"Ran on anthropic · claude-opus-5 (asked for sonnet) · effort medium (remediate)\n" +
-		ranOnEnd + "\n"
+	want := "Summary.\n\n" + ranOnBlock(
+		"- anthropic · claude-opus-5 · effort inherited (implement)",
+		"- anthropic · claude-opus-5 (asked for sonnet) · effort medium (remediate)",
+	) + "\n\nCloses #1\n"
 	if got != want {
 		t.Errorf("PR body:\n got %q\nwant %q\nlog:\n%s", got, want, buf.String())
 	}
@@ -151,7 +211,7 @@ func TestWriteRanOnSkipsWhenNothingIsNew(t *testing.T) {
 	cfg, path := drainConfig(t, "stream", &ghState{PRs: map[string]*fakePR{"issue-1": {Number: 42, Body: "Closes #1\n"}}})
 	st := &issueState{ranOn: []prRanOn{{combo: "c", reasons: []string{"implement"}}}}
 	writeRanOn(context.Background(), cfg, 42, st)
-	if !strings.Contains(finalGhState(t, path).PRs["issue-1"].Body, "Ran on c (implement)") {
+	if !strings.Contains(finalGhState(t, path).PRs["issue-1"].Body, "- c (implement)") {
 		t.Fatalf("the first write didn't land:\n%s", buf.String())
 	}
 	buf.Reset()
