@@ -231,6 +231,44 @@ func TestPreflightLetsADryRunLookThroughTheLabelGate(t *testing.T) {
 	}
 }
 
+// scripts/smoke.sh and smoke.ps1 check the pair with a dry run scoped to a
+// label left missing on purpose. Run for real, that stops at the label gate
+// before any version check, and the smoke goes red on a release with nothing
+// wrong in it. The scripts tell the label's note from a real
+// refusal by refuseOrNote's phrase plus the label's name, so this holds both
+// scripts to the dry run and that phrase to what the binary logs.
+func TestSmokePairCheckMatchesTheDryRunNote(t *testing.T) {
+	t.Parallel()
+	const label, phrase = "__polako-smoke__", "a real run would refuse"
+	_, checkout := upstream(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{})
+	cfg.dir = checkout
+	cfg.label = label
+	cfg.dryRun = true
+
+	logged := captureLog(t)
+
+	if err := preflight(context.Background(), &cfg); err != nil {
+		t.Fatalf("the smoke's dry run failed preflight: %v", err)
+	}
+	var noted bool
+	for line := range strings.SplitSeq(logged.String(), "\n") {
+		noted = noted || (strings.Contains(line, phrase) && strings.Contains(line, label))
+	}
+	if !noted {
+		t.Errorf("no line holds both %q and %q — the smoke would read the missing label as a real refusal:\n%s",
+			phrase, label, logged)
+	}
+	for _, script := range []string{"smoke.sh", "smoke.ps1"} {
+		content := readRepoFile(t, "scripts", script)
+		for _, want := range []string{"-dry-run", phrase} {
+			if !strings.Contains(content, want) {
+				t.Errorf("scripts/%s no longer mentions %q — its pair check stops at the label gate, or can't tell that note from a real refusal", script, want)
+			}
+		}
+	}
+}
+
 // A lookup that never gets a definitive answer is not a refusal — it must
 // not be reported as a missing label, and it must fail preflight outright
 // rather than being carved around by -dry-run the way a real refusal is.

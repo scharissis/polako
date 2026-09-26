@@ -427,12 +427,21 @@ if [ -z "$drain" ]; then
 elif [ "$pluginInstalled" != true ]; then
   skip "version-skew check" "the plugin did not install"
 else
-  # A label no issue carries makes this a preflight-only run: preflight does
-  # the PATH, git, gh and version-skew checks, lowestOpenIssue then finds
-  # nothing and the process exits 0 without starting a single claude run.
+  # A dry run scoped to a label no issue carries: preflight does the PATH,
+  # git, gh and version-skew checks, the queue comes back empty, and nothing
+  # runs or is written. A dry run notes each refusal and carries on, which a
+  # real run can't: it refuses a -label the repository lacks (labelGate)
+  # before it reaches the version checks, and this label is missing on
+  # purpose. So the note naming the label is expected, and any other is a
+  # refusal the pair would hit for real - the skill behind the binary shows
+  # up only that way, never as a "version skew" line.
   # -metrics off keeps smoke runs out of the real run data.
-  if out=$("$drain" work -dir . -label "__${name}-smoke__" -metrics off 2>&1); then
-    if grep -q "version skew" <<<"$out"; then
+  smokeLabel="__${name}-smoke__"
+  if out=$("$drain" work -dir . -label "$smokeLabel" -dry-run -metrics off 2>&1); then
+    refusals=$(grep 'a real run would refuse' <<<"$out" | grep -vF "$smokeLabel")
+    if [ -n "$refusals" ]; then
+      bad "preflight would refuse a real run" "$(head -1 <<<"$refusals")"
+    elif grep -q "version skew" <<<"$out"; then
       bad "the binary and the plugin disagree on a version" \
         "$(grep -m1 'version skew' <<<"$out")"
     else
