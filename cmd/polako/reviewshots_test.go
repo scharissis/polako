@@ -142,6 +142,11 @@ func TestReviewShotsMatchTheSkill(t *testing.T) {
 		{"`npx --yes playwright install chromium`", "`npx --yes playwright install chromium`"},
 		{"<worktree>/" + evidenceDir + "/after-<slug>.png", "<worktree>/" + evidenceDir + "/after-<slug>.png"},
 		{"Never `--force`", "never --force"},
+		{"`npx --yes playwright --version`", "`npx --yes playwright --version`"},
+		{"`npx --yes -p playwright@<v> node <worktree>/.polako-scratch/shoot.mjs`",
+			"`npx --yes -p playwright@<v> node <worktree>/.polako-scratch/shoot.mjs`"},
+		{"`npx --yes playwright@<v> install chromium`", "`npx --yes playwright@<v> install chromium`"},
+		{"each a JSON string literal", "each a JSON string literal"},
 	}
 	for _, p := range pairs {
 		if !strings.Contains(skill, p.skill) {
@@ -150,6 +155,18 @@ func TestReviewShotsMatchTheSkill(t *testing.T) {
 		if !strings.Contains(how, p.how) {
 			t.Errorf("reviewShotsHow no longer says %q — it has to match the skill's %q", p.how, p.skill)
 		}
+	}
+
+	// The scratch script is one text in both copies, so every call it makes
+	// is the one a reviewer of the skill already read.
+	const first, last = "import { createRequire }", "await browser.close(); }"
+	start, end := strings.Index(skill, first), strings.Index(skill, last)
+	if start < 0 || end < start {
+		t.Fatalf("SKILL.md no longer carries the scratch script from %q to %q", first, last)
+	}
+	template := skill[start : end+len(last)]
+	if !strings.Contains(strings.Join(strings.Fields(how), " "), template) {
+		t.Errorf("reviewShotsHow's scratch script no longer matches the skill's:\n%s", template)
 	}
 
 	// The URL both copies build, filled in, is what latestShots looks for.
