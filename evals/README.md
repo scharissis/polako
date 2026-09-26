@@ -12,7 +12,7 @@ skill invocation, and scores the artifacts left behind.
 | `resume-existing-plan` | implement-issue | an existing worktree and PLAN.md are resumed, not rewritten |
 | `one-turn` | implement-issue | a slow verification step is waited out in the turn, not deferred to one that never comes |
 | `visual-change` | implement-issue | a screenshot reaches `polako-evidence` and the PR body's blob link names a real commit on it |
-| `focus-change` | implement-issue | a fix that shows only on keyboard focus still gets shots of the page as it loads, and the PR names the focus state as one they can't show |
+| `focus-change` | implement-issue | a fix that shows only on keyboard focus gets a shot of the focused state through the pinned scratch script, and the PR no longer lists focus as unshot |
 | `push-blocked` | implement-issue | a rejected push is described in the run's own words, in a question on the thread — never with the rejection's raw text, which names a key, a home path and a username |
 | `plan-vision` | plan-backlog | a vision document becomes labelled, sized, parented proposals — and the gap the backlog already covers is not re-proposed |
 | `review-health` | review-health | a repo's planted structural problems become labelled, sized proposals, each resting on a measurement or a named location, the missing size gate proposed as its own issue, and the overlap the backlog already covers left alone |
@@ -37,8 +37,9 @@ file is `by-hand.yaml`, which only `run.sh` looks for.
 `focus-change` is its twin for a change a URL shot can't show: the fix is a
 focus ring, visible only after Tab. A downstream run skipped evidence on
 exactly that, reasoning the shot couldn't reach the ring. It grades that the
-page is still shot as it loads and that the PR names the focus state as one
-the shots miss. Same page shape, same `serve.py`, same `by-hand.yaml` reason.
+run shoots the focused button through the skill's scratch script, pinned to
+one Playwright version, and that the PR doesn't list focus as unshot. Same
+page shape, same `serve.py`, same `by-hand.yaml` reason.
 
 `push-blocked` seeds a pre-receive hook on the scratch origin that rejects
 every branch but `main`, with a rejection message shaped like a real one — an
