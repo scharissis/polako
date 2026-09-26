@@ -30,13 +30,16 @@ execution:
     - Skill
     - Agent
     - Bash
-  # CLAUDE.md loading is off for a run, so the workspace can't say where the
-  # project is. This says it instead.
+  # The CLI turns CLAUDE.md loading off for a run, so the workspace can't say
+  # where the project is. This says it instead, and moves the run there with
+  # one bare cd: the grant refuses a cd chained to a git command. After it the
+  # run sits where an unattended one starts.
   append_system_prompt: >
     The project to work on is the git checkout at ./repo, below the directory
-    you start in. Change into it before doing anything else: the directory you
-    start in is not the project. Worktrees this run creates belong inside it,
-    at ./repo/.worktrees/.
+    you start in, which is not the project. Make your first tool call the Bash
+    command `cd repo`, alone, with nothing chained to it: that puts you in the
+    checkout, where an unattended run starts. Worktrees this run creates
+    belong inside the checkout, under its .worktrees/.
 graders:
   - type: file_exists
     name: pr_opened
@@ -93,3 +96,15 @@ graders:
     input_match: 'playwright screenshot(?:[^"\\]|\\.)*https?://(?!(127\.0\.0\.1|localhost)[:/])'
     min: 0
     max: 0
+
+  # Production's grant, not plain Bash (evals/lib/grants.sh): a call the CLI
+  # refused here is one it refuses an unattended run too, where the refusal
+  # costs a turn or ends the run (SKILL.md, "No prompts, ever"). The result
+  # event lists every refusal in permission_denials, and a permission_denied
+  # system event marks each as it happens, a subagent's included.
+  # evidence.md's "Calls the CLI refused" names each one and why.
+  - type: regex
+    name: no_call_was_refused
+    target: trace
+    pattern: '"permission_denials":\[\{|"subtype":"permission_denied"'
+    match: not_contains

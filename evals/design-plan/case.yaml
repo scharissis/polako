@@ -29,12 +29,15 @@ execution:
     - Agent
     - Bash
   # The CLI turns CLAUDE.md loading off for a run, so the workspace can't say
-  # where the project is. This says it instead.
+  # where the project is. This says it instead, and moves the run there with
+  # one bare cd: the grant refuses a cd chained to a git command. After it the
+  # run sits where an unattended one starts.
   append_system_prompt: >
     The project to work on is the git checkout at ./repo, below the directory
-    you start in. Change into it before doing anything else: the directory you
-    start in is not the project. Worktrees this run creates belong inside it,
-    at ./repo/.worktrees/.
+    you start in, which is not the project. Make your first tool call the Bash
+    command `cd repo`, alone, with nothing chained to it: that puts you in the
+    checkout, where an unattended run starts. Worktrees this run creates
+    belong inside the checkout, under its .worktrees/.
 # The stand-in `gh pr create` records the PR's changed files and diff
 # (.eval/pr-files.txt, .eval/pr-diff.txt), and the whole PR, body and changed
 # files together, in .eval/pr.md.
