@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -152,10 +153,12 @@ func TestPRComboNamesWhatRanAndWhatWasAskedFor(t *testing.T) {
 
 // The whole round trip, under -metrics off: the implement run's line lands
 // above `Closes #1`, the remediation run's joins it, and the body outside the
-// markers is what the skill wrote.
+// markers is what the skill wrote. Each write's success line is a detail:
+// the shift log gets it, the terminal doesn't.
 func TestDrainNotesRanOnInThePRBody(t *testing.T) {
 	t.Parallel()
-	buf := captureLog(t)
+	var term, buf bytes.Buffer
+	captureUI(t, &ui{terminal: &term, file: &buf})
 	cfg, path := drainConfig(t, "implementthenrebase", &ghState{
 		Issues: map[string]*fakeIssue{"1": {Open: true}},
 	})
@@ -177,6 +180,9 @@ func TestDrainNotesRanOnInThePRBody(t *testing.T) {
 	}
 	if n := strings.Count(buf.String(), "noted on PR #42 which provider"); n != 2 {
 		t.Errorf("logged %d ran-on writes, want 2 (implement, rebase)\n%s", n, buf.String())
+	}
+	if strings.Contains(term.String(), "noted on PR") {
+		t.Errorf("the ran-on success line reached the terminal:\n%s", term.String())
 	}
 }
 
