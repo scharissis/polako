@@ -215,21 +215,11 @@ func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply
 			"rerun from the main checkout instead", w.path)
 		return res
 	}
-	// Only a PR merged into the default branch counts: one retargeted at a
-	// release or stacked branch merged somewhere this sweep never checks.
-	// No resolvable default branch means no shortcut, just the ordinary path.
-	shipped := false
-	_, defaultBranch, headErr := originHead(ctx, cfg)
-	if out, err := git(ctx, cfg, "rev-parse", "--verify", "-q", "refs/heads/"+branch); err == nil && headErr == nil {
-		tip := strings.TrimSpace(string(out))
-		for _, p := range merged {
-			if p.head == tip && p.base == defaultBranch {
-				// Name the PR that vouches for this tip, not whichever merged
-				// first — an operator acting on a skip looks at this one.
-				shipped, res.why = true, fmt.Sprintf("merged (PR #%d)", p.number)
-				break
-			}
-		}
+	pr, shipped := shippedBy(ctx, cfg, branch, merged)
+	if shipped {
+		// Name the PR that vouches for this tip, not whichever merged first —
+		// an operator acting on a skip looks at this one.
+		res.why = fmt.Sprintf("merged (PR #%d)", pr)
 	}
 	if !shipped {
 		if !w.counted {
@@ -291,6 +281,28 @@ func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply
 	}
 	res.reclaimed = true
 	return res
+}
+
+// shippedBy reports which merged PR, if any, has branch's local tip as its
+// head. Only a PR merged into the default branch counts: one retargeted at a
+// release or stacked branch merged somewhere this sweep never checks. No
+// resolvable default branch means no shortcut, just the ordinary path.
+func shippedBy(ctx context.Context, cfg config, branch string, merged []mergedPR) (int, bool) {
+	_, defaultBranch, err := originHead(ctx, cfg)
+	if err != nil {
+		return 0, false
+	}
+	out, err := git(ctx, cfg, "rev-parse", "--verify", "-q", "refs/heads/"+branch)
+	if err != nil {
+		return 0, false
+	}
+	tip := strings.TrimSpace(string(out))
+	for _, p := range merged {
+		if p.head == tip && p.base == defaultBranch {
+			return p.number, true
+		}
+	}
+	return 0, false
 }
 
 // tidySweep reclaims the worktrees and local branches of every issue it can
