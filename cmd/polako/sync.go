@@ -8,7 +8,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"strings"
 )
 
@@ -39,36 +38,6 @@ const evidenceDir = ".polako-evidence"
 // is the only spelling both halves can agree on; discounting untracked
 // `*.diff` instead would loosen the check on the one verb that can't be undone.
 const scratchDir = ".polako-scratch"
-
-// gitAuthFailure reports whether a git fetch's error is git's own credentials
-// being refused, SSH or HTTPS, rather than a dead remote, a down network or a
-// bad path. Substring rather than head-anchored like authFailure in
-// refusals.go: git's captured stderr here wraps a transport's own wording
-// (ssh, or libcurl for https) ahead of git's own "fatal: Could not read..."
-// line, so there is no fixed head to anchor on the way there is for the CLI's
-// own text.
-func gitAuthFailure(err error) bool {
-	msg := err.Error()
-	for _, sig := range []string{
-		"Permission denied (publickey)",
-		"Authentication failed",
-		"could not read Username",
-	} {
-		if strings.Contains(msg, sig) {
-			return true
-		}
-	}
-	return false
-}
-
-// fetchOriginError is the shift-ending error for an origin polako can't fetch:
-// a dead remote on the first try, or an auth failure that outlasted
-// authHoldLimit pickups.
-func fetchOriginError(dir string, err error) error {
-	return fmt.Errorf("could not fetch origin, so a run would start from a base of unknown age "+
-		"and could not push its work — check the network and git's credentials (is the ssh-agent "+
-		"unlocked? does `git -C %s fetch origin` work?), then start the drain again: %w", dir, err)
-}
 
 // porcelainPath is the path out of one `git status --porcelain` line, or "" for
 // a blank one. The format is two status columns and a space, then the path.
@@ -166,9 +135,7 @@ func syncDefaultBranch(ctx context.Context, cfg config, st *issueState) error {
 	}
 	// Retried like a GitHub read, and for the same reason: waking from sleep is
 	// exactly when the network is not back yet. A fetch is safe to repeat.
-	if _, err := retryRead(ctx, cfg, "git fetch origin", func() ([]byte, error) {
-		return git(ctx, cfg, "fetch", "origin", "--quiet")
-	}); err != nil {
+	if err := fetchOrigin(ctx, cfg); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
