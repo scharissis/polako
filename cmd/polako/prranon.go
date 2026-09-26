@@ -262,5 +262,5 @@ func writeRanOn(ctx context.Context, cfg config, prNumber int, st *issueState) {
 		return
 	}
 	st.ranOnSent = sent
-	cfg.logf("noted on PR #%d which provider, model and effort ran on it", prNumber)
+	cfg.detailf("noted on PR #%d which provider, model and effort ran on it", prNumber)
 }
