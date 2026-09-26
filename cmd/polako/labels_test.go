@@ -5,6 +5,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -116,6 +118,35 @@ func TestMarkedGateLabel(t *testing.T) {
 	}
 	if ambiguous || name != "ready" {
 		t.Errorf("markedGateLabel() = (%q, %v), want (\"ready\", false)", name, ambiguous)
+	}
+}
+
+// A marked label past the first page is still found (issue #642): the read
+// asks for every page, and the argv says so.
+func TestMarkedGateLabelReadsEveryPage(t *testing.T) {
+	t.Parallel()
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Labels:            []string{"bug", "docs", "ready"},
+		LabelDescriptions: map[string]string{"ready": gateLabelDescription},
+	})
+	calls := filepath.Join(t.TempDir(), "gh-calls.log")
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
+
+	name, ambiguous, err := markedGateLabel(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("markedGateLabel: %v", err)
+	}
+	if ambiguous || name != "ready" {
+		t.Errorf("markedGateLabel() = (%q, %v), want (\"ready\", false)", name, ambiguous)
+	}
+
+	log, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatalf("reading the gh call log: %v", err)
+	}
+	want := "api repos/{owner}/{repo}/labels?per_page=100 --paginate"
+	if got := strings.TrimSpace(string(log)); got != want {
+		t.Errorf("gh calls = %q, want exactly %q", got, want)
 	}
 }
 

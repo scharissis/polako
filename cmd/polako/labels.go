@@ -13,9 +13,12 @@ package main
 // time some other way, so ensureLabel is a find-or-create at the point of use.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"strings"
 )
@@ -129,8 +132,11 @@ func labelExists(ctx context.Context, cfg config, name string) (bool, error) {
 }
 
 // markedGateLabel finds the one label carrying setup's own gate-label
-// marker (gateLabelDescription) — one `gh api repos/{owner}/{repo}/labels`
-// read, so `status` can scope itself with no -label given. Absent (no label
+// marker (gateLabelDescription) — one paginated `gh api .../labels` read, so
+// `status` can scope itself with no -label given. Every page, not the first:
+// on a repo with more labels than a page holds, the marked one can sit past
+// it, and status would then run unscoped with nothing said (issue #642).
+// Absent (no label
 // carries it) and ambiguous (more than one does) both come back with name
 // == "": scoping to a guess would be worse than not scoping at all, the
 // same "wrong is worse than none" rule installedVersion already holds to
@@ -138,19 +144,26 @@ func labelExists(ctx context.Context, cfg config, name string) (bool, error) {
 // a caller can say which happened.
 func markedGateLabel(ctx context.Context, cfg config) (name string, ambiguous bool, err error) {
 	out, err := retryRead(ctx, cfg, "listing labels", func() ([]byte, error) {
-		return gh(ctx, cfg, "api", "repos/{owner}/{repo}/labels")
+		return gh(ctx, cfg, "api", "repos/{owner}/{repo}/labels?per_page=100", "--paginate")
 	})
 	if err != nil {
 		return "", false, err
 	}
-	var labels []ghLabelDesc
-	if err := json.Unmarshal(out, &labels); err != nil {
-		return "", false, fmt.Errorf("parsing labels: %w", err)
-	}
+	// Page by page, for the reason issueComments gives: one merged array or
+	// several back-to-back is gh's business.
 	var matches []string
-	for _, l := range labels {
-		if l.Description == gateLabelDescription {
-			matches = append(matches, l.Name)
+	dec := json.NewDecoder(bytes.NewReader(out))
+	for {
+		var page []ghLabelDesc
+		if err := dec.Decode(&page); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			return "", false, fmt.Errorf("parsing labels: %w", err)
+		}
+		for _, l := range page {
+			if l.Description == gateLabelDescription {
+				matches = append(matches, l.Name)
+			}
 		}
 	}
 	switch len(matches) {
