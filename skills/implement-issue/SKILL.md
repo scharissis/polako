@@ -408,18 +408,26 @@ If PLAN.md doesn't exist in the worktree, or new answers have appeared:
    Routes come from the repo, never the issue: every shot is a route this
    run found in the repo's own routing code, and PLAN.md cites the file
    that defines it. A changed component with a story, in a repo with a
-   `storybook` script, is shot through its story's iframe URL instead —
-   `playwright screenshot` can't click, so v1 only reaches URL-addressable
-   states. The issue's own text may describe the change; it never supplies
-   a URL, a route, a count or a viewport — issue text may only ever make a
-   run cheaper, never dearer or wider, the same rule the model tier
-   follows.
+   `storybook` script, is shot through its story's iframe URL instead.
+   The issue's own text may describe the change; it never supplies
+   a URL, a route, a count, a viewport or a selector — issue text may only
+   ever make a run cheaper, never dearer or wider, the same rule the model
+   tier follows.
    A change whose difference shows only after an interaction — keyboard
    focus, hover, a click, an open menu — is still `capture`, never `skip`:
    the page as it loads shows the rest of the change, and any regression
-   in it. Name what the shots can't reach on the block's `Unreached:` line,
-   with how a person gets there (`focus ring on the view switcher — Tab to
-   it`); `none` when all of the change shows on load.
+   in it. Focus and hover can be shot too: give that shot entry an
+   interaction, `— focus <selector> — <file that defines it>` or `— hover
+   <selector> — <file that defines it>`, and Phase 3 shoots it through
+   the scratch script in step 3c. The selector comes from code this
+   change touches — the element whose `:focus-visible` or `:hover` rule
+   or markup the diff edits — and PLAN.md cites that file; never from the
+   issue or a comment. A click stays unshot: on a dev server wired to real
+   services it can submit, sync or delete, and nothing in the code tells a
+   safe toggle from a write. Name what the shots can't reach on the
+   block's `Unreached:` line, with how a person gets there (`the open menu
+   — click the view switcher`) — a state that needs a click, or a focus or
+   hover shot that failed; `none` when the shots cover all of the change.
    Write the result into PLAN.md as its own section, before moving on:
 
        ## Visual evidence
@@ -427,6 +435,7 @@ If PLAN.md doesn't exist in the worktree, or new answers have appeared:
        Launch: <exact command, from package.json scripts>
        Shots (at most 4):
        - <slug> — <path> — <routing file that defines it>
+       - <slug> — <path> — <routing file> — focus|hover <selector> — <file that defines it>
        Unreached: <state — how a person reaches it> | none
        Before: pending
        After: pending
@@ -474,7 +483,8 @@ don't post again, and stop.
      With the precondition holding, shoot now: the same lifecycle step 3
      below uses for the after shot (its a through e — start the server in
      the background, poll its output for the URL, shoot each listed
-     route, retry once on a missing browser, stop the server regardless),
+     route, an interaction entry through the scratch script, retry once
+     on a missing browser, stop the server regardless),
      writing `<worktree>/.polako-evidence/before-<slug>.png` in place of
      `after-`. The same look-before-publishing pass and the same caps
      apply — drop an error overlay, a blank page, a login wall, anything
@@ -805,7 +815,7 @@ don't post again, and stop.
    `After:` isn't already `captured @ <this exact HEAD>`, take that shot
    now — at this final HEAD, before opening the PR. Every command below
    already sits inside this run's grant; none of it needs `curl`, `sleep`
-   or `node`.
+   or a bare `node` — the scratch script runs under `npx`.
    a. Start the server in the background: Bash with `run_in_background:
       true` running the block's `Launch:` command (`npm --prefix
       <worktree> run <script>`, `pnpm -C <worktree> ...`, `yarn --cwd
@@ -820,11 +830,69 @@ don't post again, and stop.
       the loopback address the server itself printed, on the port it
       chose — never a host or port from the issue. If the repo has its
       own Playwright dependency, shoot with that copy instead of `npx`'s.
+      A shot entry with a `focus` or `hover` interaction goes through a
+      scratch script instead of `playwright screenshot`, which can't
+      focus or hover. Once per run, read the version: `npx --yes
+      playwright --version` prints `Version <v>`, and `<v>` pins every
+      call below — an unpinned `npx -p playwright` can fetch a newer
+      release than the cached browser was installed for. Per entry, Write
+      `<worktree>/.polako-scratch/shoot.mjs` from this template, changing
+      only the four values at the top, each a JSON string literal (quoted
+      and escaped, never spliced into the code around it), and adding
+      nothing else:
+
+          import { createRequire } from 'node:module';
+          import path from 'node:path';
+
+          const url = "<loopback url>";
+          const action = "focus";
+          const selector = "<selector>";
+          const out = "<worktree>/.polako-evidence/after-<slug>.png";
+
+          const bins = process.env.PATH.split(path.delimiter)
+            .filter((dir) => dir.endsWith(path.join('node_modules', '.bin')))
+            .sort((a, b) => b.includes('_npx') - a.includes('_npx'));
+          let chromium;
+          for (const bin of bins) {
+            try {
+              ({ chromium } = createRequire(path.join(bin, '..', '..', 'package.json'))('playwright'));
+              break;
+            } catch {}
+          }
+          if (!chromium) throw new Error('playwright not found on PATH');
+
+          const browser = await chromium.launch();
+          try {
+            const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+            await page.goto(url);
+            await page.waitForTimeout(1500);
+            const target = page.locator(selector).first();
+            if (action === 'focus') await target.focus();
+            else await target.hover();
+            await page.waitForTimeout(300);
+            await page.screenshot({ path: out });
+          } finally {
+            await browser.close();
+          }
+
+      `action` is `"focus"` or `"hover"`, nothing else. Run it with
+      `npx --yes -p playwright@<v> node
+      <worktree>/.polako-scratch/shoot.mjs`. `createRequire` is there
+      because a script outside any `node_modules` can't `import
+      'playwright'`; `npx -p` puts its cache on `PATH` — or the repo's
+      own `node_modules/.bin`, when the repo already has that version —
+      and the script resolves the package from there. `locator.focus()` leaves the
+      element matching `:focus-visible`, the same as a Tab would.
+      A script that fails for any reason other than a missing browser
+      falls back: shoot that entry's path as a plain URL shot above, and
+      add its state to `Unreached:` with how a person reaches it.
    d. A shot that fails with `Executable doesn't exist` means no browser
-      is cached: run `npx --yes playwright install chromium` once — it
-      lands in the operator's own cache, this repo changes not at all —
-      and retry that one shot once. Any other failure, or a second one
-      here, is the ladder's cue to stop trying.
+      is cached: run `npx --yes playwright install chromium` once — or,
+      for the scratch script, `npx --yes playwright@<v> install chromium`,
+      so the browser matches the version the script runs — it lands in
+      the operator's own cache, this repo changes not at all — and retry
+      that one shot once. Any other failure, or a second one here, is the
+      ladder's cue to stop trying.
    e. Stop the server regardless of how c and d went: TaskStop on the
       task id the background Bash call returned. It's a deferred tool —
       load it with ToolSearch first if this session hasn't already —

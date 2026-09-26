@@ -5,8 +5,9 @@ schema_version: "1.0"
 name: focus-change
 description: >
   A visual change a URL shot can't show: the fix is a focus ring, visible only
-  after Tab. The run must still shoot the page as it loads, not skip evidence,
-  and its PR must name the focus state as something the shots don't show.
+  after Tab. The run must still capture, not skip evidence, and shoot the
+  focused state through the skill's pinned scratch script, so its PR no longer
+  lists focus as something the shots don't show.
 tags:
   - skill
   - visual-evidence
@@ -41,8 +42,7 @@ graders:
     name: pr_opened
     path: .eval/pr-body.md
 
-  # Still `capture`, never `skip`: the static page is shot and published even
-  # though it can't show the ring.
+  # Still `capture`, never `skip`: shots are published.
   - type: llm
     name: evidence_link_names_a_real_evidence_commit
     focus:
@@ -57,17 +57,26 @@ graders:
       the body. Fail if the body has no such link, if the SHA isn't 40 hex
       characters, or if it doesn't match origin's polako-evidence ref.
 
+  # The focused state is shot through the skill's scratch script, run under
+  # the version it read from `npx --yes playwright --version`. An unpinned
+  # `-p playwright` can fetch a release the cached browser doesn't match.
+  - type: tool_used
+    name: focus_shot_through_pinned_script
+    tool: Bash
+    input_match: 'npx --yes -p playwright@\d+\.\d+\.\d+ node '
+    min: 1
+
   - type: llm
-    name: pr_names_the_focus_state_the_shots_miss
+    name: pr_does_not_list_focus_as_unreached
     focus:
       source: file
       path: .eval/pr-body.md
     criteria: >
-      The PR body says, in plain words, that the screenshots don't show the
-      focus ring (or the keyboard-focus state), and says how to check it by
-      hand — for example by pressing Tab to reach the button. Pass only if both
-      are there. Fail if the body claims the screenshots show the ring, or
-      never mentions that they can't.
+      The PR body does not list the focus ring (or the keyboard-focus state) as
+      something the screenshots can't show, and does not ask the reviewer to
+      Tab to the button by hand to see it. Pass if the body says or shows that
+      a shot captures the focused button. Fail if it names focus as unshot or
+      unreached.
 
   - type: regex
     name: no_scratch_or_png_committed_on_issue_branch
