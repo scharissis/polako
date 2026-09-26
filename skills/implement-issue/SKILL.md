@@ -849,10 +849,17 @@ don't post again, and stop.
           const selector = "<selector>";
           const out = "<worktree>/.polako-evidence/after-<slug>.png";
 
-          const bin = process.env.PATH.split(path.delimiter)
-            .find((dir) => dir.includes('_npx') && dir.endsWith(path.join('node_modules', '.bin')));
-          const require = createRequire(path.join(bin, '..', '..', 'package.json'));
-          const { chromium } = require('playwright');
+          const bins = process.env.PATH.split(path.delimiter)
+            .filter((dir) => dir.endsWith(path.join('node_modules', '.bin')))
+            .sort((a, b) => b.includes('_npx') - a.includes('_npx'));
+          let chromium;
+          for (const bin of bins) {
+            try {
+              ({ chromium } = createRequire(path.join(bin, '..', '..', 'package.json'))('playwright'));
+              break;
+            } catch {}
+          }
+          if (!chromium) throw new Error('playwright not found on PATH');
 
           const browser = await chromium.launch();
           try {
@@ -872,8 +879,9 @@ don't post again, and stop.
       `npx --yes -p playwright@<v> node
       <worktree>/.polako-scratch/shoot.mjs`. `createRequire` is there
       because a script outside any `node_modules` can't `import
-      'playwright'`; `npx -p` puts its cache on `PATH`, and the script
-      resolves the package from there. `locator.focus()` leaves the
+      'playwright'`; `npx -p` puts its cache on `PATH` — or the repo's
+      own `node_modules/.bin`, when the repo already has that version —
+      and the script resolves the package from there. `locator.focus()` leaves the
       element matching `:focus-visible`, the same as a Tab would.
       A script that fails for any reason other than a missing browser
       falls back: shoot that entry's path as a plain URL shot above, and
