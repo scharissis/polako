@@ -104,7 +104,8 @@ func TestReviewPromptCarriesShotsOnlyWhenOn(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			prompt := reviewPrompt(tc.cfg, 46, 9)
-			for _, marker := range []string{"Screenshots:", evidenceRef, evidenceDir, reviewShotsFinished} {
+			for _, marker := range []string{"Screenshots:", evidenceRef, evidenceDir, reviewShotsFinished,
+				"which state the shots can't show"} {
 				if got := strings.Contains(prompt, marker); got != tc.shots {
 					t.Errorf("prompt contains %q = %v, want %v:\n%s", marker, got, tc.shots, prompt)
 				}

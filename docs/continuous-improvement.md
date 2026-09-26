@@ -39,7 +39,7 @@ the backlog, never through the supervisor reading its own telemetry.
 ## Pillar 1 — the eval suite's first green run
 
 The highest-leverage item in this plan is not new; it is finishing one that
-exists. `evals/` grades what a real skill run leaves behind — ten cases now,
+exists. `evals/` grades what a real skill run leaves behind — eleven cases now,
 across all four shipped skills. It has run in full once, by hand through
 `evals/run.sh` on 2026-08-28 (32/34, both reds genuine skill findings).
 Issue #77 ported it to `claude plugin eval`, the CLI's own runner: the cases

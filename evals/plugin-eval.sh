@@ -30,8 +30,8 @@
 # Mind the defaults: --ablation runs every case a second time without the
 # plugin, and the HTML report publishes to your claude.ai account unless
 # --no-publish says otherwise. evals/README.md, "Running it", has the rest.
-# visual-change isn't in this runner's reach (by-hand.yaml, not case.yaml);
-# evals/run.sh runs it.
+# visual-change and focus-change aren't in this runner's reach (by-hand.yaml,
+# not case.yaml); evals/run.sh runs them.
 set -euo pipefail
 
 evals_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)

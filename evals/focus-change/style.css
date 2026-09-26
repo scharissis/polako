@@ -1,0 +1,24 @@
+body {
+  font-family: sans-serif;
+  margin: 4rem;
+}
+
+.toolbar {
+  display: inline-block;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.hero-button {
+  background: #0b5ffd;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 24px;
+  font-size: 16px;
+}
+
+.hero-button:focus-visible {
+  outline: 3px solid #7c3aed;
+  outline-offset: 2px;
+}

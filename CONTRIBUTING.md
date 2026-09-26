@@ -94,7 +94,7 @@ closing the issue. Whether a run *keeps* those promises is what
 evals/run.sh clear-issue
 ```
 
-Ten cases, each one a real run against a scratch repo and a stand-in `gh`,
+Eleven cases, each one a real run against a scratch repo and a stand-in `gh`,
 covering all four shipped skills — [`evals/README.md`](evals/README.md) has the
 table. This one is not part of `check.sh` and not in CI. It needs the network,
 a real `claude` and money, roughly $0.30–$1.60 a case — a deliberate exception

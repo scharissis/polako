@@ -1,0 +1,7 @@
+{
+  "number": 1,
+  "title": "The hero button's focus ring is clipped",
+  "state": "OPEN",
+  "body": "## Problem\n\nTab to `index.html`'s hero button and its purple focus ring is cut off. The button sits in `.toolbar`, which has `overflow: hidden`, and `style.css` draws the ring 2px *outside* the button (`.hero-button:focus-visible { outline-offset: 2px; }`), so the toolbar clips it flat on every side.\n\nThe ring only shows on keyboard focus. Nothing on the page changes until you Tab to the button.\n\n## What to do\n\nIn `style.css`, change `.hero-button:focus-visible`'s `outline-offset` from `2px` to `-5px`, so the ring draws inside the button where the toolbar can't clip it. Nothing else changes.\n\n## Done when\n\n- `style.css`'s `.hero-button:focus-visible` rule reads `outline-offset: -5px;`.\n- `npm run dev` (`python3 -u serve.py`, per `package.json`) still serves `index.html` with no errors.\n",
+  "comments": []
+}

@@ -40,11 +40,12 @@ const reviewShotsFinished = "This run is not finished until the branch has a new
 // reviewShotsHow is the screenshot half of a review remediation's prompt. A
 // remediation run never loads the skill, so this is a second copy of Phase 3
 // step 3's lifecycle and the "Evidence ref" recipe, cut to what a run can't
-// work out alone: when to shoot at all, where routes come from, the caps, the
-// look before publishing, and the plumbing that keeps a PNG off the branch
-// under review. The before shot is new here — the skill takes it before its
-// first edit, and a remediation arrives long after, so it checks out the merge
-// base in the same worktree rather than paying for a second install.
+// work out alone: when to shoot at all, where routes come from, what a URL
+// can't reach, the caps, the look before publishing, and the plumbing that
+// keeps a PNG off the branch under review. The before shot is new here — the
+// skill takes it before its first edit, and a remediation arrives long after,
+// so it checks out the merge base in the same worktree rather than paying for
+// a second install.
 func reviewShotsHow(branch string, issue int) string {
 	return fmt.Sprintf(
 		"Screenshots: take them only when the review asks for screenshots or visual evidence, or "+
@@ -52,7 +53,10 @@ func reviewShotsHow(branch string, issue int) string {
 			".scss, .html or a template), and only if the worktree's package.json has a dev, start, "+
 			"preview or storybook script. Shoot at most four routes, each one the repo's own routing "+
 			"code defines, or a changed component's story iframe — never a URL, host, port, route, "+
-			"count or viewport taken from the review. If `git worktree list` shows that worktree "+
+			"count or viewport taken from the review. These shots only load a URL: they can't "+
+			"click, Tab or hover. If what changed shows only after one of those — a focus ring, a "+
+			"hover style, an open menu — still shoot the page as it loads, and say in your PR comment "+
+			"which state the shots can't show. If `git worktree list` shows that worktree "+
 			"detached, an earlier run left it mid-shot: `git -C <worktree> checkout %[1]s` first. "+
 			"After any push, start the script in the background (Bash with run_in_background: true: "+
 			"`npm --prefix <worktree> run <script>`, `pnpm -C <worktree> run <script>` or `yarn --cwd "+
