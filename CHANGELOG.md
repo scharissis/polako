@@ -13,6 +13,23 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.37.0]
+
+### What's Changed
+* docs: sdlc.svg no longer says -notify pings on a merge wait by @scharissis in https://github.com/scharissis/polako/pull/683 (closes #643)
+* docs: name the run data's readers and file modes as the code has them by @scharissis in https://github.com/scharissis/polako/pull/684 (closes #644)
+* fix: design-plan names the run behind an absence claim by @scharissis in https://github.com/scharissis/polako/pull/685 (closes #647)
+* test: hold design-plan's gh calls to the design grant by @scharissis in https://github.com/scharissis/polako/pull/686 (closes #648)
+* docs: move docs/designs/model-selection.md to done/ — every issue it proposed is closed by @scharissis in https://github.com/scharissis/polako/pull/687 (closes #661)
+* feat: put the ran-on lines in a ## Ran on section above Closes #N by @scharissis in https://github.com/scharissis/polako/pull/688 (closes #673)
+* feat: a brief's milestone says what the batch does, not its first words by @scharissis in https://github.com/scharissis/polako/pull/689 (closes #674)
+* feat: shoot focus and hover states from a pinned scratch playwright script by @scharissis in https://github.com/scharissis/polako/pull/690 (closes #678)
+* feat: review runs shoot focus and hover states too by @scharissis in https://github.com/scharissis/polako/pull/691 (closes #679)
+* docs: say capture can shoot focus and hover states by @scharissis in https://github.com/scharissis/polako/pull/692 (closes #680)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.36.1...v0.37.0
+
 ## [0.36.1]
 
 ### What's Changed
