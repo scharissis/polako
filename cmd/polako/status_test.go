@@ -838,7 +838,7 @@ func TestStatusMakesOnlyReadCalls(t *testing.T) {
 			isViewer := fields[1] == "user"
 			// markedGateLabel's own call, made because this cfg has no
 			// -label: the one new read this feature adds to status.
-			isLabels := strings.HasSuffix(fields[1], "/labels")
+			isLabels := strings.HasSuffix(fields[1], "/labels?per_page=100") && slices.Contains(fields, "--paginate")
 			if !isComments && !isMarketplace && !isViewer && !isLabels {
 				t.Errorf("status called `gh %s`, which is not the comments, marketplace, viewer-login or labels read", line)
 			}

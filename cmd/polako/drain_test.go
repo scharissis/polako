@@ -394,6 +394,10 @@ func fakeGh(path string, args []string) int {
 	return code
 }
 
+// fakeLabelPage is how many labels the fake's `api .../labels` puts on a
+// page — small, so a test can put a label past the first page with three.
+const fakeLabelPage = 2
+
 // answerGh is the fake's whole repertoire: exactly the calls the supervisor
 // makes. Anything else fails loudly, so a new gh call added to the drain shows
 // up as a named failure rather than an empty answer.
@@ -440,7 +444,7 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			call = "api compare"
 		} else if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "/labels/") }) {
 			call = "api label"
-		} else if slices.ContainsFunc(args, func(a string) bool { return strings.HasSuffix(a, "/labels") }) {
+		} else if slices.ContainsFunc(args, func(a string) bool { return strings.HasSuffix(a, "/labels") || strings.Contains(a, "/labels?") }) {
 			// markedGateLabel's own call: repos/{owner}/{repo}/labels, no
 			// name past it — checked after the /labels/<name> case above,
 			// since that path also ends in a name that could (in principle)
@@ -689,11 +693,21 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 		// markedGateLabel's own call: every label the repository has
 		// defined, name and description — status reads this with no -label
 		// given to find the one, if any, carrying setup's gate-label marker.
-		var rows []string
-		for _, name := range st.Labels {
-			rows = append(rows, fmt.Sprintf(`{"name":%q,"description":%q}`, name, st.LabelDescriptions[name]))
+		// Pages of fakeLabelPage, back-to-back the way --paginate can print
+		// them; without --paginate, only the first — the real API's answer,
+		// and the bug issue #642 fixed.
+		var pages []string
+		for i := 0; i == 0 || i < len(st.Labels); i += fakeLabelPage {
+			var rows []string
+			for _, name := range st.Labels[i:min(i+fakeLabelPage, len(st.Labels))] {
+				rows = append(rows, fmt.Sprintf(`{"name":%q,"description":%q}`, name, st.LabelDescriptions[name]))
+			}
+			pages = append(pages, "["+strings.Join(rows, ",")+"]")
+			if !slices.Contains(args, "--paginate") {
+				break
+			}
 		}
-		return "[" + strings.Join(rows, ",") + "]", false, 0
+		return strings.Join(pages, "\n"), false, 0
 
 	case "issue create":
 		// `plan` preflight makes the `--parent` capability probe; a real plan
