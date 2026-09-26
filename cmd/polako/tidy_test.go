@@ -86,7 +86,7 @@ func TestReclaimRemovesAMergedAndCleanIssue(t *testing.T) {
 
 	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: false}}}, checkout)
 
-	results, err := reclaim(context.Background(), cfg, true, 0)
+	results, err := reclaim(context.Background(), cfg, true)
 	if err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestReclaimSurvivesAnUnreachableOrigin(t *testing.T) {
 	mergeIssueBranch(t, checkout, "issue-1", "feature-1")
 	unreachableOrigin(t, checkout)
 
-	results, err := reclaim(context.Background(), tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: false}}}, checkout), true, 0)
+	results, err := reclaim(context.Background(), tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: false}}}, checkout), true)
 	if err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestReclaimWorksAtOldAndNewWorktreeLocations(t *testing.T) {
 
 	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"2": {Open: false}, "3": {Open: false}}}, checkout)
 
-	results, err := reclaim(context.Background(), cfg, true, 0)
+	results, err := reclaim(context.Background(), cfg, true)
 	if err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestReclaimRemovesAWorktreeHoldingOnlyThePlan(t *testing.T) {
 
 	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"9": {Open: false}}}, checkout)
 
-	results, err := reclaim(context.Background(), cfg, true, 0)
+	results, err := reclaim(context.Background(), cfg, true)
 	if err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestReclaimRemovesAWorktreeHoldingOnlyThePlanAndEvidence(t *testing.T) {
 
 	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"9": {Open: false}}}, checkout)
 
-	results, err := reclaim(context.Background(), cfg, true, 0)
+	results, err := reclaim(context.Background(), cfg, true)
 	if err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestReclaimDiscountsTheScratchDirButNotARootLevelDump(t *testing.T) {
 
 	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"9": {Open: false}, "10": {Open: false}}}, checkout)
 
-	results, err := reclaim(context.Background(), cfg, true, 0)
+	results, err := reclaim(context.Background(), cfg, true)
 	if err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestReclaimSkipsAnOpenIssue(t *testing.T) {
 
 	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"2": {Open: true}}}, checkout)
 
-	results, err := reclaim(context.Background(), cfg, true, 0)
+	results, err := reclaim(context.Background(), cfg, true)
 	if err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestReclaimSkipsAClosedIssueWithADirtyWorktree(t *testing.T) {
 
 	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"3": {Open: false}}}, checkout)
 
-	results, err := reclaim(context.Background(), cfg, true, 0)
+	results, err := reclaim(context.Background(), cfg, true)
 	if err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestReclaimLeavesAWorktreeItCannotReadAlone(t *testing.T) {
 
 	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: false}}}, checkout)
 
-	results, err := reclaim(context.Background(), cfg, true, 0)
+	results, err := reclaim(context.Background(), cfg, true)
 	if err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestReclaimSkipsABranchNotMergedIntoTheDefaultBranch(t *testing.T) {
 
 	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"4": {Open: false}}}, checkout)
 
-	results, err := reclaim(context.Background(), cfg, true, 0)
+	results, err := reclaim(context.Background(), cfg, true)
 	if err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
@@ -411,7 +411,7 @@ func TestReclaimLeavesAHeldIssueAlone(t *testing.T) {
 				PRs:    map[string]*fakePR{"issue-1": {Number: 9, State: "MERGED"}},
 			}, checkout)
 
-			results, err := reclaim(context.Background(), cfg, true, 0)
+			results, err := reclaim(context.Background(), cfg, true)
 			if err != nil {
 				t.Fatalf("reclaim: %v", err)
 			}
@@ -460,44 +460,45 @@ func TestTidySweepIsQuietAboutAHeldWatchedIssue(t *testing.T) {
 	}
 }
 
-// The branch whose merge the drain witnessed is reclaimed even when it is not a
-// literal ancestor of the default branch — a squash merge never is. The
-// evidence is GitHub's own merge event, not the branch shape, and it applies
-// only because the local tip still equals what was pushed to origin.
-func TestReclaimReclaimsAWitnessedSquashMerge(t *testing.T) {
+// squashShaped leaves branch the way a squash merge does: one commit ahead of
+// main and never merged back, so it is no ancestor of anything. It returns the
+// branch's tip — what GitHub reports as the merged PR's head.
+func squashShaped(t *testing.T, checkout, branch, file string) string {
+	t.Helper()
+	gitAt(t, checkout, "checkout", "-b", branch)
+	commit(t, checkout, file)
+	tip := gitAt(t, checkout, "rev-parse", "HEAD")
+	gitAt(t, checkout, "checkout", "main")
+	return tip
+}
+
+// A branch whose tip is exactly its merged PR's head is reclaimed even when it
+// is not a literal ancestor of the default branch — a squash merge never is.
+// The evidence is GitHub's own head SHA, not the branch shape, and it holds in
+// `tidy -apply` and the shift-start sweep alike, with no watched issue.
+func TestReclaimReclaimsASquashMergeMatchingItsPRHead(t *testing.T) {
 	t.Parallel()
 	_, checkout := upstream(t)
-	// issue-7 diverges and is never merged back: 1 commit ahead of main, the
-	// shape a squash merge leaves.
-	gitAt(t, checkout, "checkout", "-b", "issue-7")
-	commit(t, checkout, "feature-7")
-	gitAt(t, checkout, "checkout", "main")
+	tip := squashShaped(t, checkout, "issue-7", "feature-7")
 	gitAt(t, checkout, "push", "origin", "issue-7")
 	wt := filepath.Join(t.TempDir(), "issue-7-worktree")
 	gitAt(t, checkout, "worktree", "add", wt, "issue-7")
 
 	cfg := tidyCfg(t, &ghState{
 		Issues: map[string]*fakeIssue{"7": {Open: false}},
-		PRs:    map[string]*fakePR{"issue-7": {Number: 9, State: "MERGED"}},
+		PRs:    map[string]*fakePR{"issue-7": {Number: 9, State: "MERGED", Head: tip}},
 	}, checkout)
 
-	// Not witnessed: the conservative refusal still stands.
-	unwatched, err := reclaim(context.Background(), cfg, false, 0)
+	results, err := reclaim(context.Background(), cfg, true)
 	if err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
-	if r := findTidyResult(t, unwatched, 7); r.reclaimed || !strings.Contains(r.reason, "not merged into the default branch") {
-		t.Fatalf("unwitnessed, a non-ancestor branch must be refused: %+v", r)
-	}
-
-	// Witnessed: reclaimed.
-	watched, err := reclaim(context.Background(), cfg, true, 7)
-	if err != nil {
-		t.Fatalf("reclaim: %v", err)
-	}
-	r := findTidyResult(t, watched, 7)
+	r := findTidyResult(t, results, 7)
 	if !r.reclaimed {
-		t.Fatalf("a witnessed merge must be reclaimed whatever the branch shape: %+v", r)
+		t.Fatalf("a branch matching its merged PR's head must be reclaimed whatever its shape: %+v", r)
+	}
+	if r.why != "merged (PR #9)" {
+		t.Errorf("why = %q, want %q", r.why, "merged (PR #9)")
 	}
 	if _, err := os.Stat(wt); !os.IsNotExist(err) {
 		t.Errorf("worktree %s still exists", wt)
@@ -507,36 +508,180 @@ func TestReclaimReclaimsAWitnessedSquashMerge(t *testing.T) {
 	}
 }
 
-// A witnessed merge vouches for what was pushed, not for a commit added to the
-// local branch on top of it. reclaim confirms the local tip still equals
-// origin's before it force-deletes; when it does not, the branch takes the
-// ordinary conservative path and is left alone rather than -D'd.
-func TestReclaimDoesNotForceDeleteAWitnessedBranchWithUnpushedWork(t *testing.T) {
+// Issue #698's own incident: the fetch failed, so the mirror is stale and the
+// ancestor check sees the branch ahead — and the skill had pushed to a URL, so
+// no origin/issue-N ref was ever set. GitHub's head SHA still proves nothing
+// can be lost.
+func TestReclaimTrustsThePRHeadOverAStaleMirrorAndNoTrackingRef(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	tip := squashShaped(t, checkout, "issue-7", "feature-7") // never pushed to origin
+	unreachableOrigin(t, checkout)
+	wt := filepath.Join(t.TempDir(), "issue-7-worktree")
+	gitAt(t, checkout, "worktree", "add", wt, "issue-7")
+	if err := os.WriteFile(filepath.Join(wt, planFile), []byte("## Approach\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := tidyCfg(t, &ghState{
+		Issues: map[string]*fakeIssue{"7": {Open: false}},
+		PRs:    map[string]*fakePR{"issue-7": {Number: 9, State: "MERGED", Head: tip}},
+	}, checkout)
+
+	results, err := reclaim(context.Background(), cfg, true)
+	if err != nil {
+		t.Fatalf("reclaim: %v", err)
+	}
+	if r := findTidyResult(t, results, 7); !r.reclaimed {
+		t.Fatalf("a branch matching its merged PR's head must be reclaimed against a stale mirror: %+v", r)
+	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Errorf("worktree %s still exists", wt)
+	}
+	if out := gitAt(t, checkout, "branch", "--list", "issue-7"); out != "" {
+		t.Errorf("branch issue-7 still exists: %q", out)
+	}
+}
+
+// A tracking ref left behind by an earlier push through origin, stale because
+// the push that merged went to a URL and the fetch that would prune it failed,
+// must not outvote GitHub's head SHA.
+func TestReclaimIgnoresAStaleTrackingRefWhenThePRHeadMatches(t *testing.T) {
 	t.Parallel()
 	_, checkout := upstream(t)
 	gitAt(t, checkout, "checkout", "-b", "issue-7")
 	commit(t, checkout, "feature-7")
 	gitAt(t, checkout, "push", "origin", "issue-7")
-	// A commit that never reached origin — the merge event cannot speak for it.
-	commit(t, checkout, "local-only-follow-up")
+	commit(t, checkout, "review-fix") // reached GitHub, but not through origin
+	tip := gitAt(t, checkout, "rev-parse", "HEAD")
 	gitAt(t, checkout, "checkout", "main")
+	unreachableOrigin(t, checkout)
 
 	cfg := tidyCfg(t, &ghState{
 		Issues: map[string]*fakeIssue{"7": {Open: false}},
-		PRs:    map[string]*fakePR{"issue-7": {Number: 9, State: "MERGED"}},
+		PRs:    map[string]*fakePR{"issue-7": {Number: 9, State: "MERGED", Head: tip}},
 	}, checkout)
-
-	results, err := reclaim(context.Background(), cfg, true, 7)
+	results, err := reclaim(context.Background(), cfg, true)
 	if err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
-	r := findTidyResult(t, results, 7)
-	if r.reclaimed {
-		t.Fatalf("a witnessed branch with unpushed work must not be force-deleted: %+v", r)
+	if r := findTidyResult(t, results, 7); !r.reclaimed {
+		t.Fatalf("a stale origin/issue-7 must not refuse a branch matching its merged PR's head: %+v", r)
 	}
-	if out := gitAt(t, checkout, "branch", "--list", "issue-7"); out == "" {
-		t.Error("branch issue-7 was deleted despite carrying an unpushed commit")
+}
+
+// The PR head vouches for what merged, nothing more. A commit past it, a dirty
+// worktree, or a PR list gh could not read each keep the branch.
+func TestReclaimRefusesWhatThePRHeadDoesNotCover(t *testing.T) {
+	t.Parallel()
+	t.Run("commit past the head", func(t *testing.T) {
+		t.Parallel()
+		_, checkout := upstream(t)
+		gitAt(t, checkout, "checkout", "-b", "issue-7")
+		commit(t, checkout, "feature-7")
+		head := gitAt(t, checkout, "rev-parse", "HEAD")
+		commit(t, checkout, "local-only-follow-up")
+		gitAt(t, checkout, "checkout", "main")
+
+		cfg := tidyCfg(t, &ghState{
+			Issues: map[string]*fakeIssue{"7": {Open: false}},
+			PRs:    map[string]*fakePR{"issue-7": {Number: 9, State: "MERGED", Head: head}},
+		}, checkout)
+		results, err := reclaim(context.Background(), cfg, true)
+		if err != nil {
+			t.Fatalf("reclaim: %v", err)
+		}
+		if r := findTidyResult(t, results, 7); r.reclaimed || !strings.Contains(r.reason, "not merged into the default branch") {
+			t.Fatalf("a branch past its merged PR's head must be refused: %+v", r)
+		}
+		if out := gitAt(t, checkout, "branch", "--list", "issue-7"); out == "" {
+			t.Error("branch issue-7 was deleted despite carrying a commit the PR never had")
+		}
+	})
+	// A bare MERGED state is not enough: with no head, or a different one,
+	// nothing ties the merge to this tip.
+	for name, head := range map[string]string{"no head reported": "", "a different head": "0123456789abcdef0123456789abcdef01234567"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, checkout := upstream(t)
+			squashShaped(t, checkout, "issue-7", "feature-7")
+
+			cfg := tidyCfg(t, &ghState{
+				Issues: map[string]*fakeIssue{"7": {Open: false}},
+				PRs:    map[string]*fakePR{"issue-7": {Number: 9, State: "MERGED", Head: head}},
+			}, checkout)
+			results, err := reclaim(context.Background(), cfg, true)
+			if err != nil {
+				t.Fatalf("reclaim: %v", err)
+			}
+			if r := findTidyResult(t, results, 7); r.reclaimed || !strings.Contains(r.reason, "not merged into the default branch") {
+				t.Fatalf("a squash-shaped branch no merged PR's head matches must be refused: %+v", r)
+			}
+		})
 	}
+	t.Run("merged into another branch", func(t *testing.T) {
+		t.Parallel()
+		_, checkout := upstream(t)
+		tip := squashShaped(t, checkout, "issue-7", "feature-7")
+
+		cfg := tidyCfg(t, &ghState{
+			Issues: map[string]*fakeIssue{"7": {Open: false}},
+			PRs:    map[string]*fakePR{"issue-7": {Number: 9, State: "MERGED", Head: tip, Base: "release"}},
+		}, checkout)
+		results, err := reclaim(context.Background(), cfg, true)
+		if err != nil {
+			t.Fatalf("reclaim: %v", err)
+		}
+		if r := findTidyResult(t, results, 7); r.reclaimed || !strings.Contains(r.reason, "not merged into the default branch") {
+			t.Fatalf("a PR merged into a non-default branch must not vouch for the tip: %+v", r)
+		}
+	})
+	t.Run("dirty worktree", func(t *testing.T) {
+		t.Parallel()
+		_, checkout := upstream(t)
+		tip := squashShaped(t, checkout, "issue-7", "feature-7")
+		wt := filepath.Join(t.TempDir(), "issue-7-worktree")
+		gitAt(t, checkout, "worktree", "add", wt, "issue-7")
+		if err := os.WriteFile(filepath.Join(wt, "scratch.txt"), []byte("uncommitted"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg := tidyCfg(t, &ghState{
+			Issues: map[string]*fakeIssue{"7": {Open: false}},
+			PRs:    map[string]*fakePR{"issue-7": {Number: 9, State: "MERGED", Head: tip}},
+		}, checkout)
+		results, err := reclaim(context.Background(), cfg, true)
+		if err != nil {
+			t.Fatalf("reclaim: %v", err)
+		}
+		if r := findTidyResult(t, results, 7); r.reclaimed || r.reason != "1 uncommitted file" {
+			t.Fatalf("a dirty worktree must be refused whatever the PR head says: %+v", r)
+		}
+		if _, err := os.Stat(wt); err != nil {
+			t.Errorf("worktree %s should still be there: %v", wt, err)
+		}
+	})
+	t.Run("PR list unreadable", func(t *testing.T) {
+		t.Parallel()
+		_, checkout := upstream(t)
+		tip := squashShaped(t, checkout, "issue-7", "feature-7")
+
+		cfg := tidyCfg(t, &ghState{
+			Issues:    map[string]*fakeIssue{"7": {Open: false}},
+			PRs:       map[string]*fakePR{"issue-7": {Number: 9, State: "MERGED", Head: tip}},
+			FailReads: map[string]int{"pr list": 100},
+		}, checkout)
+		results, err := reclaim(context.Background(), cfg, true)
+		if err != nil {
+			t.Fatalf("reclaim: %v", err)
+		}
+		if r := findTidyResult(t, results, 7); r.reclaimed || !strings.Contains(r.reason, "could not read GitHub's state") {
+			t.Fatalf("a failed PR read must be refused and say why: %+v", r)
+		}
+		if out := gitAt(t, checkout, "branch", "--list", "issue-7"); out == "" {
+			t.Error("branch issue-7 was deleted though GitHub could not be read")
+		}
+	})
 }
 
 // A branch that never got its own worktree still has its branch deleted —
@@ -549,7 +694,7 @@ func TestReclaimDeletesABranchWithNoWorktree(t *testing.T) {
 
 	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"5": {Open: false}}}, checkout)
 
-	results, err := reclaim(context.Background(), cfg, true, 0)
+	results, err := reclaim(context.Background(), cfg, true)
 	if err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
@@ -583,7 +728,7 @@ func TestReclaimClearsAPrunableWorktreeEntry(t *testing.T) {
 
 	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"6": {Open: false}}}, checkout)
 
-	results, err := reclaim(context.Background(), cfg, true, 0)
+	results, err := reclaim(context.Background(), cfg, true)
 	if err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
@@ -615,7 +760,7 @@ func TestReclaimIgnoresADetachedWorktree(t *testing.T) {
 
 	cfg := tidyCfg(t, &ghState{}, checkout)
 
-	results, err := reclaim(context.Background(), cfg, true, 0)
+	results, err := reclaim(context.Background(), cfg, true)
 	if err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
@@ -643,7 +788,7 @@ func TestReclaimRefusesToRemoveTheWorktreeItIsRunningFrom(t *testing.T) {
 
 	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"8": {Open: false}}}, wt) // -dir points at the linked worktree itself
 
-	results, err := reclaim(context.Background(), cfg, true, 0)
+	results, err := reclaim(context.Background(), cfg, true)
 	if err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
@@ -675,7 +820,7 @@ func TestReclaimDryRunWritesNothingToDisk(t *testing.T) {
 	cfg := tidyCfg(t, &ghState{Issues: map[string]*fakeIssue{"7": {Open: false}}}, checkout)
 
 	for i := 0; i < 2; i++ {
-		results, err := reclaim(context.Background(), cfg, false, 0)
+		results, err := reclaim(context.Background(), cfg, false)
 		if err != nil {
 			t.Fatalf("reclaim (pass %d): %v", i, err)
 		}

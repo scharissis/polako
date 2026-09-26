@@ -44,8 +44,8 @@ for every `issue-N` branch it can prove finished — closed, or merged with a
 clean worktree and nothing unpushed — it removes the worktree and deletes
 the local branch, touching nothing on GitHub, and the shift log says which:
 `reclaimed 1 finished issue: issue-7 (worktree removed, local branch
-deleted)`. For the issue whose merge the shift just watched, GitHub's merge
-event stands in for the ancestor check, so a squash merge is reclaimed too.
+deleted)`. A tip that is exactly its merged PR's head skips the ancestor
+check, so a squash merge or a stale mirror still reclaims.
 A sweep that can't run at all, and the just-merged worktree failing to
 reclaim (usually uncommitted work), are both named in the shift log;
 neither ends a shift, since a tidy-up must not take a backlog down. A

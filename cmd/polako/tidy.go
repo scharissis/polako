@@ -7,7 +7,8 @@ package main
 // the sweep an operator can also point at that backlog by hand.
 //
 // It proves a branch safe to remove before removing it — closed or merged,
-// merged into the default branch, its worktree clean, nothing unpushed — and
+// merged into the default branch or its tip exactly a merged PR's head, its
+// worktree clean, nothing unpushed — and
 // reports what it refused exactly as loudly as what it did: a skip is always
 // recoverable, a wrong removal is not. -dry-run is the default for the same
 // reason: every other verb here defaults to acting, but this is the one verb
@@ -72,7 +73,7 @@ func runTidy(ctx context.Context, args []string, out io.Writer, rpt report) erro
 	if err != nil {
 		return err
 	}
-	results, err := reclaim(ctx, cfg, opt.apply, 0)
+	results, err := reclaim(ctx, cfg, opt.apply)
 	if err != nil {
 		return err
 	}
@@ -104,28 +105,8 @@ type tidyResult struct {
 }
 
 // reclaim is the whole sweep: every local branch matching cfg.branchPrefix
-// plus a number, judged and — if -apply says so — removed. watched is the issue
-// whose PR the caller just saw merge (0 for none, always so from `polako
-// tidy`): for that one the merge is GitHub's own event rather than a guess from
-// the branch shape, so the "ancestor of the default branch" test — which a
-// squash merge fails even with nothing lost — is not applied, provided the
-// local branch still matches what was pushed to origin.
-func reclaim(ctx context.Context, cfg config, apply bool, watched int) ([]tidyResult, error) {
-	// What origin's copy of the watched branch points at, read before the fetch
-	// below prunes it. GitHub deletes a merged PR's head branch, and a fetch
-	// with prune set drops the remote-tracking ref the instant it does — so the
-	// witnessed-merge shortcut captures the tip here, while it is still around,
-	// to confirm the local branch is exactly what merged before it force-deletes
-	// past `git branch -d`'s reachability check. Stale is fine: it still names
-	// the commit that shipped.
-	watchedRemoteTip := ""
-	if watched != 0 {
-		wb := fmt.Sprintf("%s%d", cfg.branchPrefix, watched)
-		if out, err := git(ctx, cfg, "rev-parse", "--verify", "-q", "refs/remotes/origin/"+wb); err == nil {
-			watchedRemoteTip = strings.TrimSpace(string(out))
-		}
-	}
-
+// plus a number, judged and — if -apply says so — removed.
+func reclaim(ctx context.Context, cfg config, apply bool) ([]tidyResult, error) {
 	// The ancestor check below means nothing against a stale mirror, so the
 	// sweep runs after this and never before it — the same rule the drain
 	// itself follows picking up an issue. An unreachable origin stops a pickup
@@ -159,19 +140,7 @@ func reclaim(ctx context.Context, cfg config, apply bool, watched int) ([]tidyRe
 		if !ok {
 			continue
 		}
-		// Witnessed only when the merge event covers the whole local branch:
-		// origin's tip was readable before the fetch, and the local branch has
-		// not moved past it. A branch with unpushed commits on top is not
-		// witnessed — the merge vouches for what was pushed, nothing more — and
-		// takes the ordinary conservative path instead.
-		witnessed := false
-		if issue == watched && watchedRemoteTip != "" {
-			if out, err := git(ctx, cfg, "rev-parse", "--verify", "-q", "refs/heads/"+branch); err == nil &&
-				strings.TrimSpace(string(out)) == watchedRemoteTip {
-				witnessed = true
-			}
-		}
-		results = append(results, reclaimOne(ctx, cfg, issue, branch, apply, witnessed))
+		results = append(results, reclaimOne(ctx, cfg, issue, branch, apply))
 	}
 	slices.SortFunc(results, func(a, b tidyResult) int { return a.issue - b.issue })
 	return results, nil
@@ -181,19 +150,21 @@ func reclaim(ctx context.Context, cfg config, apply bool, watched int) ([]tidyRe
 // apply is true, removes its worktree and deletes it. The checks run in the
 // order that establishes nothing is lost: finished on GitHub, merged into the
 // default branch, worktree clean, nothing unpushed — first failure is the
-// reported reason, and none of it reasons past that failure. watched is set
-// only for the branch whose merge the caller witnessed *and* whose local tip
-// its caller has already confirmed equal to origin's — so GitHub's merge event
-// covers the whole branch. For that one it skips the ancestor-of-default check
-// (a squash merge fails it with nothing lost) and deletes with -D, since -d's
-// reachability recheck is moot once the merge event is the evidence. That tip
-// comparison is the unpushed-commit check, done in the caller; the
-// uncommitted-work check still runs here, since a merge event says nothing
-// about a dirty worktree.
-func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply, watched bool) tidyResult {
+// reported reason, and none of it reasons past that failure.
+//
+// A branch whose local tip is exactly a merged PR's head is proven shipped by
+// GitHub itself, whatever the branch shape: it skips the ancestor-of-default
+// check (a squash merge fails it with nothing lost, and so does a mirror left
+// stale by a failed fetch) and deletes with -D, since -d's reachability recheck
+// is moot once GitHub's head SHA is the evidence. It needs no remote-tracking
+// ref either — a skill that pushed to a URL rather than to origin never set
+// one. A commit past that head is not covered and takes the ordinary path; the
+// uncommitted-work check runs regardless, since a merge says nothing about a
+// dirty worktree.
+func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply bool) tidyResult {
 	res := tidyResult{issue: issue, branch: branch}
 
-	why, held, err := issueFinished(ctx, cfg, issue, branch)
+	why, held, merged, err := issueFinished(ctx, cfg, issue, branch)
 	if err != nil {
 		res.reason = fmt.Sprintf("could not read GitHub's state for #%d: %v", issue, err)
 		return res
@@ -244,14 +215,20 @@ func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply
 			"rerun from the main checkout instead", w.path)
 		return res
 	}
-	if !watched {
+	pr, shipped := shippedBy(ctx, cfg, branch, merged)
+	if shipped {
+		// Name the PR that vouches for this tip, not whichever merged first —
+		// an operator acting on a skip looks at this one.
+		res.why = fmt.Sprintf("merged (PR #%d)", pr)
+	}
+	if !shipped {
 		if !w.counted {
 			res.reason = "could not tell whether it's merged into the default branch"
 			return res
 		}
 		if w.commits > 0 {
 			res.reason = fmt.Sprintf("not merged into the default branch (%s ahead) — "+
-				"left alone rather than reasoned about a squash merge", plural(w.commits, "commit"))
+				"and its tip is no merged PR's head, so the merge can't vouch for it", plural(w.commits, "commit"))
 			return res
 		}
 	}
@@ -259,9 +236,14 @@ func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply
 		res.reason = plural(w.dirty, "uncommitted file")
 		return res
 	}
-	if reason := unpushedReason(ctx, cfg, branch); reason != "" {
-		res.reason = reason
-		return res
+	// A shipped tip is on GitHub by definition, so origin's tracking ref has
+	// nothing to add — and one left stale by a failed fetch, or by a push to a
+	// URL that never moved it, would refuse a branch that provably merged.
+	if !shipped {
+		if reason := unpushedReason(ctx, cfg, branch); reason != "" {
+			res.reason = reason
+			return res
+		}
 	}
 
 	if !apply {
@@ -285,13 +267,12 @@ func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply
 	// duplicating it, and this is the one verb whose actions cannot be undone,
 	// so a redundant safety net stays rather than being traded for a tidier
 	// exit on the rare run where cfg.dir is not sitting on the default branch.
-	// The witnessed-merge case is the exception: a squash merge is not
-	// reachable from HEAD, so -d would refuse a branch whose work provably
-	// shipped, and the merge event GitHub already reported is the check -d
-	// wanted. The caller only set watched after confirming the local tip is
-	// exactly origin's, so -D here cannot outrun what merged.
+	// A shipped branch is the exception: a squash merge is not reachable from
+	// HEAD, so -d would refuse a branch whose work provably merged, and the
+	// merged PR's head GitHub reported is the check -d wanted. shipped means
+	// the local tip is exactly that head, so -D here cannot outrun what merged.
 	del := "-d"
-	if watched {
+	if shipped {
 		del = "-D"
 	}
 	if _, err := git(ctx, cfg, "branch", del, branch); err != nil {
@@ -302,9 +283,32 @@ func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply
 	return res
 }
 
+// shippedBy reports which merged PR, if any, has branch's local tip as its
+// head. Only a PR merged into the default branch counts: one retargeted at a
+// release or stacked branch merged somewhere this sweep never checks. No
+// resolvable default branch means no shortcut, just the ordinary path.
+func shippedBy(ctx context.Context, cfg config, branch string, merged []mergedPR) (int, bool) {
+	_, defaultBranch, err := originHead(ctx, cfg)
+	if err != nil {
+		return 0, false
+	}
+	out, err := git(ctx, cfg, "rev-parse", "--verify", "-q", "refs/heads/"+branch)
+	if err != nil {
+		return 0, false
+	}
+	tip := strings.TrimSpace(string(out))
+	for _, p := range merged {
+		if p.head == tip && p.base == defaultBranch {
+			return p.number, true
+		}
+	}
+	return 0, false
+}
+
 // tidySweep reclaims the worktrees and local branches of every issue it can
-// prove finished — closed, or merged into the default branch, worktree clean,
-// nothing unpushed — the same judgement `polako tidy` makes. The drain runs it
+// prove finished — closed, or merged into the default branch or matching a
+// merged PR's head, worktree clean, nothing unpushed — the same judgement
+// `polako tidy` makes. The drain runs it
 // once at shift start (between two shifts a human merges PRs by hand, and every
 // one of those leaves a worktree no merge-moment cleanup will ever revisit) and
 // after every merge it observes, where it reclaims the just-merged issue as one
@@ -322,11 +326,10 @@ func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply
 // `reclaim` runs its own `syncDefaultBranch` first, so the "is an ancestor of
 // the default branch" test never runs against a stale mirror — and that same
 // refresh is the post-merge sync the merge arm used to make by hand. watched
-// is the issue whose merge this call follows (0 at shift start): for that one
-// the merge is GitHub's own event, so the ancestor check — which a squash
-// merge fails with nothing lost — does not apply to it.
+// is the issue whose merge this call follows (0 at shift start), and only
+// decides how loudly a failure to reclaim it is said.
 func tidySweep(ctx context.Context, cfg config, watched int) {
-	results, err := reclaim(ctx, cfg, true, watched)
+	results, err := reclaim(ctx, cfg, true)
 	if err != nil {
 		cfg.narrate(sevWarning, "could not sweep finished worktrees (%v) — nothing was reclaimed; "+
 			"run `polako tidy` by hand to clear them", err)
@@ -394,17 +397,20 @@ func tidySweep(ctx context.Context, cfg config, watched int) {
 	}
 }
 
-// issueFinished reports why GitHub considers this issue done — "closed" or
-// "merged (PR #N)" — with why "" when it is neither, and held set to the label
+// issueFinished reports why GitHub considers this issue done — "merged (PR
+// #N)" or "closed" — with why "" when it is neither, and held set to the label
 // name when a human has put needs-human or proposed on it, which outranks
 // everything else: the caller leaves those alone whatever their merge state.
-// GitHub is the authority, as always: this never reasons from anything local.
-func issueFinished(ctx context.Context, cfg config, issue int, branch string) (why, held string, err error) {
+// merged is every merged PR on branch with its head commit, read for a closed
+// issue too, since that is the evidence reclaimOne trusts over the branch
+// shape. GitHub is the authority, as always: this never reasons from anything
+// local.
+func issueFinished(ctx context.Context, cfg config, issue int, branch string) (why, held string, merged []mergedPR, err error) {
 	out, err := retryRead(ctx, cfg, fmt.Sprintf("reading #%d's state", issue), func() ([]byte, error) {
 		return gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "state,labels")
 	})
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 	var v struct {
 		State  string `json:"state"`
@@ -413,44 +419,60 @@ func issueFinished(ctx context.Context, cfg config, issue int, branch string) (w
 		} `json:"labels"`
 	}
 	if err := json.Unmarshal(out, &v); err != nil {
-		return "", "", fmt.Errorf("parsing issue state: %w", err)
+		return "", "", nil, fmt.Errorf("parsing issue state: %w", err)
 	}
 	for _, l := range v.Labels {
 		if l.Name == needsHumanLabel || l.Name == proposedLabel {
-			return "", l.Name, nil
+			return "", l.Name, nil, nil
 		}
-	}
-	if v.State == "CLOSED" {
-		return "closed", "", nil
 	}
 
 	raw, err := retryRead(ctx, cfg, fmt.Sprintf("reading PRs on %s", branch), func() ([]byte, error) {
-		return gh(ctx, cfg, "pr", "list", "--head", branch, "--state", "all", "--json", "number,state")
+		return gh(ctx, cfg, "pr", "list", "--head", branch, "--state", "all", "--json", "number,state,headRefOid,baseRefName")
 	})
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 	var prs []struct {
-		Number int    `json:"number"`
-		State  string `json:"state"`
+		Number      int    `json:"number"`
+		State       string `json:"state"`
+		HeadRefOid  string `json:"headRefOid"`
+		BaseRefName string `json:"baseRefName"`
 	}
 	if err := json.Unmarshal(raw, &prs); err != nil {
-		return "", "", fmt.Errorf("parsing PR list: %w", err)
+		return "", "", nil, fmt.Errorf("parsing PR list: %w", err)
 	}
 	for _, p := range prs {
-		if p.State == "MERGED" {
-			return fmt.Sprintf("merged (PR #%d)", p.Number), "", nil
+		if p.State != "MERGED" {
+			continue
+		}
+		if why == "" {
+			why = fmt.Sprintf("merged (PR #%d)", p.Number)
+		}
+		if p.HeadRefOid != "" {
+			merged = append(merged, mergedPR{number: p.Number, head: p.HeadRefOid, base: p.BaseRefName})
 		}
 	}
-	return "", "", nil
+	if why == "" && v.State == "CLOSED" {
+		why = "closed"
+	}
+	return why, "", merged, nil
+}
+
+// mergedPR is one merged PR on an issue branch: which PR, what merged, and
+// into which branch.
+type mergedPR struct {
+	number int
+	head   string
+	base   string
 }
 
 // unpushedReason reports whether branch carries commits its own
 // remote-tracking ref does not, or "" when there is nothing to say. Absent
 // entirely is common and not itself a problem — GitHub can delete a head
-// branch on merge — and not a reason to refuse: the ancestor check already
-// established the content is on the default branch, which is the only
-// guarantee this sweep makes.
+// branch on merge — and not a reason to refuse: the ancestor check, or a merged
+// PR's head matching the tip, already established the content shipped, which
+// is the only guarantee this sweep makes.
 func unpushedReason(ctx context.Context, cfg config, branch string) string {
 	pushed, known := branchPushed(ctx, cfg, branch)
 	if !known || pushed {
