@@ -30,8 +30,8 @@ neither, and neither an issue or PR number. Design runs write their own
 review text, diffs, or anything the model said — reviews are counted, never
 quoted. Records hold numbers, identifiers and labels you chose, which is
 what makes one of these files safe to hand to a teammate unread. They live
-at `~/.polako/metrics/<owner>--<repo>.jsonl`, one append-only file per
-repository, created `0700`, never inside your checkout.
+at `~/.polako/metrics/<owner>--<repo>.jsonl` (directory `0700`, files
+`0600`), one append-only file per repository, never inside your checkout.
 
 **Run data never leaves your machine unless you ask it to** — no telemetry
 endpoint, no phone-home. The one exception is
