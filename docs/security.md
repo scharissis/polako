@@ -210,8 +210,12 @@ a rendered page reads, and a sha-pinned image on a public repo is, in
 practice, not retractable once pushed. A run looks at each shot before
 publishing it and drops anything that reads as an error, a blank page, a
 login wall, or a credential — the mitigation for a rendered page reading
-something it shouldn't. `-visual-evidence=false` on `polako work` is the way
-to decline the whole thing.
+something it shouldn't. A focus or hover shot runs a scratch script, but
+it's the skill's fixed template with only its values filled in: load the
+loopback URL, focus or hover one selector taken from the changed code, take
+the shot. No click, nothing typed, and it runs under the `npx` grant runs
+already have, so no grant widens. `-visual-evidence=false` on `polako work`
+is the way to decline the whole thing.
 
 A review can ask for shots, but only an owner's, member's or collaborator's
 review starts a run or gets acted on (see [above](#polako-work)), so a
