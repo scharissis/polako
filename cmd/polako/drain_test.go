@@ -1003,11 +1003,11 @@ func answerMilestones(st *ghState, args []string) (out string, changed bool, cod
 }
 
 // prListJSON renders one row of `gh pr list --json number,state,url` — plus the
-// headRefName `status` filters on, which the drain's own lookup does not ask
-// for and ignores.
+// headRefName `status` filters on and the headRefOid tidy trusts, which the
+// drain's own lookup does not ask for and ignores.
 func prListJSON(branch string, pr *fakePR) string {
-	return fmt.Sprintf(`{"number":%d,"state":%q,"headRefName":%q,"url":"https://example.invalid/pr/%d","mergedAt":%q,"closedAt":%q}`,
-		pr.Number, pr.State, branch, pr.Number, pr.MergedAt, pr.ClosedAt)
+	return fmt.Sprintf(`{"number":%d,"state":%q,"headRefName":%q,"headRefOid":%q,"url":"https://example.invalid/pr/%d","mergedAt":%q,"closedAt":%q}`,
+		pr.Number, pr.State, branch, pr.Head, pr.Number, pr.MergedAt, pr.ClosedAt)
 }
 
 // rollupJSON renders the statusCheckRollup half of `pr view --json`. Every

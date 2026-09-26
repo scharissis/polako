@@ -546,8 +546,8 @@ these, not any one:
   human clears, outranking even a merged PR;
 - the issue is closed, or its PR is merged;
 - the branch is merged into the default branch, after the same fast-forward
-  refresh a shift does before picking up an issue — except right after a
-  merge a shift itself watched, where GitHub's event is proof enough;
+  refresh a shift does before picking up an issue — or its tip is exactly a
+  merged PR's head, which covers a squash merge and a failed fetch;
 - its worktree, if it has one, has no uncommitted or untracked changes
   (`PLAN.md` and `.polako-scratch/` don't count, in park messages either);
 - nothing about it is unpushed.
