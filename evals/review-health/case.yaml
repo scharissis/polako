@@ -186,11 +186,12 @@ graders:
 
   # The run reads the code and writes issue bodies. It doesn't commit, push,
   # branch or edit anything in repo/. Its one scratch file, ISSUE_BODY.md, is
-  # gone by the end.
+  # gone by the end. Anchored to the command: the call's description is free
+  # text, and "get current commit" isn't a commit (issue #702).
   - type: tool_used
     name: the_repository_was_not_written_to
     tool: Bash
-    input_match: 'git\b(?:[^"\\]|\\.)*\b(commit|push)\b|worktree add|checkout -b|switch -c'
+    input_match: '"command":"(?:[^"\\]|\\.)*(?:git\b(?:[^"\\]|\\.)*\b(commit|push)\b|worktree add|checkout -b|switch -c)'
     min: 0
     max: 0
 

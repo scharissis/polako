@@ -74,10 +74,10 @@ graders:
     name: base_was_refreshed_first
     before:
       tool: Bash
-      input_match: 'merge --ff-only'
+      input_match: '"command":"(?:[^"\\]|\\.)*merge --ff-only'
     after:
       tool: Bash
-      input_match: 'gh pr create'
+      input_match: '"command":"(?:[^"\\]|\\.)*gh pr create'
 
   # The level comes from the size of the change, so the change is sized
   # (`git diff --stat` against the origin ref) before anything is reviewed.
@@ -85,10 +85,10 @@ graders:
     name: the_diff_was_sized_first
     before:
       tool: Bash
-      input_match: 'diff --stat'
+      input_match: '"command":"(?:[^"\\]|\\.)*diff --stat'
     after:
       tool: Bash
-      input_match: 'gh pr create'
+      input_match: '"command":"(?:[^"\\]|\\.)*gh pr create'
 
   # Issues #217 and #372: a wait on a review that was always going to block,
   # hand-polled with filler calls. One ListAgents check per return is the

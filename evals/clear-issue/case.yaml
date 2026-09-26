@@ -55,7 +55,7 @@ graders:
       input_match: '"file_path":"(?:[^"\\]|\\.)*PLAN\.md"'
     after:
       tool: Bash
-      input_match: 'git\b(?:[^"\\]|\\.)*\bcommit\b'
+      input_match: '"command":"(?:[^"\\]|\\.)*git\b(?:[^"\\]|\\.)*\bcommit\b'
 
   - type: llm
     name: pr_body_is_complete
@@ -98,7 +98,7 @@ graders:
   - type: tool_used
     name: no_dev_server_or_evidence_ref
     tool: Bash
-    input_match: 'npm run|http\.server|playwright|polako-evidence'
+    input_match: '"command":"(?:[^"\\]|\\.)*(?:npm run|http\.server|playwright|polako-evidence)'
     min: 0
     max: 0
 

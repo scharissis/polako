@@ -382,7 +382,10 @@ loaded as nothing. What the CLI does with a case, read from its runner on CLI
   mid-run order with `tool_order`, `tool_used` or a `regex` over the whole
   trace. A focus file that doesn't exist fails the grader.
 - **`tool_used` and `tool_order` match `input_match` against the tool call's
-  input as compact JSON** — `"command":"git …"`, `"file_path":"…"`.
+  input as compact JSON** — `"command":"git …"`, `"file_path":"…"`. A Bash
+  call's input also holds a free-text `description`, so a pattern meant for
+  the command starts `"command":"(?:[^"\\]|\\.)*` to stay inside it (issue
+  #702).
   `tool_used` defaults to `min: 1`, so an absence check needs `min: 0` as well
   as `max: 0`.
 - **`regex` reads the same sources**, the whole trace included, with

@@ -47,7 +47,7 @@ graders:
   - type: tool_used
     name: existing_worktree_was_reused
     tool: Bash
-    input_match: 'worktree (add|remove)|branch -[dDfM]\b|checkout -B|switch -C'
+    input_match: '"command":"(?:[^"\\]|\\.)*(?:worktree (add|remove)|branch -[dDfM]\b|checkout -B|switch -C)'
     min: 0
     max: 0
 
