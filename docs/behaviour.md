@@ -553,8 +553,8 @@ Deliberately just two, both on GitHub:
 2. Merging the PR. Nothing merges itself.
 
 Neither is on a clock: an unanswered question or an unmerged PR simply
-waits. Both wait out of the queue rather than in it, as a parked issue
-does, so neither holds anything else up.
+waits. A question is set aside like a parked issue and the queue moves on;
+an open PR is waited on before the next issue is picked up.
 
 ## Questions
 
