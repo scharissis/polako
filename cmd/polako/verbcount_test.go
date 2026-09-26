@@ -3,8 +3,8 @@ package main
 // Docs that state how many verbs polako has go stale each time a verb lands
 // (issue #641: three pages said seven while the binary had nine). This pins
 // every stated count to verbUsage, the one list that can't advertise a verb
-// that doesn't exist. Same walk as docsbudget_test.go — README.md, CLAUDE.md
-// and docs/*.md, not docs/designs/, whose plan documents record the count as
+// that doesn't exist. Near docsbudget_test.go's walk — README.md, CLAUDE.md,
+// docs/*.md and docs/demo.tape, not docs/designs/, whose plan documents record the count as
 // it was when each was written.
 //
 // Only totals are pinned: "<N> verbs" and "the other <N> verbs". Partial
@@ -69,7 +69,8 @@ func TestDocsStateTheVerbCountVerbUsageLists(t *testing.T) {
 		t.Fatalf("reading docs: %v", err)
 	}
 	for _, e := range entries {
-		if !e.IsDir() && filepath.Ext(e.Name()) == ".md" {
+		// demo.tape too: its comments narrate the verb table the gif shows.
+		if ext := filepath.Ext(e.Name()); !e.IsDir() && (ext == ".md" || ext == ".tape") {
 			files = append(files, []string{"docs", e.Name()})
 		}
 	}
