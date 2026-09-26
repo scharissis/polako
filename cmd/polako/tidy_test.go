@@ -598,6 +598,27 @@ func TestReclaimRefusesWhatThePRHeadDoesNotCover(t *testing.T) {
 			t.Error("branch issue-7 was deleted despite carrying a commit the PR never had")
 		}
 	})
+	// A bare MERGED state is not enough: with no head, or a different one,
+	// nothing ties the merge to this tip.
+	for name, head := range map[string]string{"no head reported": "", "a different head": "0123456789abcdef0123456789abcdef01234567"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, checkout := upstream(t)
+			squashShaped(t, checkout, "issue-7", "feature-7")
+
+			cfg := tidyCfg(t, &ghState{
+				Issues: map[string]*fakeIssue{"7": {Open: false}},
+				PRs:    map[string]*fakePR{"issue-7": {Number: 9, State: "MERGED", Head: head}},
+			}, checkout)
+			results, err := reclaim(context.Background(), cfg, true)
+			if err != nil {
+				t.Fatalf("reclaim: %v", err)
+			}
+			if r := findTidyResult(t, results, 7); r.reclaimed || !strings.Contains(r.reason, "not merged into the default branch") {
+				t.Fatalf("a squash-shaped branch no merged PR's head matches must be refused: %+v", r)
+			}
+		})
+	}
 	t.Run("merged into another branch", func(t *testing.T) {
 		t.Parallel()
 		_, checkout := upstream(t)
