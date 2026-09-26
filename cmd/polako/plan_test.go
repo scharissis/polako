@@ -1004,3 +1004,135 @@ func TestApproxUSDAndDur(t *testing.T) {
 		}
 	}
 }
+
+// A brief run's milestone title comes from the run's own `Milestone:` line,
+// cleaned and capped the way a brief is; no usable line falls back.
+func TestPlanRunMilestone(t *testing.T) {
+	t.Parallel()
+	const fallback = "i dont like the location of the PR provider/model"
+	for _, c := range []struct {
+		name, text, want string
+	}{
+		{"the run's line", "Filed 2.\n\nMilestone: Ran-On Lines Section", "Ran-On Lines Section"},
+		{"quotes stripped", `Milestone: The "Ran-On" Block`, "The Ran-On Block"},
+		{"capped at a word boundary", "Milestone: " + strings.Repeat("word ", 20), strings.TrimSpace(strings.Repeat("word ", 10))},
+		{"no line", "Filed 2.", fallback},
+		{"blank line", "Milestone: \n", fallback},
+		{"only quotes", `Milestone: ""`, fallback},
+		{"no result at all", "", fallback},
+	} {
+		if got := planRunMilestone(c.text, fallback); got != c.want {
+			t.Errorf("%s: planRunMilestone = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// A brief with no -milestone leaves the title to the run, so preflight creates
+// nothing — it only hands back the fallback. An explicit -milestone on a brief
+// is still ensured at preflight.
+func TestPlanPreflightLeavesABriefMilestoneToTheRun(t *testing.T) {
+	t.Parallel()
+	cfg, statePath, _ := planTestConfig(t, &ghState{})
+	opt := &planOptions{intakeOptions: intakeOptions{maxIssues: 10}, brief: "a dating app for horses"}
+	milestone, _, err := planPreflight(context.Background(), &cfg, opt)
+	if err != nil {
+		t.Fatalf("planPreflight: %v", err)
+	}
+	if milestone != "a dating app for horses" {
+		t.Errorf("fallback milestone = %q, want the brief's words", milestone)
+	}
+	if st, _ := readGhState(statePath); len(st.Milestones) != 0 {
+		t.Errorf("preflight created a milestone the run was meant to name: %v", st.Milestones)
+	}
+
+	setCfg, setState, _ := planTestConfig(t, &ghState{})
+	if _, _, err := planPreflight(context.Background(), &setCfg,
+		&planOptions{intakeOptions: intakeOptions{maxIssues: 10}, brief: "a dating app for horses", milestone: "Horses"}); err != nil {
+		t.Fatalf("planPreflight -milestone: %v", err)
+	}
+	if st, _ := readGhState(setState); !slices.Equal(st.Milestones, []string{"Horses"}) {
+		t.Errorf("an explicit -milestone on a brief was not ensured at preflight: %v", st.Milestones)
+	}
+}
+
+// End to end for a brief: the fake skill's report ends `Milestone: Horse
+// "Barn" Matching`, so that — quote-stripped — is the milestone created,
+// attached, linked and recorded, not the brief's first words.
+func TestPlanRunBriefUsesTheRunsMilestone(t *testing.T) {
+	t.Parallel()
+	var term, buf bytes.Buffer
+	captureUI(t, &ui{terminal: &term, file: &buf})
+	cfg, statePath := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "plan")
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10}, brief: "a dating app for horses"}
+	cfg.maxIssues = opt.maxIssues
+	if err := planRun(context.Background(), cfg, opt, planMilestoneTitle(&opt), io.Discard); err != nil {
+		t.Fatalf("planRun: %v", err)
+	}
+
+	const want = "Horse Barn Matching"
+	st, err := readGhState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(st.Milestones, []string{want}) {
+		t.Errorf("milestones = %v, want only %q", st.Milestones, want)
+	}
+	for n, is := range st.Issues {
+		if is.Mine && is.Milestone != want {
+			t.Errorf("#%s milestone = %q, want %q", n, is.Milestone, want)
+		}
+	}
+	if !strings.Contains(term.String(), "milestone%3A%22Horse+Barn+Matching%22") {
+		t.Errorf("the curation link is not narrowed to the run's milestone:\n%s", term.String())
+	}
+	lines := readRecords(t, records, cfg.repo)
+	if len(lines) != 1 || !strings.Contains(lines[0], `"milestone":"`+want+`"`) {
+		t.Errorf("the record does not carry the milestone used:\n%v", lines)
+	}
+}
+
+// A brief run whose report names no milestone falls back to the brief's
+// first words, and the record says so.
+func TestPlanRunBriefFallsBackWithNoMilestoneLine(t *testing.T) {
+	t.Parallel()
+	captureLog(t)
+	cfg, statePath := planRunConfig(t, &ghState{Labels: []string{proposedLabel}}, "planempty")
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10}, brief: "a dating app for horses"}
+	cfg.maxIssues = opt.maxIssues
+	if err := planRun(context.Background(), cfg, opt, planMilestoneTitle(&opt), io.Discard); err != nil {
+		t.Fatalf("planRun: %v", err)
+	}
+	if st, _ := readGhState(statePath); !slices.Equal(st.Milestones, []string{"a dating app for horses"}) {
+		t.Errorf("milestones = %v, want the brief fallback", st.Milestones)
+	}
+	lines := readRecords(t, records, cfg.repo)
+	if len(lines) != 1 || !strings.Contains(lines[0], `"milestone":"a dating app for horses"`) {
+		t.Errorf("the record does not carry the fallback milestone:\n%v", lines)
+	}
+}
+
+// A dry run of a brief says the run names the milestone, and what it falls
+// back to.
+func TestPlanDryRunSaysABriefMilestoneIsNamedByTheRun(t *testing.T) {
+	t.Parallel()
+	cfg, _, _ := planTestConfig(t, &ghState{})
+	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10, dryRun: true}, brief: "a dating app for horses"}
+	buf := captureLog(t)
+	milestone, hierarchical, err := planPreflight(context.Background(), &cfg, &opt)
+	if err != nil {
+		t.Fatalf("planPreflight: %v", err)
+	}
+	if err := planDryRun(cfg, opt, milestone, hierarchical, io.Discard); err != nil {
+		t.Fatalf("planDryRun: %v", err)
+	}
+	want := `milestone: named by the run once it has shaped the batch — "a dating app for horses" if it names none`
+	if !strings.Contains(buf.String(), want) {
+		t.Errorf("narration is missing %q\ngot:\n%s", want, buf.String())
+	}
+}

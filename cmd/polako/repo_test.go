@@ -646,6 +646,26 @@ func TestPlanSkillFooterMatchesTheParser(t *testing.T) {
 	}
 }
 
+// The Phase 5 `Milestone:` line is a contract the same way (issue #674): a
+// brief run's milestone is titled from it, so the example the skill ships has
+// to parse, and has to sit in the report section.
+func TestPlanSkillMilestoneLineMatchesTheParser(t *testing.T) {
+	t.Parallel()
+	skill := planSkill(t)
+
+	report := strings.Index(skill, "## Phase 5 — Report")
+	if report < 0 {
+		t.Fatal("SKILL.md no longer has its Phase 5 report")
+	}
+	example := "    " + milestoneLinePrefix + "Ran-On Lines Section"
+	if !strings.Contains(skill[report:], example) {
+		t.Fatalf("SKILL.md's Phase 5 no longer shows the %q line the binary parses", strings.TrimSpace(example))
+	}
+	if got := parseMilestoneLine(skill[report:]); got != "Ran-On Lines Section" {
+		t.Errorf("parseMilestoneLine(Phase 5) = %q, want %q", got, "Ran-On Lines Section")
+	}
+}
+
 // The one guarantee that makes proposals safe to file unattended: this run
 // creates labelled issues and does nothing else. No commits, no pushes, no pull
 // requests, and no touching threads that already exist — an edit could strip a

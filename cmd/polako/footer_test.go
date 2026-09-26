@@ -308,3 +308,28 @@ func TestParkCommentBodyCategoryFooter(t *testing.T) {
 		})
 	}
 }
+
+// parseMilestoneLine reads plan-backlog's closing `Milestone:` line — issue
+// #674 — raw; planRunMilestone does the cleaning and capping.
+func TestParseMilestoneLine(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, text, want string
+	}{
+		{"no line", "Filed 3 proposals.", ""},
+		{"empty text", "", ""},
+		{"last line", "Filed 3.\n\nCurate on GitHub: ...\n\nMilestone: Ran-On Lines Section\n", "Ran-On Lines Section"},
+		{"trailing space and CRLF", "Milestone:   Horse Barns  \r\n", "Horse Barns"},
+		{"blank title", "Milestone: \n", ""},
+		{"the last of two wins", "Milestone: Old\n\nMilestone: New\n", "New"},
+		{"prose mention mid-sentence does not parse", "It ends with `Milestone: <words>`.\n", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := parseMilestoneLine(tc.text); got != tc.want {
+				t.Errorf("parseMilestoneLine(%q) = %q, want %q", tc.text, got, tc.want)
+			}
+		})
+	}
+}

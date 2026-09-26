@@ -211,11 +211,12 @@ func intakePreflight(ctx context.Context, cfg *config, opt *intakeOptions, verb 
 // with no milestone concept), the log line that announces the run, the
 // narration prefix, and which record they write.
 type intakeRunSpec struct {
-	verb           string                                 // "plan" / "health": narration prefix, normaliseProposals tag, exit-ladder wording
-	milestone      string                                 // batch milestone, "" for a run with no milestone concept (health)
-	announceTarget string                                 // the middle of "running <skill> <target> — capped at N": "from <doc>" / "against <dir>"
-	prompt         string                                 // the -p string execClaude is invoked with
-	record         func(config, runReport, proposalFacts) // writes the one run-data record, wrapping proposalFacts in the verb's own facts type
+	verb           string                                          // "plan" / "health": narration prefix, normaliseProposals tag, exit-ladder wording
+	milestone      string                                          // batch milestone, "" for a run with no milestone concept (health)
+	nameMilestone  func(context.Context, config, runReport) string // set when the run names the milestone itself: returns the title to attach, replacing milestone
+	announceTarget string                                          // the middle of "running <skill> <target> — capped at N": "from <doc>" / "against <dir>"
+	prompt         string                                          // the -p string execClaude is invoked with
+	record         func(config, runReport, proposalFacts, string)  // writes the one run-data record, wrapping proposalFacts (and the milestone used) in the verb's own facts type
 }
 
 // intakeRun is the shared body of a real `polako plan` and `polako health`:
@@ -252,7 +253,11 @@ func intakeRun(ctx context.Context, cfg config, opt intakeOptions, spec intakeRu
 	if ctx.Err() != nil {
 		cfg.narrate(sevWarning, "the run was interrupted — still normalising anything it created before exiting")
 	}
-	pass := normaliseProposals(passCtx, cfg, before, spec.milestone, spec.verb)
+	milestone := spec.milestone
+	if spec.nameMilestone != nil {
+		milestone = spec.nameMilestone(passCtx, cfg, rep)
+	}
+	pass := normaliseProposals(passCtx, cfg, before, milestone, spec.verb)
 	pass.report(cfg, spec.verb, opt.maxCost, rep)
 
 	// The pricing line: what the operator's own history says this batch will
@@ -266,7 +271,7 @@ func intakeRun(ctx context.Context, cfg config, opt intakeOptions, spec intakeRu
 			proposalPricingLine(cfg.rec.metricsDir(), cfg.repo, workable, pass.epics, time.Now()))
 	}
 	if pass.created > 0 {
-		cfg.narrate(sevProgress, "%s: %s", spec.verb, curationLine(cfg.repo, spec.milestone))
+		cfg.narrate(sevProgress, "%s: %s", spec.verb, curationLine(cfg.repo, milestone))
 	}
 
 	// The two traces the run leaves, both after the label pass so they carry
@@ -281,7 +286,7 @@ func intakeRun(ctx context.Context, cfg config, opt intakeOptions, spec intakeRu
 		labelsEnforced: pass.labelsEnforced(),
 		started:        started,
 		ended:          ended,
-	})
+	}, milestone)
 	if pass.created > 0 {
 		notify(context.WithoutCancel(ctx), cfg, notification{
 			event: notifyProposed, reason: proposedNotifyReason(pass.created, pass.epics)})

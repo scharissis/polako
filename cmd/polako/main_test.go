@@ -875,7 +875,7 @@ func fakeClaude(mode string) int {
 			}
 		}
 		emit(`{"type":"result","subtype":"success","session_id":"sess-plan","duration_ms":100,` +
-			`"num_turns":4,"total_cost_usd":0.3,"result":"Filed the proposals."}`)
+			`"num_turns":4,"total_cost_usd":0.3,"result":"Filed the proposals.\n\nMilestone: Horse \"Barn\" Matching"}`)
 		return 0
 	case "planempty":
 		// A `polako plan` run that proposed nothing — the document held no

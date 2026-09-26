@@ -124,7 +124,7 @@ func healthRun(ctx context.Context, cfg config, opt healthOptions, _ io.Writer) 
 		milestone:      "",
 		announceTarget: "against " + cfg.dir,
 		prompt:         healthPrompt(cfg, opt),
-		record: func(cfg config, rep runReport, pf proposalFacts) {
+		record: func(cfg config, rep runReport, pf proposalFacts, _ string) {
 			cfg.rec.recordHealth(cfg, rep, healthFacts{proposalFacts: pf})
 		},
 	})
