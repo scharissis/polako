@@ -259,6 +259,8 @@ type fakePR struct {
 	// that pushes moves Head and turns Checks green; see the "fixci" fake CLI.
 	Head   string   `json:"head"`
 	Checks []string `json:"checks"`
+	// Base is the branch the PR targets; see prListJSON for its default.
+	Base string `json:"base"`
 
 	// The review half of `pr view`: the latest verdict per reviewer, and when
 	// the newest commit on the branch was made. Timestamps are literals rather
@@ -1003,11 +1005,16 @@ func answerMilestones(st *ghState, args []string) (out string, changed bool, cod
 }
 
 // prListJSON renders one row of `gh pr list --json number,state,url` — plus the
-// headRefName `status` filters on and the headRefOid tidy trusts, which the
-// drain's own lookup does not ask for and ignores.
+// headRefName `status` filters on and the headRefOid and baseRefName tidy
+// trusts, which the drain's own lookup does not ask for and ignores. An empty
+// Base is "main", upstream()'s default branch.
 func prListJSON(branch string, pr *fakePR) string {
-	return fmt.Sprintf(`{"number":%d,"state":%q,"headRefName":%q,"headRefOid":%q,"url":"https://example.invalid/pr/%d","mergedAt":%q,"closedAt":%q}`,
-		pr.Number, pr.State, branch, pr.Head, pr.Number, pr.MergedAt, pr.ClosedAt)
+	base := pr.Base
+	if base == "" {
+		base = "main"
+	}
+	return fmt.Sprintf(`{"number":%d,"state":%q,"headRefName":%q,"headRefOid":%q,"baseRefName":%q,"url":"https://example.invalid/pr/%d","mergedAt":%q,"closedAt":%q}`,
+		pr.Number, pr.State, branch, pr.Head, base, pr.Number, pr.MergedAt, pr.ClosedAt)
 }
 
 // rollupJSON renders the statusCheckRollup half of `pr view --json`. Every

@@ -214,11 +214,15 @@ func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply
 			"rerun from the main checkout instead", w.path)
 		return res
 	}
+	// Only a PR merged into the default branch counts: one retargeted at a
+	// release or stacked branch merged somewhere this sweep never checks.
+	// No resolvable default branch means no shortcut, just the ordinary path.
 	shipped := false
-	if out, err := git(ctx, cfg, "rev-parse", "--verify", "-q", "refs/heads/"+branch); err == nil {
+	_, defaultBranch, headErr := originHead(ctx, cfg)
+	if out, err := git(ctx, cfg, "rev-parse", "--verify", "-q", "refs/heads/"+branch); err == nil && headErr == nil {
 		tip := strings.TrimSpace(string(out))
 		for _, p := range merged {
-			if p.head == tip {
+			if p.head == tip && p.base == defaultBranch {
 				// Name the PR that vouches for this tip, not whichever merged
 				// first — an operator acting on a skip looks at this one.
 				shipped, res.why = true, fmt.Sprintf("merged (PR #%d)", p.number)
@@ -410,15 +414,16 @@ func issueFinished(ctx context.Context, cfg config, issue int, branch string) (w
 	}
 
 	raw, err := retryRead(ctx, cfg, fmt.Sprintf("reading PRs on %s", branch), func() ([]byte, error) {
-		return gh(ctx, cfg, "pr", "list", "--head", branch, "--state", "all", "--json", "number,state,headRefOid")
+		return gh(ctx, cfg, "pr", "list", "--head", branch, "--state", "all", "--json", "number,state,headRefOid,baseRefName")
 	})
 	if err != nil {
 		return "", "", nil, err
 	}
 	var prs []struct {
-		Number     int    `json:"number"`
-		State      string `json:"state"`
-		HeadRefOid string `json:"headRefOid"`
+		Number      int    `json:"number"`
+		State       string `json:"state"`
+		HeadRefOid  string `json:"headRefOid"`
+		BaseRefName string `json:"baseRefName"`
 	}
 	if err := json.Unmarshal(raw, &prs); err != nil {
 		return "", "", nil, fmt.Errorf("parsing PR list: %w", err)
@@ -431,7 +436,7 @@ func issueFinished(ctx context.Context, cfg config, issue int, branch string) (w
 			why = fmt.Sprintf("merged (PR #%d)", p.Number)
 		}
 		if p.HeadRefOid != "" {
-			merged = append(merged, mergedPR{number: p.Number, head: p.HeadRefOid})
+			merged = append(merged, mergedPR{number: p.Number, head: p.HeadRefOid, base: p.BaseRefName})
 		}
 	}
 	if why == "" && v.State == "CLOSED" {
@@ -440,10 +445,12 @@ func issueFinished(ctx context.Context, cfg config, issue int, branch string) (w
 	return why, "", merged, nil
 }
 
-// mergedPR is one merged PR on an issue branch: what merged, and which PR.
+// mergedPR is one merged PR on an issue branch: which PR, what merged, and
+// into which branch.
 type mergedPR struct {
 	number int
 	head   string
+	base   string
 }
 
 // unpushedReason reports whether branch carries commits its own
