@@ -28,7 +28,7 @@ covers the rest:
 `model:`/`effort:` label, its epic's, the `-model-by-size`/`-effort-by-size`
 cell, `-remediation-*`, `-model`/`-effort`, then inherit. Inherit means
 polako passes nothing and the CLI decides (`policy.go`, `choose`;
-[behaviour.md](../behaviour.md#which-model-and-effort-a-run-gets)). Model
+[behaviour.md](../../behaviour.md#which-model-and-effort-a-run-gets)). Model
 names are tier aliases, and `TestNoVersionedModelIDsInSource` refuses version
 ids in the source.
 
@@ -179,7 +179,7 @@ model` can see a 1.5× gap. The row's `jq` line counts parks per model.
   init event against what that same run asked for. Nothing is remembered
   across runs, and nothing is read back from an earlier shift.
 - **The environment stays the operator's.** polako still sets no `cmd.Env`
-  ([hardening.md](../hardening.md)). Where `CLAUDE_CODE_EFFORT_LEVEL` would
+  ([hardening.md](../../hardening.md)). Where `CLAUDE_CODE_EFFORT_LEVEL` would
   override an effort polako was asked for, it refuses or warns. It never
   unsets the variable.
 - **Nothing changes which model or effort a run asks for.** The policy seam

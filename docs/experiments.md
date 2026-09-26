@@ -162,7 +162,7 @@ already lives in `docs/setup.md`, `docs/behaviour.md` and CLAUDE.md's own
 explicitly deferred — "left out, on purpose" until the CLAUDE.md block it
 measures shipped (#417), which it now has.
 
-The `opus-5-5-epoch` row comes from `docs/designs/model-selection.md`. Nobody
+The `opus-5-5-epoch` row comes from [`docs/designs/done/model-selection.md`](designs/done/model-selection.md). Nobody
 chose its change: a Claude Code release moved the inherited model. It's
 written down the day that happened, because a hypothesis stated afterwards
 always fits. Its "tag" is the model split rather than a `-run-tag`. `-by model`
