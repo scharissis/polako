@@ -13,6 +13,18 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.36.0]
+
+### What's Changed
+* feat: notice a merge or a reply within seconds, not at the next -poll by @scharissis in https://github.com/scharissis/polako/pull/663 (closes #615)
+* feat: a done design moves to docs/designs/done/ instead of leaving by @scharissis in https://github.com/scharissis/polako/pull/664 (closes #620)
+* fix: stats asks GitHub how in-flight issues' PRs ended by @scharissis in https://github.com/scharissis/polako/pull/665 (closes #621)
+* feat: stats -by version, for run history nobody tagged by @scharissis in https://github.com/scharissis/polako/pull/666 (closes #622)
+* docs: move docs/designs/design.md to done/ — every issue it proposed is closed by @scharissis in https://github.com/scharissis/polako/pull/667 (closes #627)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.35.0...v0.36.0
+
 ## [0.35.0]
 
 ### What's Changed
