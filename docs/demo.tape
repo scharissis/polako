@@ -7,7 +7,7 @@
 # GitHub. Nothing in this recording is staged, which is the point — a demo of
 # an unattended agent should be something you can re-run.
 #
-# Four verbs are named by the table and deliberately not run. `stats` prints
+# Most verbs are named by the table and deliberately not run. `stats` prints
 # the metrics directory, and `tidy` and `health -dry-run` print checkout paths
 # — on most machines a home directory with a name in it — and stats' numbers
 # are whatever the last two days happened to be. `update -check` warns about
@@ -35,7 +35,7 @@ Show
 
 Sleep 1s
 
-# What can it do? A bare invocation prints the seven verbs rather than
+# What can it do? A bare invocation prints every verb rather than
 # defaulting to the one that starts an unattended loop.
 Type "polako" Sleep 500ms Enter
 Sleep 6s
