@@ -262,6 +262,10 @@ and misses what's half there. So measure first:
 - Record every finding as a pointer (`file:function`, or `file:line` when
   there's no function) or as a run with its result described in words.
   A finding with neither is a guess; drop it or go measure it.
+- An absence is a finding too, and it needs the run that showed it. Not
+  "there is no `docs/` directory" but "`git ls-files docs/` prints
+  nothing" or "a Glob for `docs/**` finds no files". Nothing has a
+  `file:line` to point at, so the command is the only evidence there is.
 
 Write the findings into PLAN.md under `## Measured` as you go — the sha
 you measured at and the date first — and once the last one is in, end the
@@ -363,7 +367,8 @@ Rules the template doesn't show:
   — decide it in Phase 3 or name it under `## Left open`.
 - Every alternative under `## Considered and not proposed` has a reason.
 - Every `## What exists today` claim has a pointer or a run behind it, taken
-  from PLAN.md's `## Measured`. No pasted transcripts.
+  from PLAN.md's `## Measured`. A claim that something is absent names the
+  command that showed it. No pasted transcripts.
 - Money never appears. Sizes are S, M or L.
 
 Then commit it, before Phase 5 looks at it — the gate reviews a commit, not
@@ -377,7 +382,8 @@ HEAD resolves to right now>", then one line per check, "ok" or what failed.
 
 1. Every heading in the Phase 4 template is present, in order, and there is
    no `Status:` or `Tracking:` line.
-2. Every `## What exists today` claim has a pointer or a described run.
+2. Every `## What exists today` claim has a pointer or a described run,
+   an absence claim ("no `docs/`", "nothing calls X") included.
 3. Every alternative has a reason.
 4. Every ticket has **Problem.**, **Shape.**, **Done when.** and an
    `Estimate:` line, names its files, and passes the sizing contract.
