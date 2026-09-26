@@ -91,7 +91,9 @@ refreshing the secret is the fix.
 
 3. **Merge the publish PR.** It moves the `ref` in
    [`marketplace.json`](../.claude-plugin/marketplace.json) to the new tag, and
-   merging that one line is the moment anybody is exposed to the release. Its
+   merging that one line is the moment anybody is exposed to the release —
+   `polako update` too, which reads that `ref` and reports the previous
+   release as `published:` until this merges. Its
    body says what to check first: the *Smoke* run — every check CI can't make
    before the tags exist, from the five attached binaries' sizes, the
    downloaded one's `checksums.txt` sum and `-ldflags` version stamp,

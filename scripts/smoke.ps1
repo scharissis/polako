@@ -425,15 +425,27 @@ try {
     } elseif (-not $pluginInstalled) {
         Skip 'version-skew check' 'the plugin did not install'
     } else {
-        # A label no issue carries makes this a preflight-only run: preflight
-        # does the PATH, git, gh and version-skew checks, lowestOpenIssue then
-        # finds nothing and the process exits 0 without starting a single
-        # claude run. -metrics off keeps smoke runs out of the real run data.
-        $out = & $drain work -dir . -label "__$name-smoke__" -metrics off 2>&1 | Out-String
+        # A dry run scoped to a label no issue carries: preflight does the
+        # PATH, git, gh and version-skew checks, the queue comes back empty,
+        # and nothing runs or is written. A dry run notes each refusal and
+        # carries on, which a real run can't: it refuses a -label the
+        # repository lacks (labelGate) before it reaches the version checks,
+        # and this label is missing on purpose. So the note naming the label
+        # is expected, and any other is a refusal the pair would hit for
+        # real - the skill behind the binary shows up only that way, never as
+        # a "version skew" line.
+        # -metrics off keeps smoke runs out of the real run data.
+        $smokeLabel = "__$name-smoke__"
+        $out = & $drain work -dir . -label $smokeLabel -dry-run -metrics off 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) {
             Bad 'preflight failed' (($out -split "`r?`n" | Where-Object { $_.Trim() })[-1])
         } else {
-            if ($out -match 'version skew') {
+            $refusals = @($out -split "`r?`n" | Where-Object {
+                    $_ -match 'a real run would refuse' -and $_ -notmatch [regex]::Escape($smokeLabel)
+                })
+            if ($refusals.Count -gt 0) {
+                Bad 'preflight would refuse a real run' $refusals[0]
+            } elseif ($out -match 'version skew') {
                 Bad 'the binary and the plugin disagree on a version' `
                     (($out -split "`r?`n" | Select-String 'version skew')[0].ToString())
             } else {
