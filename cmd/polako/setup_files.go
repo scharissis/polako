@@ -229,9 +229,7 @@ func proposeSetupFiles(ctx context.Context, cfg config, want setupFileWants) (se
 	// Retried like syncDefaultBranch's own fetch: waking from sleep is
 	// exactly when the network hasn't reassociated yet, and a fetch is safe
 	// to repeat.
-	if _, err := retryRead(ctx, cfg, "git fetch origin", func() ([]byte, error) {
-		return git(ctx, cfg, "fetch", "origin", "--quiet")
-	}); err != nil {
+	if err := fetchOrigin(ctx, cfg); err != nil {
 		return setupFilesResult{}, fmt.Errorf("fetching origin: %w", err)
 	}
 	remoteDefault, defaultBranch, err := originHead(ctx, cfg)
