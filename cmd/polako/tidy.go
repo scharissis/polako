@@ -163,7 +163,7 @@ func reclaim(ctx context.Context, cfg config, apply bool) ([]tidyResult, error) 
 func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply bool) tidyResult {
 	res := tidyResult{issue: issue, branch: branch}
 
-	why, held, mergedHeads, err := issueFinished(ctx, cfg, issue, branch)
+	why, held, merged, err := issueFinished(ctx, cfg, issue, branch)
 	if err != nil {
 		res.reason = fmt.Sprintf("could not read GitHub's state for #%d: %v", issue, err)
 		return res
@@ -216,7 +216,15 @@ func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply
 	}
 	shipped := false
 	if out, err := git(ctx, cfg, "rev-parse", "--verify", "-q", "refs/heads/"+branch); err == nil {
-		shipped = slices.Contains(mergedHeads, strings.TrimSpace(string(out)))
+		tip := strings.TrimSpace(string(out))
+		for _, p := range merged {
+			if p.head == tip {
+				// Name the PR that vouches for this tip, not whichever merged
+				// first — an operator acting on a skip looks at this one.
+				shipped, res.why = true, fmt.Sprintf("merged (PR #%d)", p.number)
+				break
+			}
+		}
 	}
 	if !shipped {
 		if !w.counted {
@@ -375,11 +383,11 @@ func tidySweep(ctx context.Context, cfg config, watched int) {
 // #N)" or "closed" — with why "" when it is neither, and held set to the label
 // name when a human has put needs-human or proposed on it, which outranks
 // everything else: the caller leaves those alone whatever their merge state.
-// mergedHeads is every merged PR's head commit on branch, read for a closed
+// merged is every merged PR on branch with its head commit, read for a closed
 // issue too, since that is the evidence reclaimOne trusts over the branch
 // shape. GitHub is the authority, as always: this never reasons from anything
 // local.
-func issueFinished(ctx context.Context, cfg config, issue int, branch string) (why, held string, mergedHeads []string, err error) {
+func issueFinished(ctx context.Context, cfg config, issue int, branch string) (why, held string, merged []mergedPR, err error) {
 	out, err := retryRead(ctx, cfg, fmt.Sprintf("reading #%d's state", issue), func() ([]byte, error) {
 		return gh(ctx, cfg, "issue", "view", strconv.Itoa(issue), "--json", "state,labels")
 	})
@@ -423,13 +431,19 @@ func issueFinished(ctx context.Context, cfg config, issue int, branch string) (w
 			why = fmt.Sprintf("merged (PR #%d)", p.Number)
 		}
 		if p.HeadRefOid != "" {
-			mergedHeads = append(mergedHeads, p.HeadRefOid)
+			merged = append(merged, mergedPR{number: p.Number, head: p.HeadRefOid})
 		}
 	}
 	if why == "" && v.State == "CLOSED" {
 		why = "closed"
 	}
-	return why, "", mergedHeads, nil
+	return why, "", merged, nil
+}
+
+// mergedPR is one merged PR on an issue branch: what merged, and which PR.
+type mergedPR struct {
+	number int
+	head   string
 }
 
 // unpushedReason reports whether branch carries commits its own
