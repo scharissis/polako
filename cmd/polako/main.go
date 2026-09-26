@@ -99,8 +99,9 @@ const awaitingAnswerLabel = "awaiting-answer"
 
 func main() {
 	// Verbs, dispatched before any flag is parsed. `work` is the only one
-	// that starts runs; `stats` reads the run data and never touches GitHub,
-	// `status` reads GitHub and never touches the run data. A bare invocation
+	// that starts runs; `stats` reads the run data (and asks GitHub only how
+	// in-flight PRs ended), `status` reads GitHub plus three details of run
+	// data — the run data's readers are CLAUDE.md's list. A bare invocation
 	// prints the verb table rather than defaulting to the most consequential
 	// verb: starting an unattended agent loop should take a word that says so.
 	if len(os.Args) < 2 {
