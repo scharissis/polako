@@ -1264,6 +1264,31 @@ func TestEvidenceRefSectionIsPinned(t *testing.T) {
 	}
 }
 
+// A focus-ring fix skipped evidence altogether, reasoning that a URL shot
+// can't Tab to the ring. True of the ring, not of the rest of the page: the
+// static shot still shows the change's other half and any regression in it.
+// So an interaction-only change stays `capture`, and what the shots can't
+// reach is named — in PLAN.md, then in the PR body where a reviewer sees it.
+func TestSkillShootsTheStaticStateOfAnInteractionChange(t *testing.T) {
+	t.Parallel()
+	skill := strings.Join(strings.Fields(readRepoFile(t, "skills", skillDir, "SKILL.md")), " ")
+
+	for _, want := range []struct{ text, why string }{
+		{"is still `capture`, never `skip`",
+			"an interaction-only change must still be shot, not skipped"},
+		{"Unreached: <state — how a person reaches it> | none",
+			"the Visual evidence block must carry the Unreached: line"},
+		{"`skip` is for a change that fails one of the two tests above",
+			"skip must stay tied to the two mechanical tests, not to the run's judgement"},
+		{"`Unreached:` isn't `none`, one line here names what the shots can't show",
+			"Verification must name what the shots can't show, so a reviewer checks it by hand"},
+	} {
+		if !strings.Contains(skill, want.text) {
+			t.Errorf("SKILL.md no longer says %q — %s", want.text, want.why)
+		}
+	}
+}
+
 // issue #402: the frontmatter is the calling convention, and the skill's own
 // `no-evidence` value means nothing if the argument it rides on was never
 // declared, or the body never reads it.

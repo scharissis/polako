@@ -1,6 +1,6 @@
 # Eval suite for the shipped skills
 
-Ten cases that grade what a run *does*, not what a `SKILL.md` says. Each one
+Eleven cases that grade what a run *does*, not what a `SKILL.md` says. Each one
 scaffolds a scratch git repo, points a stand-in `gh` at fixtures, runs a real
 skill invocation, and scores the artifacts left behind.
 
@@ -12,6 +12,7 @@ skill invocation, and scores the artifacts left behind.
 | `resume-existing-plan` | implement-issue | an existing worktree and PLAN.md are resumed, not rewritten |
 | `one-turn` | implement-issue | a slow verification step is waited out in the turn, not deferred to one that never comes |
 | `visual-change` | implement-issue | a screenshot reaches `polako-evidence` and the PR body's blob link names a real commit on it |
+| `focus-change` | implement-issue | a fix that shows only on keyboard focus still gets shots of the page as it loads, and the PR names the focus state as one they can't show |
 | `push-blocked` | implement-issue | a rejected push is described in the run's own words, in a question on the thread — never with the rejection's raw text, which names a key, a home path and a username |
 | `plan-vision` | plan-backlog | a vision document becomes labelled, sized, parented proposals — and the gap the backlog already covers is not re-proposed |
 | `review-health` | review-health | a repo's planted structural problems become labelled, sized proposals, each resting on a measurement or a named location, the missing size gate proposed as its own issue, and the overlap the backlog already covers left alone |
@@ -22,16 +23,22 @@ after numbers from a benchmark that takes a minute and a quarter each time, and
 waiting those out is the behaviour under test. `seed.sh` puts that benchmark in
 the scratch repo for this case alone, so the other cases stay quick.
 
-`visual-change` is the one case with anything to look at: a static page and a
+`visual-change` is the first case with anything to look at: a static page and a
 `dev` script it can serve. It uses a real Chromium, about 150 MB once into the
 user cache, so it stays as opt-in as the rest of the suite. It shipped ahead
 of what the skill did at the time — the capture pipeline it grades landed
 across tickets 3–6 (#402–#405) of the now-retired visual-evidence plan; its
 case file says so. It first passed on 2026-09-24, once its `dev` script served
-through `serve.py`, which prints its URL at once. It's also the one case
+through `serve.py`, which prints its URL at once. It's also a case
 `claude plugin eval` can't run: the run fetches Playwright and a Chromium
 through npx, and the CLI's sandbox refuses the run's shell any network. So its
 file is `by-hand.yaml`, which only `run.sh` looks for.
+
+`focus-change` is its twin for a change a URL shot can't show: the fix is a
+focus ring, visible only after Tab. A downstream run skipped evidence on
+exactly that, reasoning the shot couldn't reach the ring. It grades that the
+page is still shot as it loads and that the PR names the focus state as one
+the shots miss. Same page shape, same `serve.py`, same `by-hand.yaml` reason.
 
 `push-blocked` seeds a pre-receive hook on the scratch origin that rejects
 every branch but `main`, with a rejection message shaped like a real one — an
@@ -80,7 +87,7 @@ of a skill's cases a change touches, run all of that skill's.
   input is worse than none: it teaches you to ignore red.
 
 A full pass, every case, is a judgement call rather than a rule. At
-$0.30–$1.60 a case, ten cases is $3–16. It earns that when you want a
+$0.30–$1.60 a case, eleven cases is $3–18. It earns that when you want a
 baseline: the first green run (issue #77), or before you trust a new
 `claude` version with a shift.
 
@@ -91,7 +98,7 @@ through `claude plugin eval`, the CLI's own runner. `evals/run.sh` runs it by
 hand, and it's the one a skill run calls, under its fixed
 `Bash(evals/run.sh:*)` grant. They should agree on every verdict: `run.sh`
 and `lib/grade.py` copy the CLI's grading rules, so a case they disagree on
-is a bug in the copy. `visual-change` runs under `run.sh` only.
+is a bug in the copy. `visual-change` and `focus-change` run under `run.sh` only.
 
 ### With `run.sh`
 
@@ -312,11 +319,11 @@ loaded as nothing. What the CLI does with a case, read from its runner on CLI
 - **Its shell is sandboxed.** The network is refused, and a `PATH` entry
   inside the plugin tree is dropped; in a probe, a command naming a path in
   that tree was refused too. So the workspace carries its own copy of the
-  stand-in, and `visual-change` can't run here. On macOS, Apple's `/usr/bin`
-  shims for `git` and `python3` fail inside it, which is why
-  `plugin-eval.sh` pins both. Writes to a repository's `.git/config` are
-  refused too: `git worktree add -b` and `git push -u` still work, but the
-  branch's upstream never gets recorded.
+  stand-in, and neither `visual-change` nor `focus-change` can run here. On
+  macOS, Apple's `/usr/bin` shims for `git` and `python3` fail inside it,
+  which is why `plugin-eval.sh` pins both. Writes to a repository's
+  `.git/config` are refused too: `git worktree add -b` and `git push -u`
+  still work, but the branch's upstream never gets recorded.
 - **It loads no CLAUDE.md**, so a case says in `append_system_prompt` what a
   workspace CLAUDE.md would have.
 - **The scaffold** runs in the run's own working directory, with a minimal

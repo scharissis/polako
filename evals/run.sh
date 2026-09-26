@@ -2,8 +2,8 @@
 # Run the eval suite by hand, beside the CLI's own runner (evals/plugin-eval.sh).
 #
 # This is the runner a skill run calls under its fixed `Bash(evals/run.sh:*)`
-# grant, and the only one that reaches visual-change (a by-hand.yaml, not a
-# case.yaml). It does what `claude plugin eval` does for this suite: scaffold
+# grant, and the only one that reaches visual-change and focus-change (each a
+# by-hand.yaml, not a case.yaml). It does what `claude plugin eval` does for this suite: scaffold
 # each case into a fresh workspace, run the case's prompt in a headless session
 # with the plugin loaded and the same toolset, and grade what the run left
 # behind with the same grader semantics (lib/grade.py's header has them). The
