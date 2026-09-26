@@ -61,6 +61,22 @@ in another directory by naming it instead — `git -C <path>`, `go -C <path>`,
 or a tool call that already takes a path argument (Read, Write, Edit all do)
 — every place below that might otherwise say "cd into it" says this instead.
 
+The grant is checked command by command, and four habits fail it. Runs
+reach for all four, and each refusal costs a turn:
+
+- `; echo "exit=$?"` to see how a command went. The result already says:
+  a call that failed starts `Exit code N` and carries its stderr, and one
+  that succeeded has no such line.
+- A value carried from one command into the next in a shell variable —
+  `SHA=$(git … rev-parse HEAD)`, then `"$SHA"`. Run the first command on
+  its own, read the value off its result, and write it literally into the
+  next.
+- `cd <dir> && git …`. A `cd` chained to a git command is refused
+  whatever the grant; `git -C <dir>` does the same job.
+- Bash to look around or probe: `ls` or `cat` outside the checkout,
+  `echo "$PATH"`, `which gh`, `gh --version`. Read, Glob and Grep look at
+  files, and `gh` is granted one subcommand at a time.
+
 ## House style
 This skill runs in repos where polako's CLAUDE.md is not loaded, so its writing
 rule is copied here. Everything you write for a human to read — the PR body,
@@ -218,7 +234,9 @@ subject: `evidence: issue-$issue @ <sha7>, <k> shots [skip ci]` — no
 `#$issue`, which would put a cross-reference on the issue's own timeline.
 
 Publish, each step one `git -C … <subcommand>` — no pipes, no env-var
-prefixes, no stdin, all of which fall outside `Bash(git:*)`'s prefix match:
+prefixes, no stdin, all of which fall outside `Bash(git:*)`'s prefix match.
+No shell variables either: read each step's sha off its result and write
+it literally into the next step.
 
 1. `ls-remote --heads origin polako-evidence` — absent, or present. Absent
    is empty output, not a failed command.
@@ -260,7 +278,8 @@ URL, and never a reason to stop or ask.
 ## Phase 0 — Gather context (every run, before anything else)
 1. Run `gh issue view $issue --json number,title,state,body,comments,blockedBy`
    and read it. Always use this --json form: the plain and --comments forms
-   can print nothing on this setup. If it errors and the error text contains
+   can print nothing on this setup. Run it bare: a failed call's result
+   already carries the error text. If it errors and the error text contains
    "json field" (case-insensitively — the same signal this repo's own
    `gh issue list` fallback keys off for this exact field; see
    `unknownJSONField` in `cmd/polako/main.go`), that gh does not know
@@ -500,7 +519,9 @@ don't post again, and stop.
    command prints — a new or changed flag, a usage line, an error message —
    separately run that exact command yourself now, by hand, against
    `<worktree>`, and Write its real output verbatim to
-   `<worktree>/.polako-scratch/evidence-cli.txt`. Skip only when the change
+   `<worktree>/.polako-scratch/evidence-cli.txt`. Run it bare, one command
+   per call, and copy the output off the result with the Write tool, not
+   with `tee`, `printf` or a `>` redirect. Skip only when the change
    touches nothing a human sees on a command line. Step 3's `## Evidence`
    section quotes this file — never retypes or reconstructs the output from
    memory, which is how a run ends up with an invented line instead of a

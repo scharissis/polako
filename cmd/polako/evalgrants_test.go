@@ -173,6 +173,31 @@ func TestEvalGrantsStandInForTheDefaultPermissionMode(t *testing.T) {
 // refusal as it happens, a subagent's included.
 const evalRefusalPattern = `'"permission_denials":\[\{|"subtype":"permission_denied"'`
 
+// The eval cases, run under the grant, found four habits refused in every
+// implement-issue case (2026-09-26). The skill names each, beside the fix;
+// this keeps a later edit from dropping one.
+func TestSkillNamesTheHabitsTheGrantRefuses(t *testing.T) {
+	t.Parallel()
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+	start := strings.Index(skill, "## No prompts, ever")
+	end := strings.Index(skill, "## House style")
+	if start < 0 || end < start {
+		t.Fatal("SKILL.md no longer has a `## No prompts, ever` section before `## House style`")
+	}
+	flat := strings.Join(strings.Fields(skill[start:end]), " ")
+	for _, want := range []struct{ text, why string }{
+		{`echo "exit=$?"`, "a run tacks it on to see how a command went; the result's `Exit code N` already says"},
+		{"starts `Exit code N`", "the fix for the `$?` habit is reading the result, and a run needs telling where"},
+		{"in a shell variable", "a value carried in `$VAR` into the next command is refused"},
+		{"`cd <dir> && git …`", "a cd chained to a git command is refused whatever the grant"},
+		{"`gh --version`", "gh is granted per subcommand, so probing it is refused"},
+	} {
+		if !strings.Contains(flat, want.text) {
+			t.Errorf("\"No prompts, ever\" no longer says %q: %s", want.text, want.why)
+		}
+	}
+}
+
 // Every implement-issue case fails a run that met a refusal, so a new case
 // can't quietly go back to grading only what a run produced.
 func TestImplementIssueEvalCasesFailARefusedCall(t *testing.T) {
