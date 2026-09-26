@@ -342,7 +342,10 @@ loaded as nothing. What the CLI does with a case, read from its runner on CLI
   in the run's stream twice: in the result event's `permission_denials` and as
   a `permission_denied` system event. Every implement-issue case's
   `no_call_was_refused` grader fails on either, and `evidence.md` lists each
-  refused call with the CLI's reason. The CLI decides what's refused, not a
+  refused call with the CLI's reason. Under `dontAsk` that reason is the same
+  generic line every time. Production's `acceptEdits` names the part of a
+  compound command it refused. So to learn which part, rerun the one command
+  under `acceptEdits` with the grant's entries. The CLI decides what's refused, not a
   pattern here: its read-only list lets more through than a prefix grant
   suggests. Probed by hand on 2.1.283 (2026-09-26), same grant, both modes:
   `ls`, `pwd`, `wc`, a bare `cd repo`, `cd repo && gh issue view 1`,
