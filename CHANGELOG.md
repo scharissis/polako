@@ -13,6 +13,18 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.36.1]
+
+### What's Changed
+* docs: an open PR holds the queue, a question doesn't by @scharissis in https://github.com/scharissis/polako/pull/669 (closes #640)
+* test: pin every doc's verb count to verbUsage by @scharissis in https://github.com/scharissis/polako/pull/671 (closes #641)
+* fix: markedGateLabel reads every page of labels by @scharissis in https://github.com/scharissis/polako/pull/672 (closes #642)
+* docs: design interaction-shots by @scharissis in https://github.com/scharissis/polako/pull/675
+* fix: an interaction-only visual change still gets static shots by @scharissis in https://github.com/scharissis/polako/pull/676
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.36.0...v0.36.1
+
 ## [0.36.0]
 
 ### What's Changed
