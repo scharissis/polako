@@ -290,7 +290,10 @@ scaffold checks the route end to end and stops if `gh` would reach anything
 else, before any model call is paid for. There's no workspace `CLAUDE.md`
 saying the project is `repo/`: the CLI turns CLAUDE.md loading off for a run,
 so each case says it in `execution.append_system_prompt` instead, and `run.sh`
-turns the loading off too.
+turns the loading off too. The same prompt makes the run's first call a bare
+`cd repo`. That puts it where an unattended run starts, in the main checkout,
+and the directory holds for every later call. It has to be bare: the grant
+refuses a `cd` chained to a `git` command.
 
 It refuses to run in a directory that already holds `repo/` or `.eval/`, so a
 second run in the same workspace, or a run pointed at a real project, stops
@@ -344,8 +347,10 @@ loaded as nothing. What the CLI does with a case, read from its runner on CLI
   suggests. Probed by hand on 2.1.283 (2026-09-26), same grant, both modes:
   `ls`, `pwd`, `wc`, a bare `cd repo`, `cd repo && gh issue view 1`,
   `X=$(git -C … rev-parse HEAD)` and a pipe into `head` all passed.
-  `echo "exit:$?"` after a `;`, `gh -R … issue view`, and `cd` out of the
-  workspace were refused, and so was `mkdir` under `dontAsk` only.
+  `cd repo && git status` was refused, as the CLI refuses any `cd` chained to
+  a version-control command. So were `echo "exit:$?"` after a `;`, `env`,
+  `gh -R … issue view`, and `cd` out of the workspace, and `mkdir` under
+  `dontAsk` only.
 - **Its shell is sandboxed.** The network is refused, and a `PATH` entry
   inside the plugin tree is dropped; in a probe, a command naming a path in
   that tree was refused too. So the workspace carries its own copy of the
