@@ -183,7 +183,7 @@ of the house.
 
 Inherit follows Claude Code's releases, so the model can move between two
 shifts with nobody choosing it. It moved twice in four weeks
-([model-selection.md](designs/model-selection.md)). The session line,
+([model-selection.md](designs/done/model-selection.md)). The session line,
 `status` and `stats` now say when it does; this is what to do then.
 
 | When | Do |

@@ -274,7 +274,7 @@ polako plan -design docs/VISION.md            # the real thing
 | `-focus` | *(none)* | Free-text steer for the run, e.g. `-focus "only the observability section"`. |
 | `-milestone` | *(derived)* | Batch milestone title, created idempotently at preflight and attached to every issue the run files by the label pass. Defaults to the design file's name, or the brief capped at 50 characters, cut at a word boundary. `-milestone off` skips the milestone entirely. |
 | `-max-issues` | `10` | Ceiling on the issues a run may create, epics included. A ceiling, not a target — fewer, sharper issues beat coverage. |
-| `-model` / `-effort` | `opus` / *(CLI default)* | Passed to `claude --model` / `--effort`. `-model` is an alias, not a pinned id: a plan run happens once per batch and steers every run downstream, so it defaults to the strongest tier. |
+| `-model` / `-effort` | `opus` / *(CLI default)* | Passed to `claude --model` / `--effort`. `-model` is an alias, not a pinned id: a plan run happens once per batch and steers every run downstream, so it defaults to a strong tier (`best` is the strongest). |
 | `-skill` | `polako:plan-backlog` | Slash command the run invokes. |
 | `-tools` / `-add-tools` | *(the plan allowlist)* | `--allowedTools` for the run. The default is a fraction of `work`'s: repo reads, `gh issue list` / `view` / `search`, `Write`, and `gh issue create` — nothing that commits, pushes, opens a PR, edits a thread, or reaches `gh api`. |
 | `-stall` | `15m` | Kill a run with no output events for this long — the same silence watchdog `polako work` uses. `0` disables it. |
@@ -311,7 +311,7 @@ polako health -dir ~/code/some-repo            # the real thing
 | --- | --- | --- |
 | `-focus` | *(none)* | Free-text steer for the run, e.g. `-focus "only cmd/polako"`. |
 | `-max-issues` | `10` | Ceiling on the issues a run may create, epics included. |
-| `-model` / `-effort` | `opus` / *(CLI default)* | Passed to `claude --model` / `--effort` — a health run happens periodically and steers every run downstream, so `-model` defaults to the strongest tier, the same reasoning `plan` uses. |
+| `-model` / `-effort` | `opus` / *(CLI default)* | Passed to `claude --model` / `--effort` — a health run happens periodically and steers every run downstream, so `-model` defaults to a strong tier, the same reasoning `plan` uses. |
 | `-skill` | `polako:review-health` | Slash command the run invokes. |
 | `-tools` / `-add-tools` | *(the health allowlist)* | `--allowedTools` for the run — see above. |
 | `-stall` | `15m` | Kill a run with no output events for this long. `0` disables it. |
@@ -353,7 +353,7 @@ polako design -brief "a dating app for horses"   # files the issue, then works i
 | `-issue` | *(none)* | The design request: an open issue number. Exactly one of `-issue` / `-brief` is required. `POLAKO_ISSUE` and `POLAKO_BRIEF` are ignored — a request left in a profile would start runs nobody typed. |
 | `-brief` | *(none)* | Inline request text in place of `-issue`, filed as a new `design` issue and worked. Past ~2000 characters, put it in an issue. A dry run says what it would file and files nothing. |
 | `-wait` | `false` | When the run asks a question, wait on the thread for a reply instead of exiting 0. |
-| `-model` / `-effort` | `opus` / *(CLI default)* | One design steers every ticket filed from it, so `-model` defaults to the strongest tier, as `plan` does. |
+| `-model` / `-effort` | `opus` / *(CLI default)* | One design steers every ticket filed from it, so `-model` defaults to a strong tier, as `plan` does. |
 | `-skill` | `polako:design-plan` | Slash command the run invokes. |
 | `-tools` / `-add-tools` | *(work's allowlist + two reads)* | `work`'s default plus `gh issue list` and `gh search issues`: a design cites the open backlog. |
 | `-max-issue-time` | `45m` | As `work`'s. Raise it for a design that measures a lot. |
