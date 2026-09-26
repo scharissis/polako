@@ -539,11 +539,11 @@ set, for that pass.
 run's diff touches browser-rendered files and a script serves them, it
 shoots up to four routes from the repo's routing code, before the first
 edit and at the end, pushes them to `polako-evidence` on your origin, and
-embeds a before/after pair per route in the PR body. A change seen only
-after a Tab, click or hover is shot as the page loads, and the PR names
-what the shots can't show. A route with no shot gets a `## Verification`
-line, never a park. A review can ask for shots too; the review run posts
-them in a PR comment. `-visual-evidence=false` on `work` turns it all off.
+embeds a before/after pair per route in the PR body. Focus and hover
+states get shot too; a click-only state is shot as the page loads, and the
+PR names it. A route with no shot gets a `## Verification` line, never a
+park. A review can ask for shots too; the review run posts them in a PR
+comment. `-visual-evidence=false` on `work` turns it all off.
 
 ## Human touchpoints
 
