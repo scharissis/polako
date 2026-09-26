@@ -94,11 +94,13 @@ graders:
 
   # greet.sh has no browser-rendered files and no package.json, so nothing
   # here is visual: a plain script fix has no business starting a server or
-  # touching polako-evidence.
+  # touching polako-evidence. That's the ref, not the `.polako-evidence`
+  # scratch dir: SKILL.md's read-only check that no shots reached the branch
+  # names the dir, and runs whether anything was shot or not (issue #703).
   - type: tool_used
     name: no_dev_server_or_evidence_ref
     tool: Bash
-    input_match: '"command":"(?:[^"\\]|\\.)*(?:npm run|http\.server|playwright|polako-evidence)'
+    input_match: '"command":"(?:[^"\\]|\\.)*(?:npm run|http\.server|playwright|[^.]polako-evidence)'
     min: 0
     max: 0
 
