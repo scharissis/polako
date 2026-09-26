@@ -6,7 +6,7 @@ package main
 // all come from processIssue, called once. What the verb adds is only what
 // drain wraps around that call — the four exits — and a preflight that
 // checks the one issue it was named rather than gating a queue it doesn't
-// have (docs/designs/design.md, ticket 5).
+// have (docs/designs/done/design.md, ticket 5).
 
 import (
 	"context"
