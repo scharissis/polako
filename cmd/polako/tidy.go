@@ -7,7 +7,8 @@ package main
 // the sweep an operator can also point at that backlog by hand.
 //
 // It proves a branch safe to remove before removing it — closed or merged,
-// merged into the default branch, its worktree clean, nothing unpushed — and
+// merged into the default branch or its tip exactly a merged PR's head, its
+// worktree clean, nothing unpushed — and
 // reports what it refused exactly as loudly as what it did: a skip is always
 // recoverable, a wrong removal is not. -dry-run is the default for the same
 // reason: every other verb here defaults to acting, but this is the one verb
@@ -293,8 +294,9 @@ func reclaimOne(ctx context.Context, cfg config, issue int, branch string, apply
 }
 
 // tidySweep reclaims the worktrees and local branches of every issue it can
-// prove finished — closed, or merged into the default branch, worktree clean,
-// nothing unpushed — the same judgement `polako tidy` makes. The drain runs it
+// prove finished — closed, or merged into the default branch or matching a
+// merged PR's head, worktree clean, nothing unpushed — the same judgement
+// `polako tidy` makes. The drain runs it
 // once at shift start (between two shifts a human merges PRs by hand, and every
 // one of those leaves a worktree no merge-moment cleanup will ever revisit) and
 // after every merge it observes, where it reclaims the just-merged issue as one
