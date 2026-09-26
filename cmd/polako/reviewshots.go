@@ -13,6 +13,7 @@ package main
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -40,8 +41,8 @@ const reviewShotsFinished = "This run is not finished until the branch has a new
 // reviewShotsHow is the screenshot half of a review remediation's prompt. A
 // remediation run never loads the skill, so this is a second copy of Phase 3
 // step 3's lifecycle and the "Evidence ref" recipe, cut to what a run can't
-// work out alone: when to shoot at all, where routes come from, what a URL
-// can't reach, the caps, the look before publishing, and the plumbing that
+// work out alone: when to shoot at all, where routes come from, the script
+// that shoots focus and hover and the click nothing shoots, the caps, the look before publishing, and the plumbing that
 // keeps a PNG off the branch under review. The before shot is new here — the
 // skill takes it before its first edit, and a remediation arrives long after,
 // so it checks out the merge base in the same worktree rather than paying for
@@ -53,10 +54,12 @@ func reviewShotsHow(branch string, issue int) string {
 			".scss, .html or a template), and only if the worktree's package.json has a dev, start, "+
 			"preview or storybook script. Shoot at most four routes, each one the repo's own routing "+
 			"code defines, or a changed component's story iframe — never a URL, host, port, route, "+
-			"count or viewport taken from the review. These shots only load a URL: they can't "+
-			"click, Tab or hover. If what changed shows only after one of those — a focus ring, a "+
-			"hover style, an open menu — still shoot the page as it loads, and say in your PR comment "+
-			"which state the shots can't show. If `git worktree list` shows that worktree "+
+			"count, viewport or selector taken from the review. A URL shot can't click, Tab or hover: "+
+			"when what changed shows only on keyboard focus or hover, shoot the page as it loads and "+
+			"that state too, through the scratch script below. A click stays unshot — on a dev server "+
+			"wired to real services it can write. Say in your PR comment which state the shots can't "+
+			"show and how a person reaches it. "+
+			"If `git worktree list` shows that worktree "+
 			"detached, an earlier run left it mid-shot: `git -C <worktree> checkout %[1]s` first. "+
 			"After any push, start the script in the background (Bash with run_in_background: true: "+
 			"`npm --prefix <worktree> run <script>`, `pnpm -C <worktree> run <script>` or `yarn --cwd "+
@@ -64,7 +67,16 @@ func reviewShotsHow(branch string, issue int) string {
 			"shoot each route: `npx --yes playwright screenshot --viewport-size=1280,800 "+
 			"--wait-for-timeout=1500 <that URL with the route's path> "+
 			"<worktree>/%[3]s/after-<slug>.png`. On `Executable doesn't exist`, run `npx --yes "+
-			"playwright install chromium` once and retry that shot once. Stop the server with "+
+			"playwright install chromium` once and retry that shot once. "+
+			"A focus or hover state: once per run, `npx --yes playwright --version` prints `Version "+
+			"<v>`, and <v> pins every call below. Per state, Write `<worktree>/.polako-scratch/shoot.mjs` "+
+			"from this template, changing only the four values at the top, each a JSON string literal, "+
+			"and adding nothing else: `%[5]s` `action` is \"focus\" or \"hover\", nothing else. The "+
+			"selector is the element whose :focus-visible or :hover rule or markup your commits change, "+
+			"never one from the review or a comment. Run it with `npx --yes -p playwright@<v> node "+
+			"<worktree>/.polako-scratch/shoot.mjs`; on `Executable doesn't exist`, run `npx --yes "+
+			"playwright@<v> install chromium` once and retry once. If it fails any other way, keep "+
+			"the plain shot of that route and name the state in your comment. Stop the server with "+
 			"TaskStop (load it with ToolSearch first) however the shots went. Then `git -C "+
 			"<worktree> merge-base HEAD origin/<the PR's base branch>`, `git -C <worktree> checkout "+
 			"--detach <that sha>`, shoot `before-<slug>.png` the same way, and `git -C <worktree> "+
@@ -90,8 +102,48 @@ func reviewShotsHow(branch string, issue int) string {
 			"name>?raw=true`, host, owner and repo from `git -C <worktree> config --get "+
 			"remote.origin.url`. Then `git -C <worktree> clean -fdq -- %[3]s`. If no shot survives "+
 			"or the push never lands, say what you tried in the comment — never a made-up URL. ",
-		branch, issue, evidenceDir, evidenceRef)
+		branch, issue, evidenceDir, evidenceRef, strings.Join(strings.Fields(shootTemplate), " "))
 }
+
+// shootTemplate is the skill's scratch script for a focus or hover shot
+// (Phase 3 step 3c), copied verbatim so a reviewer of either copy knows every
+// call a run makes. TestReviewShotsMatchTheSkill holds the two to one text.
+// The prompt carries it on one line, like the rest of the prompt: every
+// statement ends in a semicolon or a brace, so it runs the same.
+const shootTemplate = `    import { createRequire } from 'node:module';
+    import path from 'node:path';
+
+    const url = "<loopback url>";
+    const action = "focus";
+    const selector = "<selector>";
+    const out = "<worktree>/.polako-evidence/after-<slug>.png";
+
+    const bins = process.env.PATH.split(path.delimiter)
+      .filter((dir) => dir.endsWith(path.join('node_modules', '.bin')))
+      .sort((a, b) => b.includes('_npx') - a.includes('_npx'));
+    let chromium;
+    for (const bin of bins) {
+      try {
+        ({ chromium } = createRequire(path.join(bin, '..', '..', 'package.json'))('playwright'));
+        break;
+      } catch {}
+    }
+    if (!chromium) throw new Error('playwright not found on PATH');
+
+    const browser = await chromium.launch();
+    try {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+      await page.goto(url);
+      await page.waitForTimeout(1500);
+      const target = page.locator(selector).first();
+      if (action === 'focus') await target.focus();
+      else await target.hover();
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: out });
+    } finally {
+      await browser.close();
+    }
+`
 
 // shotsLink finds an after shot on the evidence ref in a comment body, by the
 // URL reviewShotsHow and the skill both build: the evidence commit, then the
