@@ -84,3 +84,15 @@ graders:
     input_match: 'playwright screenshot(?:[^"\\]|\\.)*https?://(?!(127\.0\.0\.1|localhost)[:/])'
     min: 0
     max: 0
+
+  # Production's grant, not plain Bash (evals/lib/grants.sh): a call the CLI
+  # refused here is one it refuses an unattended run too, where the refusal
+  # costs a turn or ends the run (SKILL.md, "No prompts, ever"). The result
+  # event lists every refusal in permission_denials, and a permission_denied
+  # system event marks each as it happens, a subagent's included.
+  # evidence.md's "Calls the CLI refused" names each one and why.
+  - type: regex
+    name: no_call_was_refused
+    target: trace
+    pattern: '"permission_denials":\[\{|"subtype":"permission_denied"'
+    match: not_contains

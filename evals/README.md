@@ -18,6 +18,11 @@ skill invocation, and scores the artifacts left behind.
 | `review-health` | review-health | a repo's planted structural problems become labelled, sized proposals, each resting on a measurement or a named location, the missing size gate proposed as its own issue, and the overlap the backlog already covers left alone |
 | `design-plan` | design-plan | a design request becomes one plan document under `docs/designs/` behind one PR — template complete, every claim pointered or measured, every ticket sized — and no issue filed |
 
+Every case runs under production's tool grant, prefix by prefix, never plain
+`Bash`. Every implement-issue case also fails a run that met a refusal
+(`no_call_was_refused`). An unattended run meets the same refusal, and there it
+costs a turn or ends the run. "What the CLI does with a case" below has how.
+
 `one-turn` is the slow one, and knowingly so: its issue asks for before and
 after numbers from a benchmark that takes a minute and a quarter each time, and
 waiting those out is the behaviour under test. `seed.sh` puts that benchmark in
@@ -121,8 +126,9 @@ which is what an unattended run does.
 `run.sh` does for this suite what `plugin eval` does. It scaffolds each case
 into a fresh workspace, lists what the scaffold left, runs the case's prompt
 in a headless session with the plugin loaded (from this checkout, or from
-`--plugin-dir`) and the toolset the CLI would give it, then grades what the
-run left behind by the CLI's rules (`lib/grade.py`, whose header has them).
+`--plugin-dir`), the toolset the CLI would give it and the CLI's `dontAsk`
+mode, then grades what the run left behind by the CLI's rules (`lib/grade.py`,
+whose header has them).
 Each `llm` grader gets judge sessions of its own — haiku, the CLI's default
 judge, `--judge-model` to override — shown that grader's focus and nothing
 else, and the majority of three votes decides, as under the CLI. The prompt
@@ -151,7 +157,9 @@ from the CLI:
   verdicts.
 - The run's shell isn't sandboxed, and the session keeps this machine's user
   settings (though not its MCP servers), where the CLI gives each run a fresh
-  config directory.
+  config directory. So an allow rule in those settings widens the grant here
+  and not under the CLI. A default permission mode there doesn't: `run.sh`
+  passes `dontAsk` itself.
 
 Results land outside the checkout, in a `mktemp -d` directory a run's own
 final message names (`results: ...`) — not `evals/results/` (issue #459: a
@@ -307,15 +315,37 @@ prompt and its limits under `execution:`, the scaffold under `context:`.
 stricter than the CLI on purpose. The CLI refuses an unknown key in a grader
 but drops one anywhere else without a word, which is how every case here once
 loaded as nothing. What the CLI does with a case, read from its runner on CLI
-2.1.280 and checked with probes:
+2.1.280 (2.1.283 for the grant and the mode) and checked with probes:
 
-- **The run gets exactly the tools it's given**: the operator's grant
-  (`lib/grants.sh`: `Bash`, `Write`, `Edit`, `Skill(claude-api)`,
-  `ListAgents`) plus the ungated tools the case's `allowed_tools` names, like
-  `Read`, `Grep`, `Skill`, `Agent` and `TodoWrite`. Every other tool is
-  withheld from the model. Each case mirrors its verb's own grant
-  (`defaultTools`, `planTools`, `healthTools`), plus `Agent` where
-  `/code-review` may run.
+- **The run gets exactly the tools it's given**: the operator's grant plus the
+  ungated tools the case's `allowed_tools` names, like `Read`, `Grep`, `Skill`,
+  `Agent` and `TodoWrite`. Every other tool is withheld from the model, and a
+  gated tool a case names reaches it only through the grant. The grant is one
+  list for the whole invocation, not one per case. So `lib/grants.sh` is every
+  verb's own grant at once, prefix by prefix: `defaultTools`, the issue-1
+  label and close pins the binary adds, and what `designTools`, `planTools`
+  and `healthTools` add on top. `TestEvalGrantsMatchTheVerbsGrants` holds it
+  to the Go. So each case runs under its verb's grant, plus the other verbs'
+  few extras: an implement-issue case can also list, search and file issues,
+  and plan-vision and review-health get all of `defaultTools`. None gets plain
+  `Bash`. Three more groups stand in for what a real run has without a grant:
+  `acceptEdits`' file commands (next bullet), the scratch repo's own scripts
+  (an operator's `-add-tools` for a repo driven by `./test.sh`), and
+  `ListAgents`.
+- **It runs under `dontAsk`**, where polako runs `acceptEdits`. A command the
+  grant doesn't cover is refused, the way an unattended run's is. The one gap
+  is the file commands `acceptEdits` also lets through (`mkdir`, `touch`,
+  `rm`, `rmdir`, `mv`, `cp`, `sed`), so the grant names those. A refusal shows
+  in the run's stream twice: in the result event's `permission_denials` and as
+  a `permission_denied` system event. Every implement-issue case's
+  `no_call_was_refused` grader fails on either, and `evidence.md` lists each
+  refused call with the CLI's reason. The CLI decides what's refused, not a
+  pattern here: its read-only list lets more through than a prefix grant
+  suggests. Probed by hand on 2.1.283 (2026-09-26), same grant, both modes:
+  `ls`, `pwd`, `wc`, a bare `cd repo`, `cd repo && gh issue view 1`,
+  `X=$(git -C … rev-parse HEAD)` and a pipe into `head` all passed.
+  `echo "exit:$?"` after a `;`, `gh -R … issue view`, and `cd` out of the
+  workspace were refused, and so was `mkdir` under `dontAsk` only.
 - **Its shell is sandboxed.** The network is refused, and a `PATH` entry
   inside the plugin tree is dropped; in a probe, a command naming a path in
   that tree was refused too. So the workspace carries its own copy of the

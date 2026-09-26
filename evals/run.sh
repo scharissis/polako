@@ -5,9 +5,10 @@
 # grant, and the only one that reaches visual-change and focus-change (each a
 # by-hand.yaml, not a case.yaml). It does what `claude plugin eval` does for this suite: scaffold
 # each case into a fresh workspace, run the case's prompt in a headless session
-# with the plugin loaded and the same toolset, and grade what the run left
-# behind with the same grader semantics (lib/grade.py's header has them). The
-# two should agree on every verdict. Where this runner differs, it says so:
+# with the plugin loaded, the same toolset and the same dontAsk permission mode,
+# and grade what the run left behind with the same grader semantics
+# (lib/grade.py's header has them). The two should agree on every verdict.
+# Where this runner differs, it says so:
 #
 #   - The stand-in gh reaches the run by putting .eval/bin first in the launch
 #     environment. A headless session ignores a workspace settings file's
@@ -207,13 +208,16 @@ for c in "${cases[@]}"; do
   # grading is about to read. --tools is the toolset the CLI would give the
   # case, and CLAUDE.md loading and this machine's MCP servers are off because
   # the CLI's run has neither; the case's append_system_prompt says what a
-  # workspace CLAUDE.md would have.
+  # workspace CLAUDE.md would have. dontAsk is the CLI's mode for a case: a
+  # command lib/grants.sh doesn't cover is refused outright, the way an
+  # unattended run's is, whatever default mode this machine's settings name.
   (
     cd "$ws" && exec env PATH="$ws/.eval/bin:$PATH" CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 \
       claude -p "$prompt" \
       --plugin-dir "$plugin_dir" \
       --tools "$tools" \
       --allowedTools "$allowed" \
+      --permission-mode dontAsk \
       --strict-mcp-config \
       ${model:+--model "$model"} \
       ${system_extra:+--append-system-prompt "$system_extra"} \

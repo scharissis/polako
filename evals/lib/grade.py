@@ -350,9 +350,23 @@ class Run:
         self.calls = []
         self.last_text = ""
         self.result = None
+        inputs = {}
+        # tool_use_id -> (tool, input, the CLI's reason), in the order the CLI
+        # refused them. The permission_denied system event carries the reason
+        # as it happens; the result's permission_denials lists them again at
+        # the end, without one.
+        self.refusals = {}
         for ev in self.events:
             if ev.get("type") == "result":
                 self.result = ev
+                for d in ev.get("permission_denials") or []:
+                    if isinstance(d, dict):
+                        self.refusals.setdefault(d.get("tool_use_id"),
+                                                 (d.get("tool_name"), d.get("tool_input"), ""))
+            if ev.get("type") == "system" and ev.get("subtype") == "permission_denied":
+                name, inp = inputs.get(ev.get("tool_use_id"), (ev.get("tool_name"), None))
+                self.refusals.setdefault(ev.get("tool_use_id"),
+                                         (name, inp, str(ev.get("message") or "")))
             if ev.get("type") != "assistant":
                 continue
             texts = []
@@ -361,6 +375,7 @@ class Run:
                     continue
                 if c.get("type") == "tool_use":
                     self.calls.append((c.get("name"), compact(c.get("input", {}))))
+                    inputs[c.get("id")] = (c.get("name"), c.get("input"))
                 elif c.get("type") == "text":
                     texts.append(str(c.get("text", "")))
             if texts:
@@ -546,6 +561,24 @@ def git(ws, sub, *args):
     return out.stdout.strip() or out.stderr.strip()
 
 
+def call_target(inp):
+    """What a tool call acted on, for a one-line listing."""
+    inp = inp if isinstance(inp, dict) else {}
+    return str(inp.get("file_path") or inp.get("command") or inp.get("prompt")
+               or " ".join(filter(None, [inp.get("skill"), inp.get("args")])))
+
+
+def refused_calls(run):
+    """One line per call the CLI refused, with its reason: what a red
+    no_call_was_refused grader is about."""
+    prefix = run.ws.rstrip(os.sep) + os.sep
+    lines = []
+    for tool, inp, why in run.refusals.values():
+        what = call_target(inp).replace(prefix, "")[:300]
+        lines.append(f"- {tool}: {what}" + (f"\n  -> {why[:RESULT_HEAD]}" if why else ""))
+    return "\n".join(lines)
+
+
 def timeline(run):
     """One line per tool call, with a head of its result."""
     results = {}
@@ -563,9 +596,7 @@ def timeline(run):
             if isinstance(c, dict) and c.get("type") == "tool_use":
                 n += 1
                 inp = c.get("input", {})
-                what = str(inp.get("file_path") or inp.get("command") or inp.get("prompt")
-                           or " ".join(filter(None, [inp.get("skill"), inp.get("args")])))
-                what = what.replace(prefix, "")[-120:]
+                what = call_target(inp).replace(prefix, "")[-120:]
                 bg = " [background]" if inp.get("run_in_background") else ""
                 head = results.get(c.get("id"), "").replace("\n", " ")
                 lines.append(f"{n:3d} {c['name']}{bg}: {what}\n      -> {head}")
@@ -576,6 +607,7 @@ def write_evidence(out_dir, run):
     parts = ["Evidence for a human. No judge reads this file: each llm grader's "
              "judge saw only its own focus, saved beside this under judge/.",
              "## Files the run created\n" + ("\n".join(run.created) or "(none)"),
+             "## Calls the CLI refused\n" + (refused_calls(run) or "(none)"),
              "## Recorded artifacts (.eval/)"]
     record = os.path.join(run.ws, ".eval")
     for root, dirs, files in os.walk(record):
