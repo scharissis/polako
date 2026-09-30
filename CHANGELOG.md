@@ -13,6 +13,21 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.37.1]
+
+### What's Changed
+* fix: smoke checks the pair with a dry run by @scharissis in https://github.com/scharissis/polako/pull/697
+* docs: move docs/designs/interaction-shots.md to done/ — every issue it proposed is closed by @scharissis in https://github.com/scharissis/polako/pull/699 (closes #693)
+* fix: treat git's ref-lock race on fetch as benign, not a warning by @scharissis in https://github.com/scharissis/polako/pull/707 (closes #695)
+* fix: reclaim a merged branch whose tip matches its merged PR's head by @scharissis in https://github.com/scharissis/polako/pull/708 (closes #698)
+* fix: keep the ran-on success line off the terminal by @scharissis in https://github.com/scharissis/polako/pull/709 (closes #700)
+* test: hold eval cases to production's prefix grant by @scharissis in https://github.com/scharissis/polako/pull/701
+* test: anchor Bash eval graders to the command, not the description by @scharissis in https://github.com/scharissis/polako/pull/710 (closes #702)
+* test: let clear-issue's no-evidence grader skip the scratch dir by @scharissis in https://github.com/scharissis/polako/pull/711 (closes #703)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.37.0...v0.37.1
+
 ## [0.37.0]
 
 ### What's Changed
