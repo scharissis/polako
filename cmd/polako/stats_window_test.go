@@ -152,6 +152,34 @@ func TestWeekAnchorFromProbeRollsBackMultipleSteps(t *testing.T) {
 	}
 }
 
+// The same calendar arithmetic today and month use: across the UK's
+// 2026-10-25 fall-back, the previous reset keeps its 6pm on the London clock
+// and the week runs 169h. A fixed 168h step would put it at 7pm BST instead.
+// The live-probe test below only meets this case in the two weeks a year the
+// real calendar puts a DST change inside the current week.
+func TestWeekAnchorFromProbeKeepsTheResetClockAcrossDST(t *testing.T) {
+	t.Parallel()
+	london, err := time.LoadLocation("Europe/London")
+	if err != nil {
+		t.Fatalf("loading Europe/London (time/tzdata is imported, so this must work everywhere): %v", err)
+	}
+	reset := time.Date(2026, 10, 29, 18, 0, 0, 0, london) // GMT, after the fall-back
+	now := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
+	snap := usageSnapshot{pools: []usagePool{{name: "week (all models)", percent: 52, reset: reset, hasReset: true}}}
+
+	bounds, ok := weekAnchorFromProbe(snap, now)
+	if !ok {
+		t.Fatal("weekAnchorFromProbe = false, want true")
+	}
+	wantFrom := time.Date(2026, 10, 22, 18, 0, 0, 0, london) // BST, before it
+	if !bounds.from.Equal(wantFrom) {
+		t.Errorf("from = %s, want %s, the same 6pm on the London clock", bounds.from, wantFrom)
+	}
+	if got := bounds.periodEnd.Sub(bounds.from); got != 169*time.Hour {
+		t.Errorf("week spans %s across the fall-back, want 169h", got)
+	}
+}
+
 func TestWeekAnchorFromProbeFalseWithoutAReadableReset(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 8, 29, 9, 0, 0, 0, time.UTC)
@@ -211,8 +239,10 @@ func TestResolveWeekWindowUsesTheProbeWhenItAnswers(t *testing.T) {
 	if bounds.anchor != "the plan's reset" && bounds.anchor != "monday" {
 		t.Errorf("anchor = %q, want one of the two named anchors", bounds.anchor)
 	}
-	if got := bounds.periodEnd.Sub(bounds.from); got != 7*24*time.Hour {
-		t.Errorf("week window spans %s, want exactly 7d", got)
+	// A calendar week, not a fixed 168h: both anchors step in calendar days,
+	// and on the real clock that week straddles a DST change twice a year.
+	if want := bounds.from.AddDate(0, 0, 7); !bounds.periodEnd.Equal(want) {
+		t.Errorf("periodEnd = %s, want one calendar week after from, %s", bounds.periodEnd, want)
 	}
 }
 
