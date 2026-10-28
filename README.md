@@ -304,23 +304,25 @@ next starts from what you just merged.
 
 ## What it costs
 
-Every run records what it spent, so
-these are measured rather than estimated — from one 33-hour shift on a small Go
-project, eight issues finished:
+Every run records what it spent, so these are measured rather than estimated —
+32 days of shifts (25 August to 26 September 2026) across five repositories,
+polako's own among them: 292 issues finished, $1,812 spent.
 
 | | |
 | --- | --- |
-| Issues that merged | 7 of 8 |
-| Cost per issue | $10.38 mean, $11.31 median |
-| Runs per issue | 1.4 mean |
-| Size of the change | +505 / −40 across 5 files, median |
-| Time from PR opened to merged | 10m median, because someone was watching |
+| Issues that merged | 268 of 292 (92%); 22 parked for a human |
+| Cost per issue | $6.18 mean, $4.84 median ($6.76 per merged PR, parks included) |
+| Runs per issue | 1.4 mean, 1 median |
+| Size of the change | +182 / −21 across 4 files, median |
+| Time from PR opened to merged | 6m median, because someone was usually watching |
+| Model | Claude Code's default: Sonnet 5 on two runs in three, Opus 5 or 5.5 on nearly all the rest |
 
-Your numbers will differ, and the ones that move them most are how big your
-issues are and how often runs crash — a crashed run's resume pays to read the
-context again. Run `polako stats` for your own figures. `-max-issue-time`
-already defaults to a ceiling; set `-max-cost` or `-max-session-cost` for one
-too.
+Dollars are the CLI's API-equivalent prices, and they undercount: 54 of 428
+runs ended before reporting a cost. Your numbers will differ, and the ones
+that move them most are the model, how big your issues are, and how often runs
+crash — a crashed run's resume pays to read the context again. Run
+`polako stats` for your own figures. `-max-issue-time` already defaults to a
+ceiling; set `-max-cost` or `-max-session-cost` for one too.
 [docs/run-data.md](docs/run-data.md) has the whole report.
 
 ## Improving polako
