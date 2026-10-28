@@ -342,13 +342,14 @@ retro checklist, the tagging rule, and the recipes for reading run data back.
   the release notes say when.
 - **It cannot tell a good issue from a bad one.** A vague issue produces either
   a question on the thread or a park, and both cost money to find out.
-- **The skills' eval suite has not had a green run yet.** Each skill change
-  runs the eval cases it touches, but no full pass has come back green. See
+- **The skills' eval suite still owes one clean full pass.** Every case has
+  passed on its own, but never all in one run, and some graders changed after
+  their green runs. Each skill change runs the cases it touches. See
   [evals/README.md](evals/README.md).
 
 ## Flags
 
-`polako work` takes around two dozen flags, and the other nine verbs have
+`polako work` takes nearly forty flags, and the other nine verbs have
 their own smaller sets. [docs/reference.md](docs/reference.md) has `work`,
 `plan`, `health`, `design`, `status`, `tidy` and `unpark`, together with `-dry-run`, `-notify`,
 `-remote` and the `POLAKO_*` environment defaults; `stats` is in
@@ -367,14 +368,16 @@ rather than by the model behaving well, and `-label` means a maintainer has to
 opt each issue in before polako will touch it — required outright on a public
 repository, unless you pass `-ungated` and mean it.
 
-Nothing you run leaves your machine unless you ask. One exception is named
-outright: `-post-summary`, off by default, comments one line of numbers on your
-own merged PR. `-remote` is on by default and would be the second, but no
-`claude` CLI registers headless runs with Remote Control yet, so polako does not
-pass the flag and no session content goes anywhere.
-[docs/security.md](docs/security.md) has the reasoning and the limits,
-[docs/hardening.md](docs/hardening.md) covers running a shift behind an egress
-firewall you supply, and [SECURITY.md](SECURITY.md) says how to report a
+A few things do leave your machine. `-remote`, on by default, registers each
+run with Remote Control on your own claude.ai account, so you can watch it from
+claude.ai/code or the app; `-remote=false` keeps runs local. A run that changes
+a rendered page pushes screenshots to a `polako-evidence` branch on your own
+origin, unless you pass `-visual-evidence=false`. `-post-summary`, off by
+default, comments one line of numbers on your own merged PR. And each PR body
+names the model and effort that worked on it.
+[docs/security.md](docs/security.md) has the full list, the reasoning and the
+limits, [docs/hardening.md](docs/hardening.md) covers running a shift behind an
+egress firewall you supply, and [SECURITY.md](SECURITY.md) says how to report a
 vulnerability privately.
 
 ## Questions
@@ -390,7 +393,7 @@ happens when it breaks something at 3am.
 | --- | --- |
 | [docs/behaviour.md](docs/behaviour.md) | What polako does when a run crashes, an issue stalls, a PR goes red, or it needs a human. FAQ at the bottom. |
 | [docs/install.md](docs/install.md) | Every install path, `polako update` and its flags, pinning, and using it on another project. |
-| [docs/reference.md](docs/reference.md) | Every flag for `work`, `plan`, `health`, `status` and `tidy`, plus `-dry-run`, `-notify`, `-remote` and environment defaults. |
+| [docs/reference.md](docs/reference.md) | Every flag for `work`, `plan`, `health`, `design`, `status`, `tidy` and `unpark`, plus `-dry-run`, `-notify`, `-remote` and environment defaults. |
 | [docs/setup.md](docs/setup.md) | `polako setup`, the report on whether a repository is ready, and `-apply` to fix what it's missing. |
 | [docs/run-data.md](docs/run-data.md) | What each run records (`work`, `plan` and `health` alike), spending caps, and the `polako stats` report. |
 | [docs/security.md](docs/security.md) | The threat model, the tool allowlist, the `-label` gate, and what leaves your machine. |
