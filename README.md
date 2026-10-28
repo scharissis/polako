@@ -304,23 +304,25 @@ next starts from what you just merged.
 
 ## What it costs
 
-Every run records what it spent, so
-these are measured rather than estimated — from one 33-hour shift on a small Go
-project, eight issues finished:
+Every run records what it spent, so these are measured rather than estimated —
+32 days of shifts (25 August to 26 September 2026) across five repositories,
+polako's own among them: 292 issues finished, $1,812 spent.
 
 | | |
 | --- | --- |
-| Issues that merged | 7 of 8 |
-| Cost per issue | $10.38 mean, $11.31 median |
-| Runs per issue | 1.4 mean |
-| Size of the change | +505 / −40 across 5 files, median |
-| Time from PR opened to merged | 10m median, because someone was watching |
+| Issues that merged | 268 of 292 (92%); 22 parked for a human |
+| Cost per issue | $6.18 mean, $4.84 median ($6.76 per merged PR, parks included) |
+| Runs per issue | 1.4 mean, 1 median |
+| Size of the change | +182 / −21 across 4 files, median |
+| Time from PR opened to merged | 6m median, because someone was usually watching |
+| Model | Claude Code's default: Sonnet 5 on two runs in three, Opus 5 or 5.5 on nearly all the rest |
 
-Your numbers will differ, and the ones that move them most are how big your
-issues are and how often runs crash — a crashed run's resume pays to read the
-context again. Run `polako stats` for your own figures. `-max-issue-time`
-already defaults to a ceiling; set `-max-cost` or `-max-session-cost` for one
-too.
+Dollars are the CLI's API-equivalent prices, and they undercount: 54 of 428
+runs ended before reporting a cost. Your numbers will differ, and the ones
+that move them most are the model, how big your issues are, and how often runs
+crash — a crashed run's resume pays to read the context again. Run
+`polako stats` for your own figures. `-max-issue-time` already defaults to a
+ceiling; set `-max-cost` or `-max-session-cost` for one too.
 [docs/run-data.md](docs/run-data.md) has the whole report.
 
 ## Improving polako
@@ -342,13 +344,14 @@ retro checklist, the tagging rule, and the recipes for reading run data back.
   the release notes say when.
 - **It cannot tell a good issue from a bad one.** A vague issue produces either
   a question on the thread or a park, and both cost money to find out.
-- **The skills' eval suite has not had a green run yet.** Each skill change
-  runs the eval cases it touches, but no full pass has come back green. See
+- **The skills' eval suite still owes one clean full pass.** Every case has
+  passed on its own, but never all in one run, and some graders changed after
+  their green runs. Each skill change runs the cases it touches. See
   [evals/README.md](evals/README.md).
 
 ## Flags
 
-`polako work` takes around two dozen flags, and the other nine verbs have
+`polako work` takes nearly forty flags, and the other nine verbs have
 their own smaller sets. [docs/reference.md](docs/reference.md) has `work`,
 `plan`, `health`, `design`, `status`, `tidy` and `unpark`, together with `-dry-run`, `-notify`,
 `-remote` and the `POLAKO_*` environment defaults; `stats` is in
@@ -367,14 +370,16 @@ rather than by the model behaving well, and `-label` means a maintainer has to
 opt each issue in before polako will touch it — required outright on a public
 repository, unless you pass `-ungated` and mean it.
 
-Nothing you run leaves your machine unless you ask. One exception is named
-outright: `-post-summary`, off by default, comments one line of numbers on your
-own merged PR. `-remote` is on by default and would be the second, but no
-`claude` CLI registers headless runs with Remote Control yet, so polako does not
-pass the flag and no session content goes anywhere.
-[docs/security.md](docs/security.md) has the reasoning and the limits,
-[docs/hardening.md](docs/hardening.md) covers running a shift behind an egress
-firewall you supply, and [SECURITY.md](SECURITY.md) says how to report a
+A few things do leave your machine. `-remote`, on by default, registers each
+run with Remote Control on your own claude.ai account, so you can watch it from
+claude.ai/code or the app; `-remote=false` keeps runs local. A run that changes
+a rendered page pushes screenshots to a `polako-evidence` branch on your own
+origin, unless you pass `-visual-evidence=false`. `-post-summary`, off by
+default, comments one line of numbers on your own merged PR. And each PR body
+names the model and effort that worked on it.
+[docs/security.md](docs/security.md) has the full list, the reasoning and the
+limits, [docs/hardening.md](docs/hardening.md) covers running a shift behind an
+egress firewall you supply, and [SECURITY.md](SECURITY.md) says how to report a
 vulnerability privately.
 
 ## Questions
@@ -390,7 +395,7 @@ happens when it breaks something at 3am.
 | --- | --- |
 | [docs/behaviour.md](docs/behaviour.md) | What polako does when a run crashes, an issue stalls, a PR goes red, or it needs a human. FAQ at the bottom. |
 | [docs/install.md](docs/install.md) | Every install path, `polako update` and its flags, pinning, and using it on another project. |
-| [docs/reference.md](docs/reference.md) | Every flag for `work`, `plan`, `health`, `status` and `tidy`, plus `-dry-run`, `-notify`, `-remote` and environment defaults. |
+| [docs/reference.md](docs/reference.md) | Every flag for `work`, `plan`, `health`, `design`, `status`, `tidy` and `unpark`, plus `-dry-run`, `-notify`, `-remote` and environment defaults. |
 | [docs/setup.md](docs/setup.md) | `polako setup`, the report on whether a repository is ready, and `-apply` to fix what it's missing. |
 | [docs/run-data.md](docs/run-data.md) | What each run records (`work`, `plan` and `health` alike), spending caps, and the `polako stats` report. |
 | [docs/security.md](docs/security.md) | The threat model, the tool allowlist, the `-label` gate, and what leaves your machine. |
