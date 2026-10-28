@@ -100,23 +100,23 @@ change but expected a later turn `claude -p` never gives, one that ran out
 of road mid-task, and one that asked for a tool the allowlist didn't grant
 and got no answer. The middle two leave work on disk, so before parking,
 polako checks for commits on `issue-N` ahead of the default branch and
-uncommitted changes in the worktree. The fourth is read off what the run
-said — its final words if the ask was the last thing it did, an earlier
-turn otherwise. An ask that was the final word parks immediately rather
-than retrying — resuming replays the same session against the same
-allowlist and hits the same wall, so only `-add-tools` or a skill fix gets
-past it. The reason now says what to grant, derived from the refusal
-itself, narrated once and posted to the thread as e.g. "the run was refused
-`Bash(echo:*)`. Rerun with `-add-tools "Bash(echo:*)"`, then remove
-needs-human, or fix the skill."
+uncommitted changes in the worktree. The fourth is read off each call the
+CLI says it refused — except one reaching outside the session, which no
+grant lets through — and off the run's own words, final or earlier. An ask
+that was the final word parks immediately rather than retrying — resuming
+replays the same session against the same allowlist and hits the same
+wall, so only `-add-tools` or a skill fix gets past it. The reason says
+what to grant, derived from the refusal itself, narrated once and posted
+to the thread as e.g. "the run was refused `Bash(echo:*)`. Rerun with
+`-add-tools "Bash(echo:*)"`, then remove needs-human, or fix the skill."
 
-Nothing to grant says why instead — a `$VAR`, or a never-grant-table
-command — and nothing derivable falls back to the old terminal pointer. The
-comment also ends with a `Refused: <entry>, <entry>` line, thread-safe
-entries only. A worked-around refusal (kept going, ended calmly) gets a
-hedge instead — issue #390's own refusal was a red herring, the real
-blocker was in its last words — leading with "refused N calls along the
-way" rather than a confident fix.
+Nothing to grant says why: a `$VAR`, a `$(…)` or a `cd` joined to git,
+which the CLI refuses whatever the grant, or a never-grant-table command.
+Nothing derivable, unknown refusal words included, falls back to the old
+terminal pointer. The comment ends with a `Refused: <entry>, <entry>` line,
+thread-safe entries only. A worked-around refusal (kept going, ended
+calmly) gets a hedge — issue #390's refusal was a red herring, the real
+blocker in its last words — leading with "refused N calls along the way".
 
 The exit summary's own `parked` line shortens to the entries, and — when any
 park this shift made derives one — ends with the union to paste, deduped,
