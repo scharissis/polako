@@ -140,10 +140,11 @@ const permissionParkReason = "the run stopped to ask for a permission this " +
 // gives, deduplicated and filtered to addToolsEntryThreadSafe — the same
 // list both permissionParkAdviceFrom's prose (posted to the issue thread)
 // and parkIssue's `Refused:` footer use, since nothing unsafe for one is
-// safe for the other. Also reports whether any refusal was ungrantable (a `$VAR`,
-// no grant fixes it) or matched the never-grant table, so a caller with no
-// entries can still say why.
-func permissionParkEntries(refusals []refusal, allowlist string) (entries []string, ungrantable, never bool) {
+// safe for the other. Also reports each ungrantable refusal's shape, as the
+// phrase the reason names it by (a `$VAR`, a `cd` joined to git: no grant
+// fixes either), deduplicated in order, and whether any refusal matched the
+// never-grant table, so a caller with no entries can still say why.
+func permissionParkEntries(refusals []refusal, allowlist string) (entries, ungrantable []string, never bool) {
 	seen := make(map[string]bool, len(refusals))
 	for _, r := range refusals {
 		entry, kind := addToolsEntry(r, allowlist)
@@ -157,7 +158,9 @@ func permissionParkEntries(refusals []refusal, allowlist string) (entries []stri
 				entries = append(entries, entry)
 			}
 		case addToolsUngrantable:
-			ungrantable = true
+			if p := r.shape.phrase(); !slices.Contains(ungrantable, p) {
+				ungrantable = append(ungrantable, p)
+			}
 		case addToolsNever:
 			never = true
 		}
@@ -180,24 +183,36 @@ func quotedEntries(entries []string) string {
 // permissionParkAdviceFrom builds a park's advice clause from an
 // already-derived entries/ungrantable/never triple — permissionParkEntries'
 // own return — so a caller that also needs the entries themselves (for the
-// `Refused:` footer) classifies each refusal once, not once per use.
-func permissionParkAdviceFrom(entries []string, ungrantable, never bool) (advice string, ok bool) {
-	switch {
-	case len(entries) > 0:
-		return fmt.Sprintf("the run was refused %s. Rerun with `-add-tools \"%s\"`, "+
+// `Refused:` footer) classifies each refusal once, not once per use. Each
+// kind the run met gets its own sentence: advice naming only the grants
+// would send the rerun straight into the same `$VAR` again.
+func permissionParkAdviceFrom(entries, ungrantable []string, never bool) (advice string, ok bool) {
+	var says []string
+	refused := "the run was refused"
+	if len(entries) > 0 {
+		says = append(says, fmt.Sprintf("%s %s. Rerun with `-add-tools \"%s\"`, "+
 			"then remove needs-human — or fix the skill if it shouldn't reach for these.",
-			quotedEntries(entries), strings.Join(entries, ",")), true
-	case ungrantable && never:
-		return "one command held a `$VAR`, which no `-add-tools` entry allows, and another " +
-			"is one polako doesn't hand out automatically — the skill has to change both.", true
-	case ungrantable:
-		return "a command held a `$VAR`, which no `-add-tools` entry allows — " +
-			"the skill has to phrase it differently.", true
-	case never:
-		return "polako doesn't hand that grant out — fix the skill so it doesn't reach for it.", true
-	default:
-		return "", false
+			refused, quotedEntries(entries), strings.Join(entries, ",")))
+		refused = "It was also refused"
 	}
+	if len(ungrantable) > 0 {
+		it := "it"
+		if len(ungrantable) > 1 {
+			it = "them"
+		}
+		says = append(says, fmt.Sprintf("%s %s, which no `-add-tools` entry allows — "+
+			"the skill has to phrase %s differently.", refused, andList(ungrantable), it))
+		refused = "It was also refused"
+	}
+	if never {
+		if len(says) == 0 {
+			says = append(says, "polako doesn't hand that grant out — fix the skill so it doesn't reach for it.")
+		} else {
+			says = append(says, refused+" a command whose grant polako doesn't hand out "+
+				"automatically — fix the skill so it doesn't reach for that.")
+		}
+	}
+	return strings.Join(says, " "), len(says) > 0
 }
 
 // permissionParkReasonAndEntries is a permission park's reason, derived from
@@ -294,63 +309,107 @@ func permissionAskMidRun(text string) bool {
 	return headMatchesAny(text, permissionAskSignatures...)
 }
 
-// sigMultipleOps and sigSimpleExpansion are named separately from
-// toolRefusalSignatures' third member (the plain "this command requires
-// approval" has no separate classification to share) because refusalKindOf
-// below has to test for them individually — naming them once keeps the two
-// switches from drifting apart on the exact wording.
-const (
-	sigMultipleOps     = "this bash command contains multiple operations"
-	sigSimpleExpansion = "contains simple_expansion"
-)
-
-// toolRefusalSignatures are the CLI's own wrapper text for a tool_result the
-// permission system refused outright — observed verbatim on issue #209
-// (session 902c1c34-d4db-40cc-b00c-aa8f82242472): a plain "This command
-// requires approval" for a single command, and, for a compound Bash command,
-// "This Bash command contains multiple operations. The following parts
-// require approval: ..." naming the parts. "Contains simple_expansion"
-// joined this list on issue #430 (#390's own session): a `$VAR` in the
-// command, refused for a reason no `-add-tools` entry fixes — the command has
-// to be phrased differently — but still a refusal, so it still latches
-// permissionRefused below. Unlike permissionAskSignatures this is CLI prose,
-// not the model's, so — like authFailure and limitRefusal — it is trusted
-// rather than treated as one phrasing among many.
-var toolRefusalSignatures = []string{
-	"this command requires approval",
-	sigMultipleOps,
-	sigSimpleExpansion,
-}
-
 // refusalKind tells apart a refusal a wider allowlist can fix from one no
-// grant can — see refusalKindOf.
+// grant can — see refusalWordings.
 type refusalKind string
 
 const (
-	// refusalPlain is a whole single command the CLI refused outright —
-	// "This command requires approval".
+	// refusalPlain is a whole call the CLI refused outright — a single Bash
+	// command, or a tool the allowlist doesn't name. A grant lets it
+	// through.
 	refusalPlain refusalKind = "plain"
 	// refusalPart is one named part of a compound Bash command the CLI
 	// refused — "The following part(s) require approval: …" — one refusal
 	// entry per part it named.
 	refusalPart refusalKind = "part"
-	// refusalUngrantable is "Contains simple_expansion": a $VAR in the
-	// command. No -add-tools entry fixes it.
+	// refusalUngrantable is a command whose shape the CLI refuses whatever
+	// the grant — see refusalShape. It has to be phrased differently.
 	refusalUngrantable refusalKind = "ungrantable"
+	// refusalUnrecognized is a refusal in words refusalWordings doesn't know
+	// — dontAsk's one generic line, a hook's, the next CLI release's. Still
+	// a refusal, but nothing says whether a grant would lift it, so none is
+	// derived.
+	refusalUnrecognized refusalKind = "unrecognized"
 )
 
-// refusalKindOf classifies a refused tool_result's own text into which of
-// toolRefusalSignatures matched. Only called once toolResultRefusal has
-// already said this text is a refusal at all.
-func refusalKindOf(text string) refusalKind {
-	switch {
-	case headMatchesAny(text, sigMultipleOps):
-		return refusalPart
-	case headMatchesAny(text, sigSimpleExpansion):
-		return refusalUngrantable
+// refusalShape is what about a command the CLI refuses whatever the grant.
+type refusalShape string
+
+const (
+	shapeVariable refusalShape = "variable" // a $VAR, or a variable the command sets
+	shapeNested   refusalShape = "nested"   // a $(…)
+	shapeCdVCS    refusalShape = "cd-vcs"   // a cd before git, which could pick up the target's hooks
+)
+
+// phrase is how a park reason names the shape: fixed text, safe on a public
+// thread, never the command itself.
+func (s refusalShape) phrase() string {
+	switch s {
+	case shapeNested:
+		return "a command with a `$(…)`"
+	case shapeCdVCS:
+		return "a `cd` joined to git"
 	default:
-		return refusalPlain
+		return "a command with a `$VAR`"
 	}
+}
+
+// refusalWordings are the CLI's own words for a refused call — the text the
+// permission_denied event and the refused tool_result both carry — and what
+// each means for a grant. Head-anchored. CLI prose, not the model's, so —
+// like authFailure and limitRefusal — trusted rather than treated as one
+// phrasing among many.
+//
+// The plain and compound wordings were observed verbatim on issue #209, and
+// "Contains simple_expansion" (a `$VAR`) on #430. By 2.1.312 (probed
+// 2026-10-28) a `$VAR` reads "A variable in this command can't be checked
+// before it runs", and three more shapes have words of their own. Each of
+// those four was still refused with the grant polako would derive already
+// in place — `Bash(git:*)` for `git -C $PWD status`, `Bash(cd:*)` beside
+// `Bash(git status:*)` for `cd .. && git status` — which is why they are
+// ungrantable rather than plain.
+var refusalWordings = []struct {
+	sig   string
+	kind  refusalKind
+	shape refusalShape
+}{
+	{"this command requires approval", refusalPlain, ""},
+	{"claude requested permissions to use", refusalPlain, ""}, // a tool the allowlist doesn't name
+	{"this bash command contains multiple operations", refusalPart, ""},
+	{"contains simple_expansion", refusalUngrantable, shapeVariable},
+	{"a variable in this command", refusalUngrantable, shapeVariable},
+	{"a variable set in this command", refusalUngrantable, shapeVariable},
+	{"a nested command in this command", refusalUngrantable, shapeNested},
+	{"this command changes directory before running a version-control command", refusalUngrantable, shapeCdVCS},
+}
+
+// classifyRefusal reads a refusal's kind, and shape when it has one, off the
+// CLI's own text. Words refusalWordings doesn't know are unrecognized, never
+// plain: a plain refusal derives a grant, and deriving one from words nobody
+// has read would hand the operator `Bash(git:*)` for a `$VAR` no grant
+// lifts.
+func classifyRefusal(text string) (refusalKind, refusalShape) {
+	for _, w := range refusalWordings {
+		if headMatchesAny(text, w.sig) {
+			return w.kind, w.shape
+		}
+	}
+	return refusalUnrecognized, ""
+}
+
+// workingDirBlockRe is the Bash tool's own sandbox refusing a path outside
+// the session's working directories — "ls in '/' was blocked. For security,
+// Claude Code may only list files in the allowed working directories for
+// this session: '…'" on 2.1.312, cd's twin beside it, rm's on #209. Matched
+// on the sentence that names the sandbox rather than the lead-in, which
+// varies with the command.
+var workingDirBlockRe = regexp.MustCompile(`(?i)^[^\n]* was blocked\. for security, claude code may only `)
+
+// workingDirBlock reports whether text is that sandbox block. The CLI sends
+// a permission_denied event for one, but #209 keeps it out of the refusals:
+// no -add-tools entry reaches a path outside the session.
+func workingDirBlock(text string) bool {
+	return workingDirBlockRe.MatchString(strings.TrimSpace(text))
 }
 
 // refusalPartsRe extracts the CLI's own comma-separated list of parts it
@@ -387,12 +446,14 @@ func refusalParts(text string) []string {
 // words: which tool it was (when correlated back to its tool_use), the
 // command that tool_use carried, the specific part the CLI named for a
 // compound-command refusal, and a kind telling a grantable refusal apart from
-// one no grant fixes. Comparable, so addRefusals can dedup with slices.Index.
+// one no grant fixes — with, for the latter, the shape that makes it so.
+// Comparable, so addRefusals can dedup with slices.Index.
 type refusal struct {
 	tool    string
 	command string
 	part    string
 	kind    refusalKind
+	shape   refusalShape
 }
 
 // refusalCap bounds runReport.refusals so a run stuck looping on the same
@@ -439,7 +500,7 @@ func newRefusals(tool pendingTool, hadTool bool, text string) []refusal {
 			command = c
 		}
 	}
-	switch kind := refusalKindOf(text); kind {
+	switch kind, shape := classifyRefusal(text); kind {
 	case refusalPart:
 		parts := refusalParts(text)
 		if len(parts) == 0 {
@@ -456,7 +517,7 @@ func newRefusals(tool pendingTool, hadTool bool, text string) []refusal {
 		}
 		return out
 	default:
-		return []refusal{{tool: toolName, command: command, kind: kind}}
+		return []refusal{{tool: toolName, command: command, kind: kind, shape: shape}}
 	}
 }
 
@@ -518,13 +579,16 @@ func joinRefusalDetails(refusals []refusal) string {
 }
 
 // toolResultRefusal reports whether a tool_result's content is the CLI
-// itself refusing a command outside --allowedTools — the structural fact
-// issue #209 classifies on, rather than the model's own retelling of it a
-// turn or more later. Head-anchored for the same reason as authFailure: a
-// tool_result that merely quotes this text (a grep hit, a file read) is the
-// likelier false positive.
+// itself refusing a call, in words refusalWordings knows — the structural
+// fact issue #209 classifies on, rather than the model's own retelling of it
+// a turn or more later. A permission_denied event covers the words it
+// doesn't know; on a CLI too old to send one, this is all there is.
+// Head-anchored for the same reason as authFailure: a tool_result that
+// merely quotes this text (a grep hit, a file read) is the likelier false
+// positive.
 func toolResultRefusal(text string) bool {
-	return headMatchesAny(text, toolRefusalSignatures...)
+	kind, _ := classifyRefusal(text)
+	return kind != refusalUnrecognized
 }
 
 // addToolsKind explains why addToolsEntry returned no entry; the zero value
@@ -541,10 +605,13 @@ const (
 	// `|` or `&` in the source: no single word can be pulled out of it
 	// safely, the same restraint splitCommand (notify.go) holds itself to.
 	addToolsAmbiguous addToolsKind = "ambiguous"
-	// addToolsUngrantable mirrors refusalUngrantable: a `$VAR` refusal no
+	// addToolsUngrantable mirrors refusalUngrantable: a refusal no
 	// -add-tools entry ever fixes — the command has to be phrased
 	// differently.
 	addToolsUngrantable addToolsKind = "ungrantable"
+	// addToolsUnrecognized mirrors refusalUnrecognized: the CLI's words
+	// don't say whether a grant would lift the refusal, so none is guessed.
+	addToolsUnrecognized addToolsKind = "unrecognized"
 	// addToolsUnknown is a refusal whose tool_use never correlated, so
 	// r.command holds the CLI's own refusal text rather than the command it
 	// refused — nothing to derive a grant from.
@@ -598,8 +665,11 @@ func hasCommandPrefix(source, prefix string) bool {
 // the bare tool, unconditionally: a non-Bash refusal is the whole tool
 // asking, not a command inside it.
 func addToolsEntry(r refusal, allowlist string) (entry string, kind addToolsKind) {
-	if r.kind == refusalUngrantable {
+	switch r.kind {
+	case refusalUngrantable:
 		return "", addToolsUngrantable
+	case refusalUnrecognized:
+		return "", addToolsUnrecognized
 	}
 	if r.tool == "" {
 		return "", addToolsUnknown

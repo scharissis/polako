@@ -30,23 +30,11 @@ type streamEvent struct {
 	// ClaudeCodeVersion is the init event's own CLI version: the one that
 	// actually ran, where the preflight snapshot goes stale on a mid-shift
 	// update.
-	ClaudeCodeVersion string `json:"claude_code_version"`
-	Message           struct {
-		Content []struct {
-			Type  string          `json:"type"`
-			Text  string          `json:"text"`
-			Name  string          `json:"name"`
-			Input json.RawMessage `json:"input"`
-			// ID identifies a tool_use block (assistant); ToolUseID is
-			// the same value echoed back on the tool_result (user) that
-			// answers it, so the two can be correlated.
-			ID         string          `json:"id"`
-			ToolUseID  string          `json:"tool_use_id"`
-			IsError    bool            `json:"is_error"`
-			ResultText json.RawMessage `json:"content"`
-		} `json:"content"`
-		Usage streamUsage `json:"usage"`
-	} `json:"message"`
+	ClaudeCodeVersion string        `json:"claude_code_version"`
+	Message           streamMessage `json:"message"`
+	// ToolUseID is the call a permission_denied event refused — the id its
+	// tool_use block carried, and the tool_result answering it will echo.
+	ToolUseID     string                      `json:"tool_use_id"`
 	DurationMS    int64                       `json:"duration_ms"`
 	DurationAPIMS int64                       `json:"duration_api_ms"`
 	NumTurns      int                         `json:"num_turns"`
@@ -61,6 +49,36 @@ type streamEvent struct {
 	// probed it by hand); observe treats anything it cannot make sense of the
 	// same as no reply at all, rather than guessing at a shape.
 	Response *controlResponse `json:"response"`
+}
+
+// streamMessage is an event's "message": an object holding content blocks and
+// usage on assistant and user events, but a plain string on a
+// permission_denied event. The string has to parse too, or the whole line
+// fails and the scanner drops the event unread. Its words are left to the
+// refused tool_result that follows, which repeats them.
+type streamMessage struct {
+	Content []struct {
+		Type  string          `json:"type"`
+		Text  string          `json:"text"`
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
+		// ID identifies a tool_use block (assistant); ToolUseID is
+		// the same value echoed back on the tool_result (user) that
+		// answers it, so the two can be correlated.
+		ID         string          `json:"id"`
+		ToolUseID  string          `json:"tool_use_id"`
+		IsError    bool            `json:"is_error"`
+		ResultText json.RawMessage `json:"content"`
+	} `json:"content"`
+	Usage streamUsage `json:"usage"`
+}
+
+func (m *streamMessage) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 && b[0] == '"' {
+		return nil
+	}
+	type object streamMessage // the same fields without this method, so no recursion
+	return json.Unmarshal(b, (*object)(m))
 }
 
 // controlResponse is a control_response event's payload: a success carries a
@@ -176,11 +194,11 @@ type runReport struct {
 	// operator to approve a tool this allowlist never granted and got nobody
 	// to answer (permissionRefusal, on every result event), or — issue #209 —
 	// the CLI itself reported a refused tool_result mid-run (toolResultRefusal,
-	// latched and never cleared by a later ordinary result: see the OR in the
-	// result case below). A clean exit used to have its final text read once
-	// (for authFailed/limitMsg, both gated on IsError) and otherwise dropped,
-	// which is what let a park assert "no questions" over a run whose final
-	// message was verbatim one.
+	// or deniedCalls for words it doesn't know; latched and never cleared by
+	// a later ordinary result: see the OR in the result case below). A clean
+	// exit used to have its final text read once (for authFailed/limitMsg,
+	// both gated on IsError) and otherwise dropped, which is what let a park
+	// assert "no questions" over a run whose final message was verbatim one.
 	permissionRefused bool
 	// refusals is every refusal the stream reported, in the CLI's own words —
 	// issue #430: #390 drew five, and permissionRefusedDetail (even after
@@ -224,6 +242,13 @@ type runReport struct {
 	// id's result arrives; an id still in-flight when the run ends is simply
 	// never read.
 	pendingTools map[string]pendingTool
+	// deniedCalls holds the ids of calls a permission_denied event named
+	// whose tool_result has not arrived yet: the CLI's own structured word
+	// that the call was refused, so a refusal counts even in words
+	// refusalWordings doesn't know. That list has gone stale before — on
+	// 2.1.312 a `$VAR`, a `$(…)`, a `cd` before git and WebFetch outside the
+	// allowlist were each refused in words it didn't hold, and none counted.
+	deniedCalls map[string]bool
 	// permissionAsked is the weaker sibling: some assistant turn along the way
 	// — not necessarily the last — read as a request to use a tool this
 	// allowlist never granted, even though the final result text did not (or
@@ -296,16 +321,37 @@ func (r runReport) status() string {
 // tokens actually observed, or a tool use, are not.
 func (r runReport) progressed() bool { return r.observed.Out > 0 || r.toolUses > 0 }
 
+// notePermissionDenied marks the call a permission_denied event names, for
+// observeToolResults to judge when its tool_result arrives. The event came
+// first in every 2.1.312 probe — main loop and subagent, -remote or not,
+// acceptEdits and dontAsk alike — so only a call still pending is marked:
+// a mark nothing will consume would sit there for the rest of the run. A
+// hook's denial sends no event, by exit code or by permissionDecision.
+func (r *runReport) notePermissionDenied(ev streamEvent) {
+	if _, pending := r.pendingTools[ev.ToolUseID]; !pending {
+		return
+	}
+	if r.deniedCalls == nil {
+		r.deniedCalls = make(map[string]bool)
+	}
+	r.deniedCalls[ev.ToolUseID] = true
+}
+
 // observeToolResults folds a "user" event's tool_result content into the
 // report: the CLI's own fact that a tool was refused, not the model's later
-// retelling of it — see toolResultRefusal. Latched: it survives a later
-// ordinary result event the same way permissionRefused does. Unlike
-// permissionAsked it still pre-empts an *immediate* resume in the caller —
-// replaying the identical session against the identical allowlist hits the
-// same wall again — unless refusalWorkedAround says otherwise (issue #461):
-// successful tool calls after this refusal's last trip, with a final word
-// that is not itself an ask, mean the run may have found another way and is
-// worth letting try to finish before parking on this.
+// retelling of it — one toolResultRefusal recognises by its words, or any
+// other a permission_denied event marked, except a working-directory block.
+// The CLI sends the event for that too, but #209 keeps it out, since no
+// grant reaches a path outside the session; it is told apart here, by the
+// tool_result's own words, because every refusal carries them. Latched: it
+// survives a later ordinary result event the same way permissionRefused
+// does. Unlike permissionAsked it still pre-empts an *immediate* resume in
+// the caller — replaying the identical session against the identical
+// allowlist hits the same wall again — unless refusalWorkedAround says
+// otherwise (issue #461): successful tool calls after this refusal's last
+// trip, with a final word that is not itself an ask, mean the run may have
+// found another way and is worth letting try to finish before parking on
+// this.
 func (r *runReport) observeToolResults(ev streamEvent) {
 	for _, c := range ev.Message.Content {
 		if c.Type != "tool_result" {
@@ -313,6 +359,8 @@ func (r *runReport) observeToolResults(ev streamEvent) {
 		}
 		tool, hadTool := r.pendingTools[c.ToolUseID]
 		delete(r.pendingTools, c.ToolUseID)
+		denied := r.deniedCalls[c.ToolUseID]
+		delete(r.deniedCalls, c.ToolUseID)
 		// Counted here, not on the tool_use above: a create still in flight
 		// when -max-issues is reached must not count, or the kill lands
 		// before it returns and N files N-1 (issue #340). A rejected create
@@ -328,7 +376,7 @@ func (r *runReport) observeToolResults(ev streamEvent) {
 			r.toolSucceededAfterRefusal = true
 			continue
 		}
-		if text := toolResultContentText(c.ResultText); toolResultRefusal(text) {
+		if text := toolResultContentText(c.ResultText); toolResultRefusal(text) || (denied && !workingDirBlock(text)) {
 			r.permissionRefused = true
 			// Scoped to *this* refusal's aftermath, not the whole run's.
 			r.toolSucceededAfterRefusal = false
@@ -344,7 +392,8 @@ func (r *runReport) observe(ev streamEvent) {
 	}
 	switch ev.Type {
 	case "system":
-		if ev.Subtype == "init" {
+		switch ev.Subtype {
+		case "init":
 			r.started = true
 			if ev.Model != "" {
 				r.model = ev.Model
@@ -352,6 +401,8 @@ func (r *runReport) observe(ev streamEvent) {
 			if ev.ClaudeCodeVersion != "" {
 				r.claudeVer = ev.ClaudeCodeVersion
 			}
+		case "permission_denied":
+			r.notePermissionDenied(ev)
 		}
 	case "assistant":
 		r.observedTurns++

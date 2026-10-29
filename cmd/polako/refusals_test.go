@@ -226,6 +226,13 @@ func TestToolResultRefusalMatchesTheCLIsOwnWrapperText(t *testing.T) {
 		"This Bash command contains multiple operations. The following " +
 			"parts require approval: ls /Users/stef/code/polako-issue-126/PLAN.md, " +
 			"cat /Users/stef/code/polako-issue-126/PLAN.md",
+		// 2.1.312's words, for a CLI that sends them without the event.
+		"Claude requested permissions to use WebFetch, but you haven't granted it yet.",
+		"A variable in this command can't be checked before it runs",
+		"A variable set in this command can't be checked before it runs",
+		"A nested command in this command can't be checked before it runs",
+		"This command changes directory before running a version-control command, which can pick up " +
+			"untrusted hooks or repository configuration from the target directory. Approve only if you trust it.",
 	}
 	for _, r := range refused {
 		if !toolResultRefusal(r) {
@@ -675,6 +682,13 @@ func TestAddToolsEntryDerivesTheGrantOrExplainsWhyNot(t *testing.T) {
 			wantKind: addToolsUngrantable,
 		},
 		{
+			// Read as plain, this would hand out Bash(ls:*), which lets
+			// nothing through: the $(…) is what the CLI refused.
+			name:     "unrecognized words derive nothing, even with a command to read",
+			refusal:  refusal{tool: "Bash", command: "ls $(pwd)", kind: refusalUnrecognized},
+			wantKind: addToolsUnrecognized,
+		},
+		{
 			name:     "an uncorrelated refusal has nothing to derive from",
 			refusal:  refusal{command: "This command requires approval", kind: refusalPlain},
 			wantKind: addToolsUnknown,
@@ -718,10 +732,11 @@ func TestAddToolsEntryThreadSafe(t *testing.T) {
 func TestPermissionParkAdviceNamesTheFixOrSaysWhyNot(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name      string
-		refusals  []refusal
-		wantOK    bool
-		wantParts []string // substrings advice must contain when wantOK
+		name       string
+		refusals   []refusal
+		wantOK     bool
+		wantParts  []string // substrings advice must contain when wantOK
+		wantAbsent []string // substrings it must not
 	}{
 		{
 			name:     "no refusals at all has nothing to say",
@@ -752,6 +767,55 @@ func TestPermissionParkAdviceNamesTheFixOrSaysWhyNot(t *testing.T) {
 			},
 			wantOK:    true,
 			wantParts: []string{"$VAR", "phrase it differently"},
+		},
+		{
+			name: "a cd joined to git is named as that, not as a $VAR",
+			refusals: []refusal{
+				{tool: "Bash", command: "cd .. && git status", kind: refusalUngrantable, shape: shapeCdVCS},
+			},
+			wantOK:     true,
+			wantParts:  []string{"a `cd` joined to git", "phrase it differently"},
+			wantAbsent: []string{"$VAR", "-add-tools \""},
+		},
+		{
+			name: "two shapes are both named, each once",
+			refusals: []refusal{
+				{tool: "Bash", command: "git -C $PWD status", kind: refusalUngrantable, shape: shapeVariable},
+				{tool: "Bash", command: "ls $(pwd)", kind: refusalUngrantable, shape: shapeNested},
+				{tool: "Bash", command: "X=1; echo $X", kind: refusalUngrantable, shape: shapeVariable},
+			},
+			wantOK:    true,
+			wantParts: []string{"a command with a `$VAR` and a command with a `$(…)`,", "phrase them differently"},
+		},
+		{
+			// A rerun with only the grant would hit the cd again.
+			name: "a grant and a shape no grant lifts are both said",
+			refusals: []refusal{
+				{tool: "Bash", command: "ssh -T git@github.com", kind: refusalPlain},
+				{tool: "Bash", command: "cd .. && git status", kind: refusalUngrantable, shape: shapeCdVCS},
+			},
+			wantOK: true,
+			wantParts: []string{`-add-tools "Bash(ssh:*)"`,
+				"It was also refused a `cd` joined to git, which no `-add-tools` entry allows"},
+		},
+		{
+			name: "two shapes and a never-grant command are each said, not counted as both",
+			refusals: []refusal{
+				{tool: "Bash", command: "git -C $PWD status", kind: refusalUngrantable, shape: shapeVariable},
+				{tool: "Bash", command: "cd .. && git status", kind: refusalUngrantable, shape: shapeCdVCS},
+				{tool: "Bash", command: "gh pr merge 7", kind: refusalPlain},
+			},
+			wantOK: true,
+			wantParts: []string{"a command with a `$VAR` and a `cd` joined to git", "phrase them differently",
+				"It was also refused a command whose grant polako doesn't hand out automatically"},
+			wantAbsent: []string{"both"},
+		},
+		{
+			name: "unrecognized words have nothing to say",
+			refusals: []refusal{
+				{tool: "Bash", command: "curl -s https://example.com", kind: refusalUnrecognized},
+			},
+			wantOK: false,
 		},
 		{
 			name: "only never says polako doesn't hand it out",
@@ -798,6 +862,11 @@ func TestPermissionParkAdviceNamesTheFixOrSaysWhyNot(t *testing.T) {
 					t.Errorf("advice %q missing %q", advice, part)
 				}
 			}
+			for _, part := range tt.wantAbsent {
+				if strings.Contains(advice, part) {
+					t.Errorf("advice %q should not say %q", advice, part)
+				}
+			}
 		})
 	}
 }
@@ -838,6 +907,236 @@ func TestPermissionParkReasonWorkedAroundLeadsWithTheCountAndHedge(t *testing.T)
 	if got, _ := permissionParkReasonWorkedAroundAndEntries(nil, defaultTools); !strings.Contains(got, "0 calls") ||
 		!strings.Contains(got, permissionParkReason) {
 		t.Errorf("permissionParkReasonWorkedAroundAndEntries(nil, ...) = %q, want the count and the fixed fallback", got)
+	}
+}
+
+// permissionDenied is the system event Claude Code 2.1.312 sends ahead of a
+// refused call's tool_result, cut to the fields polako reads plus the reason,
+// a plain string where every other event's "message" is an object. The
+// tool_result that follows repeats it.
+func permissionDenied(id, words string) string {
+	return `{"type":"system","subtype":"permission_denied","tool_use_id":"` + id +
+		`","message":` + jsonString(words) + `}`
+}
+
+// observeLines feeds stream lines to a fresh report, failing on any line
+// parseEvent rejects — a rejected line is one the scanner drops unread.
+func observeLines(t *testing.T, lines ...string) runReport {
+	t.Helper()
+	var rep runReport
+	for _, l := range lines {
+		ev, ok := parseEvent([]byte(l))
+		if !ok {
+			t.Fatalf("parseEvent rejected %s", l)
+		}
+		rep.observe(ev)
+	}
+	return rep
+}
+
+// dontAskWords is the one line 2.1.312 refuses every call with under
+// -permission-mode dontAsk, whatever the command: nothing in it says
+// whether a grant would help.
+const dontAskWords = "Permission to use Bash has been denied because Claude Code is running in " +
+	"don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that " +
+	"might naturally be used to accomplish this goal, e.g. using head instead of cat."
+
+// A permission_denied event's "message" is a string where every other
+// event's is an object, and the scanner drops a line it cannot parse — so the
+// event is only read at all if the string form parses.
+func TestParseEventReadsAPermissionDeniedEvent(t *testing.T) {
+	t.Parallel()
+	// 2.1.312, verbatim but for the ids.
+	line := `{"type":"system","subtype":"permission_denied","tool_name":"Bash","tool_use_id":"toolu_1",` +
+		`"decision_reason_type":"other","decision_reason":"A variable in this command can't be checked before it runs",` +
+		`"message":"A variable in this command can't be checked before it runs","uuid":"u","session_id":"s"}`
+	ev, ok := parseEvent([]byte(line))
+	if !ok {
+		t.Fatal("parseEvent rejected a permission_denied event")
+	}
+	if ev.Type != "system" || ev.Subtype != "permission_denied" || ev.ToolUseID != "toolu_1" {
+		t.Errorf("parsed type %q, subtype %q, tool_use_id %q — want the event and the call it refused",
+			ev.Type, ev.Subtype, ev.ToolUseID)
+	}
+
+	ev, ok = parseEvent([]byte(toolUseID("toolu_2", "Bash", `{"command":"git status"}`)))
+	if !ok || len(ev.Message.Content) != 1 || ev.Message.Content[0].ID != "toolu_2" {
+		t.Errorf("an object message must parse as before, got ok=%v %+v", ok, ev.Message)
+	}
+	if _, ok := parseEvent([]byte(`{"type":"user","message":null}`)); !ok {
+		t.Error("a null message must still parse")
+	}
+}
+
+// Claude Code 2.1.312's own words for each refusal shape, probed 2026-10-28
+// under acceptEdits: the command, the reason its permission_denied event and
+// tool_result both carried, and what a park should make of it. With the
+// grant polako would derive already in place, each ungrantable one was
+// refused again.
+func TestObserveReadsEachRefusalInTheCLIsCurrentWords(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, tool, input, words string
+		kind                     refusalKind
+		shape                    refusalShape
+		wantEntry                string
+		wantWhy                  addToolsKind
+	}{
+		{
+			name: "a command the allowlist doesn't grant", tool: "Bash",
+			input: `{"command":"ssh -T git@github.com"}`, words: "This command requires approval",
+			kind: refusalPlain, wantEntry: "Bash(ssh:*)",
+		},
+		{
+			name: "a tool the allowlist doesn't name", tool: "WebFetch",
+			input: `{"url":"https://example.com","prompt":"title"}`,
+			words: "Claude requested permissions to use WebFetch, but you haven't granted it yet.",
+			kind:  refusalPlain, wantEntry: "WebFetch",
+		},
+		{
+			name: "an echo of $? after a ;", tool: "Bash",
+			input: `{"command":"git status; echo \"exit=$?\""}`,
+			words: `This Bash command contains multiple operations. The following part requires approval: echo "exit=$?"`,
+			kind:  refusalPart, wantEntry: "Bash(echo:*)",
+		},
+		{
+			name: "a $VAR", tool: "Bash",
+			input: `{"command":"git -C $PWD status"}`, words: "A variable in this command can't be checked before it runs",
+			kind: refusalUngrantable, shape: shapeVariable, wantWhy: addToolsUngrantable,
+		},
+		{
+			name: "a variable the command sets", tool: "Bash",
+			input: `{"command":"X=hello; echo $X"}`, words: "A variable set in this command can't be checked before it runs",
+			kind: refusalUngrantable, shape: shapeVariable, wantWhy: addToolsUngrantable,
+		},
+		{
+			name: "a $(…)", tool: "Bash",
+			input: `{"command":"ls $(pwd)"}`, words: "A nested command in this command can't be checked before it runs",
+			kind: refusalUngrantable, shape: shapeNested, wantWhy: addToolsUngrantable,
+		},
+		{
+			name: "a cd joined to git", tool: "Bash",
+			input: `{"command":"cd .. && git status"}`,
+			words: "This command changes directory before running a version-control command, which can pick up " +
+				"untrusted hooks or repository configuration from the target directory. Approve only if you trust it.",
+			kind: refusalUngrantable, shape: shapeCdVCS, wantWhy: addToolsUngrantable,
+		},
+		{
+			name: "dontAsk's one line for every refusal", tool: "Bash",
+			input: `{"command":"curl -s https://example.com"}`, words: dontAskWords,
+			kind: refusalUnrecognized, wantWhy: addToolsUnrecognized,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			rep := observeLines(t,
+				toolUseID("toolu_1", c.tool, c.input),
+				permissionDenied("toolu_1", c.words),
+				toolResult("toolu_1", c.words, true),
+				`{"type":"result","subtype":"success","result":"Stopping here."}`,
+			)
+			if !rep.permissionRefused {
+				t.Fatal("permissionRefused should latch — the CLI said it refused the call")
+			}
+			if len(rep.refusals) != 1 {
+				t.Fatalf("got %d refusals, want 1: %+v", len(rep.refusals), rep.refusals)
+			}
+			r := rep.refusals[0]
+			if r.tool != c.tool || r.kind != c.kind || r.shape != c.shape {
+				t.Errorf("refusal = %+v, want tool %q, kind %q, shape %q", r, c.tool, c.kind, c.shape)
+			}
+			if entry, why := addToolsEntry(r, defaultTools); entry != c.wantEntry || why != c.wantWhy {
+				t.Errorf("addToolsEntry = (%q, %q), want (%q, %q)", entry, why, c.wantEntry, c.wantWhy)
+			}
+		})
+	}
+}
+
+// Words refusalWordings doesn't know — dontAsk's, a hook's, the next CLI
+// release's — still count when the CLI's own event names the call. Without
+// the event, the same tool_result reads as an ordinary error: the gap the
+// event closes, since a CLI new enough to reword a refusal sends one.
+func TestObserveCountsARefusalInUnknownWordsOnlyOffItsEvent(t *testing.T) {
+	t.Parallel()
+	use := toolUseID("toolu_1", "Bash", `{"command":"curl -s https://example.com"}`)
+	refused := toolResult("toolu_1", dontAskWords, true)
+	end := `{"type":"result","subtype":"success","result":"Stopping here."}`
+
+	if rep := observeLines(t, use, permissionDenied("toolu_1", dontAskWords), refused, end); !rep.permissionRefused {
+		t.Error("permissionRefused should latch off the event, whatever its words")
+	}
+	if rep := observeLines(t, use, refused, end); rep.permissionRefused {
+		t.Error("with no event, an error in unknown words is not evidence of a refusal")
+	}
+}
+
+// #209 keeps a working-directory block out of the refusals — no -add-tools
+// entry reaches a path outside the session — and 2.1.312 sends a
+// permission_denied event for one too. The event must not overturn that.
+func TestObserveLeavesAWorkingDirectoryBlockOutDespiteItsEvent(t *testing.T) {
+	t.Parallel()
+	const words = "ls in '/' was blocked. For security, Claude Code may only list files in the " +
+		"allowed working directories for this session: '/x/scratch'."
+	rep := observeLines(t,
+		toolUseID("toolu_1", "Bash", `{"command":"ls /"}`),
+		permissionDenied("toolu_1", words),
+		toolResult("toolu_1", words, true),
+		`{"type":"result","subtype":"success","result":"Opened a PR."}`,
+	)
+	if rep.permissionRefused || len(rep.refusals) != 0 {
+		t.Errorf("a working-directory block latched as a refusal: %+v", rep.refusals)
+	}
+}
+
+// The event and the tool_result are two reports of one refusal. It counts
+// once, and the id the event left behind goes with the tool_result, so a
+// long run's marks don't pile up — nor do they from an event for a call no
+// tool_result will answer again.
+func TestObserveCountsADeniedCallOnce(t *testing.T) {
+	t.Parallel()
+	const words = "A nested command in this command can't be checked before it runs"
+	use := toolUseID("toolu_1", "Bash", `{"command":"ls $(pwd)"}`)
+	for name, lines := range map[string][]string{
+		"event first, as the CLI sends it": {use, permissionDenied("toolu_1", words), toolResult("toolu_1", words, true)},
+		"event after its tool_result":      {use, toolResult("toolu_1", words, true), permissionDenied("toolu_1", words)},
+		"event for a call never seen":      {use, toolResult("toolu_1", words, true), permissionDenied("toolu_9", words)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			rep := observeLines(t, lines...)
+			if len(rep.refusals) != 1 {
+				t.Errorf("got %d refusals for one refused call, want 1: %+v", len(rep.refusals), rep.refusals)
+			}
+			if len(rep.deniedCalls) != 0 {
+				t.Errorf("deniedCalls = %v at the end, want it empty", rep.deniedCalls)
+			}
+		})
+	}
+}
+
+// The sandbox's block reads differently per command, but always names the
+// sandbox in the same sentence — and a refusal never does.
+func TestWorkingDirBlockMatchesEachCommandsBlock(t *testing.T) {
+	t.Parallel()
+	for _, s := range []string{
+		"ls in '/' was blocked. For security, Claude Code may only list files in the allowed working directories for this session: '/x'.",
+		"cd in '/etc' was blocked. For security, Claude Code may only change directories to the allowed working directories for this session: '/x'.",
+		"rm in '/x/y.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/x'.",
+	} {
+		if !workingDirBlock(s) {
+			t.Errorf("should read as the sandbox's block: %s", clip(s, 60))
+		}
+	}
+	for _, s := range []string{
+		"This command requires approval",
+		"A variable in this command can't be checked before it runs",
+		dontAskWords,
+		"error: the commit was blocked. See below.\nFor security, Claude Code may only ...",
+	} {
+		if workingDirBlock(s) {
+			t.Errorf("should not read as the sandbox's block: %s", clip(s, 60))
+		}
 	}
 }
 

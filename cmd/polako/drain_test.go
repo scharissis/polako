@@ -1927,6 +1927,57 @@ func TestDrainParksARefusedToolResultWithoutResuming(t *testing.T) {
 	}
 }
 
+// Claude Code 2.1.312 words a refused `cd` before git and a refused `$VAR`
+// differently than the CLI this park was built against did, and says so in a
+// permission_denied event too. Read off neither, the run parked as "produced
+// nothing", and the thread learned nothing about why. Read off the event,
+// it parks on the first run as a refusal, and the thread names both shapes
+// without offering a grant, since none lifts either.
+func TestDrainParksARefusalNoGrantLiftsWithoutResuming(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "toolrefusedshapes", &ghState{
+		Issues: map[string]*fakeIssue{"1": {Open: true}},
+	})
+	calls := filepath.Join(t.TempDir(), "gh-calls.log")
+	setFakeEnv(&cfg, fakeGhLogEnv, calls)
+	records := t.TempDir()
+	cfg.rec = newRecorder(records)
+
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("a refused call must not end the drain: %v", err)
+	}
+
+	recs := terminalRecords(t, records, cfg.repo)
+	if len(recs) != 1 || recs[0].Outcome != issueNeedsHuman || recs[0].ParkReason != parkPermission {
+		t.Fatalf("terminal record = %+v, want needs_human / %s", recs, parkPermission)
+	}
+	out := buf.String()
+	if got := strings.Count(out, "session started"); got != 1 {
+		t.Errorf("%d runs dispatched, want 1 — a resume hits the same wall\ngot:\n%s", got, out)
+	}
+	if !strings.Contains(out, "cd /w && git status") {
+		t.Errorf("the terminal should name the refused command\ngot:\n%s", out)
+	}
+
+	posted, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatalf("reading the fake gh call log: %v", err)
+	}
+	if want := "the run was refused a `cd` joined to git and a command with a `$VAR`, " +
+		"which no `-add-tools` entry allows — the skill has to phrase them differently."; !strings.Contains(string(posted), want) {
+		t.Errorf("no gh call carried %q to the thread\ngot:\n%s", want, posted)
+	}
+	// No grant fixes either, so none is offered — not in the reason, not in
+	// a Refused: footer unpark would read back — and the raw commands stay
+	// off the public thread.
+	for _, mustNotPost := range []string{"-add-tools \"", "Refused:", "cd /w && git status", "git -C $W status"} {
+		if strings.Contains(string(posted), mustNotPost) {
+			t.Errorf("%q must not reach the issue thread\ngot:\n%s", mustNotPost, posted)
+		}
+	}
+}
+
 // Issue #433, end to end: a drain that
 // parks two issues on the same derivable entry ends with one grants block,
 // the union deduplicated, one `polako unpark -apply` line to clear either.

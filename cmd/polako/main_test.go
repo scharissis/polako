@@ -694,6 +694,32 @@ func fakeClaude(mode string) int {
 			`"num_turns":6,"total_cost_usd":0.1,` +
 			`"result":"git fetch origin keeps failing here — looks like the SSH agent isn't reachable from this session."}`)
 		return 0
+	case "toolrefusedshapes":
+		// Claude Code 2.1.312's own stream for two refusals no grant lifts, a
+		// `cd` joined to git and a `$VAR`: a permission_denied event ahead of
+		// each refused tool_result, in words the CLI chose that release.
+		// Nothing after the second refusal succeeds, and the final word is
+		// calm prose — #126's shape, so the park is immediate.
+		const cdWords = "This command changes directory before running a version-control command, " +
+			"which can pick up untrusted hooks or repository configuration from the target directory. " +
+			"Approve only if you trust it."
+		const varWords = "A variable in this command can't be checked before it runs"
+		emit(`{"type":"system","subtype":"init","session_id":"sess-shapes","model":"claude-opus-5"}`)
+		for _, c := range []struct{ id, command, words string }{
+			{"toolu_1", "cd /w && git status", cdWords},
+			{"toolu_2", "git -C $W status", varWords},
+		} {
+			emit(`{"type":"assistant","session_id":"sess-shapes","message":{"content":[` +
+				`{"type":"tool_use","id":"` + c.id + `","name":"Bash","input":{"command":"` + c.command + `"}}]}}`)
+			emit(`{"type":"system","subtype":"permission_denied","tool_name":"Bash","tool_use_id":"` + c.id +
+				`","decision_reason_type":"other","decision_reason":"` + c.words + `","message":"` + c.words +
+				`","session_id":"sess-shapes"}`)
+			emit(`{"type":"user","session_id":"sess-shapes","message":{"content":[` +
+				`{"type":"tool_result","tool_use_id":"` + c.id + `","is_error":true,"content":"` + c.words + `"}]}}`)
+		}
+		emit(`{"type":"result","subtype":"success","session_id":"sess-shapes","duration_ms":100,` +
+			`"num_turns":3,"total_cost_usd":0.1,"result":"Couldn't read the worktree's status, so I stopped."}`)
+		return 0
 	case "toolrefusedrecoveredthenrefusedagain":
 		// Issue #432's own review: a worked-around refusal (run 1) defers to
 		// a resume, and that resume hits a *different* refusal it does not
