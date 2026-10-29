@@ -13,6 +13,17 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.37.2]
+
+### What's Changed
+* test: stop the live week-window test failing across a DST change by @scharissis in https://github.com/scharissis/polako/pull/714
+* docs: refresh the README's cost table and stale counts by @scharissis in https://github.com/scharissis/polako/pull/715
+* fix: read refused calls off the CLI's permission_denied event by @scharissis in https://github.com/scharissis/polako/pull/716
+* docs: move three finished designs to docs/designs/done/ by @scharissis in https://github.com/scharissis/polako/pull/717
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.37.1...v0.37.2
+
 ## [0.37.1]
 
 ### What's Changed
