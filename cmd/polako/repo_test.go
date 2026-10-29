@@ -552,9 +552,9 @@ func TestPlanSkillStatesTheTitleConvention(t *testing.T) {
 }
 
 // issue #326: the plan-document layout convention
-// (docs/designs/plan-conventions.md) existed only in a plan document other
-// repos never see, so a plan run elsewhere had nowhere to learn where plan
-// documents belong. Mirrors TestPlanSkillStatesTheTitleConvention's
+// (docs/designs/done/plan-conventions.md) existed only in a plan document
+// other repos never see, so a plan run elsewhere had nowhere to learn where
+// plan documents belong. Mirrors TestPlanSkillStatesTheTitleConvention's
 // marker-list shape.
 func TestPlanSkillStatesTheDocumentLayout(t *testing.T) {
 	t.Parallel()

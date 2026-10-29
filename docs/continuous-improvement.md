@@ -260,7 +260,7 @@ A hit is a finding, and a finding becomes an issue.
   the backlog.
 - **No text in records, and no new record fields that tempt it.**
   `park_reason` is an enum precisely so it never becomes a message.
-- **No new telemetry readers.** `docs/designs/backlog-fill.md` argues the second reader
+- **No new telemetry readers.** `docs/designs/done/backlog-fill.md` argues the second reader
   (the plan report's pricing line) out loud; this plan adds none, and the
   audit recipe reads GitHub, not the record files.
 - **No metrics service, no dashboards, no CSV export yet** — all parked in

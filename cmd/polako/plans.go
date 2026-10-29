@@ -2,9 +2,9 @@ package main
 
 // `status` gains a plans section: what state each document under
 // docs/designs/ is in, derived from the issues whose footer names it — never
-// written down, so it cannot go stale. See docs/designs/plan-conventions.md
-// for the convention this reads back, and footer.go for the parser it reads
-// bodies with.
+// written down, so it cannot go stale. See
+// docs/designs/done/plan-conventions.md for the convention this reads back,
+// and footer.go for the parser it reads bodies with.
 //
 // One gh call for the whole report: every issue, open or closed, whose body
 // carries the footer phrase. The search is a pre-filter — parsePlanFooter's
@@ -60,7 +60,7 @@ var planFooterSearchPhrase = strings.TrimSpace(planFooterPrefix)
 
 // planDocState is a plan document's derived state — never written down,
 // always read back from the issues whose footer names it. See
-// docs/designs/plan-conventions.md's table.
+// docs/designs/done/plan-conventions.md's table.
 type planDocState string
 
 const (
@@ -296,10 +296,11 @@ func localDoneDocs(dir string) []string {
 }
 
 // planDocStatusFrom derives one document's line from the issues whose
-// footer names it. See docs/designs/plan-conventions.md's table: no issues is
-// draft; all closed is done; any issue still open and past the `proposed`
-// gate is active; otherwise every naming issue is still open-and-proposed
-// or closed-early with nothing past the gate yet, which reads as proposed.
+// footer names it. See docs/designs/done/plan-conventions.md's table: no
+// issues is draft; all closed is done; any issue still open and past the
+// `proposed` gate is active; otherwise every naming issue is still
+// open-and-proposed or closed-early with nothing past the gate yet, which
+// reads as proposed.
 func planDocStatusFrom(path string, issues []ghPlanIssue) planDocStatus {
 	if len(issues) == 0 {
 		return planDocStatus{path: path, state: planDraft}

@@ -4597,7 +4597,7 @@ func planFooterLine(doc string) string {
 
 // A container whose body carries a plan footer, closing with no other open
 // issue naming that document, gets a retire issue filed for it — the
-// "Retire on close" step (docs/designs/plan-conventions.md). The retire
+// "Retire on close" step (docs/designs/done/plan-conventions.md). The retire
 // issue's own body carries the same footer, which is what a later close on
 // the same document finds (see the "already filed" case below).
 func TestDrainFilesARetireIssueWhenAContainerCloses(t *testing.T) {
@@ -4680,7 +4680,7 @@ func TestDrainFilesNoSecondRetireIssueForTheSameDocument(t *testing.T) {
 // must still file exactly one retire issue between them — closeFinishedContainers
 // closes both in the same call, and the second must not rely on a GitHub
 // search seeing the first container's create in time (its index lags a write
-// by seconds to a minute, per docs/designs/plan-conventions.md).
+// by seconds to a minute, per docs/designs/done/plan-conventions.md).
 func TestDrainFilesOnlyOneRetireIssueForTwoContainersClosingTogether(t *testing.T) {
 	t.Parallel()
 	cfg, path := drainConfig(t, "stream", &ghState{
