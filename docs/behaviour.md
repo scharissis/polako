@@ -224,7 +224,7 @@ line for the same reason.
 **A container that just closed can be the last thing naming its plan
 document — the drain files an issue to move it to `done/` when that happens.** If the
 closed container's body carries a plan footer
-(`docs/designs/plan-conventions.md`) and no other open issue names the same
+(`docs/designs/done/plan-conventions.md`) and no other open issue names the same
 document, one more `proposed` issue gets filed:
 
     docs: move docs/designs/foo.md to done/ — every issue it proposed is closed

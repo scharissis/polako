@@ -393,7 +393,7 @@ needs you: reply on #9; review and merge PR #58; grant Bash(echo:*) or fix the s
 dependency — recomputed every pass, so it clears itself once that blocker closes. Scoped to a gate label, the queues come from the same `--label` listing `work -label` drains, and one more unscoped listing finds what's outside it. Three things reach past the gate. `proposed` stays repo-wide, and a proposal without the gate label gets a clause naming both moves — `curate #7 (drop proposed, add ready)`. `design` stays repo-wide too, one clause per request: `run polako design -issue N`, or `reply on #N, then polako design -issue N` when it's awaiting an answer. An `outside the gate` row lists open issues with neither the gate label nor a hold (`needs-human`, `proposed`, `design`, `awaiting-answer`): numbers only, the first ten, then `and N more`, absent when empty. Out-of-gate containers are left out.
 
 Below that table, `plan documents` adds one row per file under `docs/designs/`:
-state derived from the naming issues (`docs/designs/plan-conventions.md`'s
+state derived from the naming issues (`docs/designs/done/plan-conventions.md`'s
 table), their `(completed/total closed)` container epics and open children
 (shape in the JSON example below), and a `gone` line for a footer naming a
 deleted document. A file under `docs/designs/done/` is always `done`.

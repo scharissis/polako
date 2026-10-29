@@ -4,7 +4,8 @@ package main
 // once a container's own close has actually succeeded. If the container's
 // body carries a plan footer (footer.go) and no other open issue names the
 // same document, file one `proposed` issue asking a human to move it to
-// docs/designs/done/ — the "Retire on close" step in docs/designs/plan-conventions.md.
+// docs/designs/done/ — the "Retire on close" step in
+// docs/designs/done/plan-conventions.md.
 //
 // Best-effort like the close's own comment: nothing here can turn a
 // container close into a drain failure. A read, a search or a create that
@@ -38,11 +39,11 @@ type retiredDoc struct {
 // same document can both be finished in the same pass, and the search alone
 // cannot be trusted to see the first container's create in time for the
 // second — GitHub's search index lags a write by seconds to a minute (the
-// same lag docs/designs/plan-conventions.md already accepts across shifts),
-// which is far longer than the gap between two loop iterations in one call.
-// This local set closes that gap for free — it costs no extra call, since
-// closeFinishedContainers already holds the equivalent information in the
-// `retired` slice it is accumulating.
+// same lag docs/designs/done/plan-conventions.md already accepts across
+// shifts), which is far longer than the gap between two loop iterations in
+// one call. This local set closes that gap for free — it costs no extra
+// call, since closeFinishedContainers already holds the equivalent
+// information in the `retired` slice it is accumulating.
 func retireOrphanedDoc(ctx context.Context, cfg config, c containerInfo, filedThisCall map[string]bool) (rd retiredDoc, ok bool, err error) {
 	body, err := containerBody(ctx, cfg, c.number)
 	if err != nil {
@@ -203,10 +204,10 @@ func issueNumberFromCreateOutput(raw []byte) (int, error) {
 }
 
 // retireIssueBody names the container that closed, the document, and the
-// rule from docs/designs/plan-conventions.md's "Retire on close" section — then
-// ends with the same footer the document's own proposals carry, so a later
-// container closing for this document finds this issue in the search above
-// and files nothing.
+// rule from docs/designs/done/plan-conventions.md's "Retire on close" section
+// — then ends with the same footer the document's own proposals carry, so a
+// later container closing for this document finds this issue in the search
+// above and files nothing.
 func retireIssueBody(c containerInfo, footer planFooter) string {
 	line := planFooterPrefix + footer.doc
 	if footer.sha != "" {

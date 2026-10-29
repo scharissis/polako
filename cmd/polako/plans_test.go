@@ -35,8 +35,8 @@ func writeDesignDoc(t *testing.T, dir, name string) {
 	}
 }
 
-// The whole state table docs/designs/plan-conventions.md describes, one doc per
-// case, plus a container and its open-children count.
+// The whole state table docs/designs/done/plan-conventions.md describes, one
+// doc per case, plus a container and its open-children count.
 func TestPlanDocsDerivesState(t *testing.T) {
 	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{
