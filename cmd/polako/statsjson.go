@@ -137,12 +137,14 @@ type statsDocIssues struct {
 // false and a true median of 0 reviews (some issues reviewed, the middle one
 // not) are both real states, and omitempty would drop the second exactly
 // like the first — dropping a fact the text report still prints as "0
-// reviews".
+// reviews". ReviewsIssues is the count that median is over, present exactly
+// when it is: an issue whose size only GitHub gave has no review count.
 type statsDocChange struct {
 	AdditionsMedian int  `json:"additions_median"`
 	DeletionsMedian int  `json:"deletions_median"`
 	FilesMedian     int  `json:"files_median"`
 	ReviewsMedian   *int `json:"reviews_median,omitempty"`
+	ReviewsIssues   int  `json:"reviews_issues,omitempty"`
 	Issues          int  `json:"issues"`
 }
 
@@ -366,6 +368,7 @@ func statsDocIssuesFrom(s issuesSummary) statsDocIssues {
 		if s.change.hasReviews {
 			reviews := s.change.reviewsMedian
 			doc.ChangePerIssue.ReviewsMedian = &reviews
+			doc.ChangePerIssue.ReviewsIssues = s.change.reviewsN
 		}
 	}
 	if s.priced == 0 {

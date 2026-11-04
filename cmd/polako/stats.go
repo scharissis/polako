@@ -386,10 +386,11 @@ func (is *issueStats) outcome() string {
 }
 
 // written is the terminal record a drain wrote for this issue, nil when none
-// did. Everything read off a record's own fields — park reason, PR size,
-// usage samples — reads this, so GitHub's answer changes an issue's outcome
-// and nothing else: an overturned park still counts as a park, and keeps
-// the samples its drain took.
+// did. Everything read off a record's own fields — park reason, usage
+// samples, and PR size where the drain got one — reads this, so GitHub's
+// answer changes an issue's outcome and fills in only the size no drain
+// recorded: an overturned park still counts as a park, and keeps the
+// samples its drain took. See changeRecord.
 func (is *issueStats) written() *issueRecord {
 	switch {
 	case is.park != nil:
@@ -398,6 +399,20 @@ func (is *issueStats) written() *issueRecord {
 		return nil
 	}
 	return is.terminal
+}
+
+// changeRecord is the record an issue's PR size is read from: the one a
+// drain wrote, when its lookup got an answer, else the one resolveFromGitHub
+// synthesized. Only the first carries a review count — on the second, 0
+// means "not asked", not "not reviewed".
+func (is *issueStats) changeRecord() (rec *issueRecord, reviewed bool) {
+	if w := is.written(); w != nil && w.enriched() {
+		return w, true
+	}
+	if is.resolved && is.terminal.enriched() {
+		return is.terminal, false
+	}
+	return nil, false
 }
 
 // rollUpIssues folds runs and terminal records into one entry per issue. An
@@ -601,6 +616,7 @@ type changeSummary struct {
 	reviewsMedian int
 	hasReviews    bool
 	n             int
+	reviewsN      int // n less the issues whose size only GitHub gave
 }
 
 func buildIssuesSummary(issues []*issueStats) issuesSummary {
@@ -664,21 +680,27 @@ func buildParkReasons(done []*issueStats) map[string]int {
 	return counts
 }
 
-// buildChangeSummary is what the work actually changed, from the GitHub
-// enrichment folded into terminal records. A record written before that
-// enrichment existed carries none, and neither does one whose lookup failed,
-// so this covers its own set of issues and says how many (n).
+// buildChangeSummary is what the work actually changed, from GitHub's
+// answer about each PR: the enrichment a drain folded into its terminal
+// record, or the size resolveFromGitHub asked for an issue no drain saw end.
+// Without the second, the medians sampled only the merges a drain saw — 4
+// files where every merged PR gave 5, on one operator's month of records.
+// A record written before the enrichment existed carries none, and neither
+// does one whose lookup failed, so this covers its own set of issues and
+// says how many (n).
 func buildChangeSummary(done []*issueStats) *changeSummary {
 	var adds, dels, files, reviews []int
 	for _, is := range done {
-		rec := is.written()
-		if rec == nil || !rec.enriched() {
+		rec, reviewed := is.changeRecord()
+		if rec == nil {
 			continue
 		}
 		adds = append(adds, rec.Additions)
 		dels = append(dels, rec.Deletions)
 		files = append(files, rec.ChangedFiles)
-		reviews = append(reviews, rec.Reviews)
+		if reviewed {
+			reviews = append(reviews, rec.Reviews)
+		}
 	}
 	if len(adds) == 0 {
 		return nil
@@ -690,8 +712,9 @@ func buildChangeSummary(done []*issueStats) *changeSummary {
 		reviewsMedian: median(reviews),
 		// A repository whose PRs are merged without a formal review reports
 		// zero every time, and a column of zeros is noise rather than a finding.
-		hasReviews: slices.Max(reviews) > 0,
+		hasReviews: len(reviews) > 0 && slices.Max(reviews) > 0,
 		n:          len(adds),
+		reviewsN:   len(reviews),
 	}
 }
 

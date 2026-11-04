@@ -19,6 +19,7 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -33,6 +34,15 @@ const statsResolveTimeout = 10 * time.Second
 // GraphQL alias query would be exact, but this is the batched listing the
 // issue asked for.
 const statsResolveLimit = 1000
+
+// statsSizeChunk is how many PRs one size query names. One query naming 100
+// took 1.4–7.1s on polako's own repo (median 1.9s), too near
+// statsResolveTimeout at the slow end, so each names half that.
+const statsSizeChunk = 50
+
+// statsSizeParallel is how many size queries run at once, so a long record
+// history doesn't arrive at GitHub as one burst of them.
+const statsSizeParallel = 4
 
 // prResolution is what the lookup came to: how many issues it settled, how
 // many of those had been parked, and the repositories it could not ask.
@@ -79,12 +89,14 @@ func settledSince(is *issueStats) time.Time {
 }
 
 // resolveFromGitHub gives each unsettled issue GitHub can settle a terminal
-// record synthesized from its answer — outcome and timestamp only, so no PR
-// text can reach the output. A park it overturns moves to is.park rather
-// than vanishing: parks are a signal, and only the outcome was wrong. One
-// `gh pr list` per repository rather than one call per PR. An empty
-// cfg.ghBin skips it: the test seam that keeps every other stats test off
-// the network.
+// record synthesized from its answer — outcome, timestamp and, where no
+// drain recorded one, the PR's size, so no PR text can reach the output.
+// Without that size, the change line would sample only the merges a drain
+// saw. A park it overturns moves to is.park rather than vanishing: parks are
+// a signal, and only the outcome was wrong. One `gh pr list` per repository
+// for the outcome, then one GraphQL query per statsSizeChunk PRs for the
+// size. An empty cfg.ghBin skips it: the test seam that keeps every other
+// stats test off the network.
 func resolveFromGitHub(ctx context.Context, cfg config, issues []*issueStats) prResolution {
 	var res prResolution
 	if cfg.ghBin == "" {
@@ -111,6 +123,7 @@ func resolveFromGitHub(ctx context.Context, cfg config, issues []*issueStats) pr
 		wg.Go(func() { lists[i], errs[i] = listPRStates(ctx, cfg, repo) })
 	}
 	wg.Wait()
+	unsized := map[string][]*issueStats{}
 	for i, repo := range repos {
 		if errs[i] != nil {
 			res.unreached = append(res.unreached, repo)
@@ -127,8 +140,16 @@ func resolveFromGitHub(ctx context.Context, cfg config, issues []*issueStats) pr
 			}
 			is.terminal, is.resolved = &rec, true
 			res.resolved++
+			if w := is.written(); w == nil || !w.enriched() {
+				unsized[repo] = append(unsized[repo], is)
+			}
 		}
 	}
+	// After the listing, not beside it: the PR that settles an issue may be
+	// the newest on its branch, which only the listing names. Same budget,
+	// so stats waits no longer for it; a size that misses it costs only the
+	// size, never the outcome.
+	addSizes(ctx, cfg, unsized)
 	return res
 }
 
@@ -195,12 +216,18 @@ type prListing struct {
 	byBranch map[string]prState
 }
 
-// listPRStates is one repository's PRs. The field list is state, timestamps
-// and head branch only, so a title or body never enters this process.
+// prListFields is state, timestamps and head branch only, so a title or body
+// never enters this process. Size isn't here on purpose: adding additions,
+// deletions and changedFiles took a 1000-PR listing of polako's own repo
+// from 3s to 13–26s (median 21s), and GitHub answered one such listing with
+// a 502. addSizes asks for it instead, for the few PRs that need it.
+const prListFields = "number,state,mergedAt,closedAt,headRefName"
+
+// listPRStates is one repository's PRs.
 func listPRStates(ctx context.Context, cfg config, repo string) (prListing, error) {
 	cfg.ghRepo = repo
 	out, err := gh(ctx, cfg, "pr", "list", "--state", "all",
-		"--limit", strconv.Itoa(statsResolveLimit), "--json", "number,state,mergedAt,closedAt,headRefName")
+		"--limit", strconv.Itoa(statsResolveLimit), "--json", prListFields)
 	if err != nil {
 		return prListing{}, err
 	}
@@ -216,6 +243,114 @@ func listPRStates(ctx context.Context, cfg config, repo string) (prListing, erro
 		}
 	}
 	return l, nil
+}
+
+// prSize is the one thing a size query asks about a PR. Reviews aren't
+// asked: GitHub gives them only with their authors and bodies, so a resolved
+// issue carries no review count.
+type prSize struct {
+	Additions    int `json:"additions"`
+	Deletions    int `json:"deletions"`
+	ChangedFiles int `json:"changedFiles"`
+}
+
+// addSizes puts GitHub's size for each issue's settling PR on the record
+// resolveFromGitHub synthesized for it. Best-effort throughout: a query that
+// fails or runs out of time leaves its issues unenriched, so the change line
+// counts them out rather than as zeros, and stats names no repo over it.
+func addSizes(ctx context.Context, cfg config, byRepo map[string][]*issueStats) {
+	numbers := map[string][]int{}
+	for repo, issues := range byRepo {
+		for _, is := range issues {
+			numbers[repo] = append(numbers[repo], is.terminal.PR)
+		}
+	}
+	chunks := sizeChunks(numbers)
+	answers := make([]map[int]prSize, len(chunks))
+	slots := make(chan struct{}, statsSizeParallel)
+	var wg sync.WaitGroup
+	for i, c := range chunks {
+		wg.Go(func() {
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			answers[i] = lookupPRSizes(ctx, cfg, c)
+		})
+	}
+	wg.Wait()
+	sizes := map[string]map[int]prSize{}
+	for i, c := range chunks {
+		if sizes[c.repo] == nil {
+			sizes[c.repo] = map[int]prSize{}
+		}
+		maps.Copy(sizes[c.repo], answers[i])
+	}
+	for repo, issues := range byRepo {
+		for _, is := range issues {
+			if sz, ok := sizes[repo][is.terminal.PR]; ok {
+				is.terminal.Additions, is.terminal.Deletions, is.terminal.ChangedFiles =
+					sz.Additions, sz.Deletions, sz.ChangedFiles
+			}
+		}
+	}
+}
+
+// sizeChunk is one size query's worth: a repository and up to statsSizeChunk
+// of its PR numbers.
+type sizeChunk struct {
+	repo    string
+	numbers []int
+}
+
+// sizeChunks splits each repo's PR numbers into queries, each PR asked about
+// once even when two issues settled on it.
+func sizeChunks(byRepo map[string][]int) []sizeChunk {
+	var chunks []sizeChunk
+	for _, repo := range slices.Sorted(maps.Keys(byRepo)) {
+		numbers := slices.Clone(byRepo[repo])
+		slices.Sort(numbers)
+		for c := range slices.Chunk(slices.Compact(numbers), statsSizeChunk) {
+			chunks = append(chunks, sizeChunk{repo, c})
+		}
+	}
+	return chunks
+}
+
+// sizeQuery names each PR once, by number, under an alias, and asks for its
+// size and nothing else.
+func sizeQuery(numbers []int) string {
+	var b strings.Builder
+	b.WriteString("query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) {")
+	for _, n := range numbers {
+		fmt.Fprintf(&b, " p%d: pullRequest(number: %d) { additions deletions changedFiles }", n, n)
+	}
+	b.WriteString(" } }")
+	return b.String()
+}
+
+// lookupPRSizes is one chunk's sizes, keyed by PR number. GitHub answers a
+// number it can't resolve with null beside the rest, and gh exits 1 over
+// that, so the body is read whatever the exit and every PR it did answer
+// for is kept.
+func lookupPRSizes(ctx context.Context, cfg config, c sizeChunk) map[int]prSize {
+	owner, name, _ := strings.Cut(c.repo, "/")
+	out, _ := captureAll(ctx, cfg.dir, cfg.env, nil, cfg.ghBin, "api", "graphql",
+		"-f", "query="+sizeQuery(c.numbers), "-f", "owner="+owner, "-f", "name="+name)
+	var resp struct {
+		Data struct {
+			Repository map[string]*prSize `json:"repository"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(out, &resp) != nil {
+		return nil
+	}
+	sizes := map[int]prSize{}
+	for alias, sz := range resp.Data.Repository {
+		n, err := strconv.Atoi(strings.TrimPrefix(alias, "p"))
+		if sz != nil && err == nil {
+			sizes[n] = *sz
+		}
+	}
+	return sizes
 }
 
 // note is the one line the report prints when a lookup failed. It names the
