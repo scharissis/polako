@@ -13,6 +13,17 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.38.0]
+
+### What's Changed
+* docs: check the README's cost table against GitHub by @scharissis in https://github.com/scharissis/polako/pull/721
+* fix: count a parked issue that later merged as merged in stats by @scharissis in https://github.com/scharissis/polako/pull/722
+* fix: count off-shift merges in stats' change line by @scharissis in https://github.com/scharissis/polako/pull/723
+* fix: settle stats' outcomes by GraphQL, past the newest 1000 PRs by @scharissis in https://github.com/scharissis/polako/pull/724
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.37.2...v0.38.0
+
 ## [0.37.2]
 
 ### What's Changed
