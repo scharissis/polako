@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -288,9 +289,13 @@ type fakePR struct {
 
 	// MergedAt and ClosedAt are what `pr list` reports for a PR that
 	// already ended — stats's own resolveFromGitHub reads them beside the
-	// head branch and nothing else.
-	MergedAt string `json:"merged_at"`
-	ClosedAt string `json:"closed_at"`
+	// head branch, and Additions, Deletions and ChangedFiles off its
+	// `api graphql` size query, and nothing else.
+	MergedAt     string `json:"merged_at"`
+	ClosedAt     string `json:"closed_at"`
+	Additions    int    `json:"additions"`
+	Deletions    int    `json:"deletions"`
+	ChangedFiles int    `json:"changed_files"`
 	// MergeOnPeek is the same merge, landing on the Nth free check
 	// (answerPeek) instead, so a test proves the peek noticed it.
 	MergeOnPeek int `json:"merge_on_peek"`
@@ -435,6 +440,9 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			// unpark's own viewer-login read: `gh api user --jq .login`, no
 			// {owner}/{repo} in the path so it needs no per-issue routing.
 			call = "api user"
+		} else if at(1) == "graphql" {
+			// stats's own size query (lookupPRSizes), the one GraphQL call.
+			call = "api graphql"
 		} else if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "milestones") }) {
 			return answerMilestones(st, args)
 		} else if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "contents") }) {
@@ -637,6 +645,9 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 
 	case "api user":
 		return fmt.Sprintf("%s\n", viewerLogin(st)), false, 0
+
+	case "api graphql":
+		return answerSizeQuery(st, args)
 
 	case "api repo":
 		// unparkDefaultBranch's own call: repos/{owner}/{repo} --jq
@@ -979,6 +990,50 @@ func answerBranchProtection(st *ghState) (out string, changed bool, code int) {
 		return "", false, 1
 	}
 	return "{}", false, 0
+}
+
+// sizeAlias is one `pN: pullRequest(number: N)` in stats's size query.
+var sizeAlias = regexp.MustCompile(`p(\d+): pullRequest\(number: (\d+)\)`)
+
+// answerSizeQuery answers stats's size query the way GitHub does: a size for
+// each PR it knows, null for one it can't resolve, and an errors list
+// beside the data — over which gh exits 1 with the body still on stdout. A
+// hidden repo answers null for the whole repository the same way.
+func answerSizeQuery(st *ghState, args []string) (out string, changed bool, code int) {
+	fields := map[string]string{}
+	for i, a := range args {
+		if a == "-f" && i+1 < len(args) {
+			k, v, _ := strings.Cut(args[i+1], "=")
+			fields[k] = v
+		}
+	}
+	if repo := fields["owner"] + "/" + fields["name"]; slices.Contains(st.HiddenRepos, repo) {
+		fmt.Fprintf(os.Stderr, "gh: Could not resolve to a Repository with the name '%s'.\n", repo)
+		return `{"data":{"repository":null},"errors":[{"type":"NOT_FOUND"}]}`, false, 1
+	}
+	var aliases, errs []string
+	for _, m := range sizeAlias.FindAllStringSubmatch(fields["query"], -1) {
+		n, _ := strconv.Atoi(m[2])
+		var pr *fakePR
+		for _, p := range st.PRs {
+			if p.Number == n {
+				pr = p
+			}
+		}
+		if pr == nil {
+			aliases = append(aliases, fmt.Sprintf(`"p%s":null`, m[1]))
+			errs = append(errs, fmt.Sprintf(`{"type":"NOT_FOUND","path":["repository","p%s"]}`, m[1]))
+			continue
+		}
+		aliases = append(aliases, fmt.Sprintf(`"p%s":{"additions":%d,"deletions":%d,"changedFiles":%d}`,
+			m[1], pr.Additions, pr.Deletions, pr.ChangedFiles))
+	}
+	body := `{"data":{"repository":{` + strings.Join(aliases, ",") + `}}`
+	if len(errs) == 0 {
+		return body + "}", false, 0
+	}
+	fmt.Fprintln(os.Stderr, "gh: Could not resolve to a PullRequest with that number.")
+	return body + `,"errors":[` + strings.Join(errs, ",") + "]}", false, 1
 }
 
 func answerMilestones(st *ghState, args []string) (out string, changed bool, code int) {

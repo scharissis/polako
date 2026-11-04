@@ -210,20 +210,25 @@ func appendGitHubNote(pairs [][2]string, s issuesSummary) [][2]string {
 }
 
 // changePairsFrom formats what the work actually changed, from a
-// *changeSummary built over the terminal records carrying the GitHub
-// enrichment — every issue that ended with a PR, abandoned ones included,
-// which is the same set the lines above it count. nil means no terminal
-// issue carries that enrichment, and there is nothing to print.
+// *changeSummary built over the terminal issues carrying GitHub's answer
+// about their PR — every issue that ended with a PR, abandoned ones
+// included, which is the same set the lines above it count. nil means no
+// terminal issue carries one, and there is nothing to print.
 func changePairsFrom(c *changeSummary) [][2]string {
 	if c == nil {
 		return nil
 	}
 	line := fmt.Sprintf("+%d -%d across %s", c.addsMedian, c.delsMedian, plural(c.filesMedian, "file"))
+	over := "medians over " + plural(c.n, "issue") + " with PR data"
 	if c.hasReviews {
 		line += ", " + plural(c.reviewsMedian, "review")
+		// An issue whose size only GitHub gave has no review count, so the
+		// review median can sit over fewer issues than the rest.
+		if c.reviewsN != c.n {
+			over += fmt.Sprintf(", reviews over %d", c.reviewsN)
+		}
 	}
-	return [][2]string{{"change per issue",
-		fmt.Sprintf("%s (medians over %s with PR data)", line, plural(c.n, "issue"))}}
+	return [][2]string{{"change per issue", fmt.Sprintf("%s (%s)", line, over)}}
 }
 
 // planCostPairs is the "plan cost per issue" line — absent entirely when no
