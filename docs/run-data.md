@@ -180,32 +180,32 @@ human latency
 | `-runs` | *(off)* | Add the run log: one row per run, with the session id that reopens it — see [Reopening a past run](#reopening-a-past-run--runs). |
 | `-html` | *(off)* | Also write the report to this path, as one self-contained HTML file — see [Keeping a copy](#keeping-a-copy--html). |
 | `-json` | `false` | Print one JSON document to stdout instead of the text report — see [As JSON](#as-json--json) below. |
+| `-branch-prefix` | `issue-` | Branch prefix the skill uses; how a PR no run recorded is matched back to its issue. |
 
 A window can keep an issue's terminal record while clipping the runs that
 produced it — those issues still count toward the merge rate but can't be
 priced, and the report says when that differs. Unreadable files (`0600`
 records in a shared directory) are named rather than failing the report.
 **Blocked on answers** is the gap between the run that posted questions and
-the re-run that folded the reply in; **PR open to merge** ends whenever
-somebody pressed the button — part of the elapsed time, not a property of
-the automation.
+the re-run that folded the reply in; **PR open to merge** ends when somebody
+pressed the button — elapsed time, not a property of the automation.
 
-**On park reasons:** `needs human` is one bucket on the `terminal` line;
-**park reasons** breaks it down (`budget 3, checks remediation 1`), an
-identifier chosen at the park itself, never the sentence posted to the
-thread. A park that can't say records `unknown`. **On PR size:** a terminal
-record carrying GitHub's answer about its PR adds a **change per issue**
-line — median additions, deletions, changed files and reviews; records
-from before that enrichment carry none.
+**On park reasons:** the line counts every park, merged since or not (below),
+by an identifier chosen at the park itself (`budget 3, checks remediation 1`),
+never the sentence posted to the thread. A park that can't say records
+`unknown`. **On PR size:** a terminal record carrying GitHub's answer about
+its PR adds a **change per issue** line — median additions, deletions, changed
+files and reviews; records from before that enrichment carry none.
 
-**On issues merged off-shift:** a terminal record is written only when a
-drain sees the merge, so a shift stopped during the merge wait leaves none.
-For each issue with no terminal record, `stats` asks GitHub about the last PR
-its runs recorded — one `gh pr list` per repository, state and timestamps
-only, 10s at most. Merged or closed counts as terminal, and the `terminal`
-line says `(N from GitHub)`; `-json` carries `from_github`. An open PR stays
-in flight. A repo GitHub won't answer for keeps its issues in flight and gets
-one `note` line (`github_note` in `-json`). Nothing is written back.
+**On issues merged off-shift:** a drain writes a terminal record only when it
+sees the merge, so one merged while no shift watched reads in flight, or
+parked if a human finished it. `stats` asks GitHub about each — the last PR
+its runs recorded, else the newest on its `-branch-prefix` branch — in one
+`gh pr list` per repo: state, timestamps and branch only, 10s at most. A
+merge or close ends an issue in flight; a park ends only in a merge after it,
+as `merged 9 (90%, 2 after a park)`. The `terminal` line's `(N from GitHub)`
+counts both; `-json` has `from_github` and `merged_after_park`. A repo GitHub
+won't answer for gets a `note` line (`github_note`). Nothing is written back.
 
 **On resumed sessions:** a crashed run and the `--resume` that finishes its
 work are two records, and `stats` sums both — including `unfinished`, a
@@ -421,7 +421,7 @@ polako stats -json | jq .
     "terminal": { "merged": 3, "needs_human": 1 },
     "done": 4,
     "in_flight": 1,
-    "from_github": 0,
+    "from_github": 0, "merged_after_park": 0,
     "park_reasons": { "produced_nothing": 1 },
     "priced": 4,
     "runs_per_issue": { "mean": 1.5, "median": 1.5 },

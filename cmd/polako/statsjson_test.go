@@ -49,6 +49,7 @@ func TestStatsJSONGoldenDocument(t *testing.T) {
     "done": 0,
     "in_flight": 1,
     "from_github": 0,
+    "merged_after_park": 0,
     "priced": 0
   },
   "runs": {
