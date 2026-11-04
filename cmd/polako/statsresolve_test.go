@@ -97,8 +97,8 @@ func TestStatsResolvesInFlightIssuesFromGitHub(t *testing.T) {
 		"note GitHub didn't answer for example/two — their in-flight and parked issues stay as they are; rerun to retry",
 		// $7.50 over the one merge GitHub supplied.
 		"per merged PR $7.50 across 1 merge",
-		// Sizes for the two it settled, and no review figure: GitHub's
-		// size query doesn't give one.
+		// Sizes for the two it settled, and no review figure: stats'
+		// query doesn't ask GitHub for one.
 		"change per issue +70 -7 across 2 files (medians over 2 issues with PR data)",
 	} {
 		if !hasLine(got, want) {
@@ -164,11 +164,49 @@ func TestStatsResolvedCountsReachJSONAndTheByTable(t *testing.T) {
 	}
 }
 
+// An issue whose PR is older than a repo's newest 1000 still settles: it's
+// asked about by number, not found in a listing. The fake's own `pr list`
+// keeps only the newest --limit, as gh does, so a listing would miss it.
+func TestStatsResolvesAPROlderThanTheNewest1000(t *testing.T) {
+	t.Parallel()
+	st := &ghState{Repo: "example/one", PRs: map[string]*fakePR{
+		"issue-1": {Number: 10, State: "MERGED", MergedAt: "2026-08-20T15:00:00Z", ClosedAt: "2026-08-20T15:00:00Z",
+			Additions: 100, Deletions: 10, ChangedFiles: 3},
+	}}
+	for n := range 1000 {
+		st.PRs[fmt.Sprintf("other-%d", n)] = &fakePR{Number: 11 + n, State: "OPEN"}
+	}
+	cfg := ghStateCfg(t, st)
+	listing := cfg
+	listing.ghRepo = "example/one"
+	listed, err := gh(context.Background(), listing, "pr", "list", "--state", "all", "--limit", "1000", "--json", "number")
+	if err != nil || strings.Contains(string(listed), `"number":10}`) || strings.Count(string(listed), `"number"`) != 1000 {
+		t.Fatalf("the fake's listing should hold the newest 1000 PRs and not #10 (err %v)", err)
+	}
+	dir := t.TempDir()
+	body := `{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T09:30:00Z","repo":"example/one","issue":1,"pr":10,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":2.00}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "example.jsonl"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := runStatsWith(cfg, []string{"-metrics", dir}, &out, io.Discard, fixtureNow, report{}); err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	for _, want := range []string{
+		"terminal 1 — merged 1 (100%) (1 from GitHub)",
+		"change per issue +100 -10 across 3 files (medians over 1 issue with PR data)",
+	} {
+		if !hasLine(out.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, out.String())
+		}
+	}
+}
+
 // An issue merged off-shift has no record of what it changed, so a change
 // line built from the records alone samples only the merges a drain saw.
-// GitHub's size query supplies the size; a review count would need the
-// review bodies, so the review median stays over the drain's own records and
-// says so.
+// GitHub's answer carries the size; a review count would need the review
+// bodies, so the review median stays over the drain's own records and says
+// so.
 func TestStatsResolvedPRsCountTowardTheChangeLine(t *testing.T) {
 	t.Parallel()
 	cfg, dir := resolveCfg(t), resolveDir(t)
@@ -224,50 +262,48 @@ func TestStatsResolvedPRsCountTowardTheChangeLine(t *testing.T) {
 		t.Errorf("change_per_issue = %v, want %v", doc.Issues.Change, want)
 	}
 
-	// Per report: one listing per repo, and beside each one size query
-	// naming the PRs its records name with no size — the open #12 too,
-	// asked before anyone knows it's open, but not #13, which its drain
-	// already sized. Both settled PRs answered, so no second round. Nothing
-	// asks for PR text, and nothing is written back.
+	// Per report: one query per repo and no listing, naming every PR the
+	// unsettled issues' records name — the open #12 too, asked before
+	// anyone knows it's open, but not #13, whose issue a drain settled — and
+	// every one of those issues' branches. The hidden repo's null isn't asked
+	// again. Nothing asks for PR text, and nothing is written back.
 	calls, err := os.ReadFile(ghLog)
 	if err != nil {
 		t.Fatal(err)
 	}
-	lists, queries := 0, 0
+	queries := 0
 	for _, call := range strings.Split(strings.TrimSpace(string(calls)), "\n") {
-		switch {
-		case strings.HasPrefix(call, "pr list"):
-			lists++
-			if !strings.Contains(call, "--json "+prListFields) {
-				t.Errorf("pr list asked for other fields: %q", call)
-			}
-		case strings.HasPrefix(call, "api graphql"):
-			queries++
-			var named []string
-			for _, m := range sizeAlias.FindAllStringSubmatch(call, -1) {
-				named = append(named, m[2])
-			}
-			want := []string{"10", "11", "12"}
-			if strings.Contains(call, "name=two") {
-				want = []string{"20"}
-			}
-			if !slices.Equal(named, want) {
-				t.Errorf("the size query named PRs %v, want %v: %q", named, want, call)
-			}
-			asks := sizeAlias.ReplaceAllString(call, "")
-			for _, field := range []string{"title", "body", "reviews", "comments"} {
-				if strings.Contains(asks, field) {
-					t.Errorf("the size query asks for %q: %q", field, call)
-				}
+		if strings.HasPrefix(call, "pr list") {
+			t.Errorf("stats listed PRs: %q", call)
+		}
+		if !strings.HasPrefix(call, "api graphql") {
+			continue
+		}
+		queries++
+		prs, branches := queryNames(call)
+		wantPRs, wantBranches := []string{"10", "11", "12"}, []string{"issue-1", "issue-2", "issue-3", "issue-4"}
+		if strings.Contains(call, "name=two") {
+			wantPRs, wantBranches = []string{"20"}, []string{"issue-9"}
+		}
+		if !slices.Equal(prs, wantPRs) || !slices.Equal(branches, wantBranches) {
+			t.Errorf("the query named PRs %v and branches %v, want %v and %v: %q", prs, branches, wantPRs, wantBranches, call)
+		}
+		if !strings.Contains(call, "fragment pr on PullRequest { "+prFields+" }") {
+			t.Errorf("the query asks for something other than prFields: %q", call)
+		}
+		asks := branchAlias.ReplaceAllString(prAlias.ReplaceAllString(call, ""), "")
+		for _, field := range []string{"title", "body", "reviews", "comments"} {
+			if strings.Contains(asks, field) {
+				t.Errorf("the query asks for %q: %q", field, call)
 			}
 		}
 	}
-	if lists != 4 || queries != 4 {
-		t.Errorf("%d pr list and %d api graphql calls, want 4 of each:\n%s", lists, queries, calls)
+	if queries != 4 {
+		t.Errorf("%d api graphql calls, want 4 — one per repo per report:\n%s", queries, calls)
 	}
 	for _, field := range []string{"title", "body", "reviews", "comments"} {
-		if slices.Contains(strings.Split(prListFields, ","), field) {
-			t.Errorf("prListFields names %q: the listing must not bring PR text in", field)
+		if slices.Contains(strings.Fields(prFields), field) {
+			t.Errorf("prFields names %q: the query must not bring PR text in", field)
 		}
 	}
 	if after, err := os.ReadFile(path); err != nil || string(after) != string(before)+onShift {
@@ -275,8 +311,23 @@ func TestStatsResolvedPRsCountTowardTheChangeLine(t *testing.T) {
 	}
 }
 
+// queryNames is the PR numbers and branch names one logged PR query asks
+// about, in the order it asks.
+func queryNames(call string) (prs, branches []string) {
+	for _, m := range prAlias.FindAllStringSubmatch(call, -1) {
+		prs = append(prs, m[2])
+	}
+	for _, m := range branchAlias.FindAllStringSubmatch(call, -1) {
+		if _, rest, ok := strings.Cut(call, " -f "+m[2]+"="); ok {
+			branch, _, _ := strings.Cut(rest, " ")
+			branches = append(branches, branch)
+		}
+	}
+	return prs, branches
+}
+
 // oneRepoDir is resolveFixture's example/one records alone: one repo, so
-// one size query a round, and FailReads fails the round a test means.
+// one query, and FailReads fails the tries a test means.
 func oneRepoDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -292,23 +343,21 @@ func oneRepoDir(t *testing.T) string {
 	return dir
 }
 
-// A size round that fails gets one more try, after the listing, in whatever
-// time is left. One that fails twice costs the sizes, never the outcomes:
-// both issues still settle, the change line counts neither rather than as
-// zeros, and the note says so rather than pass a short line off as whole.
-func TestStatsSizeFailureKeepsTheOutcome(t *testing.T) {
+// A query the network lost gets one more try, in whatever time is left. One
+// lost twice loses its issues' outcomes, and the note says so rather than
+// pass a short report off as whole: here it is example/one's only query, so
+// the repo is named as one GitHub didn't answer for.
+func TestStatsLostQueryIsAskedAgain(t *testing.T) {
 	t.Parallel()
+	const unreached = "GitHub didn't answer for example/one — their in-flight and parked issues stay as they are; rerun to retry"
 	for _, tc := range []struct {
-		fails      int
-		change     string
-		note, json string
+		fails          int
+		terminal, note string
 	}{
-		{fails: 1, change: "change per issue +70 -7 across 2 files (medians over 2 issues with PR data)"},
-		{fails: 2,
-			note: "note GitHub gave no PR size for 2 issues it settled, so change per issue leaves them out; rerun to retry",
-			json: "GitHub gave no PR size for 2 issues it settled, so change per issue leaves them out; rerun to retry"},
+		{fails: 1, terminal: "terminal 2 — merged 1 (50%), closed unmerged 1 (2 from GitHub)"},
+		{fails: 2, terminal: "in flight 4", note: unreached},
 	} {
-		t.Run(fmt.Sprintf("%d failed", tc.fails), func(t *testing.T) {
+		t.Run(fmt.Sprintf("%d lost", tc.fails), func(t *testing.T) {
 			t.Parallel()
 			// Fresh per report: the fake's failure countdown is spent by it.
 			failing := func() config {
@@ -320,23 +369,20 @@ func TestStatsSizeFailureKeepsTheOutcome(t *testing.T) {
 				t.Fatalf("stats: %v", err)
 			}
 			got := out.String()
-			if !hasLine(got, "terminal 2 — merged 1 (50%), closed unmerged 1 (2 from GitHub)") {
-				t.Errorf("a failed size query lost an outcome:\n%s", got)
+			if !hasLine(got, tc.terminal) {
+				t.Errorf("missing %q in:\n%s", tc.terminal, got)
 			}
-			if tc.change != "" && !hasLine(got, tc.change) {
-				t.Errorf("missing %q — the second try should have sized both:\n%s", tc.change, got)
-			}
-			if tc.change == "" && strings.Contains(got, "\n  change per issue") {
-				t.Errorf("sizes GitHub never gave produced a change line:\n%s", got)
-			}
-			if tc.note != "" && !hasLine(got, tc.note) {
-				t.Errorf("missing %q in:\n%s", tc.note, got)
+			if change := "change per issue +70 -7 across 2 files (medians over 2 issues with PR data)"; tc.note == "" && !hasLine(got, change) {
+				t.Errorf("missing %q — the second try should have sized both:\n%s", change, got)
 			}
 			if tc.note == "" && strings.Contains(got, "note ") {
-				t.Errorf("a size round that recovered left a note:\n%s", got)
+				t.Errorf("a query that recovered left a note:\n%s", got)
 			}
-			if tc.json == "" {
+			if tc.note == "" {
 				return
+			}
+			if !hasLine(got, "note "+tc.note) {
+				t.Errorf("missing note %q in:\n%s", tc.note, got)
 			}
 			out.Reset()
 			if err := runStatsWith(failing(), []string{"-metrics", dir, "-json"}, &out, io.Discard, fixtureNow, report{}); err != nil {
@@ -347,29 +393,82 @@ func TestStatsSizeFailureKeepsTheOutcome(t *testing.T) {
 					GitHubNote string `json:"github_note"`
 				} `json:"issues"`
 			}
-			if err := json.Unmarshal(out.Bytes(), &doc); err != nil || doc.Issues.GitHubNote != tc.json {
-				t.Errorf("github_note = %q (err %v), want %q", doc.Issues.GitHubNote, err, tc.json)
+			if err := json.Unmarshal(out.Bytes(), &doc); err != nil || doc.Issues.GitHubNote != tc.note {
+				t.Errorf("github_note = %q (err %v), want %q", doc.Issues.GitHubNote, err, tc.note)
 			}
 		})
 	}
 }
 
-// The note names an unreachable repo, a size shortfall, or both, in one
+// A repo that answered some queries isn't named as unreachable, but the
+// issues its lost query asked about are counted: 30 issues make two queries,
+// 25 and 5, and the second names a PR the network always drops.
+func TestStatsPartlyAnsweredRepoCountsWhatsLeftOut(t *testing.T) {
+	t.Parallel()
+	st := &ghState{Repo: "example/one", PRs: map[string]*fakePR{}, DropQueriesNaming: []int{127}}
+	var body strings.Builder
+	for n := 1; n <= 30; n++ {
+		fmt.Fprintf(&body, `{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","repo":"example/one","issue":%d,"pr":%d,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":1.00}`+"\n", n, 100+n)
+		st.PRs[fmt.Sprintf("issue-%d", n)] = &fakePR{Number: 100 + n, State: "MERGED",
+			MergedAt: "2026-08-20T15:00:00Z", ClosedAt: "2026-08-20T15:00:00Z", Additions: 1, ChangedFiles: 1}
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "example.jsonl"), []byte(body.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := ghStateCfg(t, st)
+	ghLog := filepath.Join(t.TempDir(), "gh.log")
+	setFakeEnv(&cfg, fakeGhLogEnv, ghLog)
+	var out bytes.Buffer
+	if err := runStatsWith(cfg, []string{"-metrics", dir, "-json"}, &out, io.Discard, fixtureNow, report{}); err != nil {
+		t.Fatalf("stats -json: %v", err)
+	}
+	var doc struct {
+		Issues struct {
+			InFlight   int    `json:"in_flight"`
+			FromGitHub int    `json:"from_github"`
+			GitHubNote string `json:"github_note"`
+		} `json:"issues"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+		t.Fatalf("parsing -json: %v\n%s", err, out.String())
+	}
+	want := "GitHub didn't answer about 5 issues — they stay as they are; rerun to retry"
+	if doc.Issues.FromGitHub != 25 || doc.Issues.InFlight != 5 || doc.Issues.GitHubNote != want {
+		t.Errorf("issues = %+v, want 25 from GitHub, 5 in flight and note %q", doc.Issues, want)
+	}
+	calls, err := os.ReadFile(ghLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var asked []string
+	for _, call := range strings.Split(strings.TrimSpace(string(calls)), "\n") {
+		_, branches := queryNames(call)
+		asked = append(asked, fmt.Sprintf("%s-%s", branches[0], branches[len(branches)-1]))
+	}
+	slices.Sort(asked)
+	if w := []string{"issue-1-issue-25", "issue-26-issue-30", "issue-26-issue-30"}; !slices.Equal(asked, w) {
+		t.Errorf("queries asked about %v, want %v — the lost one asked twice", asked, w)
+	}
+}
+
+// The note names an unreachable repo, issues a query lost, or both, in one
 // line; with neither there is no line at all.
 func TestResolutionNoteSaysWhatGitHubDidntGive(t *testing.T) {
 	t.Parallel()
+	const stay = " — their in-flight and parked issues stay as they are"
 	for _, tc := range []struct {
 		res  prResolution
 		want string
 	}{
 		{prResolution{}, ""},
-		{prResolution{unreached: []string{"o/a"}},
-			"GitHub didn't answer for o/a — their in-flight and parked issues stay as they are; rerun to retry"},
-		{prResolution{unsized: 1},
-			"GitHub gave no PR size for 1 issue it settled, so change per issue leaves it out; rerun to retry"},
-		{prResolution{unreached: []string{"o/a"}, unsized: 3},
-			"GitHub didn't answer for o/a — their in-flight and parked issues stay as they are; " +
-				"GitHub gave no PR size for 3 issues it settled, so change per issue leaves them out; rerun to retry"},
+		{prResolution{unreached: []string{"o/a"}}, "GitHub didn't answer for o/a" + stay + "; rerun to retry"},
+		{prResolution{unanswered: 1}, "GitHub didn't answer about 1 issue — it stays as it is; rerun to retry"},
+		{prResolution{unanswered: 3}, "GitHub didn't answer about 3 issues — they stay as they are; rerun to retry"},
+		{prResolution{unreached: []string{"o/a"}, unanswered: 1},
+			"GitHub didn't answer for o/a" + stay + ", as does 1 more issue elsewhere; rerun to retry"},
+		{prResolution{unreached: []string{"o/a", "o/b"}, unanswered: 3},
+			"GitHub didn't answer for o/a and o/b" + stay + ", as do 3 more issues elsewhere; rerun to retry"},
 	} {
 		if got := tc.res.note(); got != tc.want {
 			t.Errorf("note() = %q, want %q", got, tc.want)
@@ -377,22 +476,44 @@ func TestResolutionNoteSaysWhatGitHubDidntGive(t *testing.T) {
 	}
 }
 
-// GitHub answers a PR number it can't resolve with null beside the rest,
-// and gh exits 1 over it; every size it did give still counts.
-func TestSizeQueryKeepsWhatGitHubAnswered(t *testing.T) {
+// GitHub answers a PR number it can't resolve with null beside the rest, and
+// gh exits 1 over it; every PR it did answer with still counts, carrying
+// every field verdict and the change line read. A repo it can't see is its
+// own answer, not asked again; a gh that never answered is.
+func TestPRQueryKeepsWhatGitHubAnswered(t *testing.T) {
 	t.Parallel()
-	got := lookupPRSizes(context.Background(), resolveCfg(t), sizeChunk{"example/one", []int{10, 98}})
-	if want := map[int]prSize{10: {Additions: 100, Deletions: 10, ChangedFiles: 3}}; !maps.Equal(got, want) {
-		t.Errorf("sizes = %v, want %v", got, want)
+	issue := func(repo string, n, pr int) *issueStats {
+		return &issueStats{key: issueKey{repo, n}, runs: []runRecord{{PR: pr}}}
 	}
-	if got := lookupPRSizes(context.Background(), resolveCfg(t), sizeChunk{"example/two", []int{20}}); len(got) != 0 {
-		t.Errorf("a repo GitHub can't see gave sizes %v", got)
+	q := prQueries(map[string][]*issueStats{"example/one": {issue("example/one", 1, 10), issue("example/one", 7, 98)}}, "issue-")[0]
+	ans, retry := q.ask(context.Background(), resolveCfg(t))
+	merged := prState{Number: 10, State: "MERGED", MergedAt: "2026-08-20T15:00:00Z", ClosedAt: "2026-08-20T15:00:00Z",
+		Additions: 100, Deletions: 10, ChangedFiles: 3}
+	if ans == nil || retry {
+		t.Fatalf("ask = %v (retry %v), want an answer", ans, retry)
+	}
+	if want := map[int]prState{10: merged}; !maps.Equal(ans.byNumber, want) {
+		t.Errorf("byNumber = %v, want %v", ans.byNumber, want)
+	}
+	if want := map[string]prState{"issue-1": merged}; !maps.Equal(ans.byBranch, want) {
+		t.Errorf("byBranch = %v, want %v — issue-7 has no PR", ans.byBranch, want)
+	}
+
+	q = prQueries(map[string][]*issueStats{"example/two": {issue("example/two", 9, 20)}}, "issue-")[0]
+	if ans, retry := q.ask(context.Background(), resolveCfg(t)); ans != nil || retry {
+		t.Errorf("a repo GitHub can't see gave %v (retry %v), want no answer and no retry", ans, retry)
+	}
+	cfg := offlineStats
+	cfg.ghBin = filepath.Join(t.TempDir(), "no-such-gh")
+	if ans, retry := q.ask(context.Background(), cfg); ans != nil || !retry {
+		t.Errorf("a gh that isn't there gave %v (retry %v), want no answer and a retry", ans, retry)
 	}
 }
 
 // A park a merge overturned keeps the size its drain recorded, reviews and
-// all, and isn't asked about again. One whose drain had no PR to size gets
-// GitHub's, as does an in-flight issue settled through its branch.
+// all: GitHub's answer settles its outcome, and the size beside it goes
+// unread. One whose drain had no PR to size gets GitHub's, as does an
+// in-flight issue settled through its branch.
 func TestStatsSizesOnlyWhatNoDrainSized(t *testing.T) {
 	t.Parallel()
 	cfg := parkCfgWith(t, func(st *ghState) {
@@ -403,8 +524,6 @@ func TestStatsSizesOnlyWhatNoDrainSized(t *testing.T) {
 		size("issue-7", 200, 20, 5)
 		size("issue-9", 60, 6, 2)
 	})
-	ghLog := filepath.Join(t.TempDir(), "gh.log")
-	setFakeEnv(&cfg, fakeGhLogEnv, ghLog)
 	dir := t.TempDir()
 	body := `{"v":1,"kind":"run","ts":"2026-08-20T09:00:00Z","ended":"2026-08-20T09:30:00Z","repo":"example/three","issue":5,"pr":30,"reason":"implement","status":"ok","outcome":"opened_pr","cost_usd":2.00}
 {"v":1,"kind":"issue","ts":"2026-08-20T10:00:00Z","repo":"example/three","issue":5,"pr":30,"outcome":"needs_human","park_reason":"checks_remediation","additions":412,"deletions":38,"changed_files":7,"reviews":2}
@@ -428,33 +547,37 @@ func TestStatsSizesOnlyWhatNoDrainSized(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}
 	}
-	calls, err := os.ReadFile(ghLog)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, call := range strings.Split(string(calls), "\n") {
-		if strings.HasPrefix(call, "api graphql") && (strings.Contains(call, "p30:") ||
-			!strings.Contains(call, "p40:") || !strings.Contains(call, "p41:")) {
-			t.Errorf("the size query should name PRs 40 and 41, not 30: %q", call)
-		}
-	}
 }
 
-// A size query names each PR once, however many issues settled on it, and no
-// more than statsSizeChunk of them.
-func TestSizeChunksDedupeAndSplit(t *testing.T) {
+// A query asks about at most statsQueryIssues issues, in issue order
+// whatever order they came in, and names a PR once however many issues
+// recorded it. Each issue's branch is the prefix and its number.
+func TestPRQueriesSplitAndDedupe(t *testing.T) {
 	t.Parallel()
-	var many []int
-	for n := range 2*statsSizeChunk + 1 {
-		many = append(many, n+1)
+	var many []*issueStats
+	for n := 2*statsQueryIssues + 1; n > 0; n-- {
+		many = append(many, &issueStats{key: issueKey{"o/a", n}})
 	}
+	shared := []*issueStats{
+		{key: issueKey{"o/b", 3}, runs: []runRecord{{PR: 7}}},
+		{key: issueKey{"o/b", 2}, runs: []runRecord{{PR: 7}, {PR: 0}}},
+	}
+	queries := prQueries(map[string][]*issueStats{"o/b": shared, "o/a": many}, "feat-")
 	var got []string
-	for _, c := range sizeChunks(map[string][]int{"o/a": many, "o/b": {7, 7}}) {
-		got = append(got, fmt.Sprintf("%s %d-%d (%d)", c.repo, c.numbers[0], c.numbers[len(c.numbers)-1], len(c.numbers)))
+	for _, q := range queries {
+		got = append(got, fmt.Sprintf("%s %s..%s (%d)", q.repo, q.branches[0], q.branches[len(q.branches)-1], len(q.issues)))
 	}
-	want := []string{"o/a 1-50 (50)", "o/a 51-100 (50)", "o/a 101-101 (1)", "o/b 7-7 (1)"}
+	want := []string{"o/a feat-1..feat-25 (25)", "o/a feat-26..feat-50 (25)", "o/a feat-51..feat-51 (1)", "o/b feat-2..feat-3 (2)"}
 	if !slices.Equal(got, want) {
-		t.Errorf("chunks = %q, want %q", got, want)
+		t.Errorf("queries = %q, want %q", got, want)
+	}
+	if text := queries[3].text(); strings.Count(text, "pullRequest(number: 7)") != 1 || strings.Count(text, "pullRequests(headRefName:") != 2 {
+		t.Errorf("o/b's query should name PR 7 once and both branches: %q", text)
+	}
+	// The fake holds one PR per branch, so it can't tell the newest from
+	// the oldest: the query's own words have to.
+	if text := queries[3].text(); strings.Count(text, "first: 1, orderBy: {field: CREATED_AT, direction: DESC}") != 2 {
+		t.Errorf("each branch lookup should ask for its newest PR alone: %q", text)
 	}
 }
 
@@ -709,14 +832,14 @@ func TestStatsBranchFallbackHonoursBranchPrefix(t *testing.T) {
 	}
 }
 
-// verdict's edge cases, on listings the fake gh can't hold: two PRs on one
+// verdict's edge cases, on answers the fake gh can't give: two PRs on one
 // branch, and a recorded PR on another branch than the issue's own.
 func TestVerdictWeighsBothCandidates(t *testing.T) {
 	t.Parallel()
 	run := []runRecord{{TS: "2026-08-20T09:00:00Z", PR: 10}}
 	park := &issueRecord{TS: "2026-08-20T10:00:00Z", Outcome: issueNeedsHuman, PR: 10}
 	pr := func(n int, state, ended string) prState {
-		st := prState{Number: n, State: state, ClosedAt: ended, HeadRefName: "issue-1"}
+		st := prState{Number: n, State: state, ClosedAt: ended}
 		if state == "MERGED" {
 			st.MergedAt = ended
 		}
@@ -738,14 +861,14 @@ func TestVerdictWeighsBothCandidates(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			is := &issueStats{key: issueKey{"o/n", 1}, runs: run, terminal: tc.terminal}
-			l := prListing{byNumber: map[int]prState{}, byBranch: map[string]prState{}}
+			a := prAnswers{byNumber: map[int]prState{}, byBranch: map[string]prState{}}
 			if tc.recorded.Number != 0 {
-				l.byNumber[tc.recorded.Number] = tc.recorded
+				a.byNumber[tc.recorded.Number] = tc.recorded
 			}
 			if tc.branch.Number != 0 {
-				l.byBranch["issue-1"] = tc.branch
+				a.byBranch["issue-1"] = tc.branch
 			}
-			rec, ok := l.verdict(is, "issue-1")
+			rec, ok := a.verdict(is, "issue-1")
 			if tc.want == "" {
 				if ok {
 					t.Errorf("verdict = %+v, want none", rec)

@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -98,8 +97,14 @@ type ghState struct {
 	FailReads map[string]int `json:"fail_reads"`
 
 	// HiddenRepos are repositories the token can't see: `pr list --repo`
-	// naming one fails the way gh does on a 404, every time.
+	// naming one fails the way gh does on a 404, every time, and stats's
+	// GraphQL query answers null for the whole repository.
 	HiddenRepos []string `json:"hidden_repos"`
+	// DropQueriesNaming is a network that loses every stats query asking
+	// about one of these PR numbers, with no body, every time: one query of
+	// several on a repo failing for good, which FailReads' countdown can't
+	// pin to a query when several run at once.
+	DropQueriesNaming []int `json:"drop_queries_naming"`
 
 	// OldGh is a gh from before sub-issues, which rejects the whole --json set
 	// rather than the one field it does not know — and does so before it asks
@@ -287,10 +292,9 @@ type fakePR struct {
 	// than wall clock for the same reason as ReplyOnRead.
 	MergeOnRead int `json:"merge_on_read"`
 
-	// MergedAt and ClosedAt are what `pr list` reports for a PR that
-	// already ended — stats's own resolveFromGitHub reads them beside the
-	// head branch, and Additions, Deletions and ChangedFiles off its
-	// `api graphql` size query, and nothing else.
+	// MergedAt, ClosedAt and the size are what stats's own GraphQL query
+	// (resolveFromGitHub) reads about a PR, beside its number and state, and
+	// nothing else. `pr list` serves the two timestamps too.
 	MergedAt     string `json:"merged_at"`
 	ClosedAt     string `json:"closed_at"`
 	Additions    int    `json:"additions"`
@@ -441,7 +445,7 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			// {owner}/{repo} in the path so it needs no per-issue routing.
 			call = "api user"
 		} else if at(1) == "graphql" {
-			// stats's own size query (lookupPRSizes), the one GraphQL call.
+			// stats's own PR query (prQuery.ask), the one GraphQL call.
 			call = "api graphql"
 		} else if slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "milestones") }) {
 			return answerMilestones(st, args)
@@ -647,7 +651,7 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 		return fmt.Sprintf("%s\n", viewerLogin(st)), false, 0
 
 	case "api graphql":
-		return answerSizeQuery(st, args)
+		return answerPRQuery(st, args)
 
 	case "api repo":
 		// unparkDefaultBranch's own call: repos/{owner}/{repo} --jq
@@ -860,13 +864,24 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			}
 			return "[" + prListJSON(head, pr, flagVal("--json")) + "]", false, 0
 		}
-		var rows []string
-		for _, branch := range slices.Sorted(maps.Keys(st.PRs)) {
-			if pr := st.PRs[branch]; flagVal("--state") == "" ||
+		var branches []string
+		for branch, pr := range st.PRs {
+			if flagVal("--state") == "" ||
 				strings.EqualFold(flagVal("--state"), "all") ||
 				strings.EqualFold(flagVal("--state"), pr.State) {
-				rows = append(rows, prListJSON(branch, pr, flagVal("--json")))
+				branches = append(branches, branch)
 			}
+		}
+		// --limit keeps the newest that many, the way gh does, so a lookup
+		// that leans on a listing misses an old PR here too.
+		if limit, err := strconv.Atoi(flagVal("--limit")); err == nil && len(branches) > limit {
+			slices.SortFunc(branches, func(a, b string) int { return st.PRs[b].Number - st.PRs[a].Number })
+			branches = branches[:limit]
+		}
+		slices.Sort(branches)
+		rows := make([]string, 0, len(branches))
+		for _, branch := range branches {
+			rows = append(rows, prListJSON(branch, st.PRs[branch], flagVal("--json")))
 		}
 		return "[" + strings.Join(rows, ",") + "]", false, 0
 
@@ -992,27 +1007,64 @@ func answerBranchProtection(st *ghState) (out string, changed bool, code int) {
 	return "{}", false, 0
 }
 
-// sizeAlias is one `pN: pullRequest(number: N)` in stats's size query.
-var sizeAlias = regexp.MustCompile(`p(\d+): pullRequest\(number: (\d+)\)`)
+// prAlias is one `pN: pullRequest(number: N)` in stats's PR query, and
+// branchAlias one `bN: pullRequests(headRefName: $bN, ...)`.
+var (
+	prAlias     = regexp.MustCompile(`p(\d+): pullRequest\(number: (\d+)\)`)
+	branchAlias = regexp.MustCompile(`b(\d+): pullRequests\(headRefName: \$(b\d+),`)
+	prFragment  = regexp.MustCompile(`fragment pr on PullRequest \{([^}]*)\}`)
+)
 
-// answerSizeQuery answers stats's size query the way GitHub does: a size for
-// each PR it knows, null for one it can't resolve, and an errors list
-// beside the data — over which gh exits 1 with the body still on stdout. A
-// hidden repo answers null for the whole repository the same way.
-func answerSizeQuery(st *ghState, args []string) (out string, changed bool, code int) {
-	fields := map[string]string{}
+// answerPRQuery answers stats's PR query the way GitHub does: each PR asked
+// for by number, null for one it can't resolve with an errors list beside the
+// data — over which gh exits 1 with the body still on stdout — and each
+// branch's PR as a one-node connection, empty for a branch with none. A PR
+// carries only the fields the query's fragment names, so a caller that reads
+// a field it forgot to ask for reads nothing here too. A hidden repo answers
+// null for the whole repository the same way.
+func answerPRQuery(st *ghState, args []string) (out string, changed bool, code int) {
+	vars := map[string]string{}
 	for i, a := range args {
 		if a == "-f" && i+1 < len(args) {
 			k, v, _ := strings.Cut(args[i+1], "=")
-			fields[k] = v
+			vars[k] = v
 		}
 	}
-	if repo := fields["owner"] + "/" + fields["name"]; slices.Contains(st.HiddenRepos, repo) {
+	if repo := vars["owner"] + "/" + vars["name"]; slices.Contains(st.HiddenRepos, repo) {
 		fmt.Fprintf(os.Stderr, "gh: Could not resolve to a Repository with the name '%s'.\n", repo)
 		return `{"data":{"repository":null},"errors":[{"type":"NOT_FOUND"}]}`, false, 1
 	}
+	query := vars["query"]
+	for _, m := range prAlias.FindAllStringSubmatch(query, -1) {
+		if n, _ := strconv.Atoi(m[2]); slices.Contains(st.DropQueriesNaming, n) {
+			fmt.Fprintln(os.Stderr, "could not connect to api.github.com")
+			return "", false, 1
+		}
+	}
+	var fields []string
+	if m := prFragment.FindStringSubmatch(query); m != nil {
+		fields = strings.Fields(m[1])
+	}
+	node := func(pr *fakePR) string {
+		all := map[string]any{"number": pr.Number, "state": pr.State, "mergedAt": nil, "closedAt": nil,
+			"additions": pr.Additions, "deletions": pr.Deletions, "changedFiles": pr.ChangedFiles}
+		if pr.MergedAt != "" {
+			all["mergedAt"] = pr.MergedAt
+		}
+		if pr.ClosedAt != "" {
+			all["closedAt"] = pr.ClosedAt
+		}
+		row := map[string]any{}
+		for _, f := range fields {
+			if v, ok := all[f]; ok {
+				row[f] = v
+			}
+		}
+		b, _ := json.Marshal(row)
+		return string(b)
+	}
 	var aliases, errs []string
-	for _, m := range sizeAlias.FindAllStringSubmatch(fields["query"], -1) {
+	for _, m := range prAlias.FindAllStringSubmatch(query, -1) {
 		n, _ := strconv.Atoi(m[2])
 		var pr *fakePR
 		for _, p := range st.PRs {
@@ -1025,8 +1077,14 @@ func answerSizeQuery(st *ghState, args []string) (out string, changed bool, code
 			errs = append(errs, fmt.Sprintf(`{"type":"NOT_FOUND","path":["repository","p%s"]}`, m[1]))
 			continue
 		}
-		aliases = append(aliases, fmt.Sprintf(`"p%s":{"additions":%d,"deletions":%d,"changedFiles":%d}`,
-			m[1], pr.Additions, pr.Deletions, pr.ChangedFiles))
+		aliases = append(aliases, fmt.Sprintf(`"p%s":%s`, m[1], node(pr)))
+	}
+	for _, m := range branchAlias.FindAllStringSubmatch(query, -1) {
+		nodes := ""
+		if pr, ok := st.PRs[vars[m[2]]]; ok {
+			nodes = node(pr)
+		}
+		aliases = append(aliases, fmt.Sprintf(`"b%s":{"nodes":[%s]}`, m[1], nodes))
 	}
 	body := `{"data":{"repository":{` + strings.Join(aliases, ",") + `}}`
 	if len(errs) == 0 {
