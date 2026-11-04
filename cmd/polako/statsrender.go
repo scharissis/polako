@@ -143,24 +143,31 @@ func issuePairs(s issuesSummary, plan planCostSummary) [][2]string {
 		return appendGitHubNote(pairs, s)
 	}
 	// The merge rate leads, with its percentage attached: it is the headline
-	// number, and "merged 3, needs human 1" buries it in a list.
+	// number, and "merged 3, needs human 1" buries it in a list. Merges that
+	// overturned a park say so beside it: they left needs human, and the
+	// park rate is still worth reading off this line.
 	merged := s.terminal[issueMerged]
-	terminal := fmt.Sprintf("%d — merged %d (%s)", s.done, merged, percent(merged, s.done))
+	rate := percent(merged, s.done)
+	if s.afterPark > 0 {
+		rate += fmt.Sprintf(", %d after a park", s.afterPark)
+	}
+	terminal := fmt.Sprintf("%d — merged %d (%s)", s.done, merged, rate)
 	rest := maps.Clone(s.terminal)
 	delete(rest, issueMerged)
 	if other := breakdown(rest, []string{issueClosedNoChange, issueClosed, issueNeedsHuman}); other != "none" {
 		terminal += ", " + other
 	}
 	// Said on the line itself, so nobody reads an outcome GitHub supplied as
-	// one a drain recorded — see resolveInFlight.
+	// one a drain recorded — see resolveFromGitHub.
 	if s.fromGitHub > 0 {
 		terminal += fmt.Sprintf(" (%d from GitHub)", s.fromGitHub)
 	}
 
 	pairs := [][2]string{{"terminal", terminal}}
-	// What "needs human" above is made of — the most actionable ranking in the
-	// report, because it says which half of the tool the next change belongs
-	// in. Absent when nothing was parked, rather than a line of zeroes.
+	// Every park, "needs human" above and any merged since — the most
+	// actionable ranking in the report, because it says which half of the
+	// tool the next change belongs in, and a park a human finished still
+	// says it. Absent when nothing was parked, rather than a line of zeroes.
 	if len(s.parkReasons) > 0 {
 		pairs = append(pairs, [2]string{"park reasons", breakdown(s.parkReasons, parkReasonOrder)})
 	}
@@ -193,8 +200,8 @@ func issuePairs(s issuesSummary, plan planCostSummary) [][2]string {
 	return append(append(pairs, change...), planPairs...)
 }
 
-// appendGitHubNote adds the line saying which repositories' in-flight issues
-// GitHub couldn't settle, right under the count it qualifies.
+// appendGitHubNote adds the line saying which repositories' in-flight and
+// parked issues GitHub couldn't settle, right under the count it qualifies.
 func appendGitHubNote(pairs [][2]string, s issuesSummary) [][2]string {
 	if s.githubNote == "" {
 		return pairs

@@ -215,6 +215,9 @@ func headlineCards(summary statsSummary) []htmlCard {
 		merged := iss.terminal[issueMerged]
 		rate = percent(merged, iss.done)
 		rateNote = fmt.Sprintf("%d of %s", merged, plural(iss.done, "terminal issue"))
+		if iss.afterPark > 0 {
+			rateNote += fmt.Sprintf(", %d after a park", iss.afterPark)
+		}
 		if iss.fromGitHub > 0 {
 			rateNote += fmt.Sprintf(", %d from GitHub", iss.fromGitHub)
 		}

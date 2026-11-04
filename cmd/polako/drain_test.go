@@ -287,7 +287,8 @@ type fakePR struct {
 	MergeOnRead int `json:"merge_on_read"`
 
 	// MergedAt and ClosedAt are what `pr list` reports for a PR that
-	// already ended — stats's own resolveInFlight reads nothing else.
+	// already ended — stats's own resolveFromGitHub reads them beside the
+	// head branch and nothing else.
 	MergedAt string `json:"merged_at"`
 	ClosedAt string `json:"closed_at"`
 	// MergeOnPeek is the same merge, landing on the Nth free check
@@ -846,14 +847,14 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			if !ok {
 				return "[]", false, 0
 			}
-			return "[" + prListJSON(head, pr) + "]", false, 0
+			return "[" + prListJSON(head, pr, flagVal("--json")) + "]", false, 0
 		}
 		var rows []string
 		for _, branch := range slices.Sorted(maps.Keys(st.PRs)) {
 			if pr := st.PRs[branch]; flagVal("--state") == "" ||
 				strings.EqualFold(flagVal("--state"), "all") ||
 				strings.EqualFold(flagVal("--state"), pr.State) {
-				rows = append(rows, prListJSON(branch, pr))
+				rows = append(rows, prListJSON(branch, pr, flagVal("--json")))
 			}
 		}
 		return "[" + strings.Join(rows, ",") + "]", false, 0
@@ -1004,17 +1005,26 @@ func answerMilestones(st *ghState, args []string) (out string, changed bool, cod
 	return "[" + strings.Join(rows, ",") + "]", false, 0
 }
 
-// prListJSON renders one row of `gh pr list --json number,state,url` — plus the
-// headRefName `status` filters on and the headRefOid and baseRefName tidy
-// trusts, which the drain's own lookup does not ask for and ignores. An empty
-// Base is "main", upstream()'s default branch.
-func prListJSON(branch string, pr *fakePR) string {
+// prListJSON renders one row of `gh pr list --json <fields>`, holding only
+// the fields asked for, the way gh does — so a caller that reads a field it
+// forgot to request reads nothing here too. An empty Base is "main",
+// upstream()'s default branch.
+func prListJSON(branch string, pr *fakePR, fields string) string {
 	base := pr.Base
 	if base == "" {
 		base = "main"
 	}
-	return fmt.Sprintf(`{"number":%d,"state":%q,"headRefName":%q,"headRefOid":%q,"baseRefName":%q,"url":"https://example.invalid/pr/%d","mergedAt":%q,"closedAt":%q}`,
-		pr.Number, pr.State, branch, pr.Head, base, pr.Number, pr.MergedAt, pr.ClosedAt)
+	all := map[string]any{"number": pr.Number, "state": pr.State, "headRefName": branch, "headRefOid": pr.Head,
+		"baseRefName": base, "url": fmt.Sprintf("https://example.invalid/pr/%d", pr.Number),
+		"mergedAt": pr.MergedAt, "closedAt": pr.ClosedAt}
+	row := map[string]any{}
+	for _, f := range strings.Split(fields, ",") {
+		if v, ok := all[f]; ok {
+			row[f] = v
+		}
+	}
+	b, _ := json.Marshal(row)
+	return string(b)
 }
 
 // rollupJSON renders the statusCheckRollup half of `pr view --json`. Every

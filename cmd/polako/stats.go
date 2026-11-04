@@ -93,6 +93,9 @@ type statsOptions struct {
 	runs   bool
 	html   string
 	json   bool
+	// branchPrefix finds a PR no run recorded by its head branch — the
+	// issue-N contract, the same flag status and tidy take.
+	branchPrefix string
 }
 
 // runStats is the `stats` subcommand: parse its own flags, read the records,
@@ -131,6 +134,8 @@ func runStatsWith(cfg config, args []string, out, errOut io.Writer, now time.Tim
 		"also write the report to this `path`, as one self-contained HTML file")
 	fs.BoolVar(&opt.json, "json", false,
 		"print one JSON document to stdout instead of the text report — see docs/run-data.md for the schema")
+	fs.StringVar(&opt.branchPrefix, "branch-prefix", "issue-",
+		"branch name prefix the skill uses — how a PR no run recorded is matched back to its issue")
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako stats [flags]\n\n"+
 			"Reports on the run data recorded by previous shifts. Reads only;\n"+
@@ -184,6 +189,7 @@ func runStatsWith(cfg config, args []string, out, errOut io.Writer, now time.Tim
 	}
 	opt.shift = strings.TrimSpace(opt.shift)
 	opt.html = strings.TrimSpace(opt.html)
+	cfg.branchPrefix = opt.branchPrefix
 
 	dir, err := statsDir(metrics)
 	if err != nil {
@@ -191,7 +197,7 @@ func runStatsWith(cfg config, args []string, out, errOut io.Writer, now time.Tim
 	}
 	// context.Background() rather than a param this function would have to
 	// grow: the two things here that reach outside the process, probeUsage
-	// and resolveInFlight, are best-effort and bounded by their own
+	// and resolveFromGitHub, are best-effort and bounded by their own
 	// timeouts, so nothing downstream needs external cancellation the way a
 	// long-running drain does.
 	ds, issues, summary, err := statsReport(context.Background(), cfg, opt, dir, now)
@@ -258,7 +264,7 @@ func statsReport(ctx context.Context, cfg config, opt statsOptions, dir string, 
 	// would fill it back in — counting one merge under both shifts.
 	var resolution prResolution
 	if opt.shift == "" {
-		resolution = resolveInFlight(ctx, cfg, issues)
+		resolution = resolveFromGitHub(ctx, cfg, issues)
 	}
 
 	// The plan-cost cross-check needs the same probe attribution -window
@@ -277,6 +283,7 @@ func statsReport(ctx context.Context, cfg config, opt statsOptions, dir string, 
 
 	summary := buildStatsSummary(ds, issues, opt, now, bounds, probe)
 	summary.issues.fromGitHub, summary.issues.githubNote = resolution.resolved, resolution.note()
+	summary.issues.afterPark = resolution.afterPark
 	return ds, issues, summary, nil
 }
 
@@ -351,11 +358,14 @@ type issueStats struct {
 	runs     []runRecord // timestamp order
 	terminal *issueRecord
 	// resolved marks a terminal synthesized from GitHub's answer rather
-	// than read from a record — see resolveInFlight.
+	// than read from a record — see resolveFromGitHub.
 	resolved bool
 	cost     float64
 	tokens   tokenCounts
 	wallMS   int64
+	// park is the needs_human record a resolved merge overturned, nil for
+	// any other issue. See written.
+	park *issueRecord
 }
 
 func (is *issueStats) questions() int {
@@ -373,6 +383,21 @@ func (is *issueStats) outcome() string {
 		return inFlight
 	}
 	return is.terminal.Outcome
+}
+
+// written is the terminal record a drain wrote for this issue, nil when none
+// did. Everything read off a record's own fields — park reason, PR size,
+// usage samples — reads this, so GitHub's answer changes an issue's outcome
+// and nothing else: an overturned park still counts as a park, and keeps
+// the samples its drain took.
+func (is *issueStats) written() *issueRecord {
+	switch {
+	case is.park != nil:
+		return is.park
+	case is.resolved:
+		return nil
+	}
+	return is.terminal
 }
 
 // rollUpIssues folds runs and terminal records into one entry per issue. An
@@ -564,7 +589,8 @@ type issuesSummary struct {
 	tokensSplitSum tokenCounts
 	tokensSplitN   int64
 	change         *changeSummary // nil when no terminal issue carries PR data
-	fromGitHub     int            // terminal outcomes resolveInFlight supplied
+	fromGitHub     int            // terminal outcomes resolveFromGitHub supplied
+	afterPark      int            // how many of those were merges that overturned a park
 	githubNote     string         // why some couldn't be; "" when every lookup answered
 }
 
@@ -623,14 +649,16 @@ func buildIssuesSummary(issues []*issueStats) issuesSummary {
 	return s
 }
 
-// buildParkReasons breaks the hand-backs down by why they happened. A record
-// written before the field existed counts as unrecorded (key ""), never as
-// unknown, which is the field's own value for a park path that could not say.
+// buildParkReasons breaks the hand-backs down by why they happened — every
+// park, including one GitHub saw merge since, which was still a hand-back. A
+// record written before the field existed counts as unrecorded (key ""),
+// never as unknown, which is the field's own value for a park path that
+// could not say.
 func buildParkReasons(done []*issueStats) map[string]int {
 	counts := map[string]int{}
 	for _, is := range done {
-		if is.terminal.Outcome == issueNeedsHuman {
-			counts[is.terminal.ParkReason]++
+		if rec := is.written(); rec != nil && rec.Outcome == issueNeedsHuman {
+			counts[rec.ParkReason]++
 		}
 	}
 	return counts
@@ -643,13 +671,14 @@ func buildParkReasons(done []*issueStats) map[string]int {
 func buildChangeSummary(done []*issueStats) *changeSummary {
 	var adds, dels, files, reviews []int
 	for _, is := range done {
-		if !is.terminal.enriched() {
+		rec := is.written()
+		if rec == nil || !rec.enriched() {
 			continue
 		}
-		adds = append(adds, is.terminal.Additions)
-		dels = append(dels, is.terminal.Deletions)
-		files = append(files, is.terminal.ChangedFiles)
-		reviews = append(reviews, is.terminal.Reviews)
+		adds = append(adds, rec.Additions)
+		dels = append(dels, rec.Deletions)
+		files = append(files, rec.ChangedFiles)
+		reviews = append(reviews, rec.Reviews)
 	}
 	if len(adds) == 0 {
 		return nil
@@ -803,16 +832,15 @@ func buildPlanCostSummary(issues []*issueStats, probe *usageSnapshot) planCostSu
 	for _, is := range issues {
 		// A terminal GitHub supplied was never a record, so it never had
 		// a chance to be sampled — not the usage gate's miss to count.
-		if is.resolved {
+		rec := is.written()
+		if rec == nil {
 			continue
 		}
-		if is.terminal == nil || !is.terminal.hasUsageSamples() {
-			if is.terminal != nil {
-				s.unsampled++
-			}
+		if !rec.hasUsageSamples() {
+			s.unsampled++
 			continue
 		}
-		delta := float64(is.terminal.WeekUsageAtTerminal - is.terminal.WeekUsageAtPickup)
+		delta := float64(rec.WeekUsageAtTerminal - rec.WeekUsageAtPickup)
 		if delta < 0 {
 			// A reset landed mid-issue: the terminal reading belongs to a
 			// fresh cycle, not a continuation of the pickup one, so
@@ -840,7 +868,7 @@ func buildPlanCostSummary(issues []*issueStats, probe *usageSnapshot) planCostSu
 // attribution figure to sit beside a line the report is not going to print.
 func issuesHaveUsageSamples(issues []*issueStats) bool {
 	for _, is := range issues {
-		if is.terminal != nil && is.terminal.hasUsageSamples() {
+		if rec := is.written(); rec != nil && rec.hasUsageSamples() {
 			return true
 		}
 	}
