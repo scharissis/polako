@@ -45,10 +45,12 @@ const statsSizeChunk = 50
 const statsSizeParallel = 4
 
 // prResolution is what the lookup came to: how many issues it settled, how
-// many of those had been parked, and the repositories it could not ask.
+// many of those had been parked, how many it settled but couldn't size, and
+// the repositories it could not ask.
 type prResolution struct {
 	resolved  int
 	afterPark int
+	unsized   int
 	unreached []string
 }
 
@@ -94,9 +96,9 @@ func settledSince(is *issueStats) time.Time {
 // Without that size, the change line would sample only the merges a drain
 // saw. A park it overturns moves to is.park rather than vanishing: parks are
 // a signal, and only the outcome was wrong. One `gh pr list` per repository
-// for the outcome, then one GraphQL query per statsSizeChunk PRs for the
-// size. An empty cfg.ghBin skips it: the test seam that keeps every other
-// stats test off the network.
+// for the outcome, and beside it one GraphQL query per statsSizeChunk PRs
+// for the size. An empty cfg.ghBin skips it: the test seam that keeps every
+// other stats test off the network.
 func resolveFromGitHub(ctx context.Context, cfg config, issues []*issueStats) prResolution {
 	var res prResolution
 	if cfg.ghBin == "" {
@@ -114,16 +116,30 @@ func resolveFromGitHub(ctx context.Context, cfg config, issues []*issueStats) pr
 	ctx, cancel := context.WithTimeout(ctx, statsResolveTimeout)
 	defer cancel()
 	// All at once, so one slow repo can't spend the others' share of the
-	// timeout and get them reported as unreachable.
+	// timeout and get them reported as unreachable. The sizes of the PRs the
+	// records name are asked beside the listing too, not after it: one slow
+	// run that waited lost a whole batch to the timeout (242 issues sized,
+	// against 292 on the three runs after it). That asks after some PRs
+	// still open, whose answers go unused.
 	repos := slices.Sorted(maps.Keys(byRepo))
+	early := map[string][]int{}
+	for repo, list := range byRepo {
+		for _, is := range list {
+			if pr := lastPR(is); pr != 0 && unsizedByDrain(is) {
+				early[repo] = append(early[repo], pr)
+			}
+		}
+	}
 	lists := make([]prListing, len(repos))
 	errs := make([]error, len(repos))
+	var sizes map[string]map[int]prSize
 	var wg sync.WaitGroup
 	for i, repo := range repos {
 		wg.Go(func() { lists[i], errs[i] = listPRStates(ctx, cfg, repo) })
 	}
+	wg.Go(func() { sizes = lookupSizes(ctx, cfg, early) })
 	wg.Wait()
-	unsized := map[string][]*issueStats{}
+	var needed []*issueStats
 	for i, repo := range repos {
 		if errs[i] != nil {
 			res.unreached = append(res.unreached, repo)
@@ -140,17 +156,53 @@ func resolveFromGitHub(ctx context.Context, cfg config, issues []*issueStats) pr
 			}
 			is.terminal, is.resolved = &rec, true
 			res.resolved++
-			if w := is.written(); w == nil || !w.enriched() {
-				unsized[repo] = append(unsized[repo], is)
+			if unsizedByDrain(is) {
+				needed = append(needed, is)
 			}
 		}
 	}
-	// After the listing, not beside it: the PR that settles an issue may be
-	// the newest on its branch, which only the listing names. Same budget,
-	// so stats waits no longer for it; a size that misses it costs only the
-	// size, never the outcome.
-	addSizes(ctx, cfg, unsized)
+	res.unsized = sizeSettled(ctx, cfg, needed, sizes)
 	return res
+}
+
+// unsizedByDrain reports whether an issue's PR size has to come from GitHub:
+// no record a drain wrote for it carries one. The same call answers before
+// resolution, when written is an unsettled issue's own park or nothing, and
+// after it.
+func unsizedByDrain(is *issueStats) bool {
+	w := is.written()
+	return w == nil || !w.enriched()
+}
+
+// sizeSettled puts GitHub's size on each settled issue's synthesized record,
+// asking now for any PR the early round didn't answer — one found only on
+// its branch, or one whose batch failed — in whatever time is left. A size
+// it still can't get costs only the size, never the outcome: it returns how
+// many, for the report's note.
+func sizeSettled(ctx context.Context, cfg config, needed []*issueStats, sizes map[string]map[int]prSize) int {
+	late := map[string][]int{}
+	for _, is := range needed {
+		if _, ok := sizes[is.key.repo][is.terminal.PR]; !ok {
+			late[is.key.repo] = append(late[is.key.repo], is.terminal.PR)
+		}
+	}
+	for repo, got := range lookupSizes(ctx, cfg, late) {
+		if sizes[repo] == nil {
+			sizes[repo] = map[int]prSize{}
+		}
+		maps.Copy(sizes[repo], got)
+	}
+	missed := 0
+	for _, is := range needed {
+		sz, ok := sizes[is.key.repo][is.terminal.PR]
+		if !ok {
+			missed++
+			continue
+		}
+		is.terminal.Additions, is.terminal.Deletions, is.terminal.ChangedFiles =
+			sz.Additions, sz.Deletions, sz.ChangedFiles
+	}
+	return missed
 }
 
 // verdict is GitHub's answer for one unsettled issue, if it has one. Two PRs
@@ -220,7 +272,7 @@ type prListing struct {
 // never enters this process. Size isn't here on purpose: adding additions,
 // deletions and changedFiles took a 1000-PR listing of polako's own repo
 // from 3s to 13–26s (median 21s), and GitHub answered one such listing with
-// a 502. addSizes asks for it instead, for the few PRs that need it.
+// a 502. lookupSizes asks for it instead, for the few PRs that need it.
 const prListFields = "number,state,mergedAt,closedAt,headRefName"
 
 // listPRStates is one repository's PRs.
@@ -254,17 +306,10 @@ type prSize struct {
 	ChangedFiles int `json:"changedFiles"`
 }
 
-// addSizes puts GitHub's size for each issue's settling PR on the record
-// resolveFromGitHub synthesized for it. Best-effort throughout: a query that
-// fails or runs out of time leaves its issues unenriched, so the change line
-// counts them out rather than as zeros, and stats names no repo over it.
-func addSizes(ctx context.Context, cfg config, byRepo map[string][]*issueStats) {
-	numbers := map[string][]int{}
-	for repo, issues := range byRepo {
-		for _, is := range issues {
-			numbers[repo] = append(numbers[repo], is.terminal.PR)
-		}
-	}
+// lookupSizes is GitHub's size for each PR named, by repository and number.
+// Best-effort throughout: a query that fails or runs out of time leaves its
+// PRs out, so the change line counts their issues out rather than as zeros.
+func lookupSizes(ctx context.Context, cfg config, numbers map[string][]int) map[string]map[int]prSize {
 	chunks := sizeChunks(numbers)
 	answers := make([]map[int]prSize, len(chunks))
 	slots := make(chan struct{}, statsSizeParallel)
@@ -284,14 +329,7 @@ func addSizes(ctx context.Context, cfg config, byRepo map[string][]*issueStats) 
 		}
 		maps.Copy(sizes[c.repo], answers[i])
 	}
-	for repo, issues := range byRepo {
-		for _, is := range issues {
-			if sz, ok := sizes[repo][is.terminal.PR]; ok {
-				is.terminal.Additions, is.terminal.Deletions, is.terminal.ChangedFiles =
-					sz.Additions, sz.Deletions, sz.ChangedFiles
-			}
-		}
-	}
+	return sizes
 }
 
 // sizeChunk is one size query's worth: a repository and up to statsSizeChunk
@@ -353,13 +391,26 @@ func lookupPRSizes(ctx context.Context, cfg config, c sizeChunk) map[int]prSize 
 	return sizes
 }
 
-// note is the one line the report prints when a lookup failed. It names the
-// repositories, never gh's own error text, which can carry hostnames and
-// token scopes.
+// note is the one line the report prints when a lookup failed: a repo
+// GitHub didn't answer for, or a size it didn't give, so a short change line
+// never passes for a whole one. It names repositories and counts, never
+// gh's own error text, which can carry hostnames and token scopes.
 func (res prResolution) note() string {
-	if len(res.unreached) == 0 {
+	var parts []string
+	if len(res.unreached) > 0 {
+		parts = append(parts, fmt.Sprintf("GitHub didn't answer for %s — their in-flight and parked issues stay as they are",
+			andList(res.unreached)))
+	}
+	if res.unsized > 0 {
+		them := "them"
+		if res.unsized == 1 {
+			them = "it"
+		}
+		parts = append(parts, fmt.Sprintf("GitHub gave no PR size for %s it settled, so change per issue leaves %s out",
+			plural(res.unsized, "issue"), them))
+	}
+	if len(parts) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("GitHub didn't answer for %s — their in-flight and parked issues stay as they are; rerun to retry",
-		andList(res.unreached))
+	return strings.Join(parts, "; ") + "; rerun to retry"
 }

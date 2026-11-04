@@ -224,10 +224,11 @@ func TestStatsResolvedPRsCountTowardTheChangeLine(t *testing.T) {
 		t.Errorf("change_per_issue = %v, want %v", doc.Issues.Change, want)
 	}
 
-	// Per report: one listing per repo, and one size query naming just the
-	// two PRs settled with no size — not the open #12, not #13, which its
-	// drain already sized. Nothing asks for PR text, and nothing is written
-	// back.
+	// Per report: one listing per repo, and beside each one size query
+	// naming the PRs its records name with no size — the open #12 too,
+	// asked before anyone knows it's open, but not #13, which its drain
+	// already sized. Both settled PRs answered, so no second round. Nothing
+	// asks for PR text, and nothing is written back.
 	calls, err := os.ReadFile(ghLog)
 	if err != nil {
 		t.Fatal(err)
@@ -246,8 +247,12 @@ func TestStatsResolvedPRsCountTowardTheChangeLine(t *testing.T) {
 			for _, m := range sizeAlias.FindAllStringSubmatch(call, -1) {
 				named = append(named, m[2])
 			}
-			if !slices.Equal(named, []string{"10", "11"}) {
-				t.Errorf("the size query named PRs %v, want [10 11]: %q", named, call)
+			want := []string{"10", "11", "12"}
+			if strings.Contains(call, "name=two") {
+				want = []string{"20"}
+			}
+			if !slices.Equal(named, want) {
+				t.Errorf("the size query named PRs %v, want %v: %q", named, want, call)
 			}
 			asks := sizeAlias.ReplaceAllString(call, "")
 			for _, field := range []string{"title", "body", "reviews", "comments"} {
@@ -257,8 +262,8 @@ func TestStatsResolvedPRsCountTowardTheChangeLine(t *testing.T) {
 			}
 		}
 	}
-	if lists != 4 || queries != 2 {
-		t.Errorf("%d pr list and %d api graphql calls, want 4 and 2:\n%s", lists, queries, calls)
+	if lists != 4 || queries != 4 {
+		t.Errorf("%d pr list and %d api graphql calls, want 4 of each:\n%s", lists, queries, calls)
 	}
 	for _, field := range []string{"title", "body", "reviews", "comments"} {
 		if slices.Contains(strings.Split(prListFields, ","), field) {
@@ -270,21 +275,105 @@ func TestStatsResolvedPRsCountTowardTheChangeLine(t *testing.T) {
 	}
 }
 
-// A size query that fails costs the sizes, never the outcomes: both issues
-// still settle, and the change line counts neither rather than as zeros.
+// oneRepoDir is resolveFixture's example/one records alone: one repo, so
+// one size query a round, and FailReads fails the round a test means.
+func oneRepoDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	var lines []string
+	for _, line := range strings.Split(strings.TrimPrefix(resolveFixture, "\n"), "\n") {
+		if !strings.Contains(line, `"repo":"example/two"`) {
+			lines = append(lines, line)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "example.jsonl"), []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// A size round that fails gets one more try, after the listing, in whatever
+// time is left. One that fails twice costs the sizes, never the outcomes:
+// both issues still settle, the change line counts neither rather than as
+// zeros, and the note says so rather than pass a short line off as whole.
 func TestStatsSizeFailureKeepsTheOutcome(t *testing.T) {
 	t.Parallel()
-	cfg := resolveCfgWith(t, func(st *ghState) { st.FailReads = map[string]int{"api graphql": 1} })
-	var out bytes.Buffer
-	if err := runStatsWith(cfg, []string{"-metrics", resolveDir(t)}, &out, io.Discard, fixtureNow, report{}); err != nil {
-		t.Fatalf("stats: %v", err)
+	for _, tc := range []struct {
+		fails      int
+		change     string
+		note, json string
+	}{
+		{fails: 1, change: "change per issue +70 -7 across 2 files (medians over 2 issues with PR data)"},
+		{fails: 2,
+			note: "note GitHub gave no PR size for 2 issues it settled, so change per issue leaves them out; rerun to retry",
+			json: "GitHub gave no PR size for 2 issues it settled, so change per issue leaves them out; rerun to retry"},
+	} {
+		t.Run(fmt.Sprintf("%d failed", tc.fails), func(t *testing.T) {
+			t.Parallel()
+			// Fresh per report: the fake's failure countdown is spent by it.
+			failing := func() config {
+				return resolveCfgWith(t, func(st *ghState) { st.FailReads = map[string]int{"api graphql": tc.fails} })
+			}
+			dir := oneRepoDir(t)
+			var out bytes.Buffer
+			if err := runStatsWith(failing(), []string{"-metrics", dir}, &out, io.Discard, fixtureNow, report{}); err != nil {
+				t.Fatalf("stats: %v", err)
+			}
+			got := out.String()
+			if !hasLine(got, "terminal 2 — merged 1 (50%), closed unmerged 1 (2 from GitHub)") {
+				t.Errorf("a failed size query lost an outcome:\n%s", got)
+			}
+			if tc.change != "" && !hasLine(got, tc.change) {
+				t.Errorf("missing %q — the second try should have sized both:\n%s", tc.change, got)
+			}
+			if tc.change == "" && strings.Contains(got, "\n  change per issue") {
+				t.Errorf("sizes GitHub never gave produced a change line:\n%s", got)
+			}
+			if tc.note != "" && !hasLine(got, tc.note) {
+				t.Errorf("missing %q in:\n%s", tc.note, got)
+			}
+			if tc.note == "" && strings.Contains(got, "note ") {
+				t.Errorf("a size round that recovered left a note:\n%s", got)
+			}
+			if tc.json == "" {
+				return
+			}
+			out.Reset()
+			if err := runStatsWith(failing(), []string{"-metrics", dir, "-json"}, &out, io.Discard, fixtureNow, report{}); err != nil {
+				t.Fatalf("stats -json: %v", err)
+			}
+			var doc struct {
+				Issues struct {
+					GitHubNote string `json:"github_note"`
+				} `json:"issues"`
+			}
+			if err := json.Unmarshal(out.Bytes(), &doc); err != nil || doc.Issues.GitHubNote != tc.json {
+				t.Errorf("github_note = %q (err %v), want %q", doc.Issues.GitHubNote, err, tc.json)
+			}
+		})
 	}
-	got := out.String()
-	if !hasLine(got, "terminal 2 — merged 1 (50%), closed unmerged 1 (2 from GitHub)") {
-		t.Errorf("a failed size query lost an outcome:\n%s", got)
-	}
-	if strings.Contains(got, "change per issue") || strings.Contains(got, "GitHub didn't answer for example/one") {
-		t.Errorf("a failed size query should leave no change line and name no repo:\n%s", got)
+}
+
+// The note names an unreachable repo, a size shortfall, or both, in one
+// line; with neither there is no line at all.
+func TestResolutionNoteSaysWhatGitHubDidntGive(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		res  prResolution
+		want string
+	}{
+		{prResolution{}, ""},
+		{prResolution{unreached: []string{"o/a"}},
+			"GitHub didn't answer for o/a — their in-flight and parked issues stay as they are; rerun to retry"},
+		{prResolution{unsized: 1},
+			"GitHub gave no PR size for 1 issue it settled, so change per issue leaves it out; rerun to retry"},
+		{prResolution{unreached: []string{"o/a"}, unsized: 3},
+			"GitHub didn't answer for o/a — their in-flight and parked issues stay as they are; " +
+				"GitHub gave no PR size for 3 issues it settled, so change per issue leaves them out; rerun to retry"},
+	} {
+		if got := tc.res.note(); got != tc.want {
+			t.Errorf("note() = %q, want %q", got, tc.want)
+		}
 	}
 }
 

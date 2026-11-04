@@ -201,11 +201,11 @@ did (below) without reviews; older records carry none.
 sees the merge, so one merged while no shift watched reads in flight, or
 parked if a human finished it. `stats` asks GitHub about each — the last PR
 its runs recorded, else the newest on its `-branch-prefix` branch — in one
-`gh pr list` per repo, then GraphQL for sizes: no text, 10s at most. A merge
-or close ends an issue in flight; a park ends only in a merge after it, as
+`gh pr list` per repo, plus GraphQL for sizes: no text, 10s at most. A merge
+or close ends one in flight; a park ends only in a merge after it, as
 `merged 9 (90%, 2 after a park)`. The `terminal` line's `(N from GitHub)`
-counts both; `-json` has `from_github` and `merged_after_park`. A repo GitHub
-won't answer for gets a `note` line (`github_note`). Nothing is written back.
+counts both; `-json` has `from_github` and `merged_after_park`. A repo or PR
+size GitHub won't give gets a `note` (`github_note`). Nothing is written back.
 
 **On resumed sessions:** a crashed run and the `--resume` that finishes its
 work are two records, and `stats` sums both — including `unfinished`, a
