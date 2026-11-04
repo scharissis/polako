@@ -55,11 +55,12 @@ in the PR body rather than doing it quietly.
   No run-data record leaves the machine except by explicit request:
   `-post-summary`, default off, comments those same numbers on the
   operator's own merged PR. `stats` does name each record's repository to
-  GitHub, on by default (issue #621): one `gh pr list` per repo, to learn
-  how in-flight and parked issues' PRs ended. It names those issues' PR
-  numbers too, in one GraphQL query per 50, to learn how big they were
-  when no drain recorded it. Those are GitHub's own identifiers going back
-  to GitHub on the operator's token — no cost, count or other field goes
+  GitHub, on by default (issue #621), and with it each in-flight or parked
+  issue's PR number and `issue-N` branch name, in one GraphQL query per 25
+  issues, to learn how those PRs ended and how big they were. Those are
+  GitHub's own identifiers going back to GitHub on the operator's token: a
+  branch name is `-branch-prefix` plus an issue number, the name every
+  drain already looks its PR up by. No cost, count or other field goes
   with them, and nothing they read is written back.
   The per-shift log (`ui.go`, under `~/.polako/logs`) is the second write-only
   artifact — the one that *does* hold transcript text, the full claude event
