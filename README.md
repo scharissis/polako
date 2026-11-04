@@ -304,21 +304,23 @@ next starts from what you just merged.
 
 ## What it costs
 
-Every run records what it spent, so these are measured rather than estimated —
-32 days of shifts (25 August to 26 September 2026) across five repositories,
-polako's own among them: 292 issues finished, $1,812 spent.
+Every run records what it used, so these are measured rather than estimated —
+32 days of shifts (25 August to 26 September 2026) across four repositories,
+most of it on polako itself: 296 issues, outcomes checked against GitHub.
 
 | | |
 | --- | --- |
-| Issues that merged | 268 of 292 (92%); 22 parked for a human |
-| Cost per issue | $6.18 mean, $4.84 median ($6.76 per merged PR, parks included) |
+| Issues that merged | 289 of 296 (98%); 22 were parked for a human first, and 20 of those still merged |
+| Cost per issue | $6.12 mean, $4.72 median ($6.27 per merged PR, counting what the unmerged ones cost) |
 | Runs per issue | 1.4 mean, 1 median |
-| Size of the change | +182 / −21 across 4 files, median |
+| Size of the change | +194 / −24 across 5 files, median |
 | Time from PR opened to merged | 6m median, because someone was usually watching |
 | Model | Claude Code's default: Sonnet 5 on two runs in three, Opus 5 or 5.5 on nearly all the rest |
 
-Dollars are the CLI's API-equivalent prices, and they undercount: 54 of 428
-runs ended before reporting a cost. Your numbers will differ, and the ones
+Dollars are Claude Code's own API-equivalent price for the tokens: $1,812 in
+all. These shifts ran on a subscription, so none of it was billed per token.
+The figure also undercounts: 54 of 428 runs ended before reporting a cost,
+most of them in the first week. Your numbers will differ, and the ones
 that move them most are the model, how big your issues are, and how often runs
 crash — a crashed run's resume pays to read the context again. Run
 `polako stats` for your own figures. `-max-issue-time` already defaults to a
