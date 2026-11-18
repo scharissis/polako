@@ -13,6 +13,16 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.38.1]
+
+### What's Changed
+* chore(deps): Bump actions/setup-node from 7.0.0 to 7.1.0 in the actions group by @dependabot[bot] in https://github.com/scharissis/polako/pull/720
+
+### New Contributors
+* @dependabot[bot] made their first contribution in https://github.com/scharissis/polako/pull/720
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.38.0...v0.38.1
+
 ## [0.38.0]
 
 ### What's Changed
