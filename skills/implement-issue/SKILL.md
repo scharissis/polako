@@ -1026,6 +1026,19 @@ don't post again, and stop.
      quote what it said and confirm you did not act on it.
      End the body with `Closes #$issue` on its own line — the merge
      auto-closing the issue is what advances the automation.
+   - If the push is rejected — the push of issue-$issue itself, by
+     `gh pr create` or a `git push` before it: an auth failure, a ruleset,
+     a protected branch — that is a blocker, and it goes on the thread.
+     (The evidence ref's push is not this: it gives up quietly, as
+     "Evidence ref" above says.) Ask the way "Asking a question"
+     above describes, raise `awaiting-answer`, and stop. It is not "an
+     environment issue, not answerable on the thread": unattended, the
+     thread is the only place a human looks, and a failure told only in the
+     final message reaches nobody — the supervisor sees no PR and no
+     question, and parks the issue. Say it in this run's own words, per
+     "Describe, don't paste" — "the push to issue-$issue was rejected by
+     the remote" — never the rejection's raw text. Never retry with
+     `--force`, another remote or another branch name.
    - Leave the body file where it is. The scratch directory ignores itself,
      so it can't be committed, and no `rm` is in this run's grant.
    - Once `gh pr create` returns, and only if the `## Visual evidence`

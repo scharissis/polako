@@ -1640,6 +1640,29 @@ func TestSkillDescribesDontPaste(t *testing.T) {
 	}
 }
 
+// issue #704: push-blocked went red 2 runs of 3 because the run called the
+// rejection "an environment issue, not answerable on the thread" and told
+// only its final message, which nobody reads unattended. The gh pr create
+// step now points back to "Asking a question" itself.
+func TestSkillAsksWhenThePushIsRejected(t *testing.T) {
+	t.Parallel()
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
+
+	flat := strings.Join(strings.Fields(skill), " ")
+	for _, marker := range []string{
+		"If the push is rejected",
+		"that is a blocker, and it goes on the thread",
+		"raise `awaiting-answer`, and stop",
+		"It is not \"an environment issue, not answerable on the thread\"",
+	} {
+		if !strings.Contains(flat, marker) {
+			t.Errorf("SKILL.md's gh pr create step no longer says %q — without it a run"+
+				" whose push is rejected reports only in its final message and the"+
+				" supervisor sees no question (issue #704)", marker)
+		}
+	}
+}
+
 // issue #272: the PR body spec named five sections but bounded only ## Summary
 // ("2–4 sentences"). The other four were unbounded, so the reviewer at the
 // merge gate read whatever the run felt like writing. Every section now
