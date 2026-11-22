@@ -74,10 +74,10 @@ func readBranchProtection(ctx context.Context, cfg config, branch string) (branc
 // setupBranchProtectionRow reads the default branch through
 // originDefaultBranch (setup.go), the same resolution setupOriginHeadRow
 // makes — no extra git subprocess just to name it.
-func setupBranchProtectionRow(ctx context.Context, cfg config, reposOK, gitOK bool) setupRow {
+func setupBranchProtectionRow(ctx context.Context, cfg config, repoGap string, gitOK bool) setupRow {
 	const name = "branch protection"
-	if !reposOK {
-		return setupRow{name: name, status: setupUnknown, detail: "the repository could not be read"}
+	if repoGap != "" {
+		return setupRow{name: name, status: setupUnknown, detail: repoGap}
 	}
 	if !gitOK {
 		return setupRow{name: name, status: setupUnknown, detail: "git isn't on PATH"}
@@ -131,10 +131,10 @@ func readDeleteBranchOnMerge(ctx context.Context, cfg config) (deleteBranchOnMer
 	return deleteBranchOnMergeResult{known: true, value: v.DeleteBranchOnMerge}, nil
 }
 
-func setupDeleteBranchOnMergeRow(ctx context.Context, cfg config, reposOK bool) setupRow {
+func setupDeleteBranchOnMergeRow(ctx context.Context, cfg config, repoGap string) setupRow {
 	const name = "delete branches on merge"
-	if !reposOK {
-		return setupRow{name: name, status: setupUnknown, detail: "the repository could not be read"}
+	if repoGap != "" {
+		return setupRow{name: name, status: setupUnknown, detail: repoGap}
 	}
 	result, err := retryRead(ctx, cfg, "repo view deleteBranchOnMerge", func() (deleteBranchOnMergeResult, error) {
 		return readDeleteBranchOnMerge(ctx, cfg)

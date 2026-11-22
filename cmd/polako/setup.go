@@ -203,12 +203,26 @@ func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []se
 		pathRow("git", "git", gitOK),
 	}
 
-	var reposOK bool
-	if !ghOK {
+	// A folder that isn't a repo yet is the usual state of a new project, and
+	// setup is the first command the README sends it to (issue #733). Asked
+	// before any gh call: with no -repo, gh would only retry a lookup that
+	// can't work and blame auth. The fix is said once, on the first row that
+	// needs a repo, and every row that needs one says why it can't tell.
+	gap := setupCheckoutGap(ctx, cfg, gitOK)
+	var repoGap string
+	fixShown := false
+	switch {
+	case !ghOK:
 		rows = append(rows,
 			setupRow{name: "gh repo view", status: setupUnknown, detail: "gh isn't on PATH"},
 			setupRow{name: "issues enabled", status: setupUnknown, detail: "gh isn't on PATH"})
-	} else {
+		repoGap = "the repository could not be read"
+	case gap != "" && cfg.repo == "":
+		rows = append(rows,
+			setupRow{name: "gh repo view", status: setupMissing, required: true, detail: gap},
+			setupRow{name: "issues enabled", status: setupUnknown, detail: setupNoRepoYet})
+		repoGap, fixShown = setupNoRepoYet, true
+	default:
 		result, err := retryRead(ctx, cfg, "gh repo view", func() (setupRepoViewResult, error) {
 			return readSetupRepoView(ctx, cfg)
 		})
@@ -218,28 +232,71 @@ func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []se
 					detail: fmt.Sprintf("could not read the repository (%v) — is gh authenticated, "+
 						"and does -dir/-repo name a real repository?", err)},
 				setupRow{name: "issues enabled", status: setupUnknown, detail: "the repository could not be read"})
+			repoGap = "the repository could not be read"
 		} else {
-			reposOK = true
 			cfg.repo, cfg.ghRepo = result.view.NameWithOwner, result.view.NameWithOwner
 			cfg.visibility = result.view.Visibility
 			rows = append(rows, setupRepoOKRow(result.view, cfg.label), setupIssuesEnabledRow(result))
 		}
 	}
+	noCheckout := gap != ""
 
-	rows = append(rows, setupOriginHeadRow(ctx, cfg, gitOK))
-	rows = append(rows, setupGitignoreRow(cfg))
-	rows = append(rows, setupClaudeMdRow(cfg))
-	rows = append(rows, setupVisionRow(cfg))
+	switch {
+	case noCheckout && !fixShown:
+		// -repo answered (or gh is missing), so the gh row above didn't carry
+		// the fix; origin/HEAD, the first row that needs the checkout, does.
+		rows = append(rows, setupRow{name: "origin/HEAD", status: setupMissing, required: true, detail: gap})
+	case noCheckout:
+		rows = append(rows, setupRow{name: "origin/HEAD", status: setupUnknown, detail: setupNoRepoYet})
+	default:
+		rows = append(rows, setupOriginHeadRow(ctx, cfg, gitOK))
+	}
+	if noCheckout {
+		// These rows' fix is -apply's PR, which needs a repo to push to. Left
+		// "missing", they would suggest it, and -apply would try it.
+		for _, name := range []string{".gitignore", "CLAUDE.md", visionMdPath} {
+			rows = append(rows, setupRow{name: name, status: setupUnknown, detail: setupNoRepoYet})
+		}
+	} else {
+		rows = append(rows, setupGitignoreRow(cfg), setupClaudeMdRow(cfg), setupVisionRow(cfg))
+	}
 	rows = append(rows, setupPluginRow(ctx, cfg, claudeOK))
-	rows = append(rows, setupSubIssueRow(ctx, cfg, reposOK))
+	rows = append(rows, setupSubIssueRow(ctx, cfg, repoGap))
 	rows = append(rows, setupBuildToolsRow(cfg))
 	rows = append(rows, setupTemplatesRow(cfg))
 	rows = append(rows, setupCIWorkflowRow(cfg))
-	rows = append(rows, setupBranchProtectionRow(ctx, cfg, reposOK, gitOK))
-	rows = append(rows, setupDeleteBranchOnMergeRow(ctx, cfg, reposOK))
+	if noCheckout {
+		rows = append(rows, setupRow{name: "branch protection", status: setupUnknown, detail: setupNoRepoYet})
+	} else {
+		rows = append(rows, setupBranchProtectionRow(ctx, cfg, repoGap, gitOK))
+	}
+	rows = append(rows, setupDeleteBranchOnMergeRow(ctx, cfg, repoGap))
 	defs := setupLabelDefs(cfg, policyLabels)
-	rows = append(rows, setupLabelRows(ctx, cfg, reposOK, defs)...)
+	rows = append(rows, setupLabelRows(ctx, cfg, repoGap, defs)...)
 	return cfg, rows, defs
+}
+
+// setupNoRepoYet is the detail on every row that needs a repo when -dir
+// isn't one yet — the fix itself sits on the first such row.
+const setupNoRepoYet = "no repo yet"
+
+// setupCheckoutGap says what -dir lacks before polako can use it, as the
+// fix a human runs: "" when it's a checkout with an origin remote, or when
+// git isn't on PATH (its own row already says so). `gh repo create` leaves
+// origin/HEAD unset, hence the set-head step on both.
+func setupCheckoutGap(ctx context.Context, cfg config, gitOK bool) string {
+	if !gitOK {
+		return ""
+	}
+	if _, err := git(ctx, cfg, "rev-parse", "--git-dir"); err != nil {
+		return fmt.Sprintf("-dir %s isn't a git repo yet — run `git init`, commit, then "+
+			"`gh repo create <name> --private --source . --push` and `git remote set-head origin -a`", cfg.dir)
+	}
+	if _, err := git(ctx, cfg, "remote", "get-url", "origin"); err != nil {
+		return fmt.Sprintf("-dir %s has no origin remote — run `gh repo create <name> --private --source . --push` "+
+			"or `git remote add origin <url>`, then `git remote set-head origin -a`", cfg.dir)
+	}
+	return ""
 }
 
 func onPath(bin string) bool {
@@ -388,11 +445,12 @@ func setupPluginRow(ctx context.Context, cfg config, claudeOK bool) setupRow {
 
 // setupSubIssueRow is advisory only: a gh that cannot file `--parent` still
 // runs `polako work` and `polako plan` fine, epics filed flat instead — see
-// ghCreatesSubIssues.
-func setupSubIssueRow(ctx context.Context, cfg config, reposOK bool) setupRow {
+// ghCreatesSubIssues. repoGap, like every repo-scoped row's, is "" once the
+// repository read fine, or else why it couldn't be — the row's detail.
+func setupSubIssueRow(ctx context.Context, cfg config, repoGap string) setupRow {
 	const name = "sub-issue support"
-	if !reposOK {
-		return setupRow{name: name, status: setupUnknown, detail: "the repository could not be read"}
+	if repoGap != "" {
+		return setupRow{name: name, status: setupUnknown, detail: repoGap}
 	}
 	if ghCreatesSubIssues(ctx, cfg) {
 		return setupRow{name: name, status: setupOK}
