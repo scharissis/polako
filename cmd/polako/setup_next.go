@@ -71,6 +71,26 @@ func setupPlanDoc(dir string) string {
 	return ""
 }
 
+// fillBacklogHint names the commands that fill an empty backlog, for `work`
+// and `status` (issue #736), dir-free like every other command those two
+// print. Unlike setup's last line it names a design doc only when GitHub
+// says it's a draft: an empty backlog is just when a finished design sits in
+// docs/designs/ not yet moved to done/, and planning it again files its
+// tickets twice. A vision is never done, so it needs no such check. A draft
+// goes first, the same doc status's needs-you line names: it's the newer,
+// narrower plan.
+func fillBacklogHint(dir string, plans planDocsSnapshot) string {
+	if drafts := draftDocs(plans); len(drafts) > 0 {
+		return "fill it with `polako plan -design " + drafts[0] + "`"
+	}
+	for _, rel := range []string{visionMdPath, rootVisionPath} {
+		if fileExistsIn(dir, filepath.FromSlash(rel)) {
+			return "fill it with `polako plan -design " + rel + "`"
+		}
+	}
+	return "fill it with `polako design -brief \"<idea>\"` or `polako health`"
+}
+
 // setupRerunLine is `polako setup` with the flags that pick what it checks.
 func setupRerunLine(opt setupOptions, cfg config) string {
 	cmd := "polako setup -dir " + cfg.dir

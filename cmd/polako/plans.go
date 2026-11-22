@@ -256,6 +256,46 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
+// planDocClauses is status's `needs you` clauses for design docs.
+func planDocClauses(plans planDocsSnapshot) []string {
+	var parts []string
+	// A done design moves to docs/designs/done/
+	// (docs/designs/done/plan-conventions.md). The container route (retire.go)
+	// files an issue for this automatically, but only when a container
+	// closes — a document whose issues were all plain, no epic among them,
+	// has nothing filing that issue on its own, so it sits done and unmoved
+	// until a person notices. This is that notice.
+	for _, d := range plans.docs {
+		if d.state == planDone && !strings.HasPrefix(d.path, planDocsDoneDir+"/") {
+			parts = append(parts, fmt.Sprintf(
+				"move %s to done/ (every issue closed — git mv it, fix inbound links)", d.path))
+		}
+	}
+	// A draft is a design merged into the checkout with nothing proposed from
+	// it yet (issue #736). Only a person starts that `plan` run.
+	for _, d := range draftDocs(plans) {
+		parts = append(parts, fmt.Sprintf("propose tickets from %s — polako plan -design %s", d, d))
+	}
+	return parts
+}
+
+// draftDocs is every design doc with nothing proposed from it yet, by path.
+// The designs README is the folder's index, never a plan. A truncated search
+// may have missed a doc's issues, and telling someone to plan it again on
+// that guess files its tickets twice, so it names none.
+func draftDocs(plans planDocsSnapshot) []string {
+	if plans.truncated {
+		return nil
+	}
+	var drafts []string
+	for _, d := range plans.docs {
+		if d.state == planDraft && d.path != designsReadmePath {
+			drafts = append(drafts, d.path)
+		}
+	}
+	return drafts
+}
+
 // localPlanDocs lists the *.md files directly under docs/designs in the given
 // checkout — not done/, which localDoneDocs reads, so a finished design is
 // never mistaken for a draft — logical forward-slash paths (docs/designs/foo.md) matching how a

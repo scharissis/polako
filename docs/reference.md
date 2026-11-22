@@ -403,10 +403,10 @@ container renders `#321 (closed)`, not the open-container wording. The
 it, by that issue; the rest collapse into `(N deleted plans, every issue
 closed)` — `-json` always keeps the full issue list plus a per-document
 `open` count. One capped `gh issue list` call for the section. A `done`
-document not yet under `done/` gets its own `needs you` clause: `move
+document not yet under `done/` gets a `needs you` clause: `move
 docs/designs/foo.md to done/ (every issue closed — git mv it, fix inbound
-links)` — the nudge a closing container gives on its own, for a document
-whose issues were never a container.
+links)`. A `draft` gets one naming `polako plan -design <doc>`. With no
+open issue at all, `next` and `work`'s last line say how to fill it.
 
 What it prints is what a shift starting right now would do next, the same
 thing a running shift is already doing. It reports **state, not liveness** —

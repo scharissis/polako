@@ -886,7 +886,18 @@ func reportNothingLeftToWork(ctx context.Context, cfg config, parked []int) {
 	// flag this drain raised and can no longer see was closed, parked or
 	// cleared by hand while it worked elsewhere. Naming those in the summary
 	// would send an operator to a thread with nothing left to do on it.
-	cfg.narrate(sevSuccess, "no open issues — backlog cleared")
+	//
+	// This branch also covers a backlog where every open issue is held
+	// (proposed, a design request, outside the gate), so the fill hint waits
+	// on one more listing that finds nothing open at all. A listing that
+	// fails just leaves the hint off; a plans read that fails only drops the
+	// draft docs from it.
+	line := "no open issues — backlog cleared"
+	if open, err := hasOpenIssues(ctx, cfg); err == nil && !open {
+		plans, _ := readPlanDocs(ctx, cfg)
+		line += "; " + fillBacklogHint(cfg.dir, plans)
+	}
+	cfg.narrate(sevSuccess, "%s", line)
 	notify(ctx, cfg, notification{event: notifyCleared, reason: "no open issues left to work"})
 }
 
