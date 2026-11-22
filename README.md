@@ -194,8 +194,8 @@ needs you: reply on #9; review and merge PR #61; decide what to do about #5 (dro
 
 On a repository with design docs under `docs/designs/`, a `design docs` table
 sits above the `needs you:` line: one row per doc, and how far along its
-issues are. A shift ends the same way — merged, parked and why, dollars spent — see
-[docs/behaviour.md](docs/behaviour.md) for a worked example.
+issues are. A shift ends the same way — merged, parked and why, dollars
+spent — see [docs/behaviour.md](docs/behaviour.md) for a worked example.
 
 See what the runs cost, from the records every run leaves on your machine:
 
