@@ -8,8 +8,8 @@ package main
 // it was when each was written.
 //
 // Only totals are pinned: "<N> verbs" and "the other <N> verbs". Partial
-// counts like "Four start Claude runs" need a run/no-run split the usage text
-// doesn't carry, so they stay prose.
+// counts like CLAUDE.md's "other six verbs start no runs" need a run/no-run
+// split this test doesn't parse, so they stay prose.
 
 import (
 	"os"
