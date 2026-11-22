@@ -21,9 +21,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
 type setupOptions struct {
@@ -288,7 +290,16 @@ func setupCheckoutGap(ctx context.Context, cfg config, gitOK bool) string {
 	if !gitOK {
 		return ""
 	}
+	// Only git's own "not a git repository" earns the git-init advice. A typo'd
+	// -dir, or a real repo git refuses (safe.directory, permissions), would be
+	// told to make a second repo.
+	if info, err := os.Stat(cfg.dir); err != nil || !info.IsDir() {
+		return fmt.Sprintf("-dir %s doesn't exist or isn't a folder — check the path", cfg.dir)
+	}
 	if _, err := git(ctx, cfg, "rev-parse", "--git-dir"); err != nil {
+		if !strings.Contains(err.Error(), "not a git repository") {
+			return fmt.Sprintf("git can't read -dir %s (%v) — fix that, then rerun", cfg.dir, err)
+		}
 		return fmt.Sprintf("-dir %s isn't a git repo yet — run `git init`, commit, then "+
 			"`gh repo create <name> --private --source . --push` and `git remote set-head origin -a`", cfg.dir)
 	}

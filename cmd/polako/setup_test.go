@@ -90,6 +90,20 @@ func TestReadSetupOnAFolderThatIsNotARepo(t *testing.T) {
 	}
 }
 
+// A typo'd -dir isn't a folder to `git init` — it's a path to fix.
+func TestReadSetupOnAMissingDir(t *testing.T) {
+	t.Parallel()
+	cfg := setupCfg(t, &ghState{}, filepath.Join(t.TempDir(), "my-projcet"))
+
+	_, rows, _ := readSetup(context.Background(), cfg, false)
+
+	first := findSetupRow(t, rows, "gh repo view")
+	if first.status != setupMissing || !strings.Contains(first.detail, "check the path") ||
+		strings.Contains(first.detail, "git init") {
+		t.Errorf("gh repo view row = %+v, want it to say check the path, not git init", first)
+	}
+}
+
 // A checkout with no origin remote gets its own fix: make one, or point at
 // one, then set origin/HEAD.
 func TestReadSetupOnACheckoutWithNoRemote(t *testing.T) {
