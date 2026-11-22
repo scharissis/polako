@@ -653,12 +653,13 @@ don't post again, and stop.
       worktree root or `/tmp`. The usual one is a dump of a diff too big to
       read from Bash output: the session refuses `/tmp`, the review falls
       back to an improvised name in the worktree root, and that file strands
-      the worktree after the merge. Tell it too to run git as `git -C
-      <worktree> …`, never `cd <worktree> && git …`: the review's agent
-      never sees "No prompts, ever" above, and that `cd` is refused under
-      this run's grant like any other. Tell it too to launch its finder and
-      verifier subagents in the foreground — `run_in_background: false`, all
-      in one message — so every report comes back inside that same call.
+      the worktree after the merge. Tell it too to look at files with Read,
+      Glob and Grep and run git as `git -C <worktree> …` — no `cd`, no
+      shell variable like `W=<worktree>`, no `ls`, `cat` or `find`. The
+      review's agents never see "No prompts, ever" above, and this run's
+      grant refuses each of those for them too. Tell it too to launch its
+      finder and verifier subagents in the foreground —
+      `run_in_background: false`, all in one message — so every report comes back inside that same call.
       Backgrounded, the reports never reach the review agent on their own,
       and it burns the run's budget polling for them. Foreground does not
       remove the wait below for the review's own separate verification
