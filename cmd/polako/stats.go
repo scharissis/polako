@@ -139,7 +139,7 @@ func runStatsWith(cfg config, args []string, out, errOut io.Writer, now time.Tim
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako stats [flags]\n\n"+
 			"Reports on the run data recorded by previous shifts. Reads only;\n"+
-			"nothing here changes what a shift does.\n\n"+envUsage+"\nFlags:\n")
+			"nothing here changes what a shift does.\n\n"+envUsage("REPO=owner/name")+"\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	// The same environment defaults the drain honours, which is what lets one

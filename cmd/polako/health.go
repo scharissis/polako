@@ -83,7 +83,7 @@ func runHealth(ctx context.Context, args []string, out io.Writer) error {
 			"`proposed` label a human lifts to queue the work. Every issue the run creates\n"+
 			"is normalised to carry exactly that label before this exits, and the run is\n"+
 			"capped at -max-issues.\n\n"+
-			"`polako health -dry-run` prints the invocation a run would make and touches nothing.\n\n"+envUsage+"\nFlags:\n")
+			"`polako health -dry-run` prints the invocation a run would make and touches nothing.\n\n"+envUsage("MAX_ISSUES=5")+"\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	if err := applyEnvDefaults(fs); err != nil {

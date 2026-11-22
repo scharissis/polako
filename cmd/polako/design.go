@@ -74,7 +74,7 @@ func designFlagSet(out io.Writer, cfg *config, opt *designOptions, local *localF
 			"issue N unattended and wait for its PR to merge — or park it for a human.\n"+
 			"-brief files that issue first, labelled design, then works it the same way.\n"+
 			"A question on the thread exits 0; reply there and rerun. Nothing here merges.\n\n"+
-			envUsage+"\nFlags:\n")
+			envUsage("POST_SUMMARY=1")+"\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	return fs

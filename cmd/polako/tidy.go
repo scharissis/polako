@@ -53,7 +53,7 @@ func runTidy(ctx context.Context, args []string, out io.Writer, rpt report) erro
 			"Reclaims the worktrees and local branches of issues that are finished:\n"+
 			"closed, or merged with the PR gone. Proves each one safe before touching it,\n"+
 			"and reports what it skipped as loudly as what it reclaimed.\n\n"+
-			"-dry-run by default — the one verb here whose actions cannot be undone.\n\n"+envUsage+"\nFlags:\n")
+			"-dry-run by default — the one verb here whose actions cannot be undone.\n\n"+envUsage("REPO=owner/name")+"\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	if err := applyEnvDefaults(fs); err != nil {

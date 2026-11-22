@@ -357,40 +357,9 @@ func verbUsage(w io.Writer) {
 
 func parseFlags() config {
 	var cfg config
-	var skip string
+	var w workFlags
 	var local localFlags
-	var showVersion bool
-	fs := flag.CommandLine
-	fs.BoolVar(&showVersion, "version", false, "print the version of this binary and exit")
-	registerIssueFlags(fs, &cfg, defaultSkill, defaultTools, &local)
-	fs.StringVar(&cfg.label, "label", "", "only process issues carrying this label (empty = all)")
-	fs.BoolVar(&cfg.ungated, "ungated", false,
-		"work a public repository without a -label gate (anyone who can open an issue can feed the queue)")
-	registerPolicyFlags(fs, &cfg)
-	fs.Float64Var(&cfg.maxSessionCost, "max-session-cost", 0,
-		"end the shift between issues once its runs have cost this many dollars (0 disables)")
-	fs.IntVar(&cfg.maxSessionUsage, "max-session-usage", 0,
-		"pause the shift between issues while the plan's current-session usage is at or over this percent, waiting the pool's own reset out then carrying on (0 disables)")
-	fs.IntVar(&cfg.maxWeekUsage, "max-week-usage", 0,
-		"pause the shift between issues while the plan's current-week usage is at or over this percent, waited out the same way — a weekly reset can be days off (0 disables)")
-	fs.StringVar(&skip, "skip", "", "comma-separated issue numbers to skip (head-of-line escape hatch)")
-	fs.BoolVar(&cfg.once, "once", false,
-		"process a single issue to a merge, a park or a question, then exit")
-	fs.BoolVar(&cfg.strictOrder, "strict-order", false,
-		"work issues in strict ascending order: wait on one that asked a question instead of moving past it")
-	fs.BoolVar(&cfg.dryRun, "dry-run", false,
-		"resolve the next issue, print the claude invocation it would get, and exit without running or writing anything")
-	fs.BoolVar(&cfg.visualEvidence, "visual-evidence", true,
-		"let the skill, and a review remediation asked for them, publish before/after screenshots to the polako-evidence ref (false appends no-evidence to the skill invocation and drops the review prompt's screenshot steps)")
-	flag.Usage = func() {
-		fmt.Fprint(flag.CommandLine.Output(),
-			"Usage: polako work [flags]\n\n"+
-				"Work the backlog to zero: run the skill on the lowest open issue, wait\n"+
-				"for its PR to merge — or park the issue for a human — then advance.\n"+
-				"Unattended; nothing here merges. `polako -h` lists the other verbs.\n\n"+
-				envUsage+"\nFlags:\n")
-		flag.PrintDefaults()
-	}
+	registerWorkFlags(flag.CommandLine, &cfg, &w, &local)
 	// Before Parse, so an argument on the command line always wins over a
 	// preference set in the environment.
 	if err := applyEnvDefaults(flag.CommandLine); err != nil {
@@ -408,7 +377,7 @@ func parseFlags() config {
 	// Answered before anything else a flag implies, so it stays usable on a
 	// machine where -dir points nowhere: this is the flag an operator reaches
 	// for when the startup warning says the two halves disagree.
-	if showVersion {
+	if w.version {
 		fmt.Println(describeVersion())
 		os.Exit(0)
 	}
@@ -417,8 +386,51 @@ func parseFlags() config {
 		sinks.fatal("%v", err)
 	}
 	cfg.verb = "work"
-	cfg.skip = parseSkip(skip)
+	cfg.skip = parseSkip(w.skip)
 	return cfg
+}
+
+// workFlags holds the two work flags no config field takes as typed. Fields
+// for the same reason localFlags has them: declaredFlags scans for `&x.y`.
+type workFlags struct {
+	skip    string
+	version bool
+}
+
+// registerWorkFlags registers work's flags and help on fs. main passes
+// flag.CommandLine; help_test.go passes a fresh set, so it can run work's -h
+// without touching the process-wide one.
+func registerWorkFlags(fs *flag.FlagSet, cfg *config, w *workFlags, local *localFlags) {
+	fs.BoolVar(&w.version, "version", false, "print the version of this binary and exit")
+	registerIssueFlags(fs, cfg, defaultSkill, defaultTools, local)
+	fs.StringVar(&cfg.label, "label", "", "only process issues carrying this label (empty = all)")
+	fs.BoolVar(&cfg.ungated, "ungated", false,
+		"work a public repository without a -label gate (anyone who can open an issue can feed the queue)")
+	registerPolicyFlags(fs, cfg)
+	fs.Float64Var(&cfg.maxSessionCost, "max-session-cost", 0,
+		"end the shift between issues once its runs have cost this many dollars (0 disables)")
+	fs.IntVar(&cfg.maxSessionUsage, "max-session-usage", 0,
+		"pause the shift between issues while the plan's current-session usage is at or over this percent, waiting the pool's own reset out then carrying on (0 disables)")
+	fs.IntVar(&cfg.maxWeekUsage, "max-week-usage", 0,
+		"pause the shift between issues while the plan's current-week usage is at or over this percent, waited out the same way — a weekly reset can be days off (0 disables)")
+	fs.StringVar(&w.skip, "skip", "", "comma-separated issue numbers to skip (head-of-line escape hatch)")
+	fs.BoolVar(&cfg.once, "once", false,
+		"process a single issue to a merge, a park or a question, then exit")
+	fs.BoolVar(&cfg.strictOrder, "strict-order", false,
+		"work issues in strict ascending order: wait on one that asked a question instead of moving past it")
+	fs.BoolVar(&cfg.dryRun, "dry-run", false,
+		"resolve the next issue, print the claude invocation it would get, and exit without running or writing anything")
+	fs.BoolVar(&cfg.visualEvidence, "visual-evidence", true,
+		"let the skill, and a review remediation asked for them, publish before/after screenshots to the polako-evidence ref (false appends no-evidence to the skill invocation and drops the review prompt's screenshot steps)")
+	fs.Usage = func() {
+		fmt.Fprint(fs.Output(),
+			"Usage: polako work [flags]\n\n"+
+				"Work the backlog to zero: run the skill on the lowest open issue, wait\n"+
+				"for its PR to merge — or park the issue for a human — then advance.\n"+
+				"Unattended; nothing here merges. `polako -h` lists the other verbs.\n\n"+
+				envUsage("POST_SUMMARY=1")+"\nFlags:\n")
+		fs.PrintDefaults()
+	}
 }
 
 // localFlags holds -metrics and -log as typed, until pinConfig turns them
@@ -507,7 +519,13 @@ func pinConfig(cfg *config, local localFlags) error {
 // every verb that runs issues takes. The size and remediation policy flags
 // in registerPolicyFlags are work's alone.
 func registerModelFlags(fs *flag.FlagSet, cfg *config, modelDefault string) {
-	fs.StringVar(&cfg.model, "model", modelDefault, "claude --model for every run (empty = whatever the CLI defaults to)")
+	// A non-empty default is printed by the flag package itself, so the
+	// "empty =" clause is only true, and only said, when there is none.
+	modelHelp := "claude --model for every run"
+	if modelDefault == "" {
+		modelHelp += " (empty = whatever the CLI defaults to)"
+	}
+	fs.StringVar(&cfg.model, "model", modelDefault, modelHelp)
 	fs.StringVar(&cfg.effort, "effort", "",
 		"claude --effort for every run — one of "+strings.Join(effortLevels, ", ")+" (empty = whatever the CLI defaults to)")
 }
@@ -554,9 +572,14 @@ func validatePolicyFlags(cfg *config) error {
 const envPrefix = "POLAKO_"
 
 // envUsage is the one line of help that makes the mechanism discoverable. A
-// default nobody knows how to set is a default nobody sets.
-const envUsage = "Any flag below can take its default from the environment:\n" +
-	"POLAKO_<FLAG>, e.g. POLAKO_POST_SUMMARY=1. Arguments win.\n"
+// default nobody knows how to set is a default nobody sets. example is
+// FLAG=value for a flag the calling verb actually has — help_test.go holds
+// each verb to that, since an example naming another verb's flag teaches a
+// variable that does nothing there.
+func envUsage(example string) string {
+	return "Any flag below can take its default from the environment:\n" +
+		"POLAKO_<FLAG>, e.g. " + envPrefix + example + ". Arguments win.\n"
+}
 
 // envExempt are the flags the environment may not set. These are actions
 // rather than preferences, and each one left in a profile turns every later

@@ -105,7 +105,7 @@ func runPlan(ctx context.Context, args []string, out io.Writer) error {
 			"exactly that label before this exits, and the run is capped at -max-issues.\n\n"+
 			"Already have a doc (a vision doc counts)? Run plan. Only an idea? Run\n"+
 			"`polako design` first.\n\n"+
-			"`polako plan -dry-run` prints the invocation a run would make and touches nothing.\n\n"+envUsage+"\nFlags:\n")
+			"`polako plan -dry-run` prints the invocation a run would make and touches nothing.\n\n"+envUsage("MAX_ISSUES=5")+"\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	if err := applyEnvDefaults(fs); err != nil {
