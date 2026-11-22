@@ -129,7 +129,9 @@ that doesn't exist is told to check the path.
   required, the same as `.gitignore`.
 - `docs/VISION.md` exists — advice only, since `plan-backlog` is opt-in. A
   `VISION.md` at the root counts too: the row says `plan` can read it there,
-  and `-apply` doesn't offer to scaffold a second one.
+  and `-apply` doesn't offer to scaffold a second one. With `docs/VISION.md`
+  there and `docs/designs/README.md` not, the row is `ok` and names the
+  README as optional; `-apply` still offers to scaffold it.
 - A build tool the default `-tools` allowlist doesn't cover: `justfile`,
   `BUILD.bazel`/`WORKSPACE`, `Taskfile.yml`, `mise.toml`, `deno.json`,
   `bun.lockb`, `composer.json`, `Gemfile`, `mix.exs`, `build.zig`. Not
@@ -155,7 +157,8 @@ that doesn't exist is told to check the path.
   the repository owner's own settings, not polako's to touch: a CI workflow
   exists (`.github/workflows/*.yml`); the default branch has a protection
   rule (`gh api .../branches/<default>/protection`, "couldn't tell" without
-  admin access to check it); head branches delete on merge
+  admin access to check it, and `missing` with "not available on this plan"
+  for a private repo on GitHub's free plan, whatever the token); head branches delete on merge
   (`deleteBranchOnMerge`, "couldn't tell" on a `gh` too old to report it).
 
 ## Flags

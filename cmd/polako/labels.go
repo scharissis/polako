@@ -201,6 +201,16 @@ func isForbiddenError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "HTTP 403")
 }
 
+// isPlanGatedError reports whether a 403 is GitHub refusing a feature the
+// repository's plan lacks ("Upgrade to GitHub Pro or make this repository
+// public to enable this feature."), not the token lacking a permission.
+// Matched on GitHub's whole sentence, case-insensitively, so a permission
+// 403 that merely mentions going public isn't misread as the plan.
+func isPlanGatedError(err error) bool {
+	return err != nil &&
+		strings.Contains(strings.ToLower(err.Error()), "upgrade to github pro or make this repository public")
+}
+
 // isAlreadyExistsError reports whether ensureLabel's own create failed
 // because the label was already there — gh's own wording for it, matched
 // case-insensitively since exact casing isn't documented. Not a write
