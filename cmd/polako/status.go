@@ -364,6 +364,10 @@ type statusSnapshot struct {
 	// (statuslastshift.go). Set by runStatus after readStatus returns, so
 	// nothing above can depend on it.
 	runData statusRunData
+	// fillHint names the commands that fill the backlog (fillBacklogHint),
+	// set only when no issue is open at all — a backlog with every issue
+	// held already names its hold instead.
+	fillHint string
 }
 
 // statusPR is one open PR on a branch the skill named, and what GitHub says
@@ -392,6 +396,9 @@ func readStatus(ctx context.Context, cfg config, now time.Time) (statusSnapshot,
 	}
 	snap.queues, snap.gate = queues, gate
 	snap.idle = idleSpans(queues, now)
+	if len(queues.open()) == 0 && !gate.open() {
+		snap.fillHint = fillBacklogHint(cfg.dir)
+	}
 	// The drain's own rule, in dryRun's words: the lowest ready issue, and with
 	// none, the lowest issue waiting on an answer. -strict-order is the one
 	// thing that changes it — openIssues folds the two queues into one there, so
@@ -650,7 +657,10 @@ func statusScope(cfg config, source string) string {
 func queuePairs(snap statusSnapshot) [][2]string {
 	q := snap.queues
 	if len(q.open()) == 0 && !snap.gate.open() {
-		return [][2]string{{"queue", "nothing open — a shift starting now would find the backlog cleared"}}
+		return [][2]string{
+			{"queue", "nothing open — a shift starting now would find the backlog cleared"},
+			{"next", nextLine(snap)},
+		}
 	}
 	pairs := [][2]string{{"ready", queueLine(q) + snap.runData.readySuffix(q.ready, snap.prs)}}
 	if len(q.heldBack) > 0 {
@@ -748,6 +758,9 @@ func nextLine(snap statusSnapshot) string {
 			held = append(held, "outside the gate")
 		}
 		if len(held) == 0 {
+			if snap.fillHint != "" {
+				return "nothing — no open issue at all; " + snap.fillHint
+			}
 			return "nothing — no open issue at all"
 		}
 		return "nothing — every open issue is " + strings.Join(held, " or ")
@@ -970,19 +983,7 @@ func needsYouParts(snap statusSnapshot) []string {
 		parts = append(parts, fmt.Sprintf("close %s (every sub-issue closed; held open by %s or %s)",
 			issueRefs(heldEpics), needsHumanLabel, proposedLabel))
 	}
-	// A done design moves to docs/designs/done/
-	// (docs/designs/done/plan-conventions.md). The container route (retire.go)
-	// files an issue for this automatically, but only when a container
-	// closes — a document whose issues were all plain, no epic among them,
-	// has nothing filing that issue on its own, so it sits done and unmoved
-	// until a person notices. This is that notice.
-	for _, d := range snap.plans.docs {
-		if d.state == planDone && !strings.HasPrefix(d.path, planDocsDoneDir+"/") {
-			parts = append(parts, fmt.Sprintf(
-				"move %s to done/ (every issue closed — git mv it, fix inbound links)", d.path))
-		}
-	}
-	return parts
+	return append(parts, planDocClauses(snap.plans)...)
 }
 
 // JSON rendering (statusDoc and its second-renderer derivation) lives in

@@ -71,6 +71,16 @@ func setupPlanDoc(dir string) string {
 	return ""
 }
 
+// fillBacklogHint names the commands that fill an empty backlog, for `work`
+// and `status` (issue #736) — the same doc search setup's last line uses, but
+// dir-free, like every other command those two print.
+func fillBacklogHint(dir string) string {
+	if doc := setupPlanDoc(dir); doc != "" {
+		return "fill it with `polako plan -design " + doc + "`"
+	}
+	return "fill it with `polako design -brief \"<idea>\"` or `polako health`"
+}
+
 // setupRerunLine is `polako setup` with the flags that pick what it checks.
 func setupRerunLine(opt setupOptions, cfg config) string {
 	cmd := "polako setup -dir " + cfg.dir

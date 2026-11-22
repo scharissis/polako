@@ -256,6 +256,32 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
+// planDocClauses is status's `needs you` clauses for design docs.
+func planDocClauses(plans planDocsSnapshot) []string {
+	var parts []string
+	// A done design moves to docs/designs/done/
+	// (docs/designs/done/plan-conventions.md). The container route (retire.go)
+	// files an issue for this automatically, but only when a container
+	// closes — a document whose issues were all plain, no epic among them,
+	// has nothing filing that issue on its own, so it sits done and unmoved
+	// until a person notices. This is that notice.
+	for _, d := range plans.docs {
+		if d.state == planDone && !strings.HasPrefix(d.path, planDocsDoneDir+"/") {
+			parts = append(parts, fmt.Sprintf(
+				"move %s to done/ (every issue closed — git mv it, fix inbound links)", d.path))
+		}
+	}
+	// A draft is a design merged into the checkout with nothing proposed from
+	// it yet (issue #736). Only a person starts that `plan` run. The designs
+	// README is the folder's index, never a plan.
+	for _, d := range plans.docs {
+		if d.state == planDraft && d.path != designsReadmePath {
+			parts = append(parts, fmt.Sprintf("propose tickets from %s — polako plan -design %s", d.path, d.path))
+		}
+	}
+	return parts
+}
+
 // localPlanDocs lists the *.md files directly under docs/designs in the given
 // checkout — not done/, which localDoneDocs reads, so a finished design is
 // never mistaken for a draft — logical forward-slash paths (docs/designs/foo.md) matching how a

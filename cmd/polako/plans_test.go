@@ -221,8 +221,10 @@ func TestPlanDocsShowsEveryDocUnderDoneAsDone(t *testing.T) {
 	if len(got) != 4 {
 		t.Errorf("docs = %+v, want four rows", snap.docs)
 	}
-	if n := needsYou(statusSnapshot{plans: snap}); n != "" {
-		t.Errorf("needsYou = %q, want nothing — a document under done/ has already moved", n)
+	// active.md is a draft, so it gets its plan clause — but nothing is told
+	// to move.
+	if n := needsYou(statusSnapshot{plans: snap}); strings.Contains(n, "move ") {
+		t.Errorf("needsYou = %q, want no move clause — a document under done/ has already moved", n)
 	}
 }
 

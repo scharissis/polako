@@ -406,7 +406,7 @@ closed)` — `-json` always keeps the full issue list plus a per-document
 document not yet under `done/` gets its own `needs you` clause: `move
 docs/designs/foo.md to done/ (every issue closed — git mv it, fix inbound
 links)` — the nudge a closing container gives on its own, for a document
-whose issues were never a container.
+whose issues were never a container; a `draft` gets `polako plan -design <doc>`. No open issue at all: `next` and `work`'s last line name `plan -design <doc>`, else `design -brief` or `health`.
 
 What it prints is what a shift starting right now would do next, the same
 thing a running shift is already doing. It reports **state, not liveness** —
