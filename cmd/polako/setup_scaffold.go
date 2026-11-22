@@ -36,6 +36,12 @@ func setupVisionRow(cfg config) setupRow {
 	if !scaffoldNeedsWrite(cfg.dir) {
 		return setupRow{name: visionMdPath, status: setupOK}
 	}
+	// A root VISION.md is the doc this row exists to find, just kept
+	// elsewhere. `ok` here also keeps -apply from offering a second one.
+	if !fileExistsIn(cfg.dir, filepath.FromSlash(visionMdPath)) && fileExistsIn(cfg.dir, rootVisionPath) {
+		return setupRow{name: visionMdPath, status: setupOK,
+			detail: "found VISION.md at the root — `polako plan -design VISION.md` reads it there"}
+	}
 	var missing []string
 	for _, rel := range []string{visionMdPath, designsReadmePath} {
 		if !fileExistsIn(cfg.dir, filepath.FromSlash(rel)) {

@@ -1,8 +1,8 @@
 package main
 
 // `polako setup` is a read-only readiness report: what a repository has for
-// polako and what it is missing, one row per check, ending with the
-// `polako work` line to run once it looks ready. `-apply` is the one thing
+// polako and what it is missing, one row per check, ending with the one
+// command to run next (setup_next.go). `-apply` is the one thing
 // that writes: it creates the labels the report found missing (issue #415),
 // asking `[Y/n]` per step on a terminal (or `-yes`, for a script), and
 // proposes the repo files it found missing through one PR (issue #416,
@@ -59,8 +59,9 @@ func runSetup(ctx context.Context, args []string, in io.Reader, isTTY bool, out 
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako setup [flags]\n\n"+
 			"Prints a read-only readiness report: what this repository has for polako\n"+
-			"and what it's missing, ending with the `polako work` line to run once it's\n"+
-			"ready. -apply is the one thing that writes — see docs/setup.md.\n\n"+envUsage+"\nFlags:\n")
+			"and what it's missing, ending with the command to run next: the fix, then\n"+
+			"`polako work`, or `polako plan` on a repo with no issues yet.\n"+
+			"-apply is the one thing that writes — see docs/setup.md.\n\n"+envUsage+"\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	if err := applyEnvDefaults(fs); err != nil {
@@ -91,7 +92,8 @@ func runSetup(ctx context.Context, args []string, in io.Reader, isTTY bool, out 
 		return err
 	}
 	cfg, rows, defs := readSetup(ctx, cfg, opt.policyLabels)
-	renderSetup(out, rpt, cfg, rows)
+	next := setupNextStep(ctx, cfg, rows, setupRerunLine(opt, cfg))
+	renderSetup(out, rpt, cfg, rows, next)
 	if opt.apply {
 		// One prompt for both write passes below — see setupPrompt's own
 		// doc comment for why a second Scanner over the same in would
@@ -100,12 +102,14 @@ func runSetup(ctx context.Context, args []string, in io.Reader, isTTY bool, out 
 		var gateLabel string
 		rows, gateLabel = applySetup(ctx, prompt, cfg, rows, defs)
 		if gateLabel != "" {
-			// The line renderSetup already printed named no -label: nothing
-			// had been chosen yet when it ran. Now something has.
 			cfg.label = gateLabel
-			fmt.Fprintf(out, "\n%s\n", suggestedWorkLine(cfg))
 		}
 		rows = applySetupFiles(ctx, prompt, cfg, rows)
+		// The line renderSetup printed came before -apply fixed rows or
+		// chose a gate label; say it again only when that changed it.
+		if after := setupNextStep(ctx, cfg, rows, setupRerunLine(opt, cfg)); after != next {
+			fmt.Fprintf(out, "\n%s\n", after)
+		}
 	}
 	if setupFailed(rows) {
 		return errSetupNotReady
@@ -441,7 +445,7 @@ func setupSubIssueRow(ctx context.Context, cfg config, repoGap string) setupRow 
 
 // --- rendering ---
 
-func renderSetup(w io.Writer, rpt report, cfg config, rows []setupRow) {
+func renderSetup(w io.Writer, rpt report, cfg config, rows []setupRow, next string) {
 	header := cfg.repo
 	if header == "" {
 		header = cfg.dir
@@ -452,11 +456,11 @@ func renderSetup(w io.Writer, rpt report, cfg config, rows []setupRow) {
 		tableRows[i] = []string{r.name, r.status, r.detail}
 	}
 	printTable(w, rpt, "setup", []string{"check", "status", "detail"}, tableRows, 3)
-	fmt.Fprintf(w, "\n%s\n", suggestedWorkLine(cfg))
+	fmt.Fprintf(w, "\n%s\n", next)
 }
 
-// suggestedWorkLine is the report's last line: the `polako work` invocation
-// this repository is ready (or not yet ready) for, -label included whenever
+// suggestedWorkLine is the report's last line on a ready repo with open
+// issues (see setupNextStep): the `polako work` invocation, -label included whenever
 // one was named and -add-tools included whenever the build-tools row found
 // something uncovered, so the suggestion matches what was actually checked.
 func suggestedWorkLine(cfg config) string {

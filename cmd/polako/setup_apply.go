@@ -206,9 +206,9 @@ func (p *setupPrompt) name(question, suggestion string) string {
 // Mutates and returns rows so the caller's setupFailed check reflects what
 // this pass actually created, without a second full read pass. gateLabel is
 // the name chosen by the public-repo prompt below, or "" if that branch
-// never ran — the caller's suggested `polako work` line was printed before
-// this ran and so cannot have named a label nobody had chosen yet; this is
-// how it finds out what to add.
+// never ran — the caller's last line was printed before this ran and so
+// cannot have named a label nobody had chosen yet; this is how it finds out
+// what to add.
 func applySetup(ctx context.Context, prompt *setupPrompt, cfg config, rows []setupRow, defs []labelDef) ([]setupRow, string) {
 	var gateLabel string
 	// queueGate rather than a hand-rolled visibility check, the same reason

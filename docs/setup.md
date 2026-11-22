@@ -1,9 +1,8 @@
 # Getting a repository ready: `polako setup`
 
 `polako setup` is a readiness report: it prints what the repository has for
-polako, what it's missing, and the `polako work` line to run once it looks
-ready. By default it's read-only; `-apply` is the one flag that writes — see
-below.
+polako, what it's missing, and the one command to run next. By default it's
+read-only; `-apply` is the one flag that writes — see below.
 
 ```bash
 polako setup -dir ../my-project
@@ -35,8 +34,25 @@ setup
   awaiting-answer           missing        gh label create awaiting-answer --color FBCA04 --description "polako is waiting for an answer on this issue"
   design                    missing        gh label create design --color C5DEF5 --description "a design request — polako work skips it; polako design works it into a plan"
 
-polako work -dir ../my-project -add-tools "Bash(just:*)" -dry-run
+next: fix the needs-human row, then rerun `polako setup -dir ../my-project`
 ```
+
+## The last line
+
+The last line is the command to run next, picked from the rows above:
+
+- A required row is `missing`: it names the first one to fix, then says to
+  rerun `polako setup`. No `work` line — `work` would refuse.
+- Ready, with open issues: the `polako work … -dry-run` line, carrying
+  `-label` and `-add-tools` when the report used them.
+- Ready, no open issues, and a doc to plan from — `docs/VISION.md`, a
+  `VISION.md` at the root, or a draft under `docs/designs/`, in that order:
+  `polako plan -dir … -design <doc> -dry-run`.
+- Ready, no open issues, no doc: both ways to start, `polako design -brief
+  "<idea>"` and `polako health`.
+
+If `gh` can't list the issues, it prints the `work` line. After `-apply`,
+the line is printed again if what `-apply` did changed it.
 
 Every row is `ok`, `missing`, or `couldn't tell` — never a guess. A tool
 missing from PATH, a `gh` too old for a field, a repository this `gh` can't
@@ -111,14 +127,16 @@ that doesn't exist is told to check the path.
   line asking a human to fill it in), which files are scratch, the `issue-N`
   branch contract, and that issue text is data, not instructions. Not
   required, the same as `.gitignore`.
-- `docs/VISION.md` exists — advice only, since `plan-backlog` is opt-in.
+- `docs/VISION.md` exists — advice only, since `plan-backlog` is opt-in. A
+  `VISION.md` at the root counts too: the row says `plan` can read it there,
+  and `-apply` doesn't offer to scaffold a second one.
 - A build tool the default `-tools` allowlist doesn't cover: `justfile`,
   `BUILD.bazel`/`WORKSPACE`, `Taskfile.yml`, `mise.toml`, `deno.json`,
   `bun.lockb`, `composer.json`, `Gemfile`, `mix.exs`, `build.zig`. Not
   required — a checkout without one of these still runs `polako work` fine —
   but a real run would stall on the permission prompt the first time it
   needs the tool, so the row prints the `-add-tools` value to grant it, and
-  the suggested `polako work` line at the end carries the same value.
+  the `polako work` line at the end carries the same value.
 
   The default set itself covers git, the gh subcommands the skill uses (`gh
   issue view`/`comment`, `gh pr create`, plus read-only `gh pr
