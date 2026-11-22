@@ -1661,6 +1661,27 @@ func TestSkillAsksWhenThePushIsRejected(t *testing.T) {
 				" supervisor sees no question (issue #704)", marker)
 		}
 	}
+
+	// issue #740: #704's own question said "push from the worktree, then
+	// rerun" and the operator had to dig for which worktree, and didn't learn
+	// a rerun waits on a reply. Each line here is one thing they had to find.
+	for _, marker := range []string{
+		"`<worktree>`'s path relative to the main checkout — `.worktrees/issue-$issue` when Phase 1 made it",
+		"repo-relative, never absolute",
+		"the push works from any checkout of the repo",
+		"`git push -u origin issue-$issue`",
+		"from the main checkout, where `<rel>` resolves",
+		"if the rejected push came before the body was written, Write it now, before asking",
+		"`gh pr create --head issue-$issue --title \"<this run's PR title>\" --body-file <rel>/.polako-scratch/PR_BODY.md`",
+		"`gh issue edit $issue --remove-label awaiting-answer`;",
+		"fix the push and reply on the thread — a run carries on only once the thread has a reply",
+		"picks the reply up by itself; only if none is, start one with `polako work`",
+	} {
+		if !strings.Contains(flat, marker) {
+			t.Errorf("SKILL.md's rejected-push question no longer says %q — without it"+
+				" the operator can't act on the question without digging (issue #740)", marker)
+		}
+	}
 }
 
 // issue #272: the PR body spec named five sections but bounded only ## Summary

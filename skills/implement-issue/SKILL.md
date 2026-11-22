@@ -1054,6 +1054,26 @@ don't post again, and stop.
      "Describe, don't paste" — "the push to issue-$issue was rejected by
      the remote" — never the rejection's raw text. Never retry with
      `--force`, another remote or another branch name.
+     The question has to be enough to act on without digging (issue
+     #740). Name where the branch is: `<worktree>`'s path relative to the
+     main checkout — `.worktrees/issue-$issue` when Phase 1 made it, the
+     real path whenever Phase 1 found it somewhere else; repo-relative,
+     never absolute — and say the push works from any checkout of the
+     repo, since the commits are on the local `issue-$issue` branch. Then
+     give each answer its commands to paste, in fenced blocks, `<rel>`
+     below standing for that same relative path. The hand-made PR below
+     points at PR_BODY.md, so if the rejected push came before the body
+     was written, Write it now, before asking:
+     - push it by hand: `git push -u origin issue-$issue`;
+     - then open the PR by hand, from the main checkout, where `<rel>`
+       resolves: `gh pr create --head issue-$issue --title "<this run's
+       PR title>" --body-file <rel>/.polako-scratch/PR_BODY.md`, then
+       `gh issue edit $issue --remove-label awaiting-answer`;
+     - or let polako finish: fix the push and reply on the thread — a
+       run carries on only once the thread has a reply. A `polako work`
+       shift still running picks the reply up by itself; only if none
+       is, start one with `polako work`. A second shift beside a waiting
+       one works the same issue twice.
    - Leave the body file where it is. The scratch directory ignores itself,
      so it can't be committed, and no `rm` is in this run's grant.
    - Once `gh pr create` returns, and only if the `## Visual evidence`
