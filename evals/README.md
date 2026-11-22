@@ -19,7 +19,7 @@ skill invocation, and scores the artifacts left behind.
 | `design-plan` | design-plan | a design request becomes one plan document under `docs/designs/` behind one PR — template complete, every claim pointered or measured, every ticket sized — and no issue filed |
 
 Every case runs under production's tool grant, prefix by prefix, never plain
-`Bash`. Every implement-issue case also fails a run that met a refusal
+`Bash`. Every case also fails a run that met a refusal
 (`no_call_was_refused`). An unattended run meets the same refusal, and there it
 costs a turn or ends the run. "What the CLI does with a case" below has how.
 
@@ -341,7 +341,7 @@ loaded as nothing. What the CLI does with a case, read from its runner on CLI
   is the file commands `acceptEdits` also lets through (`mkdir`, `touch`,
   `rm`, `rmdir`, `mv`, `cp`, `sed`), so the grant names those. A refusal shows
   in the run's stream twice: in the result event's `permission_denials` and as
-  a `permission_denied` system event. Every implement-issue case's
+  a `permission_denied` system event. Every case's
   `no_call_was_refused` grader fails on either, and `evidence.md` lists each
   refused call with the CLI's reason. Under `dontAsk` that reason is the same
   generic line every time. Production's `acceptEdits` names the part of a
