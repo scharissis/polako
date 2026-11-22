@@ -37,7 +37,7 @@ Ten verbs, grouped by when you use them. New repo? Run `polako setup`.
 **Fill the backlog**
 
 - **`design`** — an idea → a design doc, in a PR you merge.
-- **`plan`** — a design doc or vision doc → proposed issues.
+- **`plan`** — a design doc or a `-brief` → proposed issues.
 - **`health`** — the repo's code → proposed issues for what looks off.
 
 `plan` and `health` file everything behind a `proposed` label a human has to

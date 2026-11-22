@@ -341,7 +341,7 @@ func verbUsage(w io.Writer) {
 			"  setup   a repo → what polako still needs; -apply fixes what it can\n\n"+
 			"Fill the backlog\n"+
 			"  design  an idea → a design doc, in a PR you merge\n"+
-			"  plan    a design doc or vision doc → proposed issues\n"+
+			"  plan    a design doc or a -brief → proposed issues\n"+
 			"  health  the repo's code → proposed issues for what looks off\n\n"+
 			"Work it\n"+
 			"  work    open issues → one PR at a time, each waiting on your merge\n\n"+
