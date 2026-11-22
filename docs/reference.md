@@ -218,11 +218,10 @@ from inside your own hook.
 
 `polako plan` runs the [`plan-backlog`](../README.md#planning-a-backlog) skill
 the way `polako work` runs `implement-issue`: point it at a design doc (a
-vision doc counts) and it proposes a curated backlog — epics and one-PR
-issues — behind the `proposed` label a human lifts to queue. The layout
-travels: `docs/VISION.md` the long-range doc, one design doc per file under
-`docs/designs/`, no `Status:`/`Tracking:` line, `polako status` the index, a
-done design doc leaves.
+vision doc counts) and it proposes a backlog — epics and one-PR issues —
+behind the `proposed` label a human lifts to queue. The layout travels:
+`docs/VISION.md` the long-range doc, one design doc per file in `docs/designs/`,
+no `Status:`/`Tracking:` line, `polako status` the index, done docs leave.
 
 One `claude` invocation, bracketed by two enforcement mechanisms that keep
 the curation gate structural rather than something the model has to
