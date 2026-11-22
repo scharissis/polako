@@ -280,8 +280,13 @@ func planDocClauses(plans planDocsSnapshot) []string {
 }
 
 // draftDocs is every design doc with nothing proposed from it yet, by path.
-// The designs README is the folder's index, never a plan.
+// The designs README is the folder's index, never a plan. A truncated search
+// may have missed a doc's issues, and telling someone to plan it again on
+// that guess files its tickets twice, so it names none.
 func draftDocs(plans planDocsSnapshot) []string {
+	if plans.truncated {
+		return nil
+	}
 	var drafts []string
 	for _, d := range plans.docs {
 		if d.state == planDraft && d.path != designsReadmePath {

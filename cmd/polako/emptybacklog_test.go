@@ -70,6 +70,20 @@ func TestDrainFillHintSkipsADoneDesign(t *testing.T) {
 	}
 }
 
+// A truncated plans search can't tell a draft from a doc whose issues it
+// missed, so it names none.
+func TestDraftDocsTrustsNoTruncatedSearch(t *testing.T) {
+	t.Parallel()
+	plans := planDocsSnapshot{docs: []planDocStatus{{path: "docs/designs/widgets.md", state: planDraft}}}
+	if got := draftDocs(plans); len(got) != 1 {
+		t.Errorf("draftDocs = %v, want widgets.md", got)
+	}
+	plans.truncated = true
+	if got := draftDocs(plans); len(got) != 0 {
+		t.Errorf("draftDocs on a truncated search = %v, want none", got)
+	}
+}
+
 // Every open issue held is not an empty backlog: no fill hint.
 func TestDrainWithOnlyHeldIssuesGivesNoFillHint(t *testing.T) {
 	t.Parallel()
