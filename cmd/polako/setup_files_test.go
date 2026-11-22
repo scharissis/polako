@@ -202,6 +202,49 @@ func TestApplySetupFilesScaffoldWhenAcceptedExplicitly(t *testing.T) {
 	}
 }
 
+// Issue #738: a repo with its own docs/VISION.md reads ok, yet -apply still
+// offers the missing README — naming only that page — and the row stays ok
+// once it's proposed.
+func TestApplySetupFilesOffersTheReadmeBesideAnExistingVision(t *testing.T) {
+	t.Parallel()
+	work, checkout := upstream(t)
+	if err := os.MkdirAll(filepath.Join(work, "docs"), 0o755); err != nil {
+		t.Fatalf("mkdir docs: %v", err)
+	}
+	const human = "# Our vision\n"
+	if err := os.WriteFile(filepath.Join(work, filepath.FromSlash(visionMdPath)), []byte(human), 0o644); err != nil {
+		t.Fatalf("writing docs/VISION.md: %v", err)
+	}
+	gitAt(t, work, "add", visionMdPath)
+	gitAt(t, work, "commit", "-m", "docs: vision")
+	gitAt(t, work, "push", "origin", "main")
+	gitAt(t, checkout, "pull", "--ff-only", "origin", "main")
+
+	cfg := setupCfg(t, &ghState{}, checkout)
+	cfg.env = append(cfg.env, gitIdentity...)
+	cfg, rows, _ := readSetup(context.Background(), cfg, false)
+	if r := findSetupRow(t, rows, visionMdPath); r.status != setupOK {
+		t.Fatalf("test setup: %s row = %+v, want ok", visionMdPath, r)
+	}
+
+	var out strings.Builder
+	// In order: decline .gitignore, decline CLAUDE.md, accept the scaffold.
+	rows = applySetupFiles(context.Background(), newSetupPrompt(strings.NewReader("n\nn\ny\n"), &out, false), cfg, rows)
+
+	if !strings.Contains(out.String(), "also scaffold "+designsReadmePath+" through") {
+		t.Errorf("output = %q, want the question to name only %s", out.String(), designsReadmePath)
+	}
+	r := findSetupRow(t, rows, visionMdPath)
+	if r.status != setupOK || !strings.Contains(r.detail, "proposed "+designsReadmePath) {
+		t.Errorf("%s row = %+v, want ok naming the proposed README", visionMdPath, r)
+	}
+
+	gitAt(t, work, "fetch", "origin", "polako-setup")
+	if diff := gitAt(t, work, "diff", "--name-only", "main", "FETCH_HEAD"); strings.TrimSpace(diff) != designsReadmePath {
+		t.Errorf("PR diff = %q, want only %s", diff, designsReadmePath)
+	}
+}
+
 // Restart safety: an open PR from polako-setup means report its URL and
 // write nothing — never a second PR, never a second branch.
 func TestApplySetupFilesReportsAnAlreadyOpenPR(t *testing.T) {
