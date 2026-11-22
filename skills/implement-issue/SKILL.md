@@ -1045,7 +1045,7 @@ don't post again, and stop.
          evidence ref is the one sanctioned channel; never any other upload.
          Budget: at most four shots or pairs, plus at most a sentence of
          framing around each. The same goes for fenced blocks: at most four,
-         each under one sentence saying what it shows.
+         each with one sentence above it saying what it shows.
          Omit this section entirely when the change alters nothing a human sees,
          or when nothing above can represent what it produced; most PRs hit
          the first case. When nothing safe could show the behaviour, omit it
