@@ -51,17 +51,17 @@ func TestSetupBranchProtectionRow(t *testing.T) {
 	_, checkout := upstream(t)
 
 	cfg := setupCfg(t, &ghState{BranchProtected: true}, checkout)
-	if row := setupBranchProtectionRow(context.Background(), cfg, true, true); row.status != setupOK {
+	if row := setupBranchProtectionRow(context.Background(), cfg, "", true); row.status != setupOK {
 		t.Errorf("protected: row = %+v, want ok", row)
 	}
 
 	cfg = setupCfg(t, &ghState{}, checkout)
-	if row := setupBranchProtectionRow(context.Background(), cfg, true, true); row.status != setupMissing || row.required {
+	if row := setupBranchProtectionRow(context.Background(), cfg, "", true); row.status != setupMissing || row.required {
 		t.Errorf("unprotected: row = %+v, want missing and not required (advice only)", row)
 	}
 
 	cfg = setupCfg(t, &ghState{NoAdminAccess: true}, checkout)
-	row := setupBranchProtectionRow(context.Background(), cfg, true, true)
+	row := setupBranchProtectionRow(context.Background(), cfg, "", true)
 	if row.status != setupUnknown {
 		t.Errorf("no admin access: row = %+v, want %q", row, setupUnknown)
 	}
@@ -77,7 +77,7 @@ func TestSetupBranchProtectionRow(t *testing.T) {
 func TestSetupBranchProtectionRowNamesANonCheckout(t *testing.T) {
 	t.Parallel()
 	cfg := config{dir: t.TempDir()} // no .git here at all
-	row := setupBranchProtectionRow(context.Background(), cfg, true, true)
+	row := setupBranchProtectionRow(context.Background(), cfg, "", true)
 	if row.status != setupUnknown || !strings.Contains(row.detail, "not a git checkout") {
 		t.Errorf("row = %+v, want it to name -dir as not a git checkout", row)
 	}
@@ -87,10 +87,10 @@ func TestSetupBranchProtectionRowUnknownWithoutRepoOrGit(t *testing.T) {
 	t.Parallel()
 	_, checkout := upstream(t)
 	cfg := setupCfg(t, &ghState{}, checkout)
-	if row := setupBranchProtectionRow(context.Background(), cfg, false, true); row.status != setupUnknown {
+	if row := setupBranchProtectionRow(context.Background(), cfg, setupNoRepoYet, true); row.status != setupUnknown {
 		t.Errorf("no repo: row = %+v, want %q", row, setupUnknown)
 	}
-	if row := setupBranchProtectionRow(context.Background(), cfg, true, false); row.status != setupUnknown {
+	if row := setupBranchProtectionRow(context.Background(), cfg, "", false); row.status != setupUnknown {
 		t.Errorf("no git: row = %+v, want %q", row, setupUnknown)
 	}
 }
@@ -100,22 +100,22 @@ func TestSetupDeleteBranchOnMergeRow(t *testing.T) {
 	_, checkout := upstream(t)
 
 	cfg := setupCfg(t, &ghState{DeleteBranchOnMerge: true}, checkout)
-	if row := setupDeleteBranchOnMergeRow(context.Background(), cfg, true); row.status != setupOK {
+	if row := setupDeleteBranchOnMergeRow(context.Background(), cfg, ""); row.status != setupOK {
 		t.Errorf("enabled: row = %+v, want ok", row)
 	}
 
 	cfg = setupCfg(t, &ghState{}, checkout)
-	if row := setupDeleteBranchOnMergeRow(context.Background(), cfg, true); row.status != setupMissing || row.required {
+	if row := setupDeleteBranchOnMergeRow(context.Background(), cfg, ""); row.status != setupMissing || row.required {
 		t.Errorf("disabled: row = %+v, want missing and not required (advice only)", row)
 	}
 
 	cfg = setupCfg(t, &ghState{NoDeleteBranchOnMergeField: true}, checkout)
-	if row := setupDeleteBranchOnMergeRow(context.Background(), cfg, true); row.status != setupUnknown {
+	if row := setupDeleteBranchOnMergeRow(context.Background(), cfg, ""); row.status != setupUnknown {
 		t.Errorf("old gh: row = %+v, want %q", row, setupUnknown)
 	}
 
 	cfg = setupCfg(t, &ghState{}, checkout)
-	if row := setupDeleteBranchOnMergeRow(context.Background(), cfg, false); row.status != setupUnknown {
+	if row := setupDeleteBranchOnMergeRow(context.Background(), cfg, setupNoRepoYet); row.status != setupUnknown {
 		t.Errorf("no repo: row = %+v, want %q", row, setupUnknown)
 	}
 }

@@ -87,10 +87,9 @@ const unmarkedGateLabelDetail = "exists, not marked as the gate label"
 // too, since an existing-but-unmarked one is exactly what `-apply`'s
 // marking pass exists to fix, and reading it here means setupLabelRows (the
 // read-only report) shows the same row `-apply` acts on.
-func checkLabelDef(ctx context.Context, cfg config, reposOK bool, l labelDef) setupRow {
-	if !reposOK {
-		return setupRow{name: l.name, status: setupUnknown, required: l.required,
-			detail: "the repository could not be read"}
+func checkLabelDef(ctx context.Context, cfg config, repoGap string, l labelDef) setupRow {
+	if repoGap != "" {
+		return setupRow{name: l.name, status: setupUnknown, required: l.required, detail: repoGap}
 	}
 	// labelDescription over labelExists even for a non-gate def: it reads the
 	// same endpoint and the description comes back either way, so the
@@ -114,10 +113,10 @@ func checkLabelDef(ctx context.Context, cfg config, reposOK bool, l labelDef) se
 // about to point `polako work` at, plus whatever -policy-labels asked for.
 // Takes defs rather than building it, so readSetup's one setupLabelDefs call
 // is the only one — see readSetup's own comment for why that matters.
-func setupLabelRows(ctx context.Context, cfg config, reposOK bool, defs []labelDef) []setupRow {
+func setupLabelRows(ctx context.Context, cfg config, repoGap string, defs []labelDef) []setupRow {
 	rows := make([]setupRow, len(defs))
 	for i, l := range defs {
-		rows[i] = checkLabelDef(ctx, cfg, reposOK, l)
+		rows[i] = checkLabelDef(ctx, cfg, repoGap, l)
 	}
 	return rows
 }
@@ -221,7 +220,7 @@ func applySetup(ctx context.Context, prompt *setupPrompt, cfg config, rows []set
 		gateLabel = prompt.name("this repository is public and has no gate label — name one to create", "ready")
 		def := labelDef{name: gateLabel, color: "ededed", description: gateLabelDescription, required: true, isGateLabel: true}
 		defs = append(defs, def)
-		rows = append(rows, checkLabelDef(ctx, cfg, true, def))
+		rows = append(rows, checkLabelDef(ctx, cfg, "", def))
 	}
 	// One pass: the two cases below are mutually exclusive per def — missing
 	// (needs creating) and existing-but-unmarked (needs marking) can never

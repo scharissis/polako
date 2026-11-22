@@ -52,6 +52,129 @@ func TestSetupOriginHeadRowDistinguishesANonCheckout(t *testing.T) {
 	}
 }
 
+// A new project is a folder before it's a repo (issue #733). The first repo
+// row names that and the fix; every row that needs a repo says it can't
+// tell, without asking gh — the fake gh would answer `repo view` and the
+// label lookups if asked, so an ok or missing row there means it was. And
+// nothing suggests -apply, which has nothing to push to.
+func TestReadSetupOnAFolderThatIsNotARepo(t *testing.T) {
+	t.Parallel()
+	cfg := setupCfg(t, &ghState{}, t.TempDir())
+
+	_, rows, _ := readSetup(context.Background(), cfg, false)
+
+	first := findSetupRow(t, rows, "gh repo view")
+	if first.status != setupMissing || !first.required {
+		t.Errorf("gh repo view row = %+v, want a required missing row", first)
+	}
+	for _, want := range []string{"isn't a git repo yet", "git init", "gh repo create <name> --private --source . --push",
+		"git remote set-head origin -a"} {
+		if !strings.Contains(first.detail, want) {
+			t.Errorf("gh repo view detail = %q, want it to contain %q", first.detail, want)
+		}
+	}
+	for _, name := range []string{"issues enabled", "origin/HEAD", ".gitignore", "CLAUDE.md", visionMdPath,
+		"sub-issue support", "branch protection", "delete branches on merge",
+		needsHumanLabel, proposedLabel, awaitingAnswerLabel, designLabel} {
+		if r := findSetupRow(t, rows, name); r.status != setupUnknown || r.detail != setupNoRepoYet {
+			t.Errorf("row %q = %+v, want %q with detail %q", name, r, setupUnknown, setupNoRepoYet)
+		}
+	}
+	for _, r := range rows {
+		if strings.Contains(r.detail, "setup -apply") {
+			t.Errorf("row %q suggests -apply with no repo to push to: %q", r.name, r.detail)
+		}
+	}
+	if !setupFailed(rows) {
+		t.Error("setupFailed(rows) = false, want true with no repo")
+	}
+}
+
+// A typo'd -dir isn't a folder to `git init` — it's a path to fix.
+func TestReadSetupOnAMissingDir(t *testing.T) {
+	t.Parallel()
+	cfg := setupCfg(t, &ghState{}, filepath.Join(t.TempDir(), "my-projcet"))
+
+	_, rows, _ := readSetup(context.Background(), cfg, false)
+
+	first := findSetupRow(t, rows, "gh repo view")
+	if first.status != setupMissing || !strings.Contains(first.detail, "check the path") ||
+		strings.Contains(first.detail, "git init") {
+		t.Errorf("gh repo view row = %+v, want it to say check the path, not git init", first)
+	}
+}
+
+// A checkout with no origin remote gets its own fix: make one, or point at
+// one, then set origin/HEAD.
+func TestReadSetupOnACheckoutWithNoRemote(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	gitAt(t, checkout, "remote", "remove", "origin")
+	cfg := setupCfg(t, &ghState{}, checkout)
+
+	_, rows, _ := readSetup(context.Background(), cfg, false)
+
+	first := findSetupRow(t, rows, "gh repo view")
+	for _, want := range []string{"no origin remote", "gh repo create <name> --private --source . --push",
+		"git remote add origin <url>", "git remote set-head origin -a"} {
+		if !strings.Contains(first.detail, want) {
+			t.Errorf("gh repo view detail = %q, want it to contain %q", first.detail, want)
+		}
+	}
+	if r := findSetupRow(t, rows, needsHumanLabel); r.detail != setupNoRepoYet {
+		t.Errorf("label row = %+v, want detail %q", r, setupNoRepoYet)
+	}
+}
+
+// A remote that just isn't called origin still names the repository, so gh
+// still runs; only origin/HEAD needs the fix.
+func TestReadSetupOnACheckoutWhoseRemoteIsNotOrigin(t *testing.T) {
+	t.Parallel()
+	_, checkout := upstream(t)
+	gitAt(t, checkout, "remote", "rename", "origin", "upstream")
+	cfg := setupCfg(t, &ghState{Labels: []string{needsHumanLabel}}, checkout)
+
+	_, rows, _ := readSetup(context.Background(), cfg, false)
+
+	if r := findSetupRow(t, rows, "gh repo view"); r.status != setupOK {
+		t.Errorf("gh repo view row = %+v, want ok — gh can find the repo through upstream", r)
+	}
+	head := findSetupRow(t, rows, "origin/HEAD")
+	if head.status != setupMissing || !strings.Contains(head.detail, "git remote rename <name> origin") {
+		t.Errorf("origin/HEAD row = %+v, want the rename fix", head)
+	}
+	if r := findSetupRow(t, rows, needsHumanLabel); r.status != setupOK {
+		t.Errorf("label row = %+v, want ok", r)
+	}
+}
+
+// With -repo named, gh can still answer for the repository, so the
+// repo-scoped rows run; the fix — clone it, never create a second one —
+// moves to origin/HEAD, the first row that needs the checkout.
+func TestReadSetupWithRepoOnAFolderThatIsNotARepo(t *testing.T) {
+	t.Parallel()
+	cfg := setupCfg(t, &ghState{Labels: []string{needsHumanLabel}}, t.TempDir())
+	cfg.repo, cfg.ghRepo = "example/repo", "example/repo"
+
+	_, rows, _ := readSetup(context.Background(), cfg, false)
+
+	if r := findSetupRow(t, rows, "gh repo view"); r.status != setupOK {
+		t.Errorf("gh repo view row = %+v, want ok with -repo named", r)
+	}
+	head := findSetupRow(t, rows, "origin/HEAD")
+	if head.status != setupMissing || !head.required || !strings.Contains(head.detail, "gh repo clone example/repo") ||
+		strings.Contains(head.detail, "gh repo create") {
+		t.Errorf("origin/HEAD row = %+v, want a required missing row saying to clone the repo", head)
+	}
+	if r := findSetupRow(t, rows, needsHumanLabel); r.status != setupOK {
+		t.Errorf("label row = %+v, want ok — gh can still read labels with -repo named", r)
+	}
+	// gh just read the repo, so "no repo yet" would contradict it.
+	if r := findSetupRow(t, rows, ".gitignore"); r.status != setupUnknown || r.detail != "no checkout at -dir" {
+		t.Errorf(".gitignore row = %+v, want %q with detail %q", r, setupUnknown, "no checkout at -dir")
+	}
+}
+
 // The bare invocation's verb table has to list setup now that it exists.
 func TestVerbUsageListsSetup(t *testing.T) {
 	t.Parallel()

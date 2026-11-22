@@ -13,27 +13,27 @@ polako setup -dir ../my-project
 example/my-project
 
 setup
-  check               status         detail
-  claude              ok
-  gh                  ok
-  git                 ok
-  gh repo view        ok             PUBLIC — public: -label is required for `polako work` to refuse an unfiltered queue
-  issues enabled      ok
-  origin/HEAD         ok
-  .gitignore          missing        missing /.worktrees/, /PLAN.md, /.polako-scratch/ — `polako setup -apply` proposes it through a PR
-  CLAUDE.md           missing        the polako block is missing or out of date — `polako setup -apply` proposes it through a PR; run `/init` for the rest of CLAUDE.md
-  docs/VISION.md      missing        missing docs/VISION.md, docs/designs/README.md — optional — `polako setup -apply` can scaffold them (advice only)
-  plugin              ok             0.23.0
-  sub-issue support   ok
-  build tools         missing        not in the default allowlist — pass -add-tools "Bash(just:*)"
-  issue templates     ok
-  CI workflow         missing        advice only — no .github/workflows/*.yml found
-  branch protection   missing        advice only — main has no branch protection rule
-  delete branches on merge  missing  advice only — turn on "automatically delete head branches" in the repository's settings
-  needs-human         missing        gh label create needs-human --color D93F0B --description "polako parked this issue for a human"
-  proposed            missing        gh label create proposed --color 1D76DB --description "proposed by polako — a human removes this label to queue it"
-  awaiting-answer     missing        gh label create awaiting-answer --color FBCA04 --description "polako is waiting for an answer on this issue"
-  design              missing        gh label create design --color C5DEF5 --description "a design request — polako work skips it; polako design works it into a plan"
+  check                     status         detail
+  claude                    ok
+  gh                        ok
+  git                       ok
+  gh repo view              ok             PUBLIC — this repository is public, so anyone who can open an issue can queue work for an unattended agent — pass -label <name> to work only issues a maintainer labelled (see docs/security.md), or -ungated to work every open issue anyway
+  issues enabled            ok
+  origin/HEAD               ok
+  .gitignore                missing        missing /.worktrees/, /PLAN.md, /.polako-scratch/ — `polako setup -apply` proposes it through a PR
+  CLAUDE.md                 missing        the polako block is missing or out of date — `polako setup -apply` proposes it through a PR; run `/init` for the rest of CLAUDE.md
+  docs/VISION.md            missing        missing docs/VISION.md, docs/designs/README.md — optional — `polako setup -apply` can scaffold them (advice only)
+  plugin                    ok             0.38.1
+  sub-issue support         ok
+  build tools               missing        not in the default allowlist — pass -add-tools "Bash(just:*)"
+  issue templates           ok
+  CI workflow               missing        advice only — no .github/workflows/*.yml found
+  branch protection         missing        advice only — main has no branch protection rule
+  delete branches on merge  missing        advice only — turn on "automatically delete head branches" in the repository's settings
+  needs-human               missing        gh label create needs-human --color D93F0B --description "polako parked this issue for a human"
+  proposed                  missing        gh label create proposed --color 1D76DB --description "proposed by polako — a human removes this label to queue it"
+  awaiting-answer           missing        gh label create awaiting-answer --color FBCA04 --description "polako is waiting for an answer on this issue"
+  design                    missing        gh label create design --color C5DEF5 --description "a design request — polako work skips it; polako design works it into a plan"
 
 polako work -dir ../my-project -add-tools "Bash(just:*)" -dry-run
 ```
@@ -45,6 +45,32 @@ broken check never hides the rest of the picture. `couldn't tell` never
 fails the report; only a `missing` row on something required does, and the
 process exits nonzero when one does — so `polako setup` doubles as a check
 in a script.
+
+## A folder that isn't a repo yet
+
+A new project is often a plain folder. `setup` checks that first, before
+any `gh` call, and the first repo row says what to run:
+
+```
+  gh repo view              missing        -dir ../my-project isn't a git repo yet — run `git init`, commit, then `gh repo create <name> --private --source . --push` and `git remote set-head origin -a`
+  issues enabled            couldn't tell  no repo yet
+  origin/HEAD               couldn't tell  no repo yet
+  .gitignore                couldn't tell  no repo yet
+  ...
+  needs-human               couldn't tell  no repo yet
+```
+
+Every row that needs a repo says `no repo yet` and asks `gh` nothing, and
+`-apply` has nothing to write until there is one. A checkout with no
+`origin` remote gets its own fix: `gh repo create <name> --private --source
+. --push`, or `git remote add origin <url>`, then `git remote set-head
+origin -a`. That last step is on both because `gh repo create` leaves
+`origin/HEAD` unset. A remote that just isn't called `origin` still lets
+`gh` find the repository; only the `origin/HEAD` row asks you to rename it.
+With `-repo` given, `gh` can still answer for that repository, so only the
+rows that read the checkout say `no checkout at -dir`, and the fix — `gh
+repo clone`, not a second repo — goes on the `origin/HEAD` row. A `-dir`
+that doesn't exist is told to check the path.
 
 ## What it checks
 

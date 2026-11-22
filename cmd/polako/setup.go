@@ -203,12 +203,25 @@ func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []se
 		pathRow("git", "git", gitOK),
 	}
 
-	var reposOK bool
-	if !ghOK {
+	// The fix is said once, on the first row that needs what -dir lacks, and
+	// every later row that needs it says why it can't tell — see
+	// setup_checkout.go.
+	gap := setupCheckoutGap(ctx, cfg, gitOK)
+	noCheckout := gap.fix != "" && !gap.ghCanTry
+	var repoGap string
+	fixShown := false
+	switch {
+	case !ghOK:
 		rows = append(rows,
 			setupRow{name: "gh repo view", status: setupUnknown, detail: "gh isn't on PATH"},
 			setupRow{name: "issues enabled", status: setupUnknown, detail: "gh isn't on PATH"})
-	} else {
+		repoGap = "the repository could not be read"
+	case noCheckout && cfg.repo == "":
+		rows = append(rows,
+			setupRow{name: "gh repo view", status: setupMissing, required: true, detail: gap.fix},
+			setupRow{name: "issues enabled", status: setupUnknown, detail: gap.why})
+		repoGap, fixShown = gap.why, true
+	default:
 		result, err := retryRead(ctx, cfg, "gh repo view", func() (setupRepoViewResult, error) {
 			return readSetupRepoView(ctx, cfg)
 		})
@@ -218,27 +231,47 @@ func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []se
 					detail: fmt.Sprintf("could not read the repository (%v) — is gh authenticated, "+
 						"and does -dir/-repo name a real repository?", err)},
 				setupRow{name: "issues enabled", status: setupUnknown, detail: "the repository could not be read"})
+			repoGap = "the repository could not be read"
 		} else {
-			reposOK = true
 			cfg.repo, cfg.ghRepo = result.view.NameWithOwner, result.view.NameWithOwner
 			cfg.visibility = result.view.Visibility
 			rows = append(rows, setupRepoOKRow(result.view, cfg.label), setupIssuesEnabledRow(result))
 		}
 	}
 
-	rows = append(rows, setupOriginHeadRow(ctx, cfg, gitOK))
-	rows = append(rows, setupGitignoreRow(cfg))
-	rows = append(rows, setupClaudeMdRow(cfg))
-	rows = append(rows, setupVisionRow(cfg))
+	switch {
+	case gap.fix != "" && !fixShown:
+		// gh answered for -repo, or gh is missing, or the remote just isn't
+		// called origin: origin/HEAD, the first row that needs the checkout,
+		// carries the fix.
+		rows = append(rows, setupRow{name: "origin/HEAD", status: setupMissing, required: true, detail: gap.fix})
+	case noCheckout:
+		rows = append(rows, setupRow{name: "origin/HEAD", status: setupUnknown, detail: gap.why})
+	default:
+		rows = append(rows, setupOriginHeadRow(ctx, cfg, gitOK))
+	}
+	if noCheckout {
+		// These rows' fix is -apply's PR, which needs a repo to push to. Left
+		// "missing", they would suggest it, and -apply would try it.
+		for _, name := range []string{".gitignore", "CLAUDE.md", visionMdPath} {
+			rows = append(rows, setupRow{name: name, status: setupUnknown, detail: gap.why})
+		}
+	} else {
+		rows = append(rows, setupGitignoreRow(cfg), setupClaudeMdRow(cfg), setupVisionRow(cfg))
+	}
 	rows = append(rows, setupPluginRow(ctx, cfg, claudeOK))
-	rows = append(rows, setupSubIssueRow(ctx, cfg, reposOK))
+	rows = append(rows, setupSubIssueRow(ctx, cfg, repoGap))
 	rows = append(rows, setupBuildToolsRow(cfg))
 	rows = append(rows, setupTemplatesRow(cfg))
 	rows = append(rows, setupCIWorkflowRow(cfg))
-	rows = append(rows, setupBranchProtectionRow(ctx, cfg, reposOK, gitOK))
-	rows = append(rows, setupDeleteBranchOnMergeRow(ctx, cfg, reposOK))
+	if noCheckout {
+		rows = append(rows, setupRow{name: "branch protection", status: setupUnknown, detail: gap.why})
+	} else {
+		rows = append(rows, setupBranchProtectionRow(ctx, cfg, repoGap, gitOK))
+	}
+	rows = append(rows, setupDeleteBranchOnMergeRow(ctx, cfg, repoGap))
 	defs := setupLabelDefs(cfg, policyLabels)
-	rows = append(rows, setupLabelRows(ctx, cfg, reposOK, defs)...)
+	rows = append(rows, setupLabelRows(ctx, cfg, repoGap, defs)...)
 	return cfg, rows, defs
 }
 
@@ -327,9 +360,9 @@ func setupIssuesEnabledRow(result setupRepoViewResult) setupRow {
 //
 // -dir not being a git checkout at all is a different problem from origin/
 // HEAD merely being unset — `git remote set-head origin -a` fails with the
-// same error a non-checkout gives `symbolic-ref`, so it is checked apart
-// and named for what it actually is, the same distinction preflight's own
-// `git rev-parse --git-dir` check draws (main.go).
+// same error a non-checkout gives `symbolic-ref`. readSetup catches that
+// case first (setupCheckoutGap) and never calls this for it; the
+// not-a-checkout branch below stays so the row is right on its own.
 func setupOriginHeadRow(ctx context.Context, cfg config, gitOK bool) setupRow {
 	const name = "origin/HEAD"
 	if !gitOK {
@@ -388,11 +421,12 @@ func setupPluginRow(ctx context.Context, cfg config, claudeOK bool) setupRow {
 
 // setupSubIssueRow is advisory only: a gh that cannot file `--parent` still
 // runs `polako work` and `polako plan` fine, epics filed flat instead — see
-// ghCreatesSubIssues.
-func setupSubIssueRow(ctx context.Context, cfg config, reposOK bool) setupRow {
+// ghCreatesSubIssues. repoGap, like every repo-scoped row's, is "" once the
+// repository read fine, or else why it couldn't be — the row's detail.
+func setupSubIssueRow(ctx context.Context, cfg config, repoGap string) setupRow {
 	const name = "sub-issue support"
-	if !reposOK {
-		return setupRow{name: name, status: setupUnknown, detail: "the repository could not be read"}
+	if repoGap != "" {
+		return setupRow{name: name, status: setupUnknown, detail: repoGap}
 	}
 	if ghCreatesSubIssues(ctx, cfg) {
 		return setupRow{name: name, status: setupOK}
