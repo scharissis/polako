@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"strings"
 )
@@ -39,7 +40,27 @@ func repoViewError(ctx context.Context, cfg config, ghErr error, hint string) er
 			return gapError(gap, hint, ghErr)
 		}
 	}
-	return fmt.Errorf("%s%s — gh said: %w", repoViewAdvice(cfg.dir, ghErr), hint, ghErr)
+	host := ""
+	if out, err := git(ctx, cfg, "config", "--get", "remote.origin.url"); err == nil {
+		host = remoteHost(strings.TrimSpace(string(out)))
+	}
+	return fmt.Errorf("%s%s — gh said: %w", repoViewAdvice(cfg.dir, host, ghErr), hint, ghErr)
+}
+
+// remoteHost is the host a remote URL names, "" when it can't tell: the scp
+// form (git@host:owner/repo) and URL forms (https://, ssh://).
+func remoteHost(raw string) string {
+	if u, err := url.Parse(raw); err == nil && u.Host != "" {
+		return u.Hostname()
+	}
+	if at, rest, ok := strings.Cut(raw, "@"); ok && !strings.Contains(at, "/") {
+		raw = rest
+	}
+	// len > 1 keeps a Windows drive letter (C:\repo) from reading as a host.
+	if host, _, ok := strings.Cut(raw, ":"); ok && len(host) > 1 && !strings.ContainsAny(host, `/\`) {
+		return host
+	}
+	return ""
 }
 
 // gapError is a checkoutGap as an error: the fix, the caller's hint, then
@@ -52,11 +73,13 @@ func gapError(gap checkoutGap, hint string, fallback error) error {
 	return fmt.Errorf("%s%s — the error was: %w", gap.fix, hint, cause)
 }
 
-// repoViewAdvice reads gh's error text, the only signal gh gives. Remote
-// first: gh's "no known GitHub host" error tells you to `gh auth login` too,
-// which is the wrong fix for a remote that isn't on GitHub. Only the auth
-// case names `gh auth login`.
-func repoViewAdvice(dir string, ghErr error) string {
+// repoViewAdvice reads gh's error text, the only signal gh gives, plus
+// origin's host. gh's "no known GitHub host" means no remote is on a host gh
+// is logged in to — a logged-out gh on a github.com remote says the same as a
+// GitLab remote — so the host decides which it is. On github.com it's auth;
+// on another host it may be GitHub Enterprise or not GitHub at all, and the
+// advice names both. A checkout with no remote never gets auth advice.
+func repoViewAdvice(dir, host string, ghErr error) string {
 	msg := ""
 	if ghErr != nil {
 		msg = strings.ToLower(ghErr.Error())
@@ -69,12 +92,22 @@ func repoViewAdvice(dir string, ghErr error) string {
 		}
 		return false
 	}
+	const notLoggedIn = "gh isn't logged in, or GitHub refused its token — run `gh auth login`, then rerun"
 	switch {
-	case contains("known github host", "no git remotes"):
+	case contains("no git remotes"):
+		return fmt.Sprintf("-dir %s has no GitHub remote — run `gh repo create <name> --private --source . --push` "+
+			"or `git remote add origin <github url>`, then `git remote set-head origin -a`", dir)
+	case contains("known github host") && host == "github.com":
+		return notLoggedIn
+	case contains("known github host") && host != "":
+		return fmt.Sprintf("-dir %s's origin is on %s, which gh isn't logged in to — if that's GitHub Enterprise, "+
+			"run `gh auth login --hostname %s`; if it isn't GitHub, run `gh repo create <name> --private` and "+
+			"`git remote set-url origin <github url>`, then `git remote set-head origin -a`", dir, host, host)
+	case contains("known github host"):
 		return fmt.Sprintf("-dir %s has no GitHub remote — run `gh repo create <name> --private --source . --push` "+
 			"or `git remote set-url origin <github url>`, then `git remote set-head origin -a`", dir)
 	case contains("gh auth login", "not logged in", "http 401", "bad credentials", "authentication"):
-		return "gh isn't logged in, or GitHub refused its token — run `gh auth login`, then rerun"
+		return notLoggedIn
 	default:
 		return fmt.Sprintf("could not read the GitHub repository at -dir %s — check that origin names a "+
 			"repository you can see, and that `gh auth status` is happy", dir)

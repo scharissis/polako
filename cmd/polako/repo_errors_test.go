@@ -73,6 +73,44 @@ func TestRepoViewErrorOnAFolderKeepsTheHint(t *testing.T) {
 	}
 }
 
+// gh says "no known GitHub host" both for a logged-out gh on github.com and
+// for a remote that isn't GitHub at all; origin's host tells them apart.
+func TestRepoViewAdviceReadsTheHostOnAnUnknownHostError(t *testing.T) {
+	t.Parallel()
+	ghErr := errors.New("none of the git remotes configured for this repository point to a known GitHub host. " +
+		"To tell gh about a new GitHub host, please use `gh auth login`")
+	if got := repoViewAdvice("/x", "github.com", ghErr); !strings.Contains(got, "isn't logged in") ||
+		strings.Contains(got, "gh repo create") {
+		t.Errorf("github.com: advice = %q, want the login advice and no gh repo create", got)
+	}
+	got := repoViewAdvice("/x", "ghe.corp.com", ghErr)
+	for _, want := range []string{"ghe.corp.com", "gh auth login --hostname ghe.corp.com", "gh repo create"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("other host: advice = %q, want it to contain %q", got, want)
+		}
+	}
+	if got := repoViewAdvice("/x", "", errors.New("no git remotes found")); !strings.Contains(got, "git remote add origin") ||
+		strings.Contains(got, "auth login") {
+		t.Errorf("no remotes: advice = %q, want `git remote add origin` and no auth advice", got)
+	}
+}
+
+func TestRemoteHost(t *testing.T) {
+	t.Parallel()
+	for raw, want := range map[string]string{
+		"git@github.com:octocat/hello.git":         "github.com",
+		"https://github.com/octocat/hello.git":     "github.com",
+		"ssh://git@ghe.corp.com:2222/team/app.git": "ghe.corp.com",
+		"https://user:tok@gitlab.com/a/b.git":      "gitlab.com",
+		"/srv/git/hello.git":                       "",
+		`C:\repos\hello.git`:                       "",
+	} {
+		if got := remoteHost(raw); got != want {
+			t.Errorf("remoteHost(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
 // On a checkout with an origin, gh's own text decides. A remote that isn't on
 // GitHub and a gh that isn't logged in get different advice; only the second
 // says `gh auth login` — even though gh's remote error mentions it too.
