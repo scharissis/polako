@@ -396,9 +396,6 @@ func readStatus(ctx context.Context, cfg config, now time.Time) (statusSnapshot,
 	}
 	snap.queues, snap.gate = queues, gate
 	snap.idle = idleSpans(queues, now)
-	if len(queues.open()) == 0 && !gate.open() {
-		snap.fillHint = fillBacklogHint(cfg.dir)
-	}
 	// The drain's own rule, in dryRun's words: the lowest ready issue, and with
 	// none, the lowest issue waiting on an answer. -strict-order is the one
 	// thing that changes it — openIssues folds the two queues into one there, so
@@ -455,6 +452,9 @@ func readStatus(ctx context.Context, cfg config, now time.Time) (statusSnapshot,
 		snap.plans = plans
 	} else if ctx.Err() != nil {
 		return snap, ctx.Err()
+	}
+	if len(snap.queues.open()) == 0 && !snap.gate.open() {
+		snap.fillHint = fillBacklogHint(cfg.dir, snap.plans)
 	}
 	// Ungated, unlike work's own readPublishedVersion: status carries no
 	// -skill to gate on, and always means this project's own plugin.

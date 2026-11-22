@@ -272,14 +272,23 @@ func planDocClauses(plans planDocsSnapshot) []string {
 		}
 	}
 	// A draft is a design merged into the checkout with nothing proposed from
-	// it yet (issue #736). Only a person starts that `plan` run. The designs
-	// README is the folder's index, never a plan.
-	for _, d := range plans.docs {
-		if d.state == planDraft && d.path != designsReadmePath {
-			parts = append(parts, fmt.Sprintf("propose tickets from %s — polako plan -design %s", d.path, d.path))
-		}
+	// it yet (issue #736). Only a person starts that `plan` run.
+	for _, d := range draftDocs(plans) {
+		parts = append(parts, fmt.Sprintf("propose tickets from %s — polako plan -design %s", d, d))
 	}
 	return parts
+}
+
+// draftDocs is every design doc with nothing proposed from it yet, by path.
+// The designs README is the folder's index, never a plan.
+func draftDocs(plans planDocsSnapshot) []string {
+	var drafts []string
+	for _, d := range plans.docs {
+		if d.state == planDraft && d.path != designsReadmePath {
+			drafts = append(drafts, d.path)
+		}
+	}
+	return drafts
 }
 
 // localPlanDocs lists the *.md files directly under docs/designs in the given

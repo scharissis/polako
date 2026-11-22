@@ -51,6 +51,25 @@ func TestDrainOnAnEmptyBacklogSaysHowToFillIt(t *testing.T) {
 	}
 }
 
+// A design whose tickets all closed is done, not a draft, even before it
+// moves to done/: planning it again would file them twice.
+func TestDrainFillHintSkipsADoneDesign(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg, _ := drainConfig(t, "stream", &ghState{
+		Issues: map[string]*fakeIssue{
+			"1": {Open: false, Body: planFooterFor("docs/designs/widgets.md", "abc1234")},
+		},
+	})
+	writeTestFile(t, cfg.dir, "docs/designs/widgets.md")
+	if err := drain(context.Background(), cfg); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if out := buf.String(); !strings.Contains(out, "backlog cleared; "+noDocHint) {
+		t.Errorf("widgets.md is done, so the hint names design and health\ngot:\n%s", out)
+	}
+}
+
 // Every open issue held is not an empty backlog: no fill hint.
 func TestDrainWithOnlyHeldIssuesGivesNoFillHint(t *testing.T) {
 	t.Parallel()

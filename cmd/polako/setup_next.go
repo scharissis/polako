@@ -72,11 +72,19 @@ func setupPlanDoc(dir string) string {
 }
 
 // fillBacklogHint names the commands that fill an empty backlog, for `work`
-// and `status` (issue #736) — the same doc search setup's last line uses, but
-// dir-free, like every other command those two print.
-func fillBacklogHint(dir string) string {
-	if doc := setupPlanDoc(dir); doc != "" {
-		return "fill it with `polako plan -design " + doc + "`"
+// and `status` (issue #736), dir-free like every other command those two
+// print. Unlike setup's last line it names a design doc only when GitHub
+// says it's a draft: an empty backlog is just when a finished design sits in
+// docs/designs/ not yet moved to done/, and planning it again files its
+// tickets twice. A vision is never done, so it needs no such check.
+func fillBacklogHint(dir string, plans planDocsSnapshot) string {
+	for _, rel := range []string{visionMdPath, rootVisionPath} {
+		if fileExistsIn(dir, filepath.FromSlash(rel)) {
+			return "fill it with `polako plan -design " + rel + "`"
+		}
+	}
+	if drafts := draftDocs(plans); len(drafts) > 0 {
+		return "fill it with `polako plan -design " + drafts[0] + "`"
 	}
 	return "fill it with `polako design -brief \"<idea>\"` or `polako health`"
 }
