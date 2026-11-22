@@ -28,34 +28,39 @@ from research to a plan to a pull request, on its own or driven by the
 PR, repairs it when CI goes red, advances when you merge. Stdlib-only Go, no
 dependencies.
 
-Ten verbs. Four start Claude runs:
+Ten verbs, grouped by when you use them. New repo? Run `polako setup`.
 
-- **`work`** — works the backlog to zero, one issue at a time, never merging.
-- **`plan`** — turns a design document into a curated backlog of proposals.
-- **`health`** — reads the repository itself and files what looks off as
-  proposals.
-- **`design`** — works one design request into the design document `plan`
-  reads, behind a PR you merge.
+**Get ready**
+
+- **`setup`** — a repo → what polako still needs; `-apply` fixes what it can.
+
+**Fill the backlog**
+
+- **`design`** — an idea → a design doc, in a PR you merge.
+- **`plan`** — a design doc or a `-brief` → proposed issues.
+- **`health`** — the repo's code → proposed issues for what looks off.
 
 `plan` and `health` file everything behind a `proposed` label a human has to
 lift; `design` writes the document first — see
 [Planning a backlog](#planning-a-backlog).
 
-Six look after the shift, and run no model:
+**Work it**
 
-- **`status`** — where the backlog stands and what is waiting on you, read
-  from GitHub, plus the last shift run here.
-- **`stats`** — what your runs cost and how they went, read from local run
-  data.
-- **`tidy`** — reclaims the worktrees and branches of finished issues. It only
-  previews until you pass `-apply`.
-- **`unpark`** — lists parked issues with why each stopped, and clears the
-  ones you approve.
-- **`update`** — brings the plugin and the binary to the published release.
-- **`setup`** — reports whether a repository is ready for polako, and fixes
-  what it can with `-apply`.
+- **`work`** — open issues → one PR at a time, each waiting on your merge.
 
-A bare `polako` prints this table; `polako <verb> -h` prints that verb's flags.
+**Look after it**
+
+- **`status`** — GitHub → where the backlog stands and what waits on you.
+- **`stats`** — local run data → what runs cost and how they went.
+- **`unpark`** — needs-human issues → why each parked; `-apply` asks to clear
+  each.
+- **`tidy`** — finished issues → their worktrees and branches; `-apply`
+  removes them.
+- **`update`** — installed plugin and binary → the published release.
+
+`design`, `plan`, `health` and `work` start Claude runs; the rest run no
+model. A bare `polako` prints this table; `polako <verb> -h` prints that
+verb's flags.
 
 
 ```
