@@ -204,14 +204,11 @@ func isForbiddenError(err error) bool {
 // isPlanGatedError reports whether a 403 is GitHub refusing a feature the
 // repository's plan lacks ("Upgrade to GitHub Pro or make this repository
 // public to enable this feature."), not the token lacking a permission.
-// Matched on GitHub's own wording, case-insensitively, the same way the
-// checks above match gh's.
+// Matched on GitHub's whole sentence, case-insensitively, so a permission
+// 403 that merely mentions going public isn't misread as the plan.
 func isPlanGatedError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "upgrade to github pro") || strings.Contains(msg, "make this repository public")
+	return err != nil &&
+		strings.Contains(strings.ToLower(err.Error()), "upgrade to github pro or make this repository public")
 }
 
 // isAlreadyExistsError reports whether ensureLabel's own create failed
