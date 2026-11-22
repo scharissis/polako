@@ -127,7 +127,7 @@ func applySetupFiles(ctx context.Context, prompt *setupPrompt, cfg config, rows 
 	// tell" row (no repo to push to) from asking at all.
 	if visionIdx >= 0 && rows[visionIdx].status != setupUnknown && scaffoldOffered(cfg.dir) {
 		want.scaffold = prompt.confirmDefault(
-			"also scaffold docs/VISION.md and docs/designs/README.md through the same PR?", false)
+			"also scaffold "+strings.Join(missingScaffoldPages(cfg.dir), " and ")+" through the same PR?", false)
 	}
 	if !want.any() {
 		return rows

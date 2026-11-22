@@ -45,14 +45,20 @@ func setupVisionRow(cfg config) setupRow {
 		return setupRow{name: visionMdPath, status: setupOK,
 			detail: "found VISION.md at the root — `polako plan -design VISION.md` reads it there"}
 	}
+	return setupRow{name: visionMdPath, status: setupMissing,
+		detail: "missing " + strings.Join(missingScaffoldPages(cfg.dir), ", ") + " — " + visionAdviceOnly}
+}
+
+// missingScaffoldPages names the scaffold pages dir lacks, in the order
+// writeScaffold writes them.
+func missingScaffoldPages(dir string) []string {
 	var missing []string
 	for _, rel := range []string{visionMdPath, designsReadmePath} {
-		if !fileExistsIn(cfg.dir, filepath.FromSlash(rel)) {
+		if !fileExistsIn(dir, filepath.FromSlash(rel)) {
 			missing = append(missing, rel)
 		}
 	}
-	return setupRow{name: visionMdPath, status: setupMissing,
-		detail: "missing " + strings.Join(missing, ", ") + " — " + visionAdviceOnly}
+	return missing
 }
 
 // scaffoldOffered is -apply's gate for the scaffold question, kept apart
