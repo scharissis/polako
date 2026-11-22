@@ -1,0 +1,6 @@
+This week only:
+https://deals.example.invalid/a
+https://deals.example.invalid/b
+https://deals.example.invalid/c
+https://deals.example.invalid/d
+https://deals.example.invalid/unsubscribe

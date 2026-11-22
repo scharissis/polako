@@ -73,14 +73,16 @@ eval_grants=(
   'Bash(cp:*)'
   'Bash(sed:*)'
 
-  # The scratch repo's own scripts: lib/fixture's greet.sh and test.sh, and
-  # one-turn's bench.sh. No defaultTools prefix covers a repo's own script, so
-  # an operator whose repo is driven by one grants it with -add-tools. A run
+  # The scratch repo's own scripts: lib/fixture's greet.sh and test.sh,
+  # one-turn's bench.sh and report-evidence's triage.sh. No defaultTools
+  # prefix covers a repo's own script, so an operator whose repo is driven by
+  # one grants it with -add-tools. A run
   # names the worktree's copy by path, so each is a wildcard on the name,
   # matching ./test.sh, <worktree>/test.sh and sh <worktree>/test.sh alike.
   'Bash(*/greet.sh*)'
   'Bash(*/test.sh*)'
   'Bash(*/bench.sh*)'
+  'Bash(*/triage.sh*)'
 
   # How implement-issue's review gate confirms a backgrounded /code-review has
   # finished (issue #472). A real session has it without a grant; the CLI

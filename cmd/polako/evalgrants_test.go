@@ -55,7 +55,8 @@ var acceptEditsCommands = []string{"mkdir", "touch", "rm", "rmdir", "mv", "cp", 
 // evalFixtureScripts are the scratch repo's own scripts that a case's run
 // executes, relative to evals/. No defaultTools prefix covers a repo's own
 // script, so an operator grants one with -add-tools, and grants.sh does too.
-var evalFixtureScripts = []string{"lib/fixture/greet.sh", "lib/fixture/test.sh", "one-turn/bench.sh"}
+var evalFixtureScripts = []string{"lib/fixture/greet.sh", "lib/fixture/test.sh", "one-turn/bench.sh",
+	"report-evidence/triage.sh"}
 
 // bashPrefix is the command a `Bash(<command>:*)` entry grants, or "" for any
 // other shape.

@@ -1,0 +1,7 @@
+{
+  "number": 1,
+  "title": "triage.sh should drop messages with too many links",
+  "state": "OPEN",
+  "body": "## Problem\n\n`./triage.sh` sorts `inbox/*.txt` into keep and drop, but the only thing it\ndrops is an empty message. Link-stuffed mail like `inbox/03-deals.txt` sails\nthrough as `keep`.\n\n## What to do\n\nAdd a `links` rule: a message with more links than `max_links` is dropped,\nand its line in `triage-report.txt` reads `<file>: drop (links)`. A link is\nanything starting `http://` or `https://`. The empty rule still wins when both\napply.\n\n`max_links` comes from a config file, not the script. Add `triage.conf` at the\nrepo root holding `max_links=3`, read by default, and a `--config <path>` flag\nto read a different one instead. Add the flag to the usage text.\n\nA missing config file is an error: say which path was missing and exit 2.\nThat goes for the default `triage.conf` and for `--config`.\n\n## Done when\n\n- `./triage.sh` drops `03-deals.txt` for links and still keeps `04-review.txt`.\n- `./triage.sh --config <path>` reads its threshold from that file.\n- A missing config file errors and exits 2.\n- `./test.sh` passes, with cases covering the new rule and the flag.\n",
+  "comments": []
+}
