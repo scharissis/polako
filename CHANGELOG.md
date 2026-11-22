@@ -13,6 +13,26 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.39.0]
+
+### What's Changed
+* test: give design-plan, plan-vision and review-health the refusal grader by @scharissis in https://github.com/scharissis/polako/pull/739 (closes #705)
+* fix: ask on the thread when the push is rejected by @scharissis in https://github.com/scharissis/polako/pull/741 (closes #704)
+* fix: say $? is refused anywhere, and name the calls implement-issue's runs still get refused by @scharissis in https://github.com/scharissis/polako/pull/742
+* docs: bare polako lists the verbs in the order you use them by @scharissis in https://github.com/scharissis/polako/pull/743 (closes #730)
+* docs: one name, design doc, for the file design writes and plan reads by @scharissis in https://github.com/scharissis/polako/pull/744 (closes #731)
+* docs: README walkthrough from a vision doc to a first PR by @scharissis in https://github.com/scharissis/polako/pull/745 (closes #732)
+* fix: setup on a folder that isn't a git repo says how to make one by @scharissis in https://github.com/scharissis/polako/pull/746 (closes #733)
+* feat: setup's last line names the command to run next by @scharissis in https://github.com/scharissis/polako/pull/747 (closes #734)
+* fix: errors for a folder with no GitHub repo say what to do by @scharissis in https://github.com/scharissis/polako/pull/748 (closes #735)
+* feat: work and status on an empty backlog say how to fill it by @scharissis in https://github.com/scharissis/polako/pull/749 (closes #736)
+* fix: five wrong lines in the verbs' -h output by @scharissis in https://github.com/scharissis/polako/pull/750 (closes #737)
+* fix: two setup rows misreport a new private repo by @scharissis in https://github.com/scharissis/polako/pull/751 (closes #738)
+* fix: a rejected-push question says where the branch is and how to finish by @scharissis in https://github.com/scharissis/polako/pull/752 (closes #740)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.38.1...v0.39.0
+
 ## [0.38.1]
 
 ### What's Changed
