@@ -20,11 +20,13 @@ const setupNoRepoYet = "no repo yet"
 // when -dir is ready. why is the detail for each row that can't tell
 // because of it. ghCanTry marks a checkout whose remote just isn't called
 // origin: gh may still find the repository through it, so only the
-// origin/HEAD row is affected.
+// origin/HEAD row is affected. cause is the raw error behind fix, nil when
+// fix already quotes it — the other verbs print it after the advice.
 type checkoutGap struct {
 	fix      string
 	why      string
 	ghCanTry bool
+	cause    error
 }
 
 // setupCheckoutGap reads -dir with git alone. Nothing to say when git isn't
@@ -38,9 +40,13 @@ func setupCheckoutGap(ctx context.Context, cfg config, gitOK bool) checkoutGap {
 	// Only git's own "not a git repository" earns the git-init advice. A typo'd
 	// -dir, or a real repo git refuses (safe.directory, permissions), would be
 	// told to make a second repo.
-	if info, err := os.Stat(cfg.dir); err != nil || !info.IsDir() {
+	info, err := os.Stat(cfg.dir)
+	if err == nil && !info.IsDir() {
+		err = fmt.Errorf("%s is a file", cfg.dir)
+	}
+	if err != nil {
 		return checkoutGap{fix: fmt.Sprintf("-dir %s doesn't exist or isn't a folder — check the path", cfg.dir),
-			why: noCheckout}
+			why: noCheckout, cause: err}
 	}
 	if _, err := git(ctx, cfg, "rev-parse", "--git-dir"); err != nil {
 		switch {
@@ -51,25 +57,27 @@ func setupCheckoutGap(ctx context.Context, cfg config, gitOK bool) checkoutGap {
 			// -repo names a repository that already exists: clone it, don't
 			// make a second one.
 			return checkoutGap{fix: fmt.Sprintf("-dir %s isn't a checkout of %s — run `gh repo clone %s` "+
-				"and point -dir at it", cfg.dir, cfg.repo, cfg.repo), why: noCheckout}
+				"and point -dir at it", cfg.dir, cfg.repo, cfg.repo), why: noCheckout, cause: err}
 		default:
 			return checkoutGap{fix: fmt.Sprintf("-dir %s isn't a git repo yet — run `git init`, commit, then "+
-				"`gh repo create <name> --private --source . --push` and `git remote set-head origin -a`", cfg.dir),
-				why: setupNoRepoYet}
+				"`gh repo create <name> --private --source . --push` and `git remote set-head origin -a`; "+
+				"or point -dir at a checkout", cfg.dir),
+				why: setupNoRepoYet, cause: err}
 		}
 	}
-	if _, err := git(ctx, cfg, "remote", "get-url", "origin"); err == nil {
+	_, originErr := git(ctx, cfg, "remote", "get-url", "origin")
+	if originErr == nil {
 		return checkoutGap{}
 	}
 	const setHead = ", then `git remote set-head origin -a`"
 	if out, err := git(ctx, cfg, "remote"); err == nil && strings.TrimSpace(string(out)) != "" {
 		return checkoutGap{fix: fmt.Sprintf("-dir %s has no origin remote — run `git remote rename <name> origin` "+
-			"or `git remote add origin <url>`"+setHead, cfg.dir), ghCanTry: true}
+			"or `git remote add origin <url>`"+setHead, cfg.dir), ghCanTry: true, cause: originErr}
 	}
 	if cfg.repo != "" {
 		return checkoutGap{fix: fmt.Sprintf("-dir %s has no origin remote — run `git remote add origin <url of %s>`"+
-			setHead, cfg.dir, cfg.repo), why: "no origin remote at -dir"}
+			setHead, cfg.dir, cfg.repo), why: "no origin remote at -dir", cause: originErr}
 	}
 	return checkoutGap{fix: fmt.Sprintf("-dir %s has no origin remote — run `gh repo create <name> --private "+
-		"--source . --push` or `git remote add origin <url>`"+setHead, cfg.dir), why: setupNoRepoYet}
+		"--source . --push` or `git remote add origin <url>`"+setHead, cfg.dir), why: setupNoRepoYet, cause: originErr}
 }

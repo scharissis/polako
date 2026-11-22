@@ -79,8 +79,7 @@ func resolveRepoConfig(ctx context.Context, cfg config, dir, repoFlag, access st
 	}
 	out, err := gh(ctx, cfg, "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
 	if err != nil {
-		return cfg, fmt.Errorf("no GitHub repository reachable from %s (is gh authenticated?): %w — "+
-			"or name one with -repo owner/name", cfg.dir, err)
+		return cfg, repoViewError(ctx, cfg, err, "; or name one with -repo owner/name")
 	}
 	cfg.repo = strings.TrimSpace(string(out))
 	cfg.ghRepo = cfg.repo
