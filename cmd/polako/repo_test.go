@@ -1673,7 +1673,8 @@ func TestSkillAsksWhenThePushIsRejected(t *testing.T) {
 		"from the main checkout, where `<rel>` resolves",
 		"`gh pr create --head issue-$issue --title \"<this run's PR title>\" --body-file <rel>/.polako-scratch/PR_BODY.md`",
 		"`gh issue edit $issue --remove-label awaiting-answer`;",
-		"reply on the thread, then run `polako work`",
+		"fix the push and reply on the thread — a run carries on only once the thread has a reply",
+		"picks the reply up by itself; only if none is, start one with `polako work`",
 	} {
 		if !strings.Contains(flat, marker) {
 			t.Errorf("SKILL.md's rejected-push question no longer says %q — without it"+

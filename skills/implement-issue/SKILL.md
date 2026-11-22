@@ -1067,9 +1067,11 @@ don't post again, and stop.
        resolves: `gh pr create --head issue-$issue --title "<this run's
        PR title>" --body-file <rel>/.polako-scratch/PR_BODY.md`, then
        `gh issue edit $issue --remove-label awaiting-answer`;
-     - or let polako finish: fix the push, reply on the thread, then run
-       `polako work` — a rerun carries on only once the thread has a
-       reply.
+     - or let polako finish: fix the push and reply on the thread — a
+       run carries on only once the thread has a reply. A `polako work`
+       shift still running picks the reply up by itself; only if none
+       is, start one with `polako work`. A second shift beside a waiting
+       one works the same issue twice.
    - Leave the body file where it is. The scratch directory ignores itself,
      so it can't be committed, and no `rm` is in this run's grant.
    - Once `gh pr create` returns, and only if the `## Visual evidence`
