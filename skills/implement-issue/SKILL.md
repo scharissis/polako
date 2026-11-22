@@ -1055,15 +1055,17 @@ don't post again, and stop.
      the remote" — never the rejection's raw text. Never retry with
      `--force`, another remote or another branch name.
      The question has to be enough to act on without digging (issue
-     #740). Name where the branch is: the worktree by its path from the
-     main checkout — `.worktrees/issue-$issue`, repo-relative, never
-     absolute — and say the push works from any checkout of the repo,
-     since the commits are on the local `issue-$issue` branch. Then give
-     each answer its commands to paste, in fenced blocks:
+     #740). Name where the branch is: `<worktree>`'s path relative to the
+     main checkout — `.worktrees/issue-$issue` when Phase 1 made it, the
+     real path whenever Phase 1 found it somewhere else; repo-relative,
+     never absolute — and say the push works from any checkout of the
+     repo, since the commits are on the local `issue-$issue` branch. Then
+     give each answer its commands to paste, in fenced blocks, `<rel>`
+     below standing for that same relative path:
      - push it by hand: `git push -u origin issue-$issue`;
-     - then open the PR by hand: `gh pr create --head issue-$issue
-       --title "<this run's PR title>" --body-file
-       .worktrees/issue-$issue/.polako-scratch/PR_BODY.md`, then
+     - then open the PR by hand, from the main checkout, where `<rel>`
+       resolves: `gh pr create --head issue-$issue --title "<this run's
+       PR title>" --body-file <rel>/.polako-scratch/PR_BODY.md`, then
        `gh issue edit $issue --remove-label awaiting-answer`;
      - or let polako finish: fix the push, reply on the thread, then run
        `polako work` — a rerun carries on only once the thread has a

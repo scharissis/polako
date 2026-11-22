@@ -1666,10 +1666,12 @@ func TestSkillAsksWhenThePushIsRejected(t *testing.T) {
 	// rerun" and the operator had to dig for which worktree, and didn't learn
 	// a rerun waits on a reply. Each line here is one thing they had to find.
 	for _, marker := range []string{
-		"`.worktrees/issue-$issue`, repo-relative, never absolute",
+		"`<worktree>`'s path relative to the main checkout — `.worktrees/issue-$issue` when Phase 1 made it",
+		"repo-relative, never absolute",
 		"the push works from any checkout of the repo",
 		"`git push -u origin issue-$issue`",
-		"`gh pr create --head issue-$issue --title \"<this run's PR title>\" --body-file .worktrees/issue-$issue/.polako-scratch/PR_BODY.md`",
+		"from the main checkout, where `<rel>` resolves",
+		"`gh pr create --head issue-$issue --title \"<this run's PR title>\" --body-file <rel>/.polako-scratch/PR_BODY.md`",
 		"`gh issue edit $issue --remove-label awaiting-answer`;",
 		"reply on the thread, then run `polako work`",
 	} {
