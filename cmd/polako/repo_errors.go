@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os/exec"
@@ -26,7 +27,7 @@ func checkoutError(ctx context.Context, cfg config) error {
 		// rev-parse failed, then worked: a race nobody can act on but a rerun.
 		return fmt.Errorf("-dir %s is not a git checkout — git said: %w", cfg.dir, err)
 	}
-	return gapError(gap, "", err)
+	return gapError(gap, "")
 }
 
 // repoViewError explains a failed `gh repo view` from -dir. hint is extra
@@ -37,7 +38,7 @@ func checkoutError(ctx context.Context, cfg config) error {
 func repoViewError(ctx context.Context, cfg config, ghErr error, hint string) error {
 	if _, err := exec.LookPath("git"); err == nil {
 		if gap := setupCheckoutGap(ctx, cfg, true); gap.fix != "" && !gap.ghCanTry {
-			return gapError(gap, hint, ghErr)
+			return gapError(gap, hint)
 		}
 	}
 	host := ""
@@ -64,13 +65,13 @@ func remoteHost(raw string) string {
 }
 
 // gapError is a checkoutGap as an error: the fix, the caller's hint, then
-// the raw error — the gap's own cause when it has one, else fallback.
-func gapError(gap checkoutGap, hint string, fallback error) error {
-	cause := gap.cause
-	if cause == nil {
-		cause = fallback
+// the gap's raw cause. A nil cause means the fix already quotes git, so
+// nothing follows it.
+func gapError(gap checkoutGap, hint string) error {
+	if gap.cause == nil {
+		return errors.New(gap.fix + hint)
 	}
-	return fmt.Errorf("%s%s — the error was: %w", gap.fix, hint, cause)
+	return fmt.Errorf("%s%s — the error was: %w", gap.fix, hint, gap.cause)
 }
 
 // repoViewAdvice reads gh's error text, the only signal gh gives, plus
