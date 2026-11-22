@@ -547,7 +547,8 @@ don't post again, and stop.
    command that writes outside the worktree, sends anything, or needs
    credentials. When the behaviour lands in a file the command writes,
    point that output under `.polako-scratch/` if the command lets you, Read
-   the file, and keep the lines that show the change. Before keeping any
+   the file, and keep the lines that show the change: those lines, under
+   the file's name, are the capture, not the command's own stdout. Before keeping any
    capture, ask: would this read the same if the change were broken? If
    yes, it isn't evidence — find a better input or drop it.
    Run each command bare, one per call, and Write its real output verbatim
