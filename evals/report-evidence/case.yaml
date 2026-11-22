@@ -69,6 +69,16 @@ graders:
       if Evidence is missing, or describes the report in prose without quoting
       it.
 
+  # The judge can't tell a quoted report line from one typed off the issue
+  # text, so the rule has to have actually reached the PR's diff.
+  - type: regex
+    name: the_rule_reached_the_diff
+    target:
+      source: file
+      path: .eval/pr-diff.txt
+    pattern: '^\+\+\+ b/triage\.sh$'
+    flags: m
+
   # Production's grant, not plain Bash (evals/lib/grants.sh): a call the CLI
   # refused here is one it refuses an unattended run too, where the refusal
   # costs a turn or ends the run (SKILL.md, "No prompts, ever"). The result
