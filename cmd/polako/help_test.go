@@ -86,6 +86,9 @@ func TestVerbHelpLines(t *testing.T) {
 			if !flags[name] {
 				t.Errorf("%s -h: environment example %s%s names -%s, which %s does not have", verb, envPrefix, m[1], name, verb)
 			}
+			if envExempt[name] {
+				t.Errorf("%s -h: environment example %s%s names -%s, which the environment may not set", verb, envPrefix, m[1], name)
+			}
 		})
 	}
 }
