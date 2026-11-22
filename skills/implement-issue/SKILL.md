@@ -61,12 +61,16 @@ in another directory by naming it instead — `git -C <path>`, `go -C <path>`,
 or a tool call that already takes a path argument (Read, Write, Edit all do)
 — every place below that might otherwise say "cd into it" says this instead.
 
-The grant is checked command by command, and four habits fail it. Runs
-reach for all four, and each refusal costs a turn:
+The grant is checked command by command, and five habits fail it. Runs
+reach for all five, and each refusal costs a turn:
 
-- `; echo "exit=$?"` to see how a command went. The result already says:
-  a call that failed starts `Exit code N` and carries its stderr, and one
-  that succeeded has no such line.
+- `; echo "exit=$?"` to see how a command went — or `$?` spelled any other
+  way, anywhere in the line. The CLI refuses a line that expands it,
+  whatever the grant. The result already says: a call that failed starts
+  `Exit code N` and carries its stderr, and one that succeeded has no such
+  line. No line *is* the 0 — that's the check, not a gap to fill. A
+  pipeline is no different: `Exit code N` is its last command's status,
+  the same number `$?` would print.
 - A value carried from one command into the next in a shell variable —
   `SHA=$(git … rev-parse HEAD)`, then `"$SHA"`. Run the first command on
   its own, read the value off its result, and write it literally into the
@@ -77,6 +81,11 @@ reach for all four, and each refusal costs a turn:
 - Bash to look around or probe: `ls` or `cat` outside the checkout,
   `echo "$PATH"`, `which gh`, `gh --version`. Read, Glob and Grep look at
   files, and `gh` is granted one subcommand at a time.
+- Wrapping a command to change how it runs — `script -q /dev/null <cmd>`
+  to fake a terminal, `<cmd> <&-` to close its stdin. The grant covers
+  the command, not the wrapper. Run it plain; a state you can only reach
+  with a wrapper is the test suite's job, and `## Verification` says it
+  wasn't checked by hand.
 
 ## House style
 This skill runs in repos where polako's CLAUDE.md is not loaded, so its writing
@@ -536,7 +545,8 @@ don't post again, and stop.
    with `tee`, `printf` or a `>` redirect. Its exit status is in that
    result too: `Exit code N` when it isn't 0, no such line when it is. So
    a check that a command exits 0 or 2 needs no `; echo $?`, which the
-   grant refuses. Skip only when the change
+   grant refuses — nor does a pipeline, whose result carries its last
+   command's status. Skip only when the change
    touches nothing a human sees on a command line. Step 3's `## Evidence`
    section quotes this file — never retypes or reconstructs the output from
    memory, which is how a run ends up with an invented line instead of a
@@ -643,9 +653,14 @@ don't post again, and stop.
       worktree root or `/tmp`. The usual one is a dump of a diff too big to
       read from Bash output: the session refuses `/tmp`, the review falls
       back to an improvised name in the worktree root, and that file strands
-      the worktree after the merge. Tell it too to launch its finder and
-      verifier subagents in the foreground — `run_in_background: false`, all
-      in one message — so every report comes back inside that same call.
+      the worktree after the merge. Tell it too to look at files with Read,
+      Glob and Grep and run git as `git -C <worktree> …` — no `cd`, no
+      shell variable like `W=<worktree>`, no `ls`, `cat` or `find`. The
+      review's agents never see "No prompts, ever" above, and this run's
+      grant refuses each of those for them too. Tell it too to launch its
+      finder and verifier subagents in the foreground —
+      `run_in_background: false`, all in one message — so every report
+      comes back inside that same call.
       Backgrounded, the reports never reach the review agent on their own,
       and it burns the run's budget polling for them. Foreground does not
       remove the wait below for the review's own separate verification
