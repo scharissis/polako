@@ -157,8 +157,8 @@ that doesn't exist is told to check the path.
   the repository owner's own settings, not polako's to touch: a CI workflow
   exists (`.github/workflows/*.yml`); the default branch has a protection
   rule (`gh api .../branches/<default>/protection`, "couldn't tell" without
-  admin access to check it, and "not available on this plan" for a private
-  repo on GitHub's free plan, whatever the token); head branches delete on merge
+  admin access to check it, and `missing` with "not available on this plan"
+  for a private repo on GitHub's free plan, whatever the token); head branches delete on merge
   (`deleteBranchOnMerge`, "couldn't tell" on a `gh` too old to report it).
 
 ## Flags
