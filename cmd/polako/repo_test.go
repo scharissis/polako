@@ -1671,6 +1671,7 @@ func TestSkillAsksWhenThePushIsRejected(t *testing.T) {
 		"the push works from any checkout of the repo",
 		"`git push -u origin issue-$issue`",
 		"from the main checkout, where `<rel>` resolves",
+		"if the rejected push came before the body was written, Write it now, before asking",
 		"`gh pr create --head issue-$issue --title \"<this run's PR title>\" --body-file <rel>/.polako-scratch/PR_BODY.md`",
 		"`gh issue edit $issue --remove-label awaiting-answer`;",
 		"fix the push and reply on the thread — a run carries on only once the thread has a reply",

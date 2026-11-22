@@ -1061,7 +1061,9 @@ don't post again, and stop.
      never absolute — and say the push works from any checkout of the
      repo, since the commits are on the local `issue-$issue` branch. Then
      give each answer its commands to paste, in fenced blocks, `<rel>`
-     below standing for that same relative path:
+     below standing for that same relative path. The hand-made PR below
+     points at PR_BODY.md, so if the rejected push came before the body
+     was written, Write it now, before asking:
      - push it by hand: `git push -u origin issue-$issue`;
      - then open the PR by hand, from the main checkout, where `<rel>`
        resolves: `gh pr create --head issue-$issue --title "<this run's
