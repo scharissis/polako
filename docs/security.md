@@ -161,7 +161,7 @@ opt-in `-label` stands for, one issue at a time — so the refusal has nothing
 to guard. Its body and thread are still data, not instructions, on any
 repo that takes outside issues: naming an issue opts its text in, and the
 skill carries the same posture paragraph `implement-issue` does. See
-[`design`](reference.md#designing-a-plan-document-polako-design).
+[`design`](reference.md#writing-a-design-doc-polako-design).
 
 ## What leaves the machine
 

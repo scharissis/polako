@@ -83,7 +83,7 @@ close the issue, remove the worktree, advance to the next
 ```
 
 That is `work`'s loop. `design` is the same loop on one issue you name,
-ending at a merged plan document instead of code. `plan` and `health` are
+ending at a merged design doc instead of code. `plan` and `health` are
 simpler: one `claude` run, filing proposals, then done — no PR, no polling.
 
 You have two jobs, both on GitHub: answer a question when a run asks one on an
@@ -192,9 +192,9 @@ open prs on issue branches
 needs you: reply on #9; review and merge PR #61; decide what to do about #5 (drop needs-human to requeue); curate #27, #28 (drop proposed to queue them)
 ```
 
-On a repository with plans under `docs/designs/`, a `plan documents` table sits
-above the `needs you:` line: one row per plan, and how far along its issues
-are. A shift ends the same way — merged, parked and why, dollars spent — see
+On a repository with design docs under `docs/designs/`, a `design docs` table
+sits above the `needs you:` line: one row per doc, and how far along its
+issues are. A shift ends the same way — merged, parked and why, dollars spent — see
 [docs/behaviour.md](docs/behaviour.md) for a worked example.
 
 See what the runs cost, from the records every run leaves on your machine:
@@ -217,7 +217,7 @@ polako tidy -apply
 ## Planning a backlog
 
 Somebody still has to write the issues polako works. `plan` runs
-`/plan-backlog`: point it at a vision or roadmap document and it decomposes
+`/plan-backlog`: point it at a design doc (a vision doc counts) and it decomposes
 the gap into issues sized to one PR each, groups anything cross-cutting under
 an epic, and files the lot as **proposals**:
 
@@ -241,9 +241,10 @@ Both are documented alongside `work`'s own flags: [`plan`](docs/reference.md#pla
 
 ### Designing first
 
-`plan` decomposes a document; it does not write one. When the idea is still
-a paragraph, `design` runs `/design-plan` on it: it asks its questions on the
-issue thread, then opens a PR adding one document under `docs/designs/`, and
+Already have a doc (a vision doc counts)? Run `plan`. Only an idea? Run
+`design` first. `plan` decomposes a design doc; it does not write one.
+`design` runs `/design-plan` on the idea: it asks its questions on the
+issue thread, then opens a PR adding one design doc under `docs/designs/`, and
 the PR review is where the design gets argued. Name an open issue, or hand it
 the text and it files the issue for you:
 
@@ -253,11 +254,11 @@ polako design -brief "a dating app for horses"
 ```
 
 The hand-off is the merge. Once you merge the PR, `polako status` lists the
-new document as `draft`, and `polako plan -design docs/designs/<doc>.md`
+new design doc as `draft`, and `polako plan -design docs/designs/<doc>.md`
 turns it into proposals — printed at the end of the run, never run for you.
 `work` skips anything labelled `design`, so a request never gets coded
 before it's designed. Flags in
-[`design`](docs/reference.md#designing-a-plan-document-polako-design).
+[`design`](docs/reference.md#writing-a-design-doc-polako-design).
 
 Every proposal carries a `proposed` label, and that label is the point:
 `polako work` skips every issue that has one, so nothing a machine proposed
