@@ -42,21 +42,24 @@ func setupCIWorkflowRow(cfg config) setupRow {
 	}
 }
 
-// branchProtectionState is readBranchProtection's answer: three states, not
-// two, since "this token can't tell" is a real, common outcome (branch
-// protection is an admin-only read) and must not be reported as "off".
+// branchProtectionState is readBranchProtection's answer. "This token can't
+// tell" is a real, common outcome (branch protection is an admin-only read)
+// and must not be reported as "off" — nor as a token problem when the real
+// answer is that the plan has no branch protection at all.
 type branchProtectionState int
 
 const (
 	branchProtectionUnknown branchProtectionState = iota
 	branchProtectionOff
 	branchProtectionOn
+	branchProtectionUnavailable
 )
 
 // readBranchProtection calls the one REST endpoint that answers this: 200
-// means a rule exists, 404 means none does, and 403 means the token can't
-// tell either way (it needs admin on the repository). Any other failure is a
-// real error for retryRead to retry.
+// means a rule exists, 404 means none does, and 403 means either the plan
+// has no branch protection (a private repo on the free plan — the owner's
+// own token gets this too) or the token can't tell (it needs admin). Any
+// other failure is a real error for retryRead to retry.
 func readBranchProtection(ctx context.Context, cfg config, branch string) (branchProtectionState, error) {
 	_, err := gh(ctx, cfg, "api", "repos/{owner}/{repo}/branches/"+url.PathEscape(branch)+"/protection")
 	switch {
@@ -64,6 +67,8 @@ func readBranchProtection(ctx context.Context, cfg config, branch string) (branc
 		return branchProtectionOn, nil
 	case isNotFoundError(err):
 		return branchProtectionOff, nil
+	case isForbiddenError(err) && isPlanGatedError(err):
+		return branchProtectionUnavailable, nil
 	case isForbiddenError(err):
 		return branchProtectionUnknown, nil
 	default:
@@ -102,6 +107,9 @@ func setupBranchProtectionRow(ctx context.Context, cfg config, repoGap string, g
 		return setupRow{name: name, status: setupOK}
 	case branchProtectionOff:
 		return setupRow{name: name, status: setupMissing, detail: "advice only — " + branch + " has no branch protection rule"}
+	case branchProtectionUnavailable:
+		return setupRow{name: name, status: setupMissing,
+			detail: "advice only — not available on this plan (a private repo needs GitHub Pro, or make it public)"}
 	default:
 		return setupRow{name: name, status: setupUnknown, detail: "this token can't check branch protection (needs admin)"}
 	}

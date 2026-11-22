@@ -86,9 +86,11 @@ type ghState struct {
 	// BranchProtected and NoAdminAccess are setup's branch-protection row:
 	// `gh api .../branches/<default>/protection` answers 200 (protected), 404
 	// (BranchProtected false, the default) or 403 (NoAdminAccess true — a
-	// token without admin can't tell either way).
-	BranchProtected bool `json:"branch_protected"`
-	NoAdminAccess   bool `json:"no_admin_access"`
+	// token without admin can't tell either way). BranchProtectionPlanGated
+	// is the other 403: a private repo on the free plan, whatever the token.
+	BranchProtected           bool `json:"branch_protected"`
+	NoAdminAccess             bool `json:"no_admin_access"`
+	BranchProtectionPlanGated bool `json:"branch_protection_plan_gated"`
 
 	// FailReads is a network that has not come back yet after the host woke:
 	// the next N calls of a kind ("issue list", "pr list") fail the way gh does
@@ -996,6 +998,10 @@ func answerContents(st *ghState, args []string) (out string, changed bool, code 
 // a token without admin gets that regardless of the real state), 404
 // otherwise — the three answers readBranchProtection distinguishes.
 func answerBranchProtection(st *ghState) (out string, changed bool, code int) {
+	if st.BranchProtectionPlanGated {
+		fmt.Fprintln(os.Stderr, "gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)")
+		return "", false, 1
+	}
 	if st.NoAdminAccess {
 		fmt.Fprintln(os.Stderr, "HTTP 403: Resource not accessible by integration")
 		return "", false, 1

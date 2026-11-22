@@ -68,6 +68,18 @@ func TestSetupBranchProtectionRow(t *testing.T) {
 	if !strings.Contains(row.detail, "admin") {
 		t.Errorf("detail = %q, want it to name the admin requirement", row.detail)
 	}
+
+	// Issue #738: a private repo on the free plan gets a 403 even on the
+	// owner's token. That's the plan, not the token — say so.
+	cfg = setupCfg(t, &ghState{BranchProtectionPlanGated: true}, checkout)
+	row = setupBranchProtectionRow(context.Background(), cfg, "", true)
+	if row.status != setupMissing || row.required {
+		t.Errorf("plan-gated: row = %+v, want missing and not required (advice only)", row)
+	}
+	if !strings.Contains(row.detail, "not available on this plan") || !strings.Contains(row.detail, "advice only") ||
+		strings.Contains(row.detail, "admin") {
+		t.Errorf("plan-gated: detail = %q, want the plan named, advice only, no admin claim", row.detail)
+	}
 }
 
 // A review finding: on a -dir that isn't a git checkout at all, this row
