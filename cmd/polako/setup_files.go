@@ -191,6 +191,12 @@ func applySetupFiles(ctx context.Context, prompt *setupPrompt, cfg config, rows 
 	}
 	if want.scaffold {
 		rows[visionIdx] = resolveSetupFileRow(visionMdPath, result.proposedScaffold, result.url)
+		// The repo's own docs/VISION.md is still there; only the README went
+		// into the PR, so the row stays ok rather than claiming the doc is missing.
+		if result.proposedScaffold && fileExistsIn(cfg.dir, filepath.FromSlash(visionMdPath)) {
+			rows[visionIdx] = setupRow{name: visionMdPath, status: setupOK,
+				detail: "proposed " + designsReadmePath + ": " + result.url}
+		}
 	}
 	if result.url == "" {
 		fmt.Fprintln(prompt.out, "  nothing left to propose — already on the default branch")
