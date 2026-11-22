@@ -30,8 +30,10 @@ const (
 // report, and nothing here judges whether a repo without one is doing
 // anything wrong. plan-backlog is opt-in. Driven by scaffoldNeedsWrite — the
 // same gate proposeSetupFiles checks — rather than stat'ing docs/VISION.md
-// alone, so a repo with its own VISION.md but no docs/designs/README.md still
-// gets offered the write writeScaffold would actually make.
+// alone, so a repo with its own docs/VISION.md but no docs/designs/README.md
+// still gets offered the write writeScaffold would actually make. A root
+// VISION.md is the one exception: that repo already chose where its vision
+// lives, so it gets no scaffold offer at all.
 func setupVisionRow(cfg config) setupRow {
 	if !scaffoldNeedsWrite(cfg.dir) {
 		return setupRow{name: visionMdPath, status: setupOK}
