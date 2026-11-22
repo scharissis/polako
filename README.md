@@ -52,7 +52,8 @@ lift; `design` writes the document first — see
 
 - **`status`** — GitHub → where the backlog stands and what waits on you.
 - **`stats`** — local run data → what runs cost and how they went.
-- **`unpark`** — needs-human issues → why each parked; `-apply` clears them.
+- **`unpark`** — needs-human issues → why each parked; `-apply` asks to clear
+  each.
 - **`tidy`** — finished issues → their worktrees and branches; `-apply`
   removes them.
 - **`update`** — installed plugin and binary → the published release.

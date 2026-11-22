@@ -348,7 +348,7 @@ func verbUsage(w io.Writer) {
 			"Look after it\n"+
 			"  status  GitHub → where the backlog stands and what waits on you\n"+
 			"  stats   local run data → what runs cost and how they went\n"+
-			"  unpark  needs-human issues → why each parked; -apply clears them\n"+
+			"  unpark  needs-human issues → why each parked; -apply asks to clear each\n"+
 			"  tidy    finished issues → their worktrees and branches; -apply removes them\n"+
 			"  update  installed plugin and binary → the published release\n\n"+
 			"Run 'polako <verb> -h' for that verb's flags.\n")
