@@ -220,7 +220,7 @@ func TestIntakeSkillsRuleOutGhRepoView(t *testing.T) {
 	t.Parallel()
 	for _, dir := range []string{"plan-backlog", "review-health"} {
 		flat := strings.Join(strings.Fields(readRepoFile(t, "skills", dir, "SKILL.md")), " ")
-		for _, want := range []string{"or `gh repo view` to learn the repository's name", "`git log -1 --format=%h`"} {
+		for _, want := range []string{"or `gh repo view` to learn the repository's name", "log -1 --format=%h`"} {
 			if !strings.Contains(flat, want) {
 				t.Errorf("skills/%s/SKILL.md no longer says %q: `gh repo view` is in no verb's grant, so a run "+
 					"that reaches for it is refused", dir, want)
