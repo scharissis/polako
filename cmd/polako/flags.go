@@ -327,22 +327,30 @@ const defaultMaxIssueTime = 45 * time.Minute
 
 // verbUsage is the bare invocation's answer: the one line of etymology that
 // explains the name, then the verbs. It lists only verbs that exist, so the
-// usage never advertises a verb that errors.
+// usage never advertises a verb that errors. Verbs are grouped by when you
+// reach for them, each line saying what goes in and what comes out, because
+// this is the first thing a returning user sees (issue #730). Group headings
+// stay unindented so usageVerbs reads only the verb lines.
 func verbUsage(w io.Writer) {
 	fmt.Fprint(w,
 		"polako — Croatian for \"take it slow\": works a GitHub issue backlog to zero,\n"+
 			"one issue at a time, with a human at every gate.\n\n"+
 			"Usage: polako <verb> [flags]\n\n"+
-			"  work    work the backlog: run the skill per issue, wait for each merge, unattended\n"+
-			"  plan    propose a backlog from a design document, behind the `proposed` label, unattended\n"+
-			"  health  propose a backlog from the repository's own shape, behind the `proposed` label, unattended\n"+
-			"  design  work one design request into a plan document behind a PR, and wait for its merge, unattended\n"+
-			"  status  print where the backlog stands, from GitHub (read-only)\n"+
-			"  stats   report on the run data already recorded (local, read-only)\n"+
-			"  tidy    reclaim the worktrees and branches of finished issues (dry-run by default)\n"+
-			"  unpark  list permission parks and clear the ones you approve (read-only by default)\n"+
-			"  update  bring the installed plugin and binary to the published release\n"+
-			"  setup   report whether a repository is ready for polako (read-only by default)\n\n"+
+			"New repo? Run polako setup.\n\n"+
+			"Get ready\n"+
+			"  setup   a repo → what polako still needs; -apply fixes what it can\n\n"+
+			"Fill the backlog\n"+
+			"  design  an idea → a design doc, in a PR you merge\n"+
+			"  plan    a design doc or vision doc → proposed issues\n"+
+			"  health  the repo's code → proposed issues for what looks off\n\n"+
+			"Work it\n"+
+			"  work    open issues → one PR at a time, each waiting on your merge\n\n"+
+			"Look after it\n"+
+			"  status  GitHub → where the backlog stands and what waits on you\n"+
+			"  stats   local run data → what runs cost and how they went\n"+
+			"  unpark  needs-human issues → why each parked; -apply clears them\n"+
+			"  tidy    finished issues → their worktrees and branches; -apply removes them\n"+
+			"  update  installed plugin and binary → the published release\n\n"+
 			"Run 'polako <verb> -h' for that verb's flags.\n")
 }
 

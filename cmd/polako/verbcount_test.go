@@ -15,9 +15,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 var countWords = map[string]int{
@@ -56,6 +58,36 @@ func TestUsageVerbsParsesEveryVerb(t *testing.T) {
 		if !found {
 			t.Errorf("usageVerbs misses %q; got %v", want, got)
 		}
+	}
+}
+
+// The bare usage is read in a terminal before anything else (issue #730):
+// it fits 80 columns, says where a new repo starts, and lists the verbs in
+// the order you reach for them.
+func TestVerbUsageIsGroupedByStage(t *testing.T) {
+	t.Parallel()
+	var b strings.Builder
+	verbUsage(&b)
+	out := b.String()
+	for _, line := range strings.Split(out, "\n") {
+		if n := utf8.RuneCountInString(line); n > 80 {
+			t.Errorf("line is %d columns, over 80: %q", n, line)
+		}
+	}
+	if !strings.Contains(out, "New repo? Run polako setup.") {
+		t.Errorf("usage doesn't say where a new repo starts:\n%s", out)
+	}
+	want := []string{"setup", "design", "plan", "health", "work", "status", "stats", "unpark", "tidy", "update"}
+	if got := usageVerbs(t); !slices.Equal(got, want) {
+		t.Errorf("verb order = %v, want %v", got, want)
+	}
+	last := -1
+	for _, h := range []string{"\nGet ready\n", "\nFill the backlog\n", "\nWork it\n", "\nLook after it\n"} {
+		i := strings.Index(out, h)
+		if i <= last {
+			t.Errorf("group heading %q missing or out of order:\n%s", strings.TrimSpace(h), out)
+		}
+		last = i
 	}
 }
 
