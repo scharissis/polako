@@ -1017,8 +1017,9 @@ don't post again, and stop.
          nothing safe could show it, that step got skipped — go do it the
          way step 1 says now, and quote it here rather than writing this
          section first. If step 2's review found something that changed this same
-         command's output after step 1 captured it, that capture is stale:
-         re-run the command now and overwrite the file before quoting it —
+         command's output, or the file it writes, after step 1 captured it,
+         that capture is stale: re-run the command now and overwrite the
+         capture before quoting it —
          never quote a transcript older than the branch's current HEAD.
          Otherwise: a fenced block of the real output (before/after
          when you can still reproduce both, after alone otherwise), a link
