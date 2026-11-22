@@ -84,8 +84,9 @@ in another directory by naming it instead — `git -C <path>`, `go -C <path>`,
 or a tool call that already takes a path argument (Read, Write, Edit all do)
 — every place below that might otherwise say "cd into it" says this instead.
 
-The grant is checked command by command, and four habits fail it. Runs
-reach for all four, and each refusal costs a turn:
+The grant is checked command by command, and four habits fail it. Runs of
+this skill and its sibling `implement-issue` reach for them, and each
+refusal costs a turn:
 
 - `; echo "exit=$?"` to see how a command went. The result already says:
   a call that failed starts `Exit code N` and carries its stderr, and one
