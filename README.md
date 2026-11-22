@@ -214,6 +214,29 @@ polako tidy -apply
 `tidy` names whatever it refuses to touch and why — see
 [docs/reference.md](docs/reference.md#reclaiming-finished-issues-polako-tidy).
 
+### Starting a new project
+
+Got a folder with a vision doc and no repo yet? Put the doc at
+`docs/VISION.md` — that's the convention, though `-design` takes any path in
+the repo. Then, from that folder:
+
+```bash
+git init
+git add . && git commit -m "docs: vision"
+gh repo create my-project --private --source . --push
+git remote set-head origin -a
+polako setup -apply                       # then merge the PR it opens
+polako plan -design docs/VISION.md -dry-run
+polako plan -design docs/VISION.md
+gh issue edit 3 4 --remove-label proposed # the proposals you want
+polako work -once
+```
+
+`gh repo create --source . --push` leaves `origin/HEAD` unset, and `setup`
+then reports it missing; `git remote set-head origin -a` sets it. A private
+repo needs no gate label. A public one needs `-label` on `work`, and the
+same label added to each issue you approve — see [Security](#security).
+
 ## Planning a backlog
 
 Somebody still has to write the issues polako works. `plan` runs
