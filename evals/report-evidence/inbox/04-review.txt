@@ -1,0 +1,2 @@
+Can you look at https://git.example.invalid/pr/12 before Friday?
+Notes are in https://docs.example.invalid/notes.

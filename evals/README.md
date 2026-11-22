@@ -1,6 +1,6 @@
 # Eval suite for the shipped skills
 
-Eleven cases that grade what a run *does*, not what a `SKILL.md` says. Each one
+Twelve cases that grade what a run *does*, not what a `SKILL.md` says. Each one
 scaffolds a scratch git repo, points a stand-in `gh` at fixtures, runs a real
 skill invocation, and scores the artifacts left behind.
 
@@ -13,6 +13,7 @@ skill invocation, and scores the artifacts left behind.
 | `one-turn` | implement-issue | a slow verification step is waited out in the turn, not deferred to one that never comes |
 | `visual-change` | implement-issue | a screenshot reaches `polako-evidence` and the PR body's blob link names a real commit on it |
 | `focus-change` | implement-issue | a fix that shows only on keyboard focus gets a shot of the focused state through the pinned scratch script, and the PR no longer lists focus as unshot |
+| `report-evidence` | implement-issue | a change whose behaviour shows only in a file the tool writes gets that file's decisions in Evidence, not just the help screen and the error |
 | `push-blocked` | implement-issue | a rejected push is described in the run's own words, in a question on the thread — never with the rejection's raw text, which names a key, a home path and a username |
 | `plan-vision` | plan-backlog | a vision document becomes labelled, sized, parented proposals — and the gap the backlog already covers is not re-proposed |
 | `review-health` | review-health | a repo's planted structural problems become labelled, sized proposals, each resting on a measurement or a named location, the missing size gate proposed as its own issue, and the overlap the backlog already covers left alone |
@@ -45,6 +46,13 @@ exactly that, reasoning the shot couldn't reach the ring. It grades that the
 run shoots the focused button through the skill's scratch script, pinned to
 one Playwright version, and that the PR doesn't list focus as unshot. Same
 page shape, same `serve.py`, same `by-hand.yaml` reason.
+
+`report-evidence` seeds `triage.sh`, which sorts an inbox, prints only counts
+and writes each decision to a report file. The issue adds a rule and a flag, so
+the help screen and the missing-file error are real captures that prove
+nothing about the rule. A downstream run's Evidence was exactly that. It landed
+ahead of the skill fix (#756), the way `visual-change` did, so red is the
+expected verdict until that ships.
 
 `push-blocked` seeds a pre-receive hook on the scratch origin that rejects
 every branch but `main`, with a rejection message shaped like a real one — an
@@ -93,7 +101,7 @@ of a skill's cases a change touches, run all of that skill's.
   input is worse than none: it teaches you to ignore red.
 
 A full pass, every case, is a judgement call rather than a rule. At
-$0.30–$1.60 a case, eleven cases is $3–18. It earns that when you want a
+$0.30–$1.60 a case, twelve cases is $4–19. It earns that when you want a
 baseline: the first green run (issue #77), or before you trust a new
 `claude` version with a shift.
 

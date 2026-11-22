@@ -1,0 +1,82 @@
+schema_version: "1.0"
+name: report-evidence
+description: >
+  A change that adds a flag and the behaviour behind it, where the behaviour
+  shows only in a report file the tool writes. A downstream run put the help
+  screen and the missing-file error in its Evidence: real captures, and neither
+  would read any differently if the rule were wrong. This case grades whether
+  Evidence shows what the rule decided. It landed ahead of the skill fix
+  (#756), the way visual-change did, so red is expected until that ships.
+tags:
+  - skill
+  - evidence
+runs: 1
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: /polako:implement-issue 1
+  max_turns: 80
+  timeout_seconds: 1800
+  # defaultTools (flags.go), plus Agent, which /code-review's finders run as.
+  # The gated ones only reach the run through evals/lib/grants.sh.
+  allowed_tools:
+    - Read
+    - Write
+    - Edit
+    - Glob
+    - Grep
+    - TodoWrite
+    - Skill
+    - Agent
+    - Bash
+  # The CLI turns CLAUDE.md loading off for a run, so the workspace can't say
+  # where the project is. This says it instead, and moves the run there with
+  # one bare cd: the grant refuses a cd chained to a git command. After it the
+  # run sits where an unattended one starts.
+  append_system_prompt: >
+    The project to work on is the git checkout at ./repo, below the directory
+    you start in, which is not the project. Make your first tool call the Bash
+    command `cd repo`, alone, with nothing chained to it: that puts you in the
+    checkout, where an unattended run starts. Worktrees this run creates
+    belong inside the checkout, under its .worktrees/.
+graders:
+  - type: file_exists
+    name: plan_written
+    path: repo/.worktrees/issue-1/PLAN.md
+
+  - type: file_exists
+    name: pr_opened
+    path: .eval/pr-body.md
+
+  # The trap: triage.sh prints only counts, and --help and the missing-file
+  # error are both real output a run can capture. Only the report shows what
+  # the new rule decided.
+  - type: llm
+    name: evidence_shows_a_links_decision
+    focus:
+      source: file
+      path: .eval/pr-body.md
+    criteria: >
+      Judge only the Evidence section. The change adds a "links" rule to
+      triage.sh, which writes its decisions to triage-report.txt as lines like
+      "<file>: keep" or "<file>: drop (<rule>)". Pass only if Evidence holds
+      captured output showing a decision the new rule made: a report line such
+      as "03-deals.txt: drop (links)", in a fenced block that reads like a real
+      transcript or file excerpt the run produced. Help or usage output, the
+      error for a missing config file, and the "triage: N kept, M dropped"
+      count line do not show a decision; fail if Evidence holds only those, in
+      any mix. Help or the error beside a real report line is fine. Also fail
+      if Evidence is missing, or describes the report in prose without quoting
+      it.
+
+  # Production's grant, not plain Bash (evals/lib/grants.sh): a call the CLI
+  # refused here is one it refuses an unattended run too, where the refusal
+  # costs a turn or ends the run (SKILL.md, "No prompts, ever"). The result
+  # event lists every refusal in permission_denials, and a permission_denied
+  # system event marks each as it happens, a subagent's included.
+  # evidence.md's "Calls the CLI refused" names each one and why.
+  - type: regex
+    name: no_call_was_refused
+    target: trace
+    pattern: '"permission_denials":\[\{|"subtype":"permission_denied"'
+    match: not_contains
