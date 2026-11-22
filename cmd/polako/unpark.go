@@ -51,7 +51,7 @@ func runUnpark(ctx context.Context, args []string, in io.Reader, isTTY bool, out
 			"Lists every issue labelled needs-human, with the reason and any -add-tools\n"+
 			"entries its own park comment named. -apply asks before clearing each one,\n"+
 			"then prints the polako work line to rerun with. Naming an issue number\n"+
-			"limits this to that one issue.\n\n"+envUsage+"\nFlags:\n")
+			"limits this to that one issue.\n\n"+envUsage("REPO=owner/name")+"\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	if err := applyEnvDefaults(fs); err != nil {

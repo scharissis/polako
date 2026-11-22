@@ -64,12 +64,12 @@ func runUpdate(ctx context.Context, seed config, args []string, out io.Writer) e
 	fs.StringVar(&opt.claudeBin, "claude", "claude", "claude binary to invoke")
 	fs.StringVar(&opt.ghBin, "gh", "gh", "gh binary to invoke")
 	fs.StringVar(&opt.skill, "skill", defaultSkill,
-		"skill `polako work` would run, so update knows whether that's the plugin or a hand-copied skill")
+		"skill polako work would run, so update knows whether that's the plugin or a hand-copied skill")
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako update [flags]\n\n"+
 			"Brings the installed plugin and the binary to the release this project has\n"+
 			"actually published — never `go install ...@latest`, which can land ahead of\n"+
-			"what the plugin side resolves to. -check prints the plan and changes nothing.\n\n"+envUsage+"\nFlags:\n")
+			"what the plugin side resolves to. -check prints the plan and changes nothing.\n\n"+envUsage("GH=/opt/homebrew/bin/gh")+"\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	if err := applyEnvDefaults(fs); err != nil {

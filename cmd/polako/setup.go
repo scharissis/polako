@@ -48,7 +48,7 @@ func runSetup(ctx context.Context, args []string, in io.Reader, isTTY bool, out 
 	fs.StringVar(&opt.repo, "repo", "",
 		"repository to check readiness for (owner/name), instead of whichever -dir is a checkout of")
 	fs.StringVar(&opt.label, "label", "",
-		"gate label `polako work -label` would use — checked as one more row, and named in the suggested command")
+		"gate label polako work -label would use — checked as one more row, and named in the suggested command")
 	fs.BoolVar(&opt.apply, "apply", false,
 		"create the labels the report found missing, asking [Y/n] first — needs a terminal, or -yes")
 	fs.BoolVar(&opt.yes, "yes", false,
@@ -61,7 +61,7 @@ func runSetup(ctx context.Context, args []string, in io.Reader, isTTY bool, out 
 			"Prints a read-only readiness report: what this repository has for polako\n"+
 			"and what it's missing, ending with the command to run next: the fix, then\n"+
 			"`polako work`, or `polako plan` on a repo with no issues yet.\n"+
-			"-apply is the one thing that writes — see docs/setup.md.\n\n"+envUsage+"\nFlags:\n")
+			"-apply is the one thing that writes — see docs/setup.md.\n\n"+envUsage("REPO=owner/name")+"\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	if err := applyEnvDefaults(fs); err != nil {

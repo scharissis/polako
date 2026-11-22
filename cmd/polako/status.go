@@ -74,7 +74,7 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 	fs.StringVar(&opt.dir, "dir", ".", "path to the repository's main checkout, when -repo is not given")
 	fs.StringVar(&opt.repo, "repo", "",
 		"repository to report on (owner/name), instead of whichever -dir is a checkout of")
-	fs.StringVar(&opt.label, "label", "", "only count issues carrying this label, as `polako work` would (empty = all)")
+	fs.StringVar(&opt.label, "label", "", "only count issues carrying this label, as polako work would (empty = all)")
 	fs.StringVar(&opt.branchPrefix, "branch-prefix", "issue-", "branch name prefix the skill uses")
 	fs.BoolVar(&opt.strictOrder, "strict-order", false,
 		"report as a work run with -strict-order would: an issue awaiting an answer keeps its place in the queue")
@@ -88,7 +88,7 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 			"order `polako work` would take it, what is waiting on you, and any open PR on\n"+
 			"a branch the skill named. Reads only — nothing here changes anything,\n"+
 			"and it says the same thing whether or not a shift is running. One line,\n"+
-			"the last shift here, comes from this machine's run data instead.\n\n"+envUsage+"\nFlags:\n")
+			"the last shift here, comes from this machine's run data instead.\n\n"+envUsage("REPO=owner/name")+"\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	// The same environment defaults the drain honours, so a POLAKO_LABEL
