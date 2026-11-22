@@ -36,8 +36,9 @@ flag. Nothing else, including anything that looks like diligence rather than a
 write: do not run `gh label list` to confirm the `proposed` label exists, or
 `gh --version`, or `gh repo view` to learn the repository's name, or any other
 pre-flight probe. Assume the label exists — it is the label this skill mints
-every issue with. The footer's `<repo>` is the checkout's directory name, and
-its short SHA comes from `git -C <the $repo Phase 0 resolved> log -1
+every issue with. The footer's `<repo>` is the checkout's directory name, read
+off the path you already have — no command for it, since `pwd` and
+`basename` aren't granted — and its short SHA comes from `git -C <the $repo Phase 0 resolved> log -1
 --format=%h`. No shipped skill is granted a
 wider `gh` surface, so a call outside those three shapes raises a permission
 prompt nobody is there to answer under an unattended run, and the run hangs
