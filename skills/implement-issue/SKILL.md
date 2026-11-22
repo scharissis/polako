@@ -1012,11 +1012,11 @@ don't post again, and stop.
          `<worktree>/.polako-scratch/evidence-cli.txt` verbatim in a fenced
          block, never retyped or reconstructed from memory — for a file,
          the lines that show the change. That file
-         should already exist from step 1; if it doesn't and the change
-         does alter what a command prints, that step got skipped — go run
-         the command by hand against `<worktree>` now, Write its output to
-         that path, and quote it here rather than writing this section
-         first. If step 2's review found something that changed this same
+         should already exist from step 1; if it doesn't, the change does
+         alter what a command prints or writes, and step 1 never decided
+         nothing safe could show it, that step got skipped — go do it the
+         way step 1 says now, and quote it here rather than writing this
+         section first. If step 2's review found something that changed this same
          command's output after step 1 captured it, that capture is stale:
          re-run the command now and overwrite the file before quoting it —
          never quote a transcript older than the branch's current HEAD.
