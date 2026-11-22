@@ -73,7 +73,8 @@ func readBranchProtection(ctx context.Context, cfg config, branch string) (branc
 
 // setupBranchProtectionRow reads the default branch through
 // originDefaultBranch (setup.go), the same resolution setupOriginHeadRow
-// makes — no extra git subprocess just to name it.
+// makes — no extra git subprocess just to name it. Like that row, readSetup
+// doesn't call it on a non-checkout (setupCheckoutGap).
 func setupBranchProtectionRow(ctx context.Context, cfg config, repoGap string, gitOK bool) setupRow {
 	const name = "branch protection"
 	if repoGap != "" {
