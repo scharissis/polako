@@ -49,6 +49,14 @@ var verbHelp = map[string]func(out io.Writer) error{
 	},
 }
 
+// typeNames are the value names flag.UnquoteUsage prints when no backquote
+// overrides them, plus the ones this binary backquotes on purpose (stats
+// -html's `path`). Anything else came from a backquote nobody meant as a name.
+var typeNames = map[string]bool{
+	"string": true, "int": true, "uint": true, "float": true, "duration": true, "value": true,
+	"path": true,
+}
+
 // Issue #737: the flag package takes a help string's first backquoted word as
 // the flag's value name, so `polako work -label` in a help string printed
 // "-label polako work -label". And the environment example has to name a flag
@@ -71,8 +79,8 @@ func TestVerbHelpLines(t *testing.T) {
 					continue
 				}
 				flags[m[1]] = true
-				if strings.Contains(m[2], " ") {
-					t.Errorf("%s -h: -%s prints value name %q — a backquoted phrase in its help is being read as the name", verb, m[1], m[2])
+				if m[2] != "" && !typeNames[m[2]] {
+					t.Errorf("%s -h: -%s prints value name %q — a backquoted word in its help is being read as the name", verb, m[1], m[2])
 				}
 			}
 			if len(flags) < 3 {
