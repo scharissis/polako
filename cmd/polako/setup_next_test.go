@@ -43,6 +43,10 @@ func TestSetupNextStepWithOpenIssuesIsTheWorkLine(t *testing.T) {
 	_, checkout := upstream(t)
 	writeTestFile(t, checkout, visionMdPath)
 	cfg := setupCfg(t, &ghState{Issues: map[string]*fakeIssue{"7": {Open: true}}}, checkout)
+	// The error path prints the work line too, so check the read itself.
+	if open, err := hasOpenIssues(context.Background(), cfg); err != nil || !open {
+		t.Fatalf("hasOpenIssues = %v, %v, want true, nil", open, err)
+	}
 	got := setupNextStep(context.Background(), cfg, readyRows, "")
 	if want := suggestedWorkLine(cfg); got != want {
 		t.Errorf("setupNextStep = %q, want the work line %q", got, want)
