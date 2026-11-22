@@ -80,5 +80,8 @@ func setupRerunLine(opt setupOptions, cfg config) string {
 	if cfg.label != "" {
 		cmd += " -label " + cfg.label
 	}
+	if opt.policyLabels {
+		cmd += " -policy-labels"
+	}
 	return cmd
 }

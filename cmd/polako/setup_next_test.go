@@ -98,8 +98,8 @@ func TestSetupNextStepWithNothingNamesDesignAndHealth(t *testing.T) {
 
 func TestSetupRerunLineKeepsRepoAndLabel(t *testing.T) {
 	t.Parallel()
-	got := setupRerunLine(setupOptions{repo: "example/repo"}, config{dir: "/x", label: "ready"})
-	if want := "polako setup -dir /x -repo example/repo -label ready"; got != want {
+	got := setupRerunLine(setupOptions{repo: "example/repo", policyLabels: true}, config{dir: "/x", label: "ready"})
+	if want := "polako setup -dir /x -repo example/repo -label ready -policy-labels"; got != want {
 		t.Errorf("setupRerunLine = %q, want %q", got, want)
 	}
 }
