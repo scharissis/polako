@@ -6,7 +6,7 @@ defaults from the [environment](#setting-defaults-from-the-environment). See [se
 ## Flags
 
 These are `polako work`'s own; the other nine verbs take smaller sets —
-[`plan`](#planning-a-backlog-unattended-polako-plan), [`health`](#auditing-repository-health-unattended-polako-health), [`design`](#designing-a-plan-document-polako-design), [`status`](#where-the-backlog-stands-polako-status), [`tidy`](#reclaiming-finished-issues-polako-tidy) and [`unpark`](#clearing-a-permission-park-polako-unpark) below,
+[`plan`](#planning-a-backlog-unattended-polako-plan), [`health`](#auditing-repository-health-unattended-polako-health), [`design`](#writing-a-design-doc-polako-design), [`status`](#where-the-backlog-stands-polako-status), [`tidy`](#reclaiming-finished-issues-polako-tidy) and [`unpark`](#clearing-a-permission-park-polako-unpark) below,
 [`stats`](run-data.md#reading-it-back-polako-stats), [`update`](install.md#update) and [`setup`](setup.md) beside what they describe.
 
 | Flag | Default | Meaning |
@@ -217,11 +217,11 @@ from inside your own hook.
 ## Planning a backlog unattended: `polako plan`
 
 `polako plan` runs the [`plan-backlog`](../README.md#planning-a-backlog) skill
-the way `polako work` runs `implement-issue`: point it at a design document
-and it proposes a curated backlog — epics and one-PR issues — behind the
-`proposed` label a human lifts to queue. The layout travels: `docs/VISION.md`
-the long-range document, one plan per file under `docs/designs/`, no
-`Status:`/`Tracking:` line, `polako status` the index, a done plan leaves.
+the way `polako work` runs `implement-issue`: point it at a design doc (a
+vision doc counts) and it proposes a backlog — epics and one-PR issues —
+behind the `proposed` label a human lifts to queue. The layout travels:
+`docs/VISION.md` the long-range doc, one design doc per file in `docs/designs/`,
+no `Status:`/`Tracking:` line, `polako status` the index, done docs leave.
 
 One `claude` invocation, bracketed by two enforcement mechanisms that keep
 the curation gate structural rather than something the model has to
@@ -269,8 +269,8 @@ polako plan -design docs/VISION.md            # the real thing
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `-design` | *(none)* | Path, resolved under `-dir`, to the design or roadmap document to plan from — `docs/VISION.md` for the long-range one, `docs/designs/<topic>.md` for a single batch. Exactly one of `-design` / `-brief` is required — never a does-the-file-exist guess, so a typo fails loudly. |
-| `-brief` | *(none)* | Inline design text in place of `-design`, e.g. `-brief "a dating app for horses"` — the greenfield story, same trust tier as the document. Past ~2000 characters, put it in a file. |
+| `-design` | *(none)* | Path, resolved under `-dir`, to the design doc to plan from — `docs/VISION.md` for the long-range one, `docs/designs/<topic>.md` for a single batch. Exactly one of `-design` / `-brief` is required — never a does-the-file-exist guess, so a typo fails loudly. |
+| `-brief` | *(none)* | Inline design text in place of `-design`; the run files proposed issues straight from it, no design doc in between. E.g. `-brief "a CLI that renames photos by EXIF date"` — the greenfield story, same trust tier as a doc. Past ~2000 characters, put it in a file. |
 | `-focus` | *(none)* | Free-text steer for the run, e.g. `-focus "only the observability section"`. |
 | `-milestone` | *(derived)* | Batch milestone title, created idempotently and attached to every issue the run files by the label pass. With `-design`, defaults to the design file's name, created at preflight. With `-brief`, the run names it: the skill's report ends `Milestone: <2–5 words>` summing up the batch, and the milestone is created after the run, capped at 50 characters. No such line falls back to the brief itself, capped the same way and cut at a word boundary. `-milestone off` skips the milestone entirely. |
 | `-max-issues` | `10` | Ceiling on the issues a run may create, epics included. A ceiling, not a target — fewer, sharper issues beat coverage. |
@@ -321,7 +321,7 @@ polako health -dir ~/code/some-repo            # the real thing
 | `-run-tag` | *(none)* | Label recorded with the `health` record, so one run can be compared against another. `stats` skips health records; compare them with the `jq` line in [experiments.md](experiments.md#plan-and-health-runs), `"plan"` swapped for `"health"`. |
 | `-notify` | *(none)* | Command run when the health run finishes with proposals to curate — the `proposed` event. Checked at preflight like `polako work`'s. |
 
-## Designing a plan document: `polako design`
+## Writing a design doc: `polako design`
 
 `polako design -issue N` runs the `design-plan` skill on one design request
 and waits for its PR — one new file under `docs/designs/` — to merge. It is
@@ -351,7 +351,7 @@ polako design -brief "a dating app for horses"   # files the issue, then works i
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `-issue` | *(none)* | The design request: an open issue number. Exactly one of `-issue` / `-brief` is required. `POLAKO_ISSUE` and `POLAKO_BRIEF` are ignored — a request left in a profile would start runs nobody typed. |
-| `-brief` | *(none)* | Inline request text in place of `-issue`, filed as a new `design` issue and worked. Past ~2000 characters, put it in an issue. A dry run says what it would file and files nothing. |
+| `-brief` | *(none)* | Inline request text in place of `-issue`: files it as a new `design` issue, then writes a design doc from it, e.g. `-brief "a dating app for horses"`. Past ~2000 characters, put it in an issue. A dry run says what it would file and files nothing. |
 | `-wait` | `false` | When the run asks a question, wait on the thread for a reply instead of exiting 0. |
 | `-model` / `-effort` | `opus` / *(CLI default)* | One design steers every ticket filed from it, so `-model` defaults to a strong tier, as `plan` does. |
 | `-skill` | `polako:design-plan` | Slash command the run invokes. |
@@ -392,7 +392,7 @@ needs you: reply on #9; review and merge PR #58; grant Bash(echo:*) or fix the s
 `held back` names an otherwise-ready issue behind an open `blockedBy`
 dependency — recomputed every pass, so it clears itself once that blocker closes. Scoped to a gate label, the queues come from the same `--label` listing `work -label` drains, and one more unscoped listing finds what's outside it. Three things reach past the gate. `proposed` stays repo-wide, and a proposal without the gate label gets a clause naming both moves — `curate #7 (drop proposed, add ready)`. `design` stays repo-wide too, one clause per request: `run polako design -issue N`, or `reply on #N, then polako design -issue N` when it's awaiting an answer. An `outside the gate` row lists open issues with neither the gate label nor a hold (`needs-human`, `proposed`, `design`, `awaiting-answer`): numbers only, the first ten, then `and N more`, absent when empty. Out-of-gate containers are left out.
 
-Below that table, `plan documents` adds one row per file under `docs/designs/`:
+Below that table, `design docs` adds one row per file under `docs/designs/`:
 state derived from the naming issues (`docs/designs/done/plan-conventions.md`'s
 table), their `(completed/total closed)` container epics and open children
 (shape in the JSON example below), and a `gone` line for a footer naming a
@@ -496,7 +496,7 @@ gate-label marker; absent when the report is unscoped.
 `queue.held_back` is `{ "issue", "blockers" }`, the `held back` row's own
 issues with their still-open `blockedBy` dependencies. `queue.outside_gate` is the `outside the gate` row uncapped; `queue.ungated_proposed` is the part of `proposed` lacking the gate label; both `[]` when unscoped. `queue.design` is `{ "issue", "awaiting_answer" }`, the `design` row's issues. `queue.details` is `{ "issue", "idle_seconds", "model", "effort" }`, one per issue the text rows annotate, ascending — a sidecar, so `ready` and `proposed` stay bare numbers; each of the last three is absent with nothing to say, and `model` is `"default"` for `model:default`. `idle_seconds` is the `updatedAt` span, named apart from `quiet_seconds`, the newest comment's.
 `plans` (plural — distinct from `plan`, the usage line below it) mirrors the
-plan documents table row for row; its `gone` is `{ "path", "issues", "open"
+design docs table row for row; its `gone` is `{ "path", "issues", "open"
 }` — `issues` is every naming issue, open or closed, unlike the text
 report's own `gone` line, which only names the open ones; `open` is that count.
 

@@ -188,7 +188,7 @@ worked** — whatever their labels, which also protects hand-made epics. This
 is structural, read off GitHub's sub-issue rollup, not a label. A `gh` too
 old to report it treats containers as ordinary work after one warning; the
 `proposed` exclusion is label-only and never depends on it. So is `design`'s:
-a design request wants a plan, not code, so `work` skips it and `status` lists it.
+a design request wants a design doc, not code, so `work` skips it and `status` lists it.
 
 **A container whose sub-issues have all closed gets closed by the drain
 that notices**, with a comment first saying why:
@@ -221,8 +221,8 @@ No new flag needed: `needs-human` already means "hold this" everywhere
 else. `polako status` names a held finished container in its `needs you`
 line for the same reason.
 
-**A container that just closed can be the last thing naming its plan
-document — the drain files an issue to move it to `done/` when that happens.** If the
+**A container that just closed can be the last thing naming its design
+doc — the drain files an issue to move it to `done/` when that happens.** If the
 closed container's body carries a plan footer
 (`docs/designs/done/plan-conventions.md`) and no other open issue names the same
 document, one more `proposed` issue gets filed:
@@ -265,9 +265,9 @@ does an awaiting-answer one.
 ## `plan` and `health`: proposing work, never doing it
 
 `polako plan` and `polako health` fill the same backlog `work` drains —
-`plan` from a vision document, `health` from the repository's own shape and
-prompts. Both create issues behind the `proposed` label above and do nothing
-else: no commits, no pushes, no PRs, no edits to threads that already exist.
+`plan` from a design doc (a vision doc counts), `health` from the
+repository's own shape and prompts. Both create issues behind the `proposed`
+label above and do nothing else: no commits, no pushes, no PRs, no edits to threads that already exist.
 The whole write surface is `gh issue create` plus a scratch body file the run
 deletes — a fully subverted run's blast radius is spam behind a label.
 
@@ -286,12 +286,12 @@ plan`](reference.md#planning-a-backlog-unattended-polako-plan) and
 health`](reference.md#auditing-repository-health-unattended-polako-health)
 for the flags each takes.
 
-## `design`: one request to a plan document
+## `design`: one request to a design doc
 
 `polako design -issue N` is `work`'s per-issue path on one issue you name,
 running the `design-plan` skill instead of `implement-issue`: same restart
 safety, same parks, same PR supervision, same worktree sweep. What it
-delivers is one file under `docs/designs/` behind a PR. `-brief "text"`
+delivers is one design doc under `docs/designs/` behind a PR. `-brief "text"`
 files the request issue first, then works it. There is no queue, so no
 `-label` gate: naming the issue is the opt-in.
 

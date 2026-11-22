@@ -362,9 +362,9 @@ func printPlanDocs(w io.Writer, rpt report, plans planDocsSnapshot) {
 			rows = append(rows, []string{d.path, string(d.state), planContainersCell(d), planOpenChildrenCell(d)})
 		}
 		header := []string{"doc", "state", "containers", "open children"}
-		printTable(w, rpt, "plan documents", header, rows, len(header))
+		printTable(w, rpt, "design docs", header, rows, len(header))
 	} else {
-		fmt.Fprintf(w, "\n%s\n", rpt.bold("plan documents"))
+		fmt.Fprintf(w, "\n%s\n", rpt.bold("design docs"))
 	}
 	if len(plans.gone) > 0 {
 		var items []string

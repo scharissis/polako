@@ -92,17 +92,19 @@ func runPlan(ctx context.Context, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("plan", flag.ContinueOnError)
 	fs.SetOutput(out)
 	var opt planOptions
-	fs.StringVar(&opt.design, "design", "", "path (under -dir) to the design or roadmap document to plan from — docs/VISION.md included")
-	fs.StringVar(&opt.brief, "brief", "", "inline design text, in place of -design — exactly one of the two is required")
+	fs.StringVar(&opt.design, "design", "", "path (under -dir) to the design doc to plan from — docs/VISION.md counts")
+	fs.StringVar(&opt.brief, "brief", "", "inline design text, in place of -design; the run files proposed issues from it — exactly one of the two is required")
 	fs.StringVar(&opt.milestone, "milestone", "",
 		"batch milestone title, or \"off\" to skip it (default: the design file's name, or for a brief, a title the run picks)")
 	registerIntakeFlags(fs, &opt.intakeOptions, planVerb)
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako plan (-design <doc> | -brief \"<text>\") [flags]\n\n"+
-			"Propose a curated backlog from a design document: run the plan-backlog skill\n"+
+			"Propose a curated backlog from a design doc: run the plan-backlog skill\n"+
 			"unattended, filing epics and one-PR issues behind the `proposed` label a human\n"+
 			"lifts to queue the work. Every issue the run creates is normalised to carry\n"+
 			"exactly that label before this exits, and the run is capped at -max-issues.\n\n"+
+			"Already have a doc (a vision doc counts)? Run plan. Only an idea? Run\n"+
+			"`polako design` first.\n\n"+
 			"`polako plan -dry-run` prints the invocation a run would make and touches nothing.\n\n"+envUsage+"\nFlags:\n")
 		fs.PrintDefaults()
 	}
