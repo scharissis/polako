@@ -552,7 +552,9 @@ don't post again, and stop.
    yes, it isn't evidence — find a better input or drop it.
    Run each command bare, one per call, and Write its real output verbatim
    to `<worktree>/.polako-scratch/evidence-cli.txt` — copied off the
-   result with the Write tool, not `tee`, `printf` or a `>` redirect. Its
+   result with the Write tool, not `tee`, `printf` or a `>` redirect. Write
+   replaces the file, so a second capture is written together with every
+   earlier one, each under the command that made it. Its
    exit status is in that result too: `Exit code N` when it isn't 0, no
    such line when it is. So a check that a command exits 0 or 2 needs no
    `; echo $?`, which the grant refuses — nor does a pipeline, whose result
