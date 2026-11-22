@@ -21,11 +21,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strings"
 )
 
 type setupOptions struct {
@@ -205,12 +203,11 @@ func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []se
 		pathRow("git", "git", gitOK),
 	}
 
-	// A folder that isn't a repo yet is the usual state of a new project, and
-	// setup is the first command the README sends it to (issue #733). Asked
-	// before any gh call: with no -repo, gh would only retry a lookup that
-	// can't work and blame auth. The fix is said once, on the first row that
-	// needs a repo, and every row that needs one says why it can't tell.
+	// The fix is said once, on the first row that needs what -dir lacks, and
+	// every later row that needs it says why it can't tell — see
+	// setup_checkout.go.
 	gap := setupCheckoutGap(ctx, cfg, gitOK)
+	noCheckout := gap.fix != "" && !gap.ghCanTry
 	var repoGap string
 	fixShown := false
 	switch {
@@ -219,11 +216,11 @@ func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []se
 			setupRow{name: "gh repo view", status: setupUnknown, detail: "gh isn't on PATH"},
 			setupRow{name: "issues enabled", status: setupUnknown, detail: "gh isn't on PATH"})
 		repoGap = "the repository could not be read"
-	case gap != "" && cfg.repo == "":
+	case noCheckout && cfg.repo == "":
 		rows = append(rows,
-			setupRow{name: "gh repo view", status: setupMissing, required: true, detail: gap},
-			setupRow{name: "issues enabled", status: setupUnknown, detail: setupNoRepoYet})
-		repoGap, fixShown = setupNoRepoYet, true
+			setupRow{name: "gh repo view", status: setupMissing, required: true, detail: gap.fix},
+			setupRow{name: "issues enabled", status: setupUnknown, detail: gap.why})
+		repoGap, fixShown = gap.why, true
 	default:
 		result, err := retryRead(ctx, cfg, "gh repo view", func() (setupRepoViewResult, error) {
 			return readSetupRepoView(ctx, cfg)
@@ -241,15 +238,15 @@ func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []se
 			rows = append(rows, setupRepoOKRow(result.view, cfg.label), setupIssuesEnabledRow(result))
 		}
 	}
-	noCheckout := gap != ""
 
 	switch {
-	case noCheckout && !fixShown:
-		// -repo answered (or gh is missing), so the gh row above didn't carry
-		// the fix; origin/HEAD, the first row that needs the checkout, does.
-		rows = append(rows, setupRow{name: "origin/HEAD", status: setupMissing, required: true, detail: gap})
+	case gap.fix != "" && !fixShown:
+		// gh answered for -repo, or gh is missing, or the remote just isn't
+		// called origin: origin/HEAD, the first row that needs the checkout,
+		// carries the fix.
+		rows = append(rows, setupRow{name: "origin/HEAD", status: setupMissing, required: true, detail: gap.fix})
 	case noCheckout:
-		rows = append(rows, setupRow{name: "origin/HEAD", status: setupUnknown, detail: setupNoRepoYet})
+		rows = append(rows, setupRow{name: "origin/HEAD", status: setupUnknown, detail: gap.why})
 	default:
 		rows = append(rows, setupOriginHeadRow(ctx, cfg, gitOK))
 	}
@@ -257,7 +254,7 @@ func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []se
 		// These rows' fix is -apply's PR, which needs a repo to push to. Left
 		// "missing", they would suggest it, and -apply would try it.
 		for _, name := range []string{".gitignore", "CLAUDE.md", visionMdPath} {
-			rows = append(rows, setupRow{name: name, status: setupUnknown, detail: setupNoRepoYet})
+			rows = append(rows, setupRow{name: name, status: setupUnknown, detail: gap.why})
 		}
 	} else {
 		rows = append(rows, setupGitignoreRow(cfg), setupClaudeMdRow(cfg), setupVisionRow(cfg))
@@ -268,7 +265,7 @@ func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []se
 	rows = append(rows, setupTemplatesRow(cfg))
 	rows = append(rows, setupCIWorkflowRow(cfg))
 	if noCheckout {
-		rows = append(rows, setupRow{name: "branch protection", status: setupUnknown, detail: setupNoRepoYet})
+		rows = append(rows, setupRow{name: "branch protection", status: setupUnknown, detail: gap.why})
 	} else {
 		rows = append(rows, setupBranchProtectionRow(ctx, cfg, repoGap, gitOK))
 	}
@@ -276,38 +273,6 @@ func readSetup(ctx context.Context, cfg config, policyLabels bool) (config, []se
 	defs := setupLabelDefs(cfg, policyLabels)
 	rows = append(rows, setupLabelRows(ctx, cfg, repoGap, defs)...)
 	return cfg, rows, defs
-}
-
-// setupNoRepoYet is the detail on every row that needs a repo when -dir
-// isn't one yet — the fix itself sits on the first such row.
-const setupNoRepoYet = "no repo yet"
-
-// setupCheckoutGap says what -dir lacks before polako can use it, as the
-// fix a human runs: "" when it's a checkout with an origin remote, or when
-// git isn't on PATH (its own row already says so). `gh repo create` leaves
-// origin/HEAD unset, hence the set-head step on both.
-func setupCheckoutGap(ctx context.Context, cfg config, gitOK bool) string {
-	if !gitOK {
-		return ""
-	}
-	// Only git's own "not a git repository" earns the git-init advice. A typo'd
-	// -dir, or a real repo git refuses (safe.directory, permissions), would be
-	// told to make a second repo.
-	if info, err := os.Stat(cfg.dir); err != nil || !info.IsDir() {
-		return fmt.Sprintf("-dir %s doesn't exist or isn't a folder — check the path", cfg.dir)
-	}
-	if _, err := git(ctx, cfg, "rev-parse", "--git-dir"); err != nil {
-		if !strings.Contains(err.Error(), "not a git repository") {
-			return fmt.Sprintf("git can't read -dir %s (%v) — fix that, then rerun", cfg.dir, err)
-		}
-		return fmt.Sprintf("-dir %s isn't a git repo yet — run `git init`, commit, then "+
-			"`gh repo create <name> --private --source . --push` and `git remote set-head origin -a`", cfg.dir)
-	}
-	if _, err := git(ctx, cfg, "remote", "get-url", "origin"); err != nil {
-		return fmt.Sprintf("-dir %s has no origin remote — run `gh repo create <name> --private --source . --push` "+
-			"or `git remote add origin <url>`, then `git remote set-head origin -a`", cfg.dir)
-	}
-	return ""
 }
 
 func onPath(bin string) bool {
