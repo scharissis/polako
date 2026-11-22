@@ -205,16 +205,19 @@ func TestSkillNamesTheHabitsTheGrantRefuses(t *testing.T) {
 	}
 }
 
-// Every implement-issue case fails a run that met a refusal, so a new case
+// evalSkills are the shipped skills whose eval cases run under the grant.
+var evalSkills = []string{"implement-issue", "design-plan", "plan-backlog", "review-health"}
+
+// Every shipped skill's case fails a run that met a refusal, so a new case
 // can't quietly go back to grading only what a run produced.
-func TestImplementIssueEvalCasesFailARefusedCall(t *testing.T) {
+func TestSkillEvalCasesFailARefusedCall(t *testing.T) {
 	t.Parallel()
 	files, err := filepath.Glob(filepath.Join(repoRoot(), "evals", "*", "*.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	prompt := regexp.MustCompile(`(?m)^\s+prompt: /polako:implement-issue\b`)
-	checked := 0
+	prompt := regexp.MustCompile(`(?m)^\s+prompt: /polako:(` + strings.Join(evalSkills, "|") + `)\b`)
+	checked := map[string]int{}
 	for _, path := range files {
 		if base := filepath.Base(path); base != "case.yaml" && base != "by-hand.yaml" {
 			continue
@@ -224,10 +227,11 @@ func TestImplementIssueEvalCasesFailARefusedCall(t *testing.T) {
 			t.Fatal(err)
 		}
 		src := string(b)
-		if !prompt.MatchString(src) {
+		m := prompt.FindStringSubmatch(src)
+		if m == nil {
 			continue
 		}
-		checked++
+		checked[m[1]]++
 		rel, _ := filepath.Rel(repoRoot(), path)
 		_, grader, ok := strings.Cut(src, "name: no_call_was_refused\n")
 		if !ok {
@@ -241,7 +245,9 @@ func TestImplementIssueEvalCasesFailARefusedCall(t *testing.T) {
 			}
 		}
 	}
-	if checked == 0 {
-		t.Fatal("found no implement-issue case under evals/ — the glob or the prompt pattern is wrong")
+	for _, skill := range evalSkills {
+		if checked[skill] == 0 {
+			t.Errorf("found no %s case under evals/ — the glob or the prompt pattern is wrong", skill)
+		}
 	}
 }
