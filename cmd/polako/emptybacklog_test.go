@@ -23,6 +23,7 @@ func TestDrainOnAnEmptyBacklogSaysHowToFillIt(t *testing.T) {
 		{"designs README alone", []string{designsReadmePath}, noDocHint},
 		{"vision", []string{visionMdPath}, "fill it with `polako plan -design docs/VISION.md`"},
 		{"draft design", []string{"docs/designs/widgets.md"}, "fill it with `polako plan -design docs/designs/widgets.md`"},
+		{"draft beats vision", []string{visionMdPath, "docs/designs/widgets.md"}, "fill it with `polako plan -design docs/designs/widgets.md`"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
