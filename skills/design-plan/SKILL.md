@@ -84,6 +84,24 @@ in another directory by naming it instead — `git -C <path>`, `go -C <path>`,
 or a tool call that already takes a path argument (Read, Write, Edit all do)
 — every place below that might otherwise say "cd into it" says this instead.
 
+The grant is checked command by command, and four habits fail it. Runs
+reach for all four, and each refusal costs a turn:
+
+- `; echo "exit=$?"` to see how a command went. The result already says:
+  a call that failed starts `Exit code N` and carries its stderr, and one
+  that succeeded has no such line.
+- A value carried from one command into the next in a shell variable —
+  `SHA=$(git … rev-parse HEAD)`, then `"$SHA"` — or spliced in inline, as
+  in `git worktree add … $(git symbolic-ref …)`. Run the first command on
+  its own, read the value off its result, and write it literally into the
+  next.
+- `cd <dir> && git …`, or a `cd` in any line that also runs git, after
+  `;` or `||` too. The CLI refuses it whatever the grant; `git -C <dir>`
+  does the same job.
+- Bash to look around or probe: `ls` or `cat` outside the checkout,
+  `echo "$PATH"`, `which gh`, `gh --version`. Read, Glob and Grep look at
+  files, and `gh` is granted one subcommand at a time.
+
 ## House style
 This skill runs in repos where polako's CLAUDE.md is not loaded, so its writing
 rule is copied here. Everything you write for a human to read — the plan
@@ -223,7 +241,9 @@ from the default branch, which would discard them. Then, by case:
   and `git worktree add` `<main-checkout>/.worktrees/issue-$issue` — taking an
   existing branch as-is (`git worktree add <path> issue-$issue`), and only
   using `-b` off the remote default branch when there is no such branch
-  anywhere. That path is `<worktree>`, carried forward the same way.
+  anywhere. Resolve that branch first, in its own call — `git symbolic-ref
+  refs/remotes/origin/HEAD --short` — and write what it printed into the
+  `worktree add`. That path is `<worktree>`, carried forward the same way.
 
 If the branch already existed, bring it up to date before Phase 2: `git -C
 <worktree> merge` the `origin/…` ref Phase 1 resolved, and write one line in
