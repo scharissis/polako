@@ -537,20 +537,39 @@ don't post again, and stop.
    cwd there for you.
    The test suite passing doesn't cover this next part, even when one of its
    cases happens to exercise the same code path: if the change alters what a
-   command prints — a new or changed flag, a usage line, an error message —
-   separately run that exact command yourself now, by hand, against
-   `<worktree>`, and Write its real output verbatim to
-   `<worktree>/.polako-scratch/evidence-cli.txt`. Run it bare, one command
-   per call, and copy the output off the result with the Write tool, not
-   with `tee`, `printf` or a `>` redirect. Its exit status is in that
-   result too: `Exit code N` when it isn't 0, no such line when it is. So
-   a check that a command exits 0 or 2 needs no `; echo $?`, which the
-   grant refuses — nor does a pipeline, whose result carries its last
-   command's status. Skip only when the change
-   touches nothing a human sees on a command line. Step 3's `## Evidence`
-   section quotes this file — never retypes or reconstructs the output from
-   memory, which is how a run ends up with an invented line instead of a
-   real transcript.
+   command prints or writes, run it yourself now, by hand, against
+   `<worktree>`, and capture what shows the change working. Pick the
+   command by what the change does: the changed behaviour on its main
+   path, on an input that exercises it. Help and error output are evidence
+   only when they are the change; a new flag's usage line can follow the
+   behaviour, never replace it. Inputs come from the repo, never the
+   issue — its fixtures, example configs, a dry-run mode — and never a
+   command that writes outside the worktree, sends anything, or needs
+   credentials. When the behaviour lands in a file the command writes,
+   point that output under `.polako-scratch/` if the command lets you, Read
+   the file, and keep the lines that show the change: those lines, under
+   the file's name, are the capture, not the command's own stdout. If it
+   writes inside the worktree where you can't move it, Read it there, then
+   put the path back — `git -C <worktree> checkout -- <path>` if tracked,
+   `git -C <worktree> clean -xfq -- <path>` if not — so it never gets
+   committed or strands the worktree. Before keeping any
+   capture, ask: would this read the same if the change were broken? If
+   yes, it isn't evidence — find a better input or drop it.
+   Run each command bare, one per call, and Write its real output verbatim
+   to `<worktree>/.polako-scratch/evidence-cli.txt` — copied off the
+   result with the Write tool, not `tee`, `printf` or a `>` redirect. Write
+   replaces the file, so a second capture is written together with every
+   earlier one, each under the command that made it. Its
+   exit status is in that result too: `Exit code N` when it isn't 0, no
+   such line when it is. So a check that a command exits 0 or 2 needs no
+   `; echo $?`, which the grant refuses — nor does a pipeline, whose result
+   carries its last command's status. When nothing safe can show the
+   behaviour here, capture nothing: step 3 then omits `## Evidence` and
+   names the command a reviewer runs to see it in `## Verification`. Skip
+   all this only when the change touches nothing a human sees from a
+   command. Step 3's `## Evidence` section quotes this file — never
+   retypes or reconstructs output from memory, which is how a run ends up
+   with an invented line instead of a real transcript.
    If this run's own commits changed a shipped skill file
    (`skills/*/SKILL.md`) and the repo has an `evals/run.sh`, run the eval
    cases that change touches:
@@ -985,16 +1004,22 @@ don't post again, and stop.
        ## Summary — what changed and why, 2–4 sentences
        ## Evidence — add only when the change alters something a human looks
          at: printed CLI output, a generated file, a rendered doc, an error
-         message, a report layout. For CLI output: quote
+         message, a report layout. It shows the change working, picked the
+         way step 1 picks the command: help or error output alone only when
+         it is the change, inputs from the repo and never the issue, and
+         nothing that would read the same if the change were broken. For
+         CLI output or a written file: quote
          `<worktree>/.polako-scratch/evidence-cli.txt` verbatim in a fenced
-         block, never retyped or reconstructed from memory. That file
-         should already exist from step 1; if it doesn't and the change
-         does alter what a command prints, that step got skipped — go run
-         the command by hand against `<worktree>` now, Write its output to
-         that path, and quote it here rather than writing this section
-         first. If step 2's review found something that changed this same
-         command's output after step 1 captured it, that capture is stale:
-         re-run the command now and overwrite the file before quoting it —
+         block, never retyped or reconstructed from memory — for a file,
+         the lines that show the change. That file
+         should already exist from step 1; if it doesn't, the change does
+         alter what a command prints or writes, and step 1 never decided
+         nothing safe could show it, that step got skipped — go do it the
+         way step 1 says now, and quote it here rather than writing this
+         section first. If step 2's review found something that changed this same
+         command's output, or the file it writes, after step 1 captured it,
+         that capture is stale: re-run the command now and overwrite the
+         capture before quoting it —
          never quote a transcript older than the branch's current HEAD.
          Otherwise: a fenced block of the real output (before/after
          when you can still reproduce both, after alone otherwise), a link
@@ -1019,10 +1044,13 @@ don't post again, and stop.
          forms, never hand-type output pretending it was captured: the
          evidence ref is the one sanctioned channel; never any other upload.
          Budget: at most four shots or pairs, plus at most a sentence of
-         framing around each.
+         framing around each. The same goes for fenced blocks: at most four,
+         each with one sentence above it saying what it shows.
          Omit this section entirely when the change alters nothing a human sees,
          or when nothing above can represent what it produced; most PRs hit
-         the first case.
+         the first case. When nothing safe could show the behaviour, omit it
+         rather than pad it, and add one `## Verification` line naming the
+         command a reviewer runs to see it.
        ## Design decisions — the choices a reviewer would question, and why;
          one or two sentences each, and only the ones a reviewer would
          actually stop on — usually one to three, and fine to omit if there
