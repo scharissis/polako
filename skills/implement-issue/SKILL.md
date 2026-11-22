@@ -64,9 +64,13 @@ or a tool call that already takes a path argument (Read, Write, Edit all do)
 The grant is checked command by command, and four habits fail it. Runs
 reach for all four, and each refusal costs a turn:
 
-- `; echo "exit=$?"` to see how a command went. The result already says:
-  a call that failed starts `Exit code N` and carries its stderr, and one
-  that succeeded has no such line.
+- `; echo "exit=$?"` to see how a command went — or `$?` spelled any other
+  way, anywhere in the line. The CLI refuses a line that expands it,
+  whatever the grant. The result already says: a call that failed starts
+  `Exit code N` and carries its stderr, and one that succeeded has no such
+  line. No line *is* the 0 — that's the check, not a gap to fill. A
+  pipeline is no different: `Exit code N` is its last command's status,
+  the same number `$?` would print.
 - A value carried from one command into the next in a shell variable —
   `SHA=$(git … rev-parse HEAD)`, then `"$SHA"`. Run the first command on
   its own, read the value off its result, and write it literally into the
@@ -536,7 +540,8 @@ don't post again, and stop.
    with `tee`, `printf` or a `>` redirect. Its exit status is in that
    result too: `Exit code N` when it isn't 0, no such line when it is. So
    a check that a command exits 0 or 2 needs no `; echo $?`, which the
-   grant refuses. Skip only when the change
+   grant refuses — nor does one fed stdin through a pipe, whose result
+   carries the last command's status. Skip only when the change
    touches nothing a human sees on a command line. Step 3's `## Evidence`
    section quotes this file — never retypes or reconstructs the output from
    memory, which is how a run ends up with an invented line instead of a
