@@ -94,12 +94,12 @@ func preflightShared(ctx context.Context, cfg *config, gate func(visibility stri
 	if err := checkNotifyCommand(cfg.notifyCmd); err != nil {
 		return err
 	}
-	if _, err := git(ctx, *cfg, "rev-parse", "--git-dir"); err != nil {
-		return fmt.Errorf("-dir %s is not a git checkout: %w", cfg.dir, err)
+	if err := checkoutError(ctx, *cfg); err != nil {
+		return err
 	}
 	out, err := gh(ctx, *cfg, "repo", "view", "--json", "nameWithOwner,visibility")
 	if err != nil {
-		return fmt.Errorf("no GitHub repository reachable from %s (is gh authenticated?): %w", cfg.dir, err)
+		return repoViewError(ctx, *cfg, err, "")
 	}
 	var repoView struct {
 		NameWithOwner string `json:"nameWithOwner"`

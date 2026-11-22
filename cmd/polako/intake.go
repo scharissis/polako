@@ -158,12 +158,12 @@ func intakePreflight(ctx context.Context, cfg *config, opt *intakeOptions, verb 
 	if err := checkNotifyCommand(cfg.notifyCmd); err != nil {
 		return false, err
 	}
-	if _, err := git(ctx, *cfg, "rev-parse", "--git-dir"); err != nil {
-		return false, fmt.Errorf("-dir %s is not a git checkout: %w", cfg.dir, err)
+	if err := checkoutError(ctx, *cfg); err != nil {
+		return false, err
 	}
 	raw, err := gh(ctx, *cfg, "repo", "view", "--json", "nameWithOwner")
 	if err != nil {
-		return false, fmt.Errorf("no GitHub repository reachable from %s (is gh authenticated?): %w", cfg.dir, err)
+		return false, repoViewError(ctx, *cfg, err, "")
 	}
 	var repoView struct {
 		NameWithOwner string `json:"nameWithOwner"`
