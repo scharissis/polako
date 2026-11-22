@@ -122,7 +122,10 @@ func applySetupFiles(ctx context.Context, prompt *setupPrompt, cfg config, rows 
 	if claudeIdx >= 0 && rows[claudeIdx].status == setupMissing {
 		want.claudeMd = prompt.confirm(fmt.Sprintf("propose the CLAUDE.md polako block through a PR on %q?", setupBranch))
 	}
-	if visionIdx >= 0 && rows[visionIdx].status == setupMissing {
+	// The vision row can read ok and still leave a page to scaffold, so the
+	// question keys off scaffoldOffered; the status check keeps a "couldn't
+	// tell" row (no repo to push to) from asking at all.
+	if visionIdx >= 0 && rows[visionIdx].status != setupUnknown && scaffoldOffered(cfg.dir) {
 		want.scaffold = prompt.confirmDefault(
 			"also scaffold docs/VISION.md and docs/designs/README.md through the same PR?", false)
 	}

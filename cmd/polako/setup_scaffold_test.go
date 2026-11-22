@@ -18,18 +18,24 @@ func TestSetupVisionRow(t *testing.T) {
 		t.Errorf("row with neither page = %+v, want missing, not required, naming both", r)
 	}
 
-	// A repo with its own docs/VISION.md but no docs/designs/README.md still
-	// has something scaffoldNeedsWrite (and writeScaffold) would add — the
-	// row has to say so, not read ok off docs/VISION.md alone.
+	if !scaffoldOffered(dir) {
+		t.Errorf("scaffoldOffered = false with neither page, want true")
+	}
+
+	// Issue #738: with docs/VISION.md there, the row is ok — the README is
+	// optional, named in the detail — and -apply still offers to add it.
 	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
 		t.Fatalf("mkdir docs: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "docs", "VISION.md"), []byte("# Vision\n"), 0o644); err != nil {
 		t.Fatalf("writing docs/VISION.md: %v", err)
 	}
-	if r := setupVisionRow(config{dir: dir}); r.status != setupMissing ||
-		strings.Contains(r.detail, visionMdPath) || !strings.Contains(r.detail, designsReadmePath) {
-		t.Errorf("row with only docs/VISION.md present = %+v, want missing naming only %s", r, designsReadmePath)
+	if r := setupVisionRow(config{dir: dir}); r.status != setupOK || strings.Contains(r.detail, visionMdPath) ||
+		!strings.Contains(r.detail, designsReadmePath) || !strings.Contains(r.detail, "optional") {
+		t.Errorf("row with only docs/VISION.md present = %+v, want ok naming only %s as optional", r, designsReadmePath)
+	}
+	if !scaffoldOffered(dir) {
+		t.Errorf("scaffoldOffered = false with docs/designs/README.md missing, want true")
 	}
 
 	if err := os.MkdirAll(filepath.Join(dir, "docs", "designs"), 0o755); err != nil {
@@ -40,6 +46,24 @@ func TestSetupVisionRow(t *testing.T) {
 	}
 	if r := setupVisionRow(config{dir: dir}); r.status != setupOK {
 		t.Errorf("row with both pages present = %+v, want ok", r)
+	}
+	if scaffoldOffered(dir) {
+		t.Errorf("scaffoldOffered = true with both pages present, want false")
+	}
+}
+
+// A root VISION.md is where that repo keeps its vision: ok, and no offer.
+func TestScaffoldNotOfferedOverARootVision(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "VISION.md"), []byte("# Vision\n"), 0o644); err != nil {
+		t.Fatalf("writing VISION.md: %v", err)
+	}
+	if r := setupVisionRow(config{dir: dir}); r.status != setupOK || !strings.Contains(r.detail, "root") {
+		t.Errorf("row = %+v, want ok naming the root VISION.md", r)
+	}
+	if scaffoldOffered(dir) {
+		t.Errorf("scaffoldOffered = true over a root VISION.md, want false")
 	}
 }
 

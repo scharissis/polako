@@ -28,19 +28,20 @@ const (
 
 // setupVisionRow is advisory only: the scaffold not existing never fails the
 // report, and nothing here judges whether a repo without one is doing
-// anything wrong. plan-backlog is opt-in. Driven by scaffoldNeedsWrite — the
-// same gate proposeSetupFiles checks — rather than stat'ing docs/VISION.md
-// alone, so a repo with its own docs/VISION.md but no docs/designs/README.md
-// still gets offered the write writeScaffold would actually make. A root
-// VISION.md is the one exception: that repo already chose where its vision
-// lives, so it gets no scaffold offer at all.
+// anything wrong. plan-backlog is opt-in. The row is named for the vision
+// doc, so it reads `ok` whenever that doc exists — docs/designs/README.md
+// alone missing is a note in the detail, not a `missing` row (issue #738).
 func setupVisionRow(cfg config) setupRow {
 	if !scaffoldNeedsWrite(cfg.dir) {
 		return setupRow{name: visionMdPath, status: setupOK}
 	}
+	if fileExistsIn(cfg.dir, filepath.FromSlash(visionMdPath)) {
+		return setupRow{name: visionMdPath, status: setupOK,
+			detail: "no " + designsReadmePath + " — optional — `polako setup -apply` can scaffold it (advice only)"}
+	}
 	// A root VISION.md is the doc this row exists to find, just kept
-	// elsewhere. `ok` here also keeps -apply from offering a second one.
-	if !fileExistsIn(cfg.dir, filepath.FromSlash(visionMdPath)) && fileExistsIn(cfg.dir, rootVisionPath) {
+	// elsewhere. scaffoldOffered keeps -apply from offering a second one.
+	if fileExistsIn(cfg.dir, rootVisionPath) {
 		return setupRow{name: visionMdPath, status: setupOK,
 			detail: "found VISION.md at the root — `polako plan -design VISION.md` reads it there"}
 	}
@@ -52,6 +53,18 @@ func setupVisionRow(cfg config) setupRow {
 	}
 	return setupRow{name: visionMdPath, status: setupMissing,
 		detail: "missing " + strings.Join(missing, ", ") + " — " + visionAdviceOnly}
+}
+
+// scaffoldOffered is -apply's gate for the scaffold question, kept apart
+// from the row's status: a repo with its own docs/VISION.md but no
+// docs/designs/README.md reads `ok` yet still has a page writeScaffold would
+// add. A root VISION.md with no docs/VISION.md is the one exception: that
+// repo already chose where its vision lives, so it gets no offer at all.
+func scaffoldOffered(dir string) bool {
+	if !scaffoldNeedsWrite(dir) {
+		return false
+	}
+	return fileExistsIn(dir, filepath.FromSlash(visionMdPath)) || !fileExistsIn(dir, rootVisionPath)
 }
 
 // scaffoldNeedsWrite reports whether either scaffold page is missing from
