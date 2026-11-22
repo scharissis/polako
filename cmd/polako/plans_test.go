@@ -318,7 +318,7 @@ func TestRenderStatusAndJSONIncludePlanDocuments(t *testing.T) {
 
 	var out strings.Builder
 	renderStatus(&out, report{}, cfg, snap)
-	for _, want := range []string{"plan documents", "docs/designs/backlog-fill.md", "active"} {
+	for _, want := range []string{"design docs", "docs/designs/backlog-fill.md", "active"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("report missing %q:\n%s", want, out.String())
 		}

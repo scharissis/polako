@@ -61,7 +61,7 @@ func designFlagSet(out io.Writer, cfg *config, opt *designOptions, local *localF
 	fs.SetOutput(out)
 	fs.IntVar(&opt.issue, "issue", 0, "the design request to work: an open issue number")
 	fs.StringVar(&opt.brief, "brief", "",
-		"inline request text, filed as a new design issue and then worked — exactly one of -issue / -brief is required")
+		"inline request text: files it as a new design issue, then writes a design doc from it — exactly one of -issue / -brief is required")
 	fs.BoolVar(&opt.wait, "wait", false,
 		"when the run asks a question, wait on the thread for a reply instead of exiting")
 	registerIssueFlags(fs, cfg, defaultDesignSkill, designTools, local)
@@ -70,7 +70,7 @@ func designFlagSet(out io.Writer, cfg *config, opt *designOptions, local *localF
 		"print the claude invocation -issue would get, or the issue -brief would file, and exit without running or writing anything")
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako design (-issue N | -brief \"<text>\") [flags]\n\n"+
-			"Work one design request into a plan document: run the design-plan skill on\n"+
+			"Work one design request into a design doc: run the design-plan skill on\n"+
 			"issue N unattended and wait for its PR to merge — or park it for a human.\n"+
 			"-brief files that issue first, labelled design, then works it the same way.\n"+
 			"A question on the thread exits 0; reply there and rerun. Nothing here merges.\n\n"+
@@ -124,7 +124,7 @@ func validateDesignSource(opt *designOptions) error {
 		return errors.New("design needs something to design from — pass -issue N (an open issue) " +
 			"or -brief \"<one sentence>\"")
 	case len(opt.brief) > planBriefMax:
-		return fmt.Errorf("-brief is %d characters — past %d that is a design document's worth: "+
+		return fmt.Errorf("-brief is %d characters — past %d that is a design doc's worth: "+
 			"put it in an issue and pass -issue", len(opt.brief), planBriefMax)
 	}
 	return nil
@@ -414,13 +414,13 @@ func designRun(ctx context.Context, cfg config, issue int) error {
 // would turn the merge into a trigger.
 func designHandOff(ctx context.Context, cfg config, issue int, st *issueState) {
 	if st.closedNoChange {
-		cfg.logf("issue #%d was closed with no change needed — no plan document to hand off", issue)
+		cfg.logf("issue #%d was closed with no change needed — no design doc to hand off", issue)
 		return
 	}
 	merged := "its PR merged"
 	if pr, err := prForBranch(ctx, cfg, fmt.Sprintf("%s%d", cfg.branchPrefix, issue)); err == nil && pr != nil {
 		merged = fmt.Sprintf("PR #%d merged", pr.Number)
 	}
-	cfg.logf("issue #%d: %s — `polako status` lists the new plan document as draft; "+
-		"`polako plan -design <that document>` proposes its tickets", issue, merged)
+	cfg.logf("issue #%d: %s — `polako status` lists the new design doc as draft; "+
+		"`polako plan -design <that doc>` proposes its tickets", issue, merged)
 }
