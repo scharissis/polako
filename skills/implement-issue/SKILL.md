@@ -83,9 +83,9 @@ reach for all five, and each refusal costs a turn:
   files, and `gh` is granted one subcommand at a time.
 - Wrapping a command to change how it runs — `script -q /dev/null <cmd>`
   to fake a terminal, `<cmd> <&-` to close its stdin. The grant covers
-  the command, not the wrapper. Run it plain; a
-  state you can only reach with a wrapper is the test suite's job, and
-  `## Verification` says it wasn't checked by hand.
+  the command, not the wrapper. Run it plain; a state you can only reach
+  with a wrapper is the test suite's job, and `## Verification` says it
+  wasn't checked by hand.
 
 ## House style
 This skill runs in repos where polako's CLAUDE.md is not loaded, so its writing
@@ -659,7 +659,8 @@ don't post again, and stop.
       review's agents never see "No prompts, ever" above, and this run's
       grant refuses each of those for them too. Tell it too to launch its
       finder and verifier subagents in the foreground —
-      `run_in_background: false`, all in one message — so every report comes back inside that same call.
+      `run_in_background: false`, all in one message — so every report
+      comes back inside that same call.
       Backgrounded, the reports never reach the review agent on their own,
       and it burns the run's budget polling for them. Foreground does not
       remove the wait below for the review's own separate verification
