@@ -548,7 +548,11 @@ don't post again, and stop.
    credentials. When the behaviour lands in a file the command writes,
    point that output under `.polako-scratch/` if the command lets you, Read
    the file, and keep the lines that show the change: those lines, under
-   the file's name, are the capture, not the command's own stdout. Before keeping any
+   the file's name, are the capture, not the command's own stdout. If it
+   writes inside the worktree where you can't move it, Read it there, then
+   put the path back — `git -C <worktree> checkout -- <path>` if tracked,
+   `git -C <worktree> clean -xfq -- <path>` if not — so it never gets
+   committed or strands the worktree. Before keeping any
    capture, ask: would this read the same if the change were broken? If
    yes, it isn't evidence — find a better input or drop it.
    Run each command bare, one per call, and Write its real output verbatim
