@@ -65,9 +65,12 @@ Every row that needs a repo says `no repo yet` and asks `gh` nothing, and
 `origin` remote gets its own fix: `gh repo create <name> --private --source
 . --push`, or `git remote add origin <url>`, then `git remote set-head
 origin -a`. That last step is on both because `gh repo create` leaves
-`origin/HEAD` unset. With `-repo` given, `gh` can still answer for the
-repository, so only the rows that read the checkout say `no repo yet`, and
-the fix goes on the `origin/HEAD` row.
+`origin/HEAD` unset. A remote that just isn't called `origin` still lets
+`gh` find the repository; only the `origin/HEAD` row asks you to rename it.
+With `-repo` given, `gh` can still answer for that repository, so only the
+rows that read the checkout say `no checkout at -dir`, and the fix — `gh
+repo clone`, not a second repo — goes on the `origin/HEAD` row. A `-dir`
+that doesn't exist is told to check the path.
 
 ## What it checks
 
