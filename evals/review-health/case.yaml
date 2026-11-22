@@ -212,3 +212,15 @@ graders:
     name: the_scratch_body_was_cleaned_up
     path: '**/ISSUE_BODY.md'
     exists: false
+
+  # Production's grant, not plain Bash (evals/lib/grants.sh): a call the CLI
+  # refused here is one it refuses an unattended run too, where the refusal
+  # costs a turn or ends the run. The result event lists every refusal in
+  # permission_denials, and a permission_denied system event marks each as it
+  # happens. The grant is every verb's at once, so this misses a call only
+  # another verb grants; nothing_but_issues_was_created covers gh's share.
+  - type: regex
+    name: no_call_was_refused
+    target: trace
+    pattern: '"permission_denials":\[\{|"subtype":"permission_denied"'
+    match: not_contains

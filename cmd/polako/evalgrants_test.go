@@ -174,28 +174,33 @@ func TestEvalGrantsStandInForTheDefaultPermissionMode(t *testing.T) {
 const evalRefusalPattern = `'"permission_denials":\[\{|"subtype":"permission_denied"'`
 
 // The eval cases, run under the grant, found four habits refused in every
-// implement-issue case (2026-09-26). The skill names each, beside the fix;
-// this keeps a later edit from dropping one.
+// implement-issue case (2026-09-26), and two of them in design-plan's. Each
+// skill names all four, beside the fix; this keeps a later edit from dropping
+// one.
 func TestSkillNamesTheHabitsTheGrantRefuses(t *testing.T) {
 	t.Parallel()
-	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
-	start := strings.Index(skill, "## No prompts, ever")
-	end := strings.Index(skill, "## House style")
-	if start < 0 || end < start {
-		t.Fatal("SKILL.md no longer has a `## No prompts, ever` section before `## House style`")
-	}
-	flat := strings.Join(strings.Fields(skill[start:end]), " ")
-	for _, want := range []struct{ text, why string }{
-		{`echo "exit=$?"`, "a run tacks it on to see how a command went; the result's `Exit code N` already says"},
-		{"starts `Exit code N`", "the fix for the `$?` habit is reading the result, and a run needs telling where"},
-		{"in a shell variable", "a value carried in `$VAR` into the next command is refused"},
-		{"`cd <dir> && git …`", "a cd chained to a git command is refused whatever the grant"},
-		{"`gh --version`", "gh is granted per subcommand, so probing it is refused"},
-	} {
-		if !strings.Contains(flat, want.text) {
-			t.Errorf("\"No prompts, ever\" no longer says %q: %s", want.text, want.why)
+	for _, dir := range []string{skillDir, "design-plan"} {
+		skill := readRepoFile(t, "skills", dir, "SKILL.md")
+		start := strings.Index(skill, "## No prompts, ever")
+		end := strings.Index(skill, "## House style")
+		if start < 0 || end < start {
+			t.Errorf("%s/SKILL.md no longer has a `## No prompts, ever` section before `## House style`", dir)
+			continue
+		}
+		flat := strings.Join(strings.Fields(skill[start:end]), " ")
+		for _, want := range []struct{ text, why string }{
+			{`echo "exit=$?"`, "a run tacks it on to see how a command went; the result's `Exit code N` already says"},
+			{"starts `Exit code N`", "the fix for the `$?` habit is reading the result, and a run needs telling where"},
+			{"in a shell variable", "a value carried in `$VAR` into the next command is refused"},
+			{"`cd <dir> && git …`", "a cd chained to a git command is refused whatever the grant"},
+			{"`gh --version`", "gh is granted per subcommand, so probing it is refused"},
+		} {
+			if !strings.Contains(flat, want.text) {
+				t.Errorf("%s's \"No prompts, ever\" no longer says %q: %s", dir, want.text, want.why)
+			}
 		}
 	}
+	skill := readRepoFile(t, "skills", skillDir, "SKILL.md")
 	// The general rule didn't reach the step where a run checks its own
 	// command's exit status by hand. Most of what was still refused after it
 	// landed was there, so the step says it too.
@@ -205,16 +210,35 @@ func TestSkillNamesTheHabitsTheGrantRefuses(t *testing.T) {
 	}
 }
 
-// Every implement-issue case fails a run that met a refusal, so a new case
+// evalSkills are the shipped skills whose eval cases run under the grant.
+var evalSkills = []string{"implement-issue", "design-plan", "plan-backlog", "review-health"}
+
+// plan-vision's and review-health's cases both reached for `gh repo view` to
+// name the repository (2026-09-26), and neither verb grants it. Each skill
+// says not to, and where the footer's values come from instead.
+func TestIntakeSkillsRuleOutGhRepoView(t *testing.T) {
+	t.Parallel()
+	for _, dir := range []string{"plan-backlog", "review-health"} {
+		flat := strings.Join(strings.Fields(readRepoFile(t, "skills", dir, "SKILL.md")), " ")
+		for _, want := range []string{"or `gh repo view` to learn the repository's name", "log -1 --format=%h`"} {
+			if !strings.Contains(flat, want) {
+				t.Errorf("skills/%s/SKILL.md no longer says %q: `gh repo view` is in no verb's grant, so a run "+
+					"that reaches for it is refused", dir, want)
+			}
+		}
+	}
+}
+
+// Every shipped skill's case fails a run that met a refusal, so a new case
 // can't quietly go back to grading only what a run produced.
-func TestImplementIssueEvalCasesFailARefusedCall(t *testing.T) {
+func TestSkillEvalCasesFailARefusedCall(t *testing.T) {
 	t.Parallel()
 	files, err := filepath.Glob(filepath.Join(repoRoot(), "evals", "*", "*.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	prompt := regexp.MustCompile(`(?m)^\s+prompt: /polako:implement-issue\b`)
-	checked := 0
+	prompt := regexp.MustCompile(`(?m)^\s+prompt: /polako:(` + strings.Join(evalSkills, "|") + `)\b`)
+	checked := map[string]int{}
 	for _, path := range files {
 		if base := filepath.Base(path); base != "case.yaml" && base != "by-hand.yaml" {
 			continue
@@ -224,10 +248,11 @@ func TestImplementIssueEvalCasesFailARefusedCall(t *testing.T) {
 			t.Fatal(err)
 		}
 		src := string(b)
-		if !prompt.MatchString(src) {
+		m := prompt.FindStringSubmatch(src)
+		if m == nil {
 			continue
 		}
-		checked++
+		checked[m[1]]++
 		rel, _ := filepath.Rel(repoRoot(), path)
 		_, grader, ok := strings.Cut(src, "name: no_call_was_refused\n")
 		if !ok {
@@ -241,7 +266,9 @@ func TestImplementIssueEvalCasesFailARefusedCall(t *testing.T) {
 			}
 		}
 	}
-	if checked == 0 {
-		t.Fatal("found no implement-issue case under evals/ — the glob or the prompt pattern is wrong")
+	for _, skill := range evalSkills {
+		if checked[skill] == 0 {
+			t.Errorf("found no %s case under evals/ — the glob or the prompt pattern is wrong", skill)
+		}
 	}
 }

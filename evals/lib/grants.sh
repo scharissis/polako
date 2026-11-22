@@ -5,8 +5,8 @@
 # its own execution.allowed_tools names, and withholds every other tool from
 # the model. run.sh builds the same set (grade.py meta). So this is production's
 # grant, prefix by prefix, never plain Bash: a command a real run would have
-# refused is refused here too, and the implement-issue cases' no_call_was_refused
-# grader fails on it. TestEvalGrantsMatchTheVerbsGrants (cmd/polako) holds this
+# refused is refused here too, and every case's no_call_was_refused grader
+# fails on it. TestEvalGrantsMatchTheVerbsGrants (cmd/polako) holds this
 # list to the Go constants it copies, so the two can't drift: its failure names
 # each entry to add or drop.
 #

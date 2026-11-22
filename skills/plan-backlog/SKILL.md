@@ -28,8 +28,11 @@ the two `issue list` reads in Phase 0, and the one `issue create` in Phase 4 —
 the last of which may carry `--parent` and `--blocked-by`, and no other write
 flag. Nothing else, including anything that looks like diligence rather than a
 write: do not run `gh label list` to confirm the `proposed` label exists, or
-`gh --version`, or any other pre-flight probe. Assume the label exists — it is
-the label this skill mints every issue with. The allowlist is the binary's to
+`gh --version`, or `gh repo view` to learn the repository's name, or any other
+pre-flight probe. Assume the label exists — it is the label this skill mints
+every issue with. `gh` already targets the repository the session is in, and
+the footer's short SHA comes from `git log -1 --format=%h`, so nothing here
+needs the name. The allowlist is the binary's to
 grant, not this skill's to widen: `polako plan` grants this run its tools,
 `polako health` grants its twin `review-health` only `issue list` and `issue
 create`, and an operator's `-tools` can narrow either verb further. `issue
