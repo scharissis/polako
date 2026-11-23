@@ -54,10 +54,10 @@ every list present.
 asks before it writes anything:
 
 ```
-5 items matched only by a guess — the issue's own words, not a marker:
+The guesses, with each issue's title:
   M2    #4     feat: add the http fetcher
   ...
-Confirm them? [y = all, N = none, or name the wrong ones: M13 drops its guess, M13=#10 points it at #10]
+Confirm them? [y = all, N = none, or name the wrong ones: ID drops its guess, ID=#N points it at #N]
 
   milestones  make sure 7 item milestones exist, named as the doc names them now
   mark        6 issues with their items: #4 (M2), #8 (M6), #9 (M7), #9 (M8), #10 (M10), #13 (M12)
@@ -68,9 +68,9 @@ Make these changes? [y/N]
 ```
 
 The guess prompt is the one place polako prints issue text: you can't
-confirm a match without its title. A dropped guess files the item fresh; `N`
-leaves guessed items alone this run. Nothing is written before the second
-yes, not even the `proposed` label.
+confirm a match without its title. Answer `M2` to drop that guess and file M2
+fresh, or `M2=#7` to point it at #7; `N` leaves guessed items alone this run.
+Nothing is written before the second yes, not even the `proposed` label.
 
 Then, in that order:
 
