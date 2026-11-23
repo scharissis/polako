@@ -31,7 +31,7 @@ var verbHelp = map[string]func(out io.Writer) error{
 		}
 		return nil
 	},
-	"plan":   func(out io.Writer) error { return runPlan(context.Background(), []string{"-h"}, out) },
+	"plan":   func(out io.Writer) error { return runPlan(context.Background(), []string{"-h"}, nil, false, out) },
 	"health": func(out io.Writer) error { return runHealth(context.Background(), []string{"-h"}, out) },
 	"stats": func(out io.Writer) error {
 		return runStatsWith(offlineStats, []string{"-h"}, out, io.Discard, fixtureNow, report{})

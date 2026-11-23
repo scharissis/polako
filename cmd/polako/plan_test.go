@@ -140,14 +140,14 @@ func TestPlanPreflightProbesParentSupport(t *testing.T) {
 	}
 
 	cfg, opt, _ := newGh(&ghState{})
-	if _, hierarchical, err := planPreflight(context.Background(), &cfg, opt); err != nil {
+	if _, hierarchical, err := planPreflight(context.Background(), &cfg, opt, false); err != nil {
 		t.Fatalf("planPreflight: %v", err)
 	} else if !hierarchical {
 		t.Error("probe missed `--parent` in a modern gh's help")
 	}
 
 	oldCfg, oldOpt, _ := newGh(&ghState{NoSubIssues: true})
-	if _, hierarchical, err := planPreflight(context.Background(), &oldCfg, oldOpt); err != nil {
+	if _, hierarchical, err := planPreflight(context.Background(), &oldCfg, oldOpt, false); err != nil {
 		t.Fatalf("planPreflight (old gh): %v", err)
 	} else if hierarchical {
 		t.Error("probe reported `--parent` on a gh whose help omits it")
@@ -162,7 +162,7 @@ func TestPlanPreflightFailsWithAdvice(t *testing.T) {
 		&planOptions{
 			intakeOptions: intakeOptions{maxIssues: 10, dryRun: true},
 			design:        "docs/not-here.md", milestone: "off",
-		})
+		}, false)
 	if err == nil {
 		t.Fatal("planPreflight accepted a -design path with no file behind it")
 	}
@@ -208,7 +208,7 @@ func TestPlanPreflightDeclaresTheGateForARealRun(t *testing.T) {
 	writeDesignFile(t, checkout, "VISION.md")
 
 	if _, _, err := planPreflight(context.Background(), &cfg,
-		&planOptions{intakeOptions: intakeOptions{maxIssues: 10}, design: "VISION.md"}); err != nil {
+		&planOptions{intakeOptions: intakeOptions{maxIssues: 10}, design: "VISION.md"}, false); err != nil {
 		t.Fatalf("planPreflight: %v", err)
 	}
 	st, err := readGhState(statePath)
@@ -228,7 +228,7 @@ func TestPlanPreflightDeclaresTheGateForARealRun(t *testing.T) {
 		&planOptions{
 			intakeOptions: intakeOptions{maxIssues: 10},
 			design:        "VISION.md", milestone: "off",
-		}); err != nil {
+		}, false); err != nil {
 		t.Fatalf("planPreflight -milestone off: %v", err)
 	}
 	if st, _ = readGhState(offState); len(st.Milestones) != 0 {
@@ -261,7 +261,7 @@ func TestPlanDryRunWritesNothingAndPrintsTheInvocation(t *testing.T) {
 		design:        "docs/VISION.md",
 	}
 	buf := captureLog(t)
-	milestone, hierarchical, err := planPreflight(context.Background(), &cfg, &opt)
+	milestone, hierarchical, err := planPreflight(context.Background(), &cfg, &opt, false)
 	if err != nil {
 		t.Fatalf("planPreflight: %v", err)
 	}
@@ -1034,7 +1034,7 @@ func TestPlanPreflightLeavesABriefMilestoneToTheRun(t *testing.T) {
 	t.Parallel()
 	cfg, statePath, _ := planTestConfig(t, &ghState{})
 	opt := &planOptions{intakeOptions: intakeOptions{maxIssues: 10}, brief: "a dating app for horses"}
-	milestone, _, err := planPreflight(context.Background(), &cfg, opt)
+	milestone, _, err := planPreflight(context.Background(), &cfg, opt, false)
 	if err != nil {
 		t.Fatalf("planPreflight: %v", err)
 	}
@@ -1047,7 +1047,7 @@ func TestPlanPreflightLeavesABriefMilestoneToTheRun(t *testing.T) {
 
 	setCfg, setState, _ := planTestConfig(t, &ghState{})
 	if _, _, err := planPreflight(context.Background(), &setCfg,
-		&planOptions{intakeOptions: intakeOptions{maxIssues: 10}, brief: "a dating app for horses", milestone: "Horses"}); err != nil {
+		&planOptions{intakeOptions: intakeOptions{maxIssues: 10}, brief: "a dating app for horses", milestone: "Horses"}, false); err != nil {
 		t.Fatalf("planPreflight -milestone: %v", err)
 	}
 	if st, _ := readGhState(setState); !slices.Equal(st.Milestones, []string{"Horses"}) {
@@ -1124,7 +1124,7 @@ func TestPlanDryRunSaysABriefMilestoneIsNamedByTheRun(t *testing.T) {
 	cfg, _, _ := planTestConfig(t, &ghState{})
 	opt := planOptions{intakeOptions: intakeOptions{maxIssues: 10, dryRun: true}, brief: "a dating app for horses"}
 	buf := captureLog(t)
-	milestone, hierarchical, err := planPreflight(context.Background(), &cfg, &opt)
+	milestone, hierarchical, err := planPreflight(context.Background(), &cfg, &opt, false)
 	if err != nil {
 		t.Fatalf("planPreflight: %v", err)
 	}

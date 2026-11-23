@@ -47,3 +47,56 @@ Reads only, like the rest of `status`: two `gh` listings, the repository's
 visibility and your login, and `git show` and `git grep` in the checkout.
 No issue text is printed. `-json` prints the same table as one document,
 every list present.
+
+## What `polako plan` does with it
+
+`polako plan -design <doc>` on a doc with items prints this table first, then
+asks before it writes anything:
+
+```
+5 items matched only by a guess — the issue's own words, not a marker:
+  M2    #4     feat: add the http fetcher
+  ...
+Confirm them? [y = all, N = none, or name the wrong ones: M13 drops its guess, M13=#10 points it at #10]
+
+  milestones  make sure 7 item milestones exist, named as the doc names them now
+  mark        6 issues with their items: #4 (M2), #8 (M6), #9 (M7), #9 (M8), #10 (M10), #13 (M12)
+  move        6 issues to their item's milestone
+  edit        1 issue whose item changed, adding the doc's new text: #5 (M3)
+  create      1 issue, one plan-backlog run capped at 10: M9
+Make these changes? [y/N]
+```
+
+The guess prompt is the one place polako prints issue text: you can't
+confirm a match without its title. A dropped guess files the item fresh; `N`
+leaves guessed items alone this run. Nothing is written before the second
+yes, not even the `proposed` label.
+
+Then, in that order:
+
+- **Milestones.** One per milestone item, `[VISION] M4: CSV importer with
+  fixtures`, found again by its `[VISION] M4:` prefix and renamed when the
+  item is. A ticket doc's issues share one milestone, named for the doc.
+- **Issue bodies.** Each matched issue gets its marker on its own line
+  above the plan footer, with `at=` naming the doc commit it now matches. A
+  stale open issue gets a `## Doc update` with the item's old and new
+  text; a stale closed or running one gets that as a comment instead. Each
+  body is re-read just before the edit and only added to.
+- **Moves.** Off no milestone or the doc's own, never off one you picked.
+- **Missing items.** One plan-backlog run handed `.polako-scratch/plan-items.md`,
+  which lists them with the marker each issue must carry. After it, every
+  new issue is checked for its marker and put in its item's milestone.
+
+An item the run finds already built gets no issue, just a `built:` line in
+its report. Add that item's marker line to the issue that built it, and the
+next run counts it.
+
+Nothing closes, reopens or relabels an existing issue. A change that
+doesn't take is reported and the rest carry on; rerunning plan picks up
+whatever is left. Once everything is in place, plan says `nothing to change`
+and writes nothing.
+
+`-yes` makes the changes without asking, for a script. A guess needs a
+person, so under `-yes` its item is neither marked nor filed. With no
+terminal and no `-yes`, plan refuses. `-dry-run` prints the table and what a
+run would change if you confirmed every guess, then stops.

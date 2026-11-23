@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -858,6 +859,59 @@ func fakeClaude(mode string) int {
 			return 1
 		}
 		return fakeClaude("stream")
+	case "planitems":
+		// A `polako plan` run handed an items file (the prompt's last
+		// argument, under the checkout claude runs in): one issue per item it
+		// lists, each body carrying the item's marker directly above the
+		// footer, the way plan-backlog's "When you're handed items" says.
+		path := os.Getenv(fakeGhEnv)
+		st, err := readGhState(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		prompt := strings.Fields(os.Args[slices.Index(os.Args, "-p")+1])
+		items, err := os.ReadFile(prompt[len(prompt)-1])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+			return 1
+		}
+		sha := "0000000"
+		if m := regexp.MustCompile(`\) at ([0-9a-f]+)\.`).FindStringSubmatch(string(items)); m != nil {
+			sha = m[1]
+		}
+		emit(`{"type":"system","subtype":"init","session_id":"sess-plan","model":"claude-opus-5"}`)
+		title, filed := "", 0
+		for _, line := range strings.Split(string(items), "\n") {
+			if h, ok := strings.CutPrefix(line, "## "); ok {
+				_, title, _ = strings.Cut(h, ": ")
+				continue
+			}
+			marker := strings.TrimSpace(line)
+			if !strings.HasPrefix(marker, itemMarkerPrefix) || title == "" {
+				continue
+			}
+			filed++
+			id := fmt.Sprintf("toolu_create_%d", filed)
+			emit(fmt.Sprintf(`{"type":"assistant","session_id":"sess-plan","message":{"content":[`+
+				`{"type":"tool_use","id":%q,"name":"Bash","input":{"command":"gh issue create --title T --label proposed --body-file ISSUE_BODY.md"}}]}}`, id))
+			body := "## Summary\nFiled from the items file.\n\n" + marker + "\n" + planFooterPrefix + "docs/VISION.md @ " + sha +
+				" — edit freely; remove the `proposed` label to queue it.\n"
+			if _, _, code := answerGh(st, []string{"issue", "create", "--title", "feat: " + title, "--label", proposedLabel, "--body", body}); code != 0 {
+				fmt.Fprintf(os.Stderr, "fake claude: gh refused to create %s\n", title)
+				return 1
+			}
+			if err := writeGhState(path, st); err != nil {
+				fmt.Fprintf(os.Stderr, "fake claude: %v\n", err)
+				return 1
+			}
+			emit(fmt.Sprintf(`{"type":"user","session_id":"sess-plan","message":{"content":[`+
+				`{"type":"tool_result","tool_use_id":%q,"is_error":false,"content":"created"}]}}`, id))
+			title = ""
+		}
+		emit(`{"type":"result","subtype":"success","session_id":"sess-plan","duration_ms":100,` +
+			`"num_turns":4,"total_cost_usd":0.2,"result":"Filed the listed items."}`)
+		return 0
 	case "plan", "plancap":
 		// A `polako plan` run: file some proposals through the fake gh — a mix
 		// of labelled and not — pairing each `gh issue create` tool_use with a
