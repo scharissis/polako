@@ -189,21 +189,24 @@ func appliedLine(a reconApplied) string {
 // askGuesses puts each guessed match to the operator. This is the one place
 // polako prints issue text to the terminal: the operator can't confirm a
 // match without seeing what the issue is called. Titles are cleaned of
-// control characters and clipped first.
+// control characters and clipped first. The table's footnote has just said
+// what a guess is, so the list says only what it adds.
 //
 // The answer: y confirms them all; n or nothing confirms none, which leaves
 // those items alone this run; naming items says which are wrong — "M13"
 // drops its guess, so plan files the item fresh, and "M13=#10" points it at
 // #10 — and confirms the rest. An unclear answer is asked again; a closed
-// stdin confirms nothing.
+// stdin confirms nothing. The prompt spells that as ID and #N, never a
+// sample ID: any real-looking one is some doc's real row, and reads as a
+// hint that its guess is wrong.
 func askGuesses(out io.Writer, scan *bufio.Scanner, res reconResult, guessed []reconRow, byNumber map[int]reconIssue) (confirmed map[int][]string, rejected map[string][]int) {
-	fmt.Fprintf(out, "\n%s matched only by a guess — the issue's own words, not a marker:\n", plural(len(guessed), "item"))
+	fmt.Fprint(out, "\nThe guesses, with each issue's title:\n")
 	for _, r := range guessed {
 		p, _ := r.primary()
 		fmt.Fprintf(out, "  %-5s #%-5d %s\n", r.item.id, p.issue, cleanTitle(byNumber[p.issue].Title))
 	}
 	for tries := 0; tries < 3; tries++ {
-		fmt.Fprint(out, "Confirm them? [y = all, N = none, or name the wrong ones: M13 drops its guess, M13=#10 points it at #10] ")
+		fmt.Fprint(out, "Confirm them? [y = all, N = none, or name the wrong ones: ID drops its guess, ID=#N points it at #N] ")
 		if !scan.Scan() {
 			return nil, nil
 		}

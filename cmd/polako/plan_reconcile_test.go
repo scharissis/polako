@@ -309,13 +309,16 @@ func TestPlanReconcileAppliesThenTheNextRunChangesNothing(t *testing.T) {
 	}
 	for _, want := range []string{
 		"#4     feat: add the http fetcher", // the guess, shown by its title to be confirmed
-		"Confirm them?",
+		"Confirm them? [y = all, N = none, or name the wrong ones: ID drops its guess, ID=#N points it at #N]",
 		"Make these changes? [y/N]",
 		"create      1 issue, one plan-backlog run capped at 10: M9",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("first run's output missing %q:\n%s", want, out)
 		}
+	}
+	if n := strings.Count(out, "not a marker"); n != 1 {
+		t.Errorf("what a guess is should be said once, under the table; said %d times:\n%s", n, out)
 	}
 
 	st := r.state(t)
