@@ -633,6 +633,10 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			// Estimate: line).
 			fields = append(fields, fmt.Sprintf(`"body":%q`, is.Body))
 		}
+		if strings.Contains(want, "title") {
+			// plan's check of each issue it just filed from an items file.
+			fields = append(fields, fmt.Sprintf(`"title":%q`, is.Title))
+		}
 		if strings.Contains(want, "subIssuesSummary") {
 			// design's preflight read: a container is refused.
 			fields = append(fields, fmt.Sprintf(`"subIssuesSummary":{"total":%d,"completed":%d}`,
@@ -805,6 +809,16 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 		if is == nil {
 			return "", false, 1
 		}
+		if flagVal("--body-file") == "-" {
+			// plan's reconciliation edits a body through stdin, the way
+			// comments already go: text stays off argv.
+			b, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return "", false, 1
+			}
+			is.Body = string(b)
+			return "", true, 0
+		}
 		if ms := flagVal("--milestone"); ms != "" {
 			is.Milestone = ms
 			return "", true, 0
@@ -828,7 +842,15 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 			return "", false, 1
 		}
 		is.Comments++
-		if body := flagVal("--body"); body != "" {
+		body := flagVal("--body")
+		if flagVal("--body-file") == "-" {
+			b, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return "", false, 1
+			}
+			body = string(b)
+		}
+		if body != "" {
 			if is.Bodies == nil {
 				is.Bodies = map[int]string{}
 			}
@@ -1129,6 +1151,26 @@ func answerPRQuery(st *ghState, args []string) (out string, changed bool, code i
 }
 
 func answerMilestones(st *ghState, args []string) (out string, changed bool, code int) {
+	if i := slices.Index(args, "-X"); i >= 0 && i+1 < len(args) && args[i+1] == "PATCH" {
+		// plan renaming an item's milestone after the item was renamed:
+		// repos/{owner}/{repo}/milestones/<number> -f title=<new>.
+		var n int
+		var title string
+		for j, a := range args {
+			if k := strings.LastIndex(a, "milestones/"); k >= 0 {
+				n, _ = strconv.Atoi(a[k+len("milestones/"):])
+			}
+			if a == "-f" && j+1 < len(args) {
+				title, _ = strings.CutPrefix(args[j+1], "title=")
+			}
+		}
+		if n < 1 || n > len(st.Milestones) || title == "" {
+			fmt.Fprintf(os.Stderr, "no milestone %d\n", n)
+			return "", false, 1
+		}
+		st.Milestones[n-1] = title
+		return fmt.Sprintf(`{"number":%d,"title":%q,"state":"open"}`, n, title), true, 0
+	}
 	var title string
 	for i, a := range args {
 		if (a == "-f" || a == "-F" || a == "--raw-field" || a == "--field") && i+1 < len(args) {

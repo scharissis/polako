@@ -148,8 +148,10 @@ func intakeTailArgs(opt intakeOptions) string {
 // For a real run it also pins the CLI and skill versions the record carries
 // and declares the `proposed` label GitHub would otherwise refuse. plan wraps
 // this with its -design stat and the batch milestone; health calls it and adds
-// nothing. verb is the noun in the binaries-missing error.
-func intakePreflight(ctx context.Context, cfg *config, opt *intakeOptions, verb string) (hierarchical bool, err error) {
+// nothing. verb is the noun in the binaries-missing error. declareLabel is
+// false for a plan that reconciles first: it writes nothing, the label
+// included, until the operator approves (plan_reconcile.go).
+func intakePreflight(ctx context.Context, cfg *config, opt *intakeOptions, verb string, declareLabel bool) (hierarchical bool, err error) {
 	for _, bin := range []string{cfg.claudeBin, cfg.ghBin, "git"} {
 		if _, err := exec.LookPath(bin); err != nil {
 			return false, fmt.Errorf("%q not found on PATH: %w — %s needs it to run the skill and read GitHub", bin, err, verb)
@@ -197,12 +199,20 @@ func intakePreflight(ctx context.Context, cfg *config, opt *intakeOptions, verb 
 		}
 		cfg.pluginVersion, _, _ = pluginVersion(ctx, *cfg)
 
-		// Best-effort like the drain's awaiting-answer declaration: an
-		// "already exists" is the healthy repeat case, not a failure.
-		l := labelByName(proposedLabel)
-		_ = ensureLabel(ctx, *cfg, l.name, l.color, l.description)
+		if declareLabel {
+			declareProposedLabel(ctx, *cfg)
+		}
 	}
 	return hierarchical, nil
+}
+
+// declareProposedLabel makes sure the `proposed` label exists, since GitHub
+// refuses a create naming a label it doesn't have. Best-effort like the
+// drain's awaiting-answer declaration: "already exists" is the healthy
+// repeat case, not a failure.
+func declareProposedLabel(ctx context.Context, cfg config) {
+	l := labelByName(proposedLabel)
+	_ = ensureLabel(ctx, cfg, l.name, l.color, l.description)
 }
 
 // intakeRunSpec is the per-verb part of a real `polako plan` / `polako health`:
@@ -217,6 +227,11 @@ type intakeRunSpec struct {
 	announceTarget string                                          // the middle of "running <skill> <target> — capped at N": "from <doc>" / "against <dir>"
 	prompt         string                                          // the -p string execClaude is invoked with
 	record         func(config, runReport, proposalFacts, string)  // writes the one run-data record, wrapping proposalFacts (and the milestone used) in the verb's own facts type
+	// afterPass runs once the label pass has, over what it found, and returns
+	// any action that didn't take. plan sets it when it filed from an items
+	// file, to check each new issue's marker and put it in its item's
+	// milestone (placeNewIssues).
+	afterPass func(context.Context, config, labelPassOutcome) []string
 }
 
 // intakeRun is the shared body of a real `polako plan` and `polako health`:
@@ -258,6 +273,9 @@ func intakeRun(ctx context.Context, cfg config, opt intakeOptions, spec intakeRu
 		milestone = spec.nameMilestone(passCtx, cfg, rep)
 	}
 	pass := normaliseProposals(passCtx, cfg, before, milestone, spec.verb)
+	if spec.afterPass != nil && pass.listErr == nil && pass.created > 0 {
+		pass.failures = append(pass.failures, spec.afterPass(passCtx, cfg, pass)...)
+	}
 	pass.report(cfg, spec.verb, opt.maxCost, rep)
 
 	// The pricing line: what the operator's own history says this batch will

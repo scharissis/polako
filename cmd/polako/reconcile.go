@@ -93,6 +93,11 @@ type reconInput struct {
 	gate         string
 	branchPrefix string
 	truncated    bool // a listing hit its limit, so some issues or PRs went unread
+	// The operator's answers to plan's guess prompt: issues confirmed as
+	// serving items (issue → upper-case IDs), and guesses they said were
+	// wrong (upper-case ID → issues). Empty for status, which never asks.
+	confirmed map[int][]string
+	rejected  map[string][]int
 }
 
 // matchHow is how an issue was matched to an item. It decides whether the
@@ -104,10 +109,13 @@ const (
 	matchRenumbered                 // its marker names the ID the item's text had before the doc was renumbered
 	matchGuess                      // its footer names the doc and its body the item's number, or a marker nobody vouches for names it
 	matchWeak                       // its title shares most of the item's name
+	matchConfirmed                  // a guess the operator confirmed, its marker not written yet
 )
 
 // settled reports whether a match stands without the operator confirming it.
-func (h matchHow) settled() bool { return h == matchMarker || h == matchRenumbered }
+func (h matchHow) settled() bool {
+	return h == matchMarker || h == matchRenumbered || h == matchConfirmed
+}
 
 // itemMatch is one issue matched to an item.
 type itemMatch struct {
@@ -171,6 +179,8 @@ type reconRow struct {
 	// a milestone item, the doc's batch one otherwise, "" when the issue sits
 	// with another item it serves.
 	milestone string
+	// inMilestone is the one the deciding issue is in now.
+	inMilestone string
 }
 
 // primary is the issue that decides the row's state.
@@ -185,6 +195,16 @@ func (r reconRow) primary() (itemMatch, bool) {
 func (r reconRow) guessed() bool {
 	p, ok := r.primary()
 	return ok && !p.how.settled()
+}
+
+// settled reports whether some match already stands for the row.
+func (r reconRow) settled() bool {
+	for _, m := range r.matches {
+		if m.how.settled() {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *reconRow) addMatch(m itemMatch) {
@@ -325,9 +345,28 @@ func reconcile(in reconInput) reconResult {
 		}
 	}
 
+	// What the operator confirmed at plan's prompt counts as a marker would,
+	// though the marker itself isn't written until they approve the changes.
+	for n, ids := range in.confirmed {
+		is, ok := byNumber[n]
+		if !ok {
+			continue
+		}
+		footerSHA := footerSHAFor(is.Body, in.doc.slug)
+		for _, id := range ids {
+			row, _, was, stale := resolve(id, footerSHA)
+			if row < 0 {
+				continue
+			}
+			res.rows[row].addMatch(itemMatch{issue: n, how: matchConfirmed, stale: stale, was: was})
+			claimed[n] = true
+		}
+	}
+
 	// Then what plan runs before markers left: a footer naming this doc, and
-	// the item's number in the body's own words. Never a container — an epic
-	// groups items, it isn't one.
+	// the item's number in the body's own words — for items nothing settled
+	// yet, since a guess is for finding an item's issue, not a second one.
+	// Never a container: an epic groups items, it isn't one.
 	guessedIssue := map[int]bool{}
 	for _, is := range in.issues {
 		if claimed[is.Number] || is.SubIssues.Total > 0 {
@@ -339,7 +378,7 @@ func reconcile(in reconInput) reconResult {
 		}
 		for _, id := range itemRefs(is.Body) {
 			row, _, was, stale := resolve(id, footer.sha)
-			if row < 0 {
+			if row < 0 || res.rows[row].settled() || slices.Contains(in.rejected[strings.ToUpper(res.rows[row].item.id)], is.Number) {
 				continue
 			}
 			res.rows[row].addMatch(itemMatch{issue: is.Number, how: matchGuess, stale: stale, was: was})
@@ -347,7 +386,7 @@ func reconcile(in reconInput) reconResult {
 		}
 	}
 
-	weakGuesses(&res, in.issues, claimed, guessedIssue)
+	weakGuesses(&res, in.issues, claimed, guessedIssue, in.rejected)
 	classify(&res, in, byNumber)
 	claimStubs(&res, in.stubs)
 	return res
@@ -355,7 +394,7 @@ func reconcile(in reconInput) reconResult {
 
 // weakGuesses matches what's still unmatched by title alone, best score
 // first and one issue per item, so two items never guess the same issue.
-func weakGuesses(res *reconResult, issues []reconIssue, claimed, guessed map[int]bool) {
+func weakGuesses(res *reconResult, issues []reconIssue, claimed, guessed map[int]bool, rejected map[string][]int) {
 	type pair struct {
 		row, issue int
 		score      float64
@@ -370,7 +409,8 @@ func weakGuesses(res *reconResult, issues []reconIssue, claimed, guessed map[int
 			continue
 		}
 		for _, is := range issues {
-			if claimed[is.Number] || guessed[is.Number] || is.SubIssues.Total > 0 {
+			if claimed[is.Number] || guessed[is.Number] || is.SubIssues.Total > 0 ||
+				slices.Contains(rejected[strings.ToUpper(res.rows[i].item.id)], is.Number) {
 				continue
 			}
 			if s := wordOverlap(words, is.Title); s >= weakFloor {
@@ -419,6 +459,7 @@ func classify(res *reconResult, in reconInput, byNumber map[int]reconIssue) {
 		if len(r.matches) == 0 {
 			r.state = stateMissing
 			r.actions = []reconAction{actCreate}
+			r.milestone = rowMilestone(in.doc, r.item)
 			continue
 		}
 		sort.SliceStable(r.matches, func(a, b int) bool {
@@ -426,6 +467,7 @@ func classify(res *reconResult, in reconInput, byNumber map[int]reconIssue) {
 		})
 		p := r.matches[0]
 		r.state, r.stale = stateOf(p.issue), p.stale
+		r.inMilestone = byNumber[p.issue].milestone()
 		switch r.state {
 		case stateInProgress:
 			r.prs = openPRs[p.issue]
@@ -452,7 +494,7 @@ func classify(res *reconResult, in reconInput, byNumber map[int]reconIssue) {
 			r.milestone = rowMilestone(in.doc, r.item)
 		}
 
-		if !p.how.settled() || p.how == matchRenumbered {
+		if p.how != matchMarker {
 			r.actions = append(r.actions, actMark)
 		}
 		if r.stale {

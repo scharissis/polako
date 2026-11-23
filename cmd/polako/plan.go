@@ -69,6 +69,7 @@ type planOptions struct {
 	design    string
 	brief     string
 	milestone string
+	yes       bool // make a reconciliation's changes without asking
 }
 
 // planVerb is the per-verb wording and defaults registerIntakeFlags takes for
@@ -87,15 +88,21 @@ var planVerb = intakeVerb{
 // print the invocation a run would make (-dry-run) or make it — snapshot the
 // backlog, spawn the skill through execClaude, and run the label pass over
 // whatever it created. Its config is built the lightweight way status's and
-// tidy's are, not work's heavier preflight.
-func runPlan(ctx context.Context, args []string, out io.Writer) error {
+// tidy's are, not work's heavier preflight. A -design doc with items is
+// reconciled against GitHub first (plan_reconcile.go), which is where stdin
+// comes in: it asks before it writes. isTTY is isTerminal(os.Stdin), the
+// seam runSetup and runUnpark take too.
+func runPlan(ctx context.Context, args []string, in io.Reader, isTTY bool, out io.Writer) error {
 	fs := flag.NewFlagSet("plan", flag.ContinueOnError)
 	fs.SetOutput(out)
 	var opt planOptions
 	fs.StringVar(&opt.design, "design", "", "path (under -dir) to the design doc to plan from — docs/VISION.md counts")
 	fs.StringVar(&opt.brief, "brief", "", "inline design text, in place of -design; the run files proposed issues from it — exactly one of the two is required")
 	fs.StringVar(&opt.milestone, "milestone", "",
-		"batch milestone title, or \"off\" to skip it (default: the design file's name, or for a brief, a title the run picks)")
+		"batch milestone title, or \"off\" to skip it (default: the design file's name, or for a brief, a title the run picks; "+
+			"for a doc with milestones, one per milestone)")
+	fs.BoolVar(&opt.yes, "yes", false,
+		"for a doc with items, make the reconciliation's changes without asking — guesses stay unconfirmed, so their items are neither marked nor filed")
 	registerIntakeFlags(fs, &opt.intakeOptions, planVerb)
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako plan (-design <doc> | -brief \"<text>\") [flags]\n\n"+
@@ -125,9 +132,16 @@ func runPlan(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	milestone, hierarchical, err := planPreflight(ctx, &cfg, &opt)
+	reconciling, err := planDocHasItems(cfg, opt)
 	if err != nil {
 		return err
+	}
+	milestone, hierarchical, err := planPreflight(ctx, &cfg, &opt, reconciling)
+	if err != nil {
+		return err
+	}
+	if reconciling {
+		return planReconcile(ctx, cfg, opt, in, isTTY, out)
 	}
 	if opt.dryRun {
 		return planDryRun(cfg, opt, milestone, hierarchical, out)
@@ -266,7 +280,10 @@ func planConfig(opt *planOptions) (config, error) {
 // operator only pointed at. A dry run declares nothing: intakePreflight runs
 // the `--parent` probe (a read) but creates no label, and this creates no
 // milestone.
-func planPreflight(ctx context.Context, cfg *config, opt *planOptions) (milestone string, hierarchical bool, err error) {
+//
+// A doc that reconciles first (reconciling) declares and ensures nothing
+// here: it writes only once the operator approves, milestones included.
+func planPreflight(ctx context.Context, cfg *config, opt *planOptions, reconciling bool) (milestone string, hierarchical bool, err error) {
 	if opt.design != "" {
 		full := filepath.Join(cfg.dir, opt.design)
 		info, statErr := os.Stat(full)
@@ -279,13 +296,13 @@ func planPreflight(ctx context.Context, cfg *config, opt *planOptions) (mileston
 		}
 	}
 
-	hierarchical, err = intakePreflight(ctx, cfg, &opt.intakeOptions, "plan")
+	hierarchical, err = intakePreflight(ctx, cfg, &opt.intakeOptions, "plan", !reconciling)
 	if err != nil {
 		return "", false, err
 	}
 
 	milestone = planMilestoneTitle(opt)
-	if !opt.dryRun && milestone != "" && !planRunNamesMilestone(opt) {
+	if !opt.dryRun && !reconciling && milestone != "" && !planRunNamesMilestone(opt) {
 		if err := ensureMilestone(ctx, *cfg, milestone); err != nil {
 			return "", false, fmt.Errorf("could not ensure the %q milestone: %w — "+
 				"pass -milestone off to skip it", milestone, err)
@@ -464,6 +481,12 @@ func planArgs(cfg config, opt planOptions) []string {
 // pass, so there is nothing more for the prompt to carry.
 func planPrompt(cfg config, opt planOptions) string {
 	return "/" + cfg.skill + " " + planSlashArg(planPromptSubject(opt)) + intakeTailArgs(opt.intakeOptions)
+}
+
+// planItemsPrompt is planPrompt with the items file as the fourth argument:
+// a reconciled run files exactly what that file lists.
+func planItemsPrompt(cfg config, opt planOptions) string {
+	return planPrompt(cfg, opt) + " " + planSlashArg(itemsManifestPath)
 }
 
 // planPromptSubject is the skill's first argument: the document path, or the

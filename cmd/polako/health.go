@@ -141,7 +141,7 @@ func healthConfig(opt *healthOptions) (config, error) {
 // is no design-file check and no milestone half — review-health plans from the
 // repository in front of it and attaches nothing.
 func healthPreflight(ctx context.Context, cfg *config, opt *healthOptions) (hierarchical bool, err error) {
-	return intakePreflight(ctx, cfg, opt, "health")
+	return intakePreflight(ctx, cfg, opt, "health", true)
 }
 
 // healthDryRun narrates what a run would do — to the log, i.e. stderr — and

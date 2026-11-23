@@ -223,17 +223,15 @@ behind the `proposed` label a human lifts to queue. The layout travels:
 `docs/VISION.md` the long-range doc, one design doc per file in `docs/designs/`,
 no `Status:`/`Tracking:` line, `polako status` the index, done docs leave.
 
-One `claude` invocation, bracketed by two enforcement mechanisms that keep
-the curation gate structural rather than something the model has to
-remember:
+One `claude` invocation, bracketed by two mechanisms that keep the curation
+gate structural, not something the model has to remember:
 
 - **The cap.** Counts a finished `gh issue create` call and kills the run at
   `-max-issues`, epics included — loud, never destructive; N filed, never N-1.
 - **The label pass.** Snapshots the open backlog before the run; after it —
   always, even on a crash, the cap kill, or Ctrl+C — every issue this `gh`
   account created since is normalised to **exactly** the `proposed` label
-  and the batch milestone. A labelling failure is reported loudly and exits
-  nonzero.
+  and its milestone. A labelling failure is loud and exits nonzero.
 
 The honest edge: an operator hand-filing an issue from the same account
 while a run is going gets caught in the sweep too — rare, but logged. When it
@@ -260,7 +258,8 @@ plan: no run history to price against — work a few issues and future plans wil
 ```
 
 `-dry-run` prints the exact `claude` invocation a run would make and touches
-nothing — no label, no milestone, no process, no record, no notification.
+nothing — no label, no milestone, no process, no record, no notification. A
+doc with milestones or drafted tickets is [reconciled](reconcile.md) first.
 
 ```bash
 polako plan -design docs/VISION.md -dry-run
@@ -272,7 +271,8 @@ polako plan -design docs/VISION.md            # the real thing
 | `-design` | *(none)* | Path, resolved under `-dir`, to the design doc to plan from — `docs/VISION.md` for the long-range one, `docs/designs/<topic>.md` for a single batch. Exactly one of `-design` / `-brief` is required — never a does-the-file-exist guess, so a typo fails loudly. |
 | `-brief` | *(none)* | Inline design text in place of `-design`; the run files proposed issues straight from it, no design doc in between. E.g. `-brief "a CLI that renames photos by EXIF date"` — the greenfield story, same trust tier as a doc. Past ~2000 characters, put it in a file. |
 | `-focus` | *(none)* | Free-text steer for the run, e.g. `-focus "only the observability section"`. |
-| `-milestone` | *(derived)* | Batch milestone title, created idempotently and attached to every issue the run files by the label pass. With `-design`, defaults to the design file's name, created at preflight. With `-brief`, the run names it: the skill's report ends `Milestone: <2–5 words>` summing up the batch, and the milestone is created after the run, capped at 50 characters. No such line falls back to the brief itself, capped the same way and cut at a word boundary. `-milestone off` skips the milestone entirely. |
+| `-milestone` | *(derived)* | Batch milestone title, created idempotently and attached to every issue the run files by the label pass. With `-design`, defaults to the design file's name, created at preflight. With `-brief`, the run names it: the skill's report ends `Milestone: <2–5 words>` summing up the batch, and the milestone is created after the run, capped at 50 characters. No such line falls back to the brief itself, capped the same way and cut at a word boundary. `-milestone off` skips the milestone entirely. A doc with milestones gets one GitHub milestone per milestone instead, unless this names a batch: [reconcile.md](reconcile.md). |
+| `-yes` | `false` | For a doc with items: make the reconciliation's changes without asking. Guessed matches stay unconfirmed, so their items are neither marked nor filed. Without it, and with no terminal, plan refuses to change anything. |
 | `-max-issues` | `10` | Ceiling on the issues a run may create, epics included. A ceiling, not a target — fewer, sharper issues beat coverage. |
 | `-model` / `-effort` | `opus` / *(CLI default)* | Passed to `claude --model` / `--effort`. `-model` is an alias, not a pinned id: a plan run happens once per batch and steers every run downstream, so it defaults to a strong tier (`best` is the strongest). |
 | `-skill` | `polako:plan-backlog` | Slash command the run invokes. |

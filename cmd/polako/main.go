@@ -193,7 +193,7 @@ func dispatchVerb() bool {
 		return false
 	case "plan":
 		runReport("plan", withShutdownContext(func(ctx context.Context) error {
-			return runPlan(ctx, os.Args[2:], os.Stdout)
+			return runPlan(ctx, os.Args[2:], os.Stdin, isTerminal(os.Stdin), os.Stdout)
 		}))
 	case "design":
 		// Not runReport: a design run is work's per-issue path, shift log and

@@ -204,6 +204,15 @@ in the PR body rather than doing it quietly.
   add `proposed` can strip it too, which is self-approval. The whole
   write surface is `gh issue create` plus a scratch body file it deletes; a
   fully subverted run's blast radius is spam sitting behind a label.
+  The one amendment is the binary's, not the run's: `plan` on a doc with
+  items reconciles it against GitHub first (`docs/reconcile.md`), and once
+  the operator approves, at a terminal or with `-yes`, it may add item
+  markers and a `## Doc update` to existing issue bodies, comment on a stale
+  one, move issues between the doc's milestones, and create or rename those
+  milestones. Every such write is built from the doc and fixed wording,
+  never from issue text, and none touches a label or an issue's state, so
+  nothing a run reads can approve its own work. The model's allowlist is
+  unchanged.
 - **An issue with sub-issues is a container.** It's never worked, whatever its
   labels — a hand-made parent is protected too. Detection is structural, not
   labelled, on purpose: a label says what something is called, the sub-issue
@@ -225,6 +234,13 @@ in the PR body rather than doing it quietly.
   the binary parses it (`parsePlanFooter`), `repo_test.go` asserts
   `plan-backlog/SKILL.md` still writes the wording the parser expects, and
   changing either side means changing both.
+- **The item marker is a contract too.** `<!-- polako:item=SLUG/ID[ at=SHA]
+  -->`, on its own line above the plan footer, ties an issue to a plan-doc
+  item (`planitems.go`): plan-backlog copies it from the items file plan
+  hands it, the binary writes it on an older issue the operator matched,
+  and `parseItemMarkers` (`footer.go`) reads both back. The slug is the
+  doc's file name, so two docs' `M1` never meet. A test holds
+  `plan-backlog/SKILL.md` to the parser's wording.
 - **The park footer is a contract too.** Every park comment ends with a
   `Park: <category>` line — the same category identifier the terminal record
   uses (`metrics.go`) — written by `parkIssue` and read back by

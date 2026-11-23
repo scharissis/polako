@@ -220,7 +220,7 @@ type reconDocOrphan struct {
 	ID    string `json:"id"`
 }
 
-var matchNames = map[matchHow]string{matchMarker: "marker", matchRenumbered: "renumbered", matchGuess: "guess", matchWeak: "title"}
+var matchNames = map[matchHow]string{matchMarker: "marker", matchRenumbered: "renumbered", matchGuess: "guess", matchWeak: "title", matchConfirmed: "confirmed"}
 
 var kindNames = map[itemKind]string{itemMilestone: "milestone", itemTicket: "ticket", itemMarked: "marked"}
 
