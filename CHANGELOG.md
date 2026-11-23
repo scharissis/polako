@@ -13,6 +13,20 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.40.0]
+
+### What's Changed
+* test: add report-evidence, an eval case where help output is the wrong evidence by @scharissis in https://github.com/scharissis/polako/pull/757 (closes #755)
+* fix: CLI evidence shows what the change does, not the new flag by @scharissis in https://github.com/scharissis/polako/pull/758 (closes #756)
+* docs: design plan reconciliation by @scharissis in https://github.com/scharissis/polako/pull/759
+* feat: parse plan-doc items and the item marker by @scharissis in https://github.com/scharissis/polako/pull/760
+* feat: status -design prints a plan doc's reconciliation table by @scharissis in https://github.com/scharissis/polako/pull/761
+* feat(plan-backlog): file exactly the items handed in, each with its marker by @scharissis in https://github.com/scharissis/polako/pull/762
+* feat: plan reconciles a doc with items before it proposes by @scharissis in https://github.com/scharissis/polako/pull/763
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.39.0...v0.40.0
+
 ## [0.39.0]
 
 ### What's Changed
