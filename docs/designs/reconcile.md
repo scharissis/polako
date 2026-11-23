@@ -123,9 +123,12 @@ always need confirming.
 `stale` stacks on any matched state: the item's text at the marker's sha
 differs from HEAD. It looks at the item's own entry only, so a change
 elsewhere in the doc doesn't count. Several issues on one item: open work
-wins over done, done over dropped. A stub whose path or nearby lines name
-a word only that item's name has gets attached to it. On a done item that
-reads `done, stub left`. Unmatched stubs go under the table.
+wins over done, done over dropped. A stub attaches to the one item it
+names: one of the item's code spans (`explain`, `crawl.yml`) in the stub's
+line or path, or a longer word of its name in the path. Never comment prose:
+on a real repo, "reports cmd as not implemented" matched "Health report". On
+a done item that reads `done, stub left`. Unclaimed stubs go under the
+table.
 
 ## Actions
 
@@ -149,8 +152,9 @@ needs anyway: milestone titles are unique per repo. A renamed item renames
 its milestone instead of orphaning it. Tickets are issue-sized, so a ticket
 doc keeps today's one batch milestone, named for its slug (`unpark`).
 
-An issue moves only off an empty milestone or its doc's batch one
-(`VISION`), never off one a human picked. One issue on two items sits in
+An issue moves only off an empty milestone, its doc's batch one
+(`VISION`), or another of the doc's item milestones (where a renumber leaves
+it), never off one a human picked. One issue on two items sits in
 the lower item's milestone. The emptied `VISION` milestone stays; deleting
 it is yours. An explicit `-milestone X` keeps today's single batch
 milestone, and `off` still means none.
