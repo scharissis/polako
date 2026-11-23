@@ -425,11 +425,11 @@ it: that's still polako's job. A parked issue's comment naming a category gets i
 | `-strict-order` | `false` | Report as a work run with `-strict-order` would: an issue awaiting an answer keeps its place, so `next` can name it rather than the ready issue behind it. |
 | `-json` | `false` | Print one JSON document to stdout instead of the text report — see [As JSON](#as-json--json) below. |
 | `-metrics` | `~/.polako/metrics` | Directory holding the run-data records the `last shift here` line, the ready row's price and the park reasons read, or `off` to read none and drop all three. Same directory `polako work` writes to. |
+| `-design` | *(none)* | Print the reconciliation table for this plan doc instead of the snapshot — see [reconcile.md](reconcile.md). A path under `-dir`; needs a checkout, so not with `-repo`. |
 
-They take environment defaults the same way `polako work`'s do — a
-`POLAKO_LABEL` that scopes your work scopes the report too, named on the
-header line. `-skip` is deliberately not among them: a head-of-line escape
-hatch typed on one invocation, not a property of the backlog.
+They take environment defaults the way `polako work`'s do: a `POLAKO_LABEL`
+that scopes your work scopes the report too, named on the header. `-skip`
+isn't one — a one-off escape hatch, not a property of the backlog.
 
 **Reads only.** Every call is a read subcommand polako itself re-derives
 state with at startup — `gh issue list`, `gh pr list`, `gh pr view`, the REST
