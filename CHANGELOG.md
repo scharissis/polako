@@ -13,6 +13,14 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.40.1]
+
+### What's Changed
+* fix: plan's guess prompt uses placeholders and stops repeating itself by @scharissis in https://github.com/scharissis/polako/pull/766
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.40.0...v0.40.1
+
 ## [0.40.0]
 
 ### What's Changed
