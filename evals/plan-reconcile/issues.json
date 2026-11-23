@@ -1,0 +1,9 @@
+[
+  {
+    "number": 1,
+    "title": "feat: print usage on --help and -h",
+    "state": "OPEN",
+    "labels": [],
+    "body": "## Summary\nAccept `--help` and `-h` and print a usage line, then exit 0.\n\n## Why now\nVision milestone 1.\n\nEstimate: S\n\n<!-- polako:item=VISION/M1 -->\nProposed by polako plan from docs/VISION.md @ 1a2b3c4 — edit freely; remove the `proposed` label to queue it.\n"
+  }
+]
