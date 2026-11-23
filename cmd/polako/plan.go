@@ -331,18 +331,20 @@ func cleanBrief(s string) string {
 // long enough to read as a title, short enough to render on one line.
 const briefTitleMax = 50
 
-// briefTitle derives a milestone title from a brief: unchanged if it already
-// fits under briefTitleMax, otherwise cut at the last whole word inside the
-// cap and trimmed so the cut doesn't leave a dangling connective or stray
-// punctuation at the end.
-func briefTitle(s string) string {
+// briefTitle derives a milestone title from a brief, capped at briefTitleMax.
+func briefTitle(s string) string { return capTitle(s, briefTitleMax) }
+
+// capTitle is s unchanged if it fits in limit runes, otherwise cut at the last
+// whole word inside limit and trimmed so the cut doesn't leave a dangling
+// connective or stray punctuation at the end.
+func capTitle(s string, limit int) string {
 	runes := []rune(s)
-	if len(runes) <= briefTitleMax {
+	if len(runes) <= limit {
 		return s
 	}
 	// Cut on runes, not bytes: a byte-index slice can split a multi-byte
 	// character in two and leave invalid UTF-8 in the milestone title.
-	cut := string(runes[:briefTitleMax])
+	cut := string(runes[:limit])
 	if i := strings.LastIndexByte(cut, ' '); i >= 0 {
 		cut = cut[:i]
 	}

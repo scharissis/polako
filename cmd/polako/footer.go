@@ -1,6 +1,7 @@
 package main
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -194,4 +195,58 @@ func parseMilestoneLine(text string) string {
 		return ""
 	}
 	return strings.TrimSpace(line[len(milestoneLinePrefix):])
+}
+
+// itemMarkerPrefix opens the hidden line that ties an issue to a
+// plan-document item (planitems.go). A contract like planFooterPrefix:
+// plan-backlog writes it on every issue it files for an item, the binary
+// writes it on an older issue an operator matches by hand, and
+// parseItemMarkers reads both back. The slug before the slash scopes the
+// ID, since every doc numbers from 1.
+const itemMarkerPrefix = "<!-- polako:item="
+
+// itemMarker is one marker: which doc's item an issue serves, and the doc
+// commit its text was last synced to — "" when the plan footer's sha stands
+// in for it.
+type itemMarker struct {
+	slug string
+	id   string
+	at   string
+}
+
+// String is the marker as it is written into a body, on a line of its own.
+func (m itemMarker) String() string {
+	s := itemMarkerPrefix + m.slug + "/" + m.id
+	if m.at != "" {
+		s += " at=" + m.at
+	}
+	return s + " -->"
+}
+
+// itemMarkerRe is a whole marker line. Anything else on the line — prose
+// quoting one, a code span around it — means it was talked about, not placed.
+var itemMarkerRe = regexp.MustCompile(`^<!--\s*polako:item=([A-Za-z0-9._-]{1,64})/([A-Za-z][A-Za-z0-9._-]{0,31})(?:\s+at=([0-9A-Fa-f]{4,40}))?\s*-->$`)
+
+// parseItemMarkers reads an issue body's markers, in order, each item once.
+// Only a line that is the marker and nothing else counts, never inside a
+// code fence or an indented code block: a body that discusses markers — this
+// feature's own issues do — must not claim the items it mentions.
+func parseItemMarkers(body string) []itemMarker {
+	var out []itemMarker
+	seen := map[string]bool{}
+	for _, l := range scanMarkdown(body) {
+		if l.fenced || indentOf(l.text) > 3 {
+			continue
+		}
+		m := itemMarkerRe.FindStringSubmatch(strings.TrimSpace(l.text))
+		if m == nil {
+			continue
+		}
+		mk := itemMarker{slug: m[1], id: m[2], at: strings.ToLower(m[3])}
+		if key := strings.ToLower(mk.slug + "/" + mk.id); !seen[key] {
+			seen[key] = true
+			out = append(out, mk)
+		}
+	}
+	return out
 }

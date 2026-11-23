@@ -333,3 +333,39 @@ func TestParseMilestoneLine(t *testing.T) {
 		})
 	}
 }
+
+func TestItemMarkerRoundTrip(t *testing.T) {
+	t.Parallel()
+	for _, m := range []itemMarker{
+		{slug: "VISION", id: "M23"},
+		{slug: "db-migration", id: "T3", at: "1a2b3c4"},
+	} {
+		got := parseItemMarkers("## Summary\nx\n\n" + m.String() + "\nProposed by polako plan from docs/VISION.md @ 1a2b3c4\n")
+		if len(got) != 1 || got[0] != m {
+			t.Errorf("parseItemMarkers(%q) = %+v, want %+v", m.String(), got, m)
+		}
+	}
+	if got := (itemMarker{slug: "VISION", id: "M23"}).String(); got != "<!-- polako:item=VISION/M23 -->" {
+		t.Errorf("String() = %q — the marker's wording is a contract", got)
+	}
+}
+
+func TestParseItemMarkersCountsOnlyPlacedOnes(t *testing.T) {
+	t.Parallel()
+	body := "Placed:\n<!-- polako:item=VISION/M12 -->\n" +
+		"  <!--polako:item=VISION/M13   at=ABCDEF1-->  \n" +
+		"<!-- polako:item=VISION/M12 -->\n" + // once per item
+		"Inline <!-- polako:item=VISION/M1 --> in prose.\n" +
+		"`<!-- polako:item=VISION/M2 -->`\n" +
+		"> <!-- polako:item=VISION/M3 -->\n" +
+		"    <!-- polako:item=VISION/M4 -->\n" +
+		"```\n<!-- polako:item=VISION/M5 -->\n```\n" +
+		"<!-- polako:item=M6 -->\n" + // no slug
+		"<!-- polako:item=VISION/6x -->\n" + // not an ID
+		"<!-- polako:item=VISION/M7 at=nothex -->\n"
+	got := parseItemMarkers(body)
+	want := []itemMarker{{slug: "VISION", id: "M12"}, {slug: "VISION", id: "M13", at: "abcdef1"}}
+	if !slices.Equal(got, want) {
+		t.Errorf("parseItemMarkers = %+v, want %+v", got, want)
+	}
+}
