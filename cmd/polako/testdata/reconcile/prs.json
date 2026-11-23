@@ -1,0 +1,62 @@
+[
+ {
+  "number": 11,
+  "state": "MERGED",
+  "headRefName": "issue-3",
+  "closingIssuesReferences": [
+   {
+    "number": 3
+   }
+  ]
+ },
+ {
+  "number": 12,
+  "state": "MERGED",
+  "headRefName": "issue-4",
+  "closingIssuesReferences": [
+   {
+    "number": 4
+   }
+  ]
+ },
+ {
+  "number": 13,
+  "state": "MERGED",
+  "headRefName": "issue-9",
+  "closingIssuesReferences": [
+   {
+    "number": 9
+   }
+  ]
+ },
+ {
+  "number": 14,
+  "state": "MERGED",
+  "headRefName": "issue-10",
+  "closingIssuesReferences": [
+   {
+    "number": 10
+   }
+  ]
+ },
+ {
+  "number": 20,
+  "state": "OPEN",
+  "headRefName": "issue-7",
+  "closingIssuesReferences": [
+   {
+    "number": 7
+   }
+  ]
+ },
+ {
+  "number": 21,
+  "state": "CLOSED",
+  "headRefName": "issue-8",
+  "closingIssuesReferences": [
+   {
+    "number": 8
+   }
+  ]
+ }
+]

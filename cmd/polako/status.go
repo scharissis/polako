@@ -62,6 +62,7 @@ type statusOptions struct {
 	strictOrder  bool
 	json         bool
 	metrics      string
+	design       string
 }
 
 // runStatus is the `status` subcommand: parse its own flags, read GitHub, print
@@ -82,6 +83,8 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 		"print one JSON document to stdout instead of the text report — see docs/reference.md for the schema")
 	fs.StringVar(&opt.metrics, "metrics", "",
 		`directory holding the run-data records the last-shift line reads, or "off" (default ~/.polako/metrics)`)
+	fs.StringVar(&opt.design, "design", "",
+		"print the reconciliation table for this plan doc instead (a path under -dir, e.g. docs/VISION.md)")
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: polako status [flags]\n\n"+
 			"Prints where the backlog stands, derived from GitHub: the queue in the\n"+
@@ -110,9 +113,15 @@ func runStatus(ctx context.Context, args []string, out io.Writer, now time.Time,
 		return err
 	}
 
+	if opt.design != "" && opt.repo != "" {
+		return errors.New("status -design reads the doc from a checkout — pass -dir, not -repo")
+	}
 	cfg, err := statusConfig(ctx, opt)
 	if err != nil {
 		return err
+	}
+	if opt.design != "" {
+		return statusDesign(ctx, cfg, fs, opt, out, rpt)
 	}
 	// Best-effort, like every claude-CLI read this binary makes: read here so
 	// both renderStatus and renderStatusJSON see the same cfg.pluginVersion the

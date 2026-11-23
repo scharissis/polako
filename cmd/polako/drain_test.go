@@ -133,6 +133,13 @@ type ghState struct {
 	// one reset out. See countUsageProbe.
 	UsageProbes int `json:"usage_probes"`
 
+	// Canned answers a call with a fixture file, verbatim — real gh output
+	// kept whole under testdata/, for reads that take a listing as it comes
+	// (reconcile_gather.go). Keyed by the call's leading words, "issue list
+	// --state all"; the longest key a call starts with wins, and a call no
+	// key matches falls through to the pretend repository below.
+	Canned map[string]string `json:"canned"`
+
 	// ViewerLogin is what `gh api user --jq .login` answers — unpark's own
 	// read, to tell its own park comment apart from the rest of a thread.
 	// Empty falls back to fakeViewerLogin, so a fixture that never sets this
@@ -408,6 +415,19 @@ func fakeGh(path string, args []string) int {
 	return code
 }
 
+// cannedFor is the fixture file a call is canned to answer with, if any:
+// the longest Canned key the call's words start with.
+func cannedFor(st *ghState, args []string) (string, bool) {
+	call := strings.Join(args, " ")
+	best, path := "", ""
+	for key, p := range st.Canned {
+		if strings.HasPrefix(call, key) && len(key) > len(best) {
+			best, path = key, p
+		}
+	}
+	return path, best != ""
+}
+
 // fakeLabelPage is how many labels the fake's `api .../labels` puts on a
 // page — small, so a test can put a label past the first page with three.
 const fakeLabelPage = 2
@@ -430,6 +450,14 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 	}
 	issue := func() *fakeIssue { return st.Issues[at(2)] }
 
+	if path, ok := cannedFor(st, args); ok {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fake gh: canned answer: %v\n", err)
+			return "", false, 1
+		}
+		return string(b), false, 0
+	}
 	if at(0) == "api" && slices.Contains(args, "-i") {
 		// The free check between full polls (peek.go), the only api call that
 		// asks for headers.

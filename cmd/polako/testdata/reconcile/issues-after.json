@@ -1,0 +1,296 @@
+[
+ {
+  "number": 2,
+  "title": "epic(feat): read the first boards end to end",
+  "body": "## Summary\nA change.\n\n## Why now\nMilestones 1–3 from the vision.\n\nEstimate: S\n\nProposed by polako plan from docs/VISION.md @ 1111111 — edit freely; remove the `proposed` label to queue it.",
+  "state": "CLOSED",
+  "stateReason": "COMPLETED",
+  "labels": [],
+  "milestone": {
+   "title": "VISION"
+  },
+  "author": {
+   "login": "op"
+  },
+  "closedByPullRequestsReferences": [],
+  "subIssuesSummary": {
+   "total": 3
+  }
+ },
+ {
+  "number": 3,
+  "title": "feat: scaffold the module and cli",
+  "body": "## Summary\nA change.\n\n## Why now\nVision milestone 1.\n\nEstimate: S\n\n<!-- polako:item=VISION/M1 -->\nProposed by polako plan from docs/VISION.md @ 1111111 — edit freely; remove the `proposed` label to queue it.",
+  "state": "CLOSED",
+  "stateReason": "COMPLETED",
+  "labels": [],
+  "milestone": {
+   "title": "[VISION] M1: Scaffold"
+  },
+  "author": {
+   "login": "op"
+  },
+  "closedByPullRequestsReferences": [
+   {
+    "number": 11
+   }
+  ],
+  "subIssuesSummary": {
+   "total": 0
+  }
+ },
+ {
+  "number": 4,
+  "title": "feat: add the http fetcher",
+  "body": "## Summary\nA change.\n\n## Why now\nVision milestone 2.\n\nEstimate: S\n\n<!-- polako:item=VISION/M2 at=1111111 -->\nProposed by polako plan from docs/VISION.md @ 1111111 — edit freely; remove the `proposed` label to queue it.",
+  "state": "CLOSED",
+  "stateReason": "COMPLETED",
+  "labels": [],
+  "milestone": {
+   "title": "[VISION] M2: HTTP fetcher with retries"
+  },
+  "author": {
+   "login": "op"
+  },
+  "closedByPullRequestsReferences": [
+   {
+    "number": 12
+   }
+  ],
+  "subIssuesSummary": {
+   "total": 0
+  }
+ },
+ {
+  "number": 5,
+  "title": "feat: add the widget importer",
+  "body": "## Summary\nA change.\n\n## Why now\nVision milestone 3.\n\n## Doc update\nM3 now reads: Widget importer with fixtures.\n\nEstimate: S\n\n<!-- polako:item=VISION/M3 at=2222222 -->\nProposed by polako plan from docs/VISION.md @ 1111111 — edit freely; remove the `proposed` label to queue it.",
+  "state": "OPEN",
+  "stateReason": "",
+  "labels": [],
+  "milestone": {
+   "title": "[VISION] M3: Widget importer with fixtures"
+  },
+  "author": {
+   "login": "op"
+  },
+  "closedByPullRequestsReferences": [],
+  "subIssuesSummary": {
+   "total": 0
+  }
+ },
+ {
+  "number": 6,
+  "title": "feat: add the gizmo importer",
+  "body": "## Summary\nA change.\n\n## Why now\nVision milestone 4.\n\nEstimate: S\n\n<!-- polako:item=VISION/M4 -->\nProposed by polako plan from docs/VISION.md @ 1111111 — edit freely; remove the `proposed` label to queue it.",
+  "state": "OPEN",
+  "stateReason": "",
+  "labels": [
+   {
+    "name": "needs-human"
+   }
+  ],
+  "milestone": {
+   "title": "[VISION] M4: Gizmo importer"
+  },
+  "author": {
+   "login": "op"
+  },
+  "closedByPullRequestsReferences": [],
+  "subIssuesSummary": {
+   "total": 0
+  }
+ },
+ {
+  "number": 7,
+  "title": "feat: add the doohickey importer",
+  "body": "## Summary\nA change.\n\n## Why now\nVision milestone 5.\n\nEstimate: S\n\n<!-- polako:item=VISION/M5 -->\nProposed by polako plan from docs/VISION.md @ 1111111 — edit freely; remove the `proposed` label to queue it.",
+  "state": "OPEN",
+  "stateReason": "",
+  "labels": [],
+  "milestone": {
+   "title": "[VISION] M5: Doohickey importer"
+  },
+  "author": {
+   "login": "op"
+  },
+  "closedByPullRequestsReferences": [],
+  "subIssuesSummary": {
+   "total": 0
+  }
+ },
+ {
+  "number": 8,
+  "title": "feat: add the sprocket importer",
+  "body": "## Summary\nA change.\n\n## Why now\nVision milestone 6.\n\nEstimate: S\n\n<!-- polako:item=VISION/M6 at=1111111 -->\nProposed by polako plan from docs/VISION.md @ 1111111 — edit freely; remove the `proposed` label to queue it.",
+  "state": "CLOSED",
+  "stateReason": "NOT_PLANNED",
+  "labels": [],
+  "milestone": {
+   "title": "VISION"
+  },
+  "author": {
+   "login": "op"
+  },
+  "closedByPullRequestsReferences": [],
+  "subIssuesSummary": {
+   "total": 0
+  }
+ },
+ {
+  "number": 9,
+  "title": "feat: add the store and health report",
+  "body": "## Summary\nA change.\n\n## Why now\nVision milestones 7 and 8.\n\nEstimate: S\n\n<!-- polako:item=VISION/M7 at=1111111 -->\n<!-- polako:item=VISION/M8 at=1111111 -->\nProposed by polako plan from docs/VISION.md @ 1111111 — edit freely; remove the `proposed` label to queue it.",
+  "state": "CLOSED",
+  "stateReason": "COMPLETED",
+  "labels": [],
+  "milestone": {
+   "title": "[VISION] M7: Store and lifecycle, with health-aware misses"
+  },
+  "author": {
+   "login": "op"
+  },
+  "closedByPullRequestsReferences": [
+   {
+    "number": 13
+   }
+  ],
+  "subIssuesSummary": {
+   "total": 0
+  }
+ },
+ {
+  "number": 10,
+  "title": "chore: add the nightly workflow",
+  "body": "## Summary\nA change.\n\n## Why now\nVision milestone 9.\n\nEstimate: S\n\n<!-- polako:item=VISION/M10 at=2222222 -->\nProposed by polako plan from docs/VISION.md @ 1111111 — edit freely; remove the `proposed` label to queue it.",
+  "state": "CLOSED",
+  "stateReason": "COMPLETED",
+  "labels": [],
+  "milestone": {
+   "title": "[VISION] M10: Nightly workflow that commits data"
+  },
+  "author": {
+   "login": "op"
+  },
+  "closedByPullRequestsReferences": [
+   {
+    "number": 14
+   }
+  ],
+  "subIssuesSummary": {
+   "total": 0
+  }
+ },
+ {
+  "number": 12,
+  "title": "feat: parse pay",
+  "body": "## Summary\nA change.\n\n## Why now\nVision milestone 10.\n\nEstimate: S\n\n<!-- polako:item=VISION/M10 -->\nProposed by polako plan from docs/VISION.md @ 1111111 — edit freely; remove the `proposed` label to queue it.",
+  "state": "OPEN",
+  "stateReason": "",
+  "labels": [
+   {
+    "name": "proposed"
+   }
+  ],
+  "milestone": {
+   "title": "VISION"
+  },
+  "author": {
+   "login": "op"
+  },
+  "closedByPullRequestsReferences": [],
+  "subIssuesSummary": {
+   "total": 0
+  }
+ },
+ {
+  "number": 13,
+  "title": "feat: import known postings",
+  "body": "Hand-made, no footer.\n<!-- polako:item=VISION/M12 at=2222222 -->\n",
+  "state": "OPEN",
+  "stateReason": "",
+  "labels": [],
+  "milestone": {
+   "title": "[VISION] M12: Known-postings import"
+  },
+  "author": {
+   "login": "op"
+  },
+  "closedByPullRequestsReferences": [],
+  "subIssuesSummary": {
+   "total": 0
+  }
+ },
+ {
+  "number": 14,
+  "title": "feat: other doc thing",
+  "body": "<!-- polako:item=other/M1 -->\n",
+  "state": "OPEN",
+  "stateReason": "",
+  "labels": [],
+  "milestone": null,
+  "author": {
+   "login": "op"
+  },
+  "closedByPullRequestsReferences": [],
+  "subIssuesSummary": {
+   "total": 0
+  }
+ },
+ {
+  "number": 15,
+  "title": "feat: an item since cut from the doc",
+  "body": "## Summary\nA change.\n\n## Why now\nVision milestone 30.\n\nEstimate: S\n\n<!-- polako:item=VISION/M30 -->\nProposed by polako plan from docs/VISION.md @ 1111111 — edit freely; remove the `proposed` label to queue it.",
+  "state": "CLOSED",
+  "stateReason": "COMPLETED",
+  "labels": [],
+  "milestone": null,
+  "author": {
+   "login": "op"
+  },
+  "closedByPullRequestsReferences": [],
+  "subIssuesSummary": {
+   "total": 0
+  }
+ },
+ {
+  "number": 17,
+  "title": "feat: parse pay, again",
+  "body": "Filed by hand.\n\n<!-- polako:item=VISION/M11 -->\n",
+  "state": "OPEN",
+  "stateReason": "",
+  "labels": [],
+  "milestone": {
+   "title": "[VISION] M11: Pay parsing"
+  },
+  "author": {
+   "login": "op"
+  },
+  "closedByPullRequestsReferences": [],
+  "subIssuesSummary": {
+   "total": 0
+  }
+ },
+ {
+  "number": 22,
+  "title": "feat: add the explain command",
+  "body": "## Summary\nA change.\n\n## Why now\nVision milestone 9.\n\nEstimate: S\n\n<!-- polako:item=VISION/M9 -->\nProposed by polako plan from docs/VISION.md @ 2222222 — edit freely; remove the `proposed` label to queue it.",
+  "state": "OPEN",
+  "stateReason": "",
+  "labels": [
+   {
+    "name": "proposed"
+   }
+  ],
+  "milestone": {
+   "title": "[VISION] M9: explain command"
+  },
+  "author": {
+   "login": "op"
+  },
+  "closedByPullRequestsReferences": [],
+  "subIssuesSummary": {
+   "total": 0
+  }
+ }
+]
