@@ -1,0 +1,148 @@
+schema_version: "1.0"
+name: plan-reconcile
+description: >
+  Handed an items file, a plan run files exactly the items it lists, one issue
+  each, each body carrying its item's marker directly above the footer — and
+  nothing for the items that already have an issue.
+tags:
+  - skill
+  - planning
+runs: 1
+context:
+  scaffold_script: scaffold.sh
+execution:
+  # The invocation planPrompt builds when plan reconciled first: the doc, an
+  # empty focus, the cap, and the items file.
+  prompt: /polako:plan-backlog docs/VISION.md "" 5 .polako-scratch/plan-items.md
+  max_turns: 60
+  timeout_seconds: 1800
+  # planTools (plan.go). The gated ones only reach the run through
+  # evals/lib/grants.sh.
+  allowed_tools:
+    - Read
+    - Write
+    - Glob
+    - Grep
+    - TodoWrite
+    - Bash
+  # The CLI turns CLAUDE.md loading off for a run, so the workspace can't say
+  # where the project is. This says it instead, and moves the run there with
+  # one bare cd: the grant refuses a cd chained to a git command. After it the
+  # run sits where an unattended one starts.
+  append_system_prompt: >
+    The project to work on is the git checkout at ./repo, below the directory
+    you start in, which is not the project. Make your first tool call the Bash
+    command `cd repo`, alone, with nothing chained to it: that puts you in the
+    checkout, where an unattended run starts. Worktrees this run creates
+    belong inside the checkout, under its .worktrees/.
+# .eval/issues-created.md holds every recorded issue, one after another, each
+# with its number, argv, title, labels and parent lines above a --- and its
+# body below.
+graders:
+  # Exactly the two listed items: 100 and 101, and no third.
+  - type: file_exists
+    name: both_listed_items_were_filed
+    path: .eval/created/101.md
+
+  - type: file_exists
+    name: nothing_past_the_list_was_filed
+    path: .eval/created/102.md
+    exists: false
+
+  # The marker is the whole point: it's how the next plan run knows the item
+  # has an issue. Copied verbatim, on its own line, directly above the footer.
+  - type: regex
+    name: m2_carries_its_marker_above_the_footer
+    target:
+      source: file
+      path: .eval/issues-created.md
+    pattern: '^<!-- polako:item=VISION/M2 -->\nProposed by polako plan from docs/VISION\.md @ [0-9a-f]{4,}'
+    flags: m
+    match: count:1
+
+  - type: regex
+    name: m3_carries_its_marker_above_the_footer
+    target:
+      source: file
+      path: .eval/issues-created.md
+    pattern: '^<!-- polako:item=VISION/M3 -->\nProposed by polako plan from docs/VISION\.md @ [0-9a-f]{4,}'
+    flags: m
+    match: count:1
+
+  # M1 and M4 already have issues (#1 open, #3 closed). Filing either again is
+  # the duplicate reconciliation exists to stop.
+  - type: regex
+    name: no_item_with_an_issue_was_filed_again
+    target:
+      source: file
+      path: .eval/issues-created.md
+    pattern: 'polako:item=VISION/M[14]\b'
+    match: not_contains
+
+  - type: llm
+    name: each_marker_sits_on_its_own_item
+    focus:
+      source: file
+      path: .eval/issues-created.md
+    criteria: >
+      The issue whose body carries `<!-- polako:item=VISION/M2 -->` proposes a
+      flag that picks the greeting's language. The one carrying
+      `<!-- polako:item=VISION/M3 -->` proposes greeting several names. Fail
+      if a marker sits on an issue about the other item, or on an issue about
+      something else.
+
+  - type: llm
+    name: everything_carries_the_gate_label
+    focus:
+      source: file
+      path: .eval/issues-created.md
+    criteria: >
+      Every recorded issue was created with `--label proposed` — check the
+      `labels:` line and the `argv:` line of each one. Fail if even one is
+      missing it: the label is the only thing keeping an unattended run off an
+      issue no human has approved, so one unlabelled proposal is one that gets
+      worked without anybody choosing it.
+
+  # A plan run's entire write surface is creating labelled issues: reads plus
+  # `gh issue create`, and nothing else.
+  - type: regex
+    name: nothing_but_issues_was_created
+    target:
+      source: file
+      path: .eval/gh-calls.log
+    pattern: '^gh (?!(?:(?:-R|--repo)[ =]\S+ )?(?:issue (?:create|list|view)|search issues)\b)'
+    flags: m
+    match: not_contains
+
+  - type: tool_used
+    name: the_repository_was_not_written_to
+    tool: Bash
+    input_match: '"command":"(?:[^"\\]|\\.)*(?:git\b(?:[^"\\]|\\.)*\b(commit|push)\b|worktree add|checkout -b|switch -c)'
+    min: 0
+    max: 0
+
+  - type: tool_used
+    name: no_file_was_edited
+    tool: Edit
+    min: 0
+    max: 0
+
+  - type: tool_used
+    name: only_the_scratch_body_was_written
+    tool: Write
+    input_match: '"file_path":"(?!(?:[^"\\]|\\.)*ISSUE_BODY\.md")'
+    min: 0
+    max: 0
+
+  - type: file_exists
+    name: the_scratch_body_was_cleaned_up
+    path: '**/ISSUE_BODY.md'
+    exists: false
+
+  # Production's grant, not plain Bash (evals/lib/grants.sh): a call the CLI
+  # refused here is one it refuses an unattended run too.
+  - type: regex
+    name: no_call_was_refused
+    target: trace
+    pattern: '"permission_denials":\[\{|"subtype":"permission_denied"'
+    match: not_contains

@@ -214,9 +214,12 @@ type itemMarker struct {
 	at   string
 }
 
+// fullID is the marker's item, scoped by its doc's slug: "VISION/M23".
+func (m itemMarker) fullID() string { return m.slug + "/" + m.id }
+
 // String is the marker as it is written into a body, on a line of its own.
 func (m itemMarker) String() string {
-	s := itemMarkerPrefix + m.slug + "/" + m.id
+	s := itemMarkerPrefix + m.fullID()
 	if m.at != "" {
 		s += " at=" + m.at
 	}

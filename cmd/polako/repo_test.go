@@ -343,6 +343,37 @@ func TestPlanSkillLabelsEverythingItCreates(t *testing.T) {
 	}
 }
 
+// With an items file, every issue the run files carries its item's marker,
+// copied verbatim from the file, and the binary's parser reads exactly that
+// line back. The marker is the one thing telling the next plan run an item
+// already has an issue: a skill that drifted from the parser's wording would
+// have every re-plan file the same items again.
+func TestPlanSkillCopiesTheItemMarker(t *testing.T) {
+	t.Parallel()
+	skill := planSkill(t)
+	front, _ := skillFrontmatter(t, "skills/"+planSkillDir+"/SKILL.md", skill)
+	if declared := declaredArguments(t, front); len(declared) < 4 || declared[3] != "items" {
+		t.Errorf("SKILL.md declares %v; the binary passes the items file fourth, so the fourth must be `items`", declared)
+	}
+	example := itemMarker{slug: "VISION", id: "M7"}.String()
+	if strings.Count(skill, example) < 2 {
+		t.Errorf("SKILL.md no longer shows the marker as the parser reads it, %q, in both the rules and the body template", example)
+	}
+	if m := parseItemMarkers(strings.TrimSpace(example)); len(m) != 1 || m[0].fullID() != "VISION/M7" {
+		t.Errorf("the skill's own example, %q, doesn't parse back as VISION/M7: %+v", example, m)
+	}
+	flat := strings.Join(strings.Fields(skill), " ")
+	for _, want := range []string{
+		"Copy each item's marker line into its body verbatim, on its own line, directly above the provenance footer",
+		"File one issue per listed item",
+		"An item Phase 1 finds already built gets no issue.",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("SKILL.md no longer says %q", want)
+		}
+	}
+}
+
 // planPrompt and healthPrompt pass the -max-issues cap as the third argument,
 // so the skill's third declared argument has to be `cap`, and its proposal
 // gate has to fit the batch to it. The supervisor's kill at the cap can only

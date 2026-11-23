@@ -1,6 +1,6 @@
 # Eval suite for the shipped skills
 
-Twelve cases that grade what a run *does*, not what a `SKILL.md` says. Each one
+Thirteen cases that grade what a run *does*, not what a `SKILL.md` says. Each one
 scaffolds a scratch git repo, points a stand-in `gh` at fixtures, runs a real
 skill invocation, and scores the artifacts left behind.
 
@@ -16,6 +16,7 @@ skill invocation, and scores the artifacts left behind.
 | `report-evidence` | implement-issue | a change whose behaviour shows only in a file the tool writes gets that file's decisions in Evidence, not just the help screen and the error |
 | `push-blocked` | implement-issue | a rejected push is described in the run's own words, in a question on the thread — never with the rejection's raw text, which names a key, a home path and a username |
 | `plan-vision` | plan-backlog | a vision document becomes labelled, sized, parented proposals — and the gap the backlog already covers is not re-proposed |
+| `plan-reconcile` | plan-backlog | handed an items file, a run files exactly the listed items, each with its marker directly above the footer, and nothing for items that already have an issue |
 | `review-health` | review-health | a repo's planted structural problems become labelled, sized proposals, each resting on a measurement or a named location, the missing size gate proposed as its own issue, and the overlap the backlog already covers left alone |
 | `design-plan` | design-plan | a design request becomes one plan document under `docs/designs/` behind one PR — template complete, every claim pointered or measured, every ticket sized — and no issue filed |
 
@@ -101,7 +102,7 @@ of a skill's cases a change touches, run all of that skill's.
   input is worse than none: it teaches you to ignore red.
 
 A full pass, every case, is a judgement call rather than a rule. At
-$0.30–$1.60 a case, twelve cases is $4–19. It earns that when you want a
+$0.30–$1.60 a case, thirteen cases is $4–21. It earns that when you want a
 baseline: the first green run (issue #77), or before you trust a new
 `claude` version with a shift.
 

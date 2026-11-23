@@ -1,0 +1,9 @@
+[
+  {
+    "number": 3,
+    "title": "ci: run test.sh on every push",
+    "state": "CLOSED",
+    "labels": [],
+    "body": "## Summary\nA workflow that runs `./test.sh` on every push.\n\n## Why now\nVision milestone 4.\n\nEstimate: S\n\n<!-- polako:item=VISION/M4 -->\nProposed by polako plan from docs/VISION.md @ 1a2b3c4 — edit freely; remove the `proposed` label to queue it.\n"
+  }
+]
