@@ -13,6 +13,16 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.41.0]
+
+### What's Changed
+* fix: plan's issue cap follows the items it files, not a flat 10 by @scharissis in https://github.com/scharissis/polako/pull/770 (closes #769)
+* fix: plan's create line says to rerun plan for any items left over by @scharissis in https://github.com/scharissis/polako/pull/772
+* docs: land the reconcile design's two post-merge fixes by @scharissis in https://github.com/scharissis/polako/pull/771
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.40.1...v0.41.0
+
 ## [0.40.1]
 
 ### What's Changed
