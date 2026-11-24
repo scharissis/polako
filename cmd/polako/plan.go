@@ -103,7 +103,7 @@ var planVerb = intakeVerb{
 	focusExample:  "only the observability section",
 	modelCadence:  "happens once per batch",
 	dryRunSubject: "the document",
-	maxIssuesHelp: fmt.Sprintf("; for a doc with items, the items to file plus %d", defaultMaxIssues),
+	maxIssuesHelp: fmt.Sprintf("; unset here and in POLAKO_MAX_ISSUES, a doc with items gets the items to file plus %d", defaultMaxIssues),
 }
 
 // runPlan is the `plan` subcommand: parse its own flags, preflight, then either
