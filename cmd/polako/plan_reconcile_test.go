@@ -154,10 +154,21 @@ type reconPlanRig struct {
 
 func newReconPlanRig(t *testing.T) *reconPlanRig {
 	t.Helper()
+	return newReconPlanRigOf(t,
+		[]string{string(readReconFixture(t, "vision-old.md")), string(readReconFixture(t, "vision.md"))},
+		string(readReconFixture(t, "issues.json")))
+}
+
+// newReconPlanRigOf is the rig over a doc and issues of the test's own: each
+// of docs committed in turn, the last at HEAD, and issuesJSON the pretend
+// repo's issues, with 1111111 and 2222222 standing in for the first and the
+// last commit's short SHA.
+func newReconPlanRigOf(t *testing.T, docs []string, issuesJSON string) *reconPlanRig {
+	t.Helper()
 	cfg, statePath, checkout := planTestConfig(t, &ghState{})
 	r := &reconPlanRig{cfg: cfg, statePath: statePath, checkout: checkout, design: "docs/VISION.md"}
 	r.cfg.repo, r.cfg.ghRepo = "example/repo", "example/repo"
-	r.cfg.maxIssues = 10
+	r.cfg.maxIssues = defaultMaxIssues
 	r.logPath = filepath.Join(t.TempDir(), "gh.log")
 	setFakeEnv(&r.cfg, fakeClaudeEnv, "planitems", fakeGhLogEnv, r.logPath)
 
@@ -167,10 +178,14 @@ func newReconPlanRig(t *testing.T) *reconPlanRig {
 		gitAt(t, checkout, "commit", "-q", "-m", "vision")
 		return gitAt(t, checkout, "rev-parse", "--short", "HEAD")
 	}
-	r.oldSHA = commit(string(readReconFixture(t, "vision-old.md")))
-	r.headSHA = commit(string(readReconFixture(t, "vision.md")))
+	for i, d := range docs {
+		r.headSHA = commit(d)
+		if i == 0 {
+			r.oldSHA = r.headSHA
+		}
+	}
 
-	raw := strings.NewReplacer("1111111", r.oldSHA, "2222222", r.headSHA).Replace(string(readReconFixture(t, "issues.json")))
+	raw := strings.NewReplacer("1111111", r.oldSHA, "2222222", r.headSHA).Replace(issuesJSON)
 	if err := json.Unmarshal([]byte(raw), &r.original); err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +305,7 @@ func (r *reconPlanRig) run(t *testing.T, opt planOptions, stdin string, tty bool
 	t.Helper()
 	opt.design = r.design
 	if opt.maxIssues == 0 {
-		opt.maxIssues = 10
+		opt.maxIssues = defaultMaxIssues
 	}
 	var out strings.Builder
 	err := planReconcile(context.Background(), r.cfg, opt, strings.NewReader(stdin), tty, &out)
@@ -442,6 +457,63 @@ func TestPlanReconcileCapFollowsItems(t *testing.T) {
 	}
 }
 
+// What the derived cap is for, end to end: a doc with more missing items
+// than the flag's default files all of them in one run when nobody set a
+// cap, where a flat 10 would kill the run at its tenth create. A real run,
+// not a dry one, so both copies are held to the derived number: the kill
+// reads cfg's and lets the run finish, while the log line and the record
+// carry opt's. Milestones are off to keep it to the cap; per-item ones are
+// TestPlanReconcileAppliesThenTheNextRunChangesNothing's.
+func TestPlanReconcileFilesABigDocInOneRun(t *testing.T) {
+	t.Parallel()
+	logged := captureLog(t)
+	const items = defaultMaxIssues + 2
+	var doc strings.Builder
+	doc.WriteString("# gadget\n\n## Milestones\n\n")
+	var ids []string
+	for i := 1; i <= items; i++ {
+		fmt.Fprintf(&doc, "%d. Importer number %d.\n", i, i)
+		ids = append(ids, fmt.Sprintf("M%d", i))
+	}
+	r := newReconPlanRigOf(t, []string{doc.String()}, "[]")
+	records := t.TempDir()
+	r.cfg.rec = newRecorder(records)
+	want := items + defaultMaxIssues
+
+	out, err := r.run(t, planOptions{milestone: milestonesOff}, "y\n", true)
+	if err != nil {
+		t.Fatalf("plan stopped short of the doc's %d items: %v\n%s", items, err, out)
+	}
+	if line := fmt.Sprintf("create      %d issues, one plan-backlog run capped at %d: %s", items, want, strings.Join(ids, ", ")); !strings.Contains(out, line) {
+		t.Errorf("output missing %q:\n%s", line, out)
+	}
+	if line := fmt.Sprintf("for %d missing items — capped at %d issues", items, want); !strings.Contains(logged.String(), line) {
+		t.Errorf("log missing %q:\n%s", line, logged)
+	}
+	filed := 0
+	for _, is := range r.state(t).Issues {
+		if is.Mine {
+			filed++
+		}
+	}
+	if filed != items {
+		t.Errorf("filed %d issues, want one per item, %d", filed, items)
+	}
+	lines := readRecords(t, records, r.cfg.repo)
+	if len(lines) != 1 {
+		t.Fatalf("wrote %d records, want one plan record", len(lines))
+	}
+	var rec map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &rec); err != nil {
+		t.Fatalf("record is not JSON: %v", err)
+	}
+	for key, w := range map[string]any{"status": "ok", "cap": float64(want), "issues_created": float64(items)} {
+		if rec[key] != w {
+			t.Errorf("record[%q] = %v, want %v", key, rec[key], w)
+		}
+	}
+}
+
 // The flag-or-env decision over plan's real flag set: argv through a real
 // parse, the environment through a stand-in lookup (t.Setenv would make the
 // test serial). applyEnvDefaults has already put an env value into the flag
@@ -489,14 +561,15 @@ func TestPlanItemsCap(t *testing.T) {
 }
 
 // An explicit cap with no headroom files items in order and may stop short
-// (an epic takes a slot per child); the create line says so, and that a
-// rerun files the rest.
+// (an epic takes a slot per child); the create line says so, and to rerun
+// plan for any left over — never that one rerun files "the rest", which a
+// big gap can take several of and a cap equal to the count usually doesn't.
 func TestReconSummaryCapBelowCount(t *testing.T) {
 	t.Parallel()
 	c := reconChanges{creates: []reconRow{{item: docItem{id: "M1"}}, {item: docItem{id: "M2"}}, {item: docItem{id: "M3"}}}}
 	for _, cap := range []int{2, 3} {
-		want := fmt.Sprintf("create      3 issues, one plan-backlog run capped at %d — this run files items in order up to %d issues, "+
-			"epics included; a rerun files the rest: M1, M2, M3", cap, cap)
+		want := fmt.Sprintf("create      3 issues, one plan-backlog run capped at %d — it files items in order up to the cap, "+
+			"epics included; rerun plan for any left over: M1, M2, M3", cap)
 		if got := c.summary(reconResult{}, cap); !slices.Contains(got, want) {
 			t.Errorf("summary = %q, want a line %q", got, want)
 		}

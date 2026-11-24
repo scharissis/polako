@@ -86,11 +86,11 @@ Then, in that order:
 - **Missing items.** One plan-backlog run handed `.polako-scratch/plan-items.md`,
   which lists them with the marker each issue must carry. After it, every
   new issue is checked for its marker and put in its item's milestone.
-  The run is capped at the number of items to file plus 10, the room an
-  item that turns into an epic and its children needs. An explicit
+  The run is capped at the number of items to file plus 10, room for an
+  item that turns into an epic and its children. An explicit
   `-max-issues`, or `POLAKO_MAX_ISSUES`, is used as is; at or below the
   item count, the `create` line says the run files items in order up to
-  the cap, epics included, and a rerun files the rest.
+  the cap, epics included, and to rerun plan for any left over.
 
 An item the run finds already built gets no issue, just a `built:` line in
 its report. Add that item's marker line to the issue that built it, and the
