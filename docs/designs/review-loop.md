@@ -25,7 +25,8 @@ on any plan — and stays out of the hosted agents' way.
 
 Merging stays yours by default. The last two tickets add a switch that
 hands polako one class of change you name in advance — say, small edits
-under `docs/` — behind a clean review, green CI and a breaker. That turns
+under `docs/` — behind a review that found nothing and green CI, on the
+PR and on the default branch. That turns
 **nothing merges itself** from an absolute into a default, on purpose.
 
 ## What exists today
@@ -147,6 +148,8 @@ A head is reviewed when all of these hold:
 
 - `-review` is on, and nothing else is owed: no conflict, no red check, no
   unanswered human review.
+- The PR was opened by the account polako runs as, from a branch in this
+  repository. Anyone can name a fork's branch `issue-7`.
 - Checks read `passing`. Or they have read `none` on this head for at
   least one `-poll` in this process, which is a repo with no CI. That
   clock restarts when the head changes or checks read anything else.
@@ -207,9 +210,9 @@ The comment, written by the binary:
 Each location links to that line at that commit. Nothing reads the
 comment back: it's for people.
 
-With `-merge-light` on, a head that reaches `success` is then put to
-ticket 11's question. A yes merges it, pinned to that commit. A no leaves
-it ready for you, like every other PR.
+With `-merge-light` on, a head whose review found nothing at all is then
+put to ticket 11's question. A yes merges it, pinned to that commit. A
+no leaves it ready for you, like every other PR.
 
 ## What this may read and write
 
@@ -248,9 +251,10 @@ it ready for you, like every other PR.
 - **The fix run.** `work`'s remediation surface, unchanged: the `issue-N`
   worktree, commits, a push, one pinned PR comment.
 - **The binary, under `-merge-light` only: one merge.** `gh pr merge`
-  pinned to the reviewed commit, one PR comment saying why, and reads of
-  the default branch's checks and the issue's labels. Never `--admin`,
-  never `--auto`, never from a run.
+  pinned to the reviewed commit, one PR comment saying why, and fresh
+  reads of the PR, the issue, the default branch's checks and how far
+  the head is behind its base. Never `--admin`, never `--auto`, never
+  from a run.
 - **Records.** Counts and enums only. No finding text.
 - **Untouched.** No run gains `gh pr merge`. Nothing approves, dismisses
   or resolves a review. Without `-merge-light` nothing merges. The
@@ -353,8 +357,10 @@ feed the second without git.
 `reviewRange`: fetch `refs/pull/N/head` and the base branch in `-dir`
 through `fetch.go:retryFetch`, reading each sha from `FETCH_HEAD`; stop,
 with nothing written, unless the fetched head is the PR's `headRefOid`;
-then the merge-base, the changed files from `git diff --name-only`, and
-the changed-line count from `--shortstat`.
+then the merge-base, and the change's files from `git diff --no-renames
+--raw --numstat`: every path with its mode and line counts. Renames are
+off on purpose. With them on, a file moved out of `.github/` shows only
+its new path and no changed lines.
 `runReview(range, level)`: `reviewerPrompt(level, base, head)` —
 `reviewPrompt` is taken — is `/code-review <level> <base>..<head> -- `
 plus a fixed trailer: this checkout is not that commit; read a file with
@@ -489,7 +495,9 @@ to start it with.
 a handler in the new file. Kept across polls: the head whose review
 completed, when `none` was first seen on the current head, a memo of
 `settledByUs` per head, and whether review is off for this PR.
-The case fires under "How one PR goes". After ticket 3's run: nothing to
+The case fires under "How one PR goes"; `prStatus`'s `--json` gains
+`isCrossRepository` for the own-PR rule, and a PR that fails it is
+logged once and waited on as today. After ticket 3's run: nothing to
 fix sets `success`; findings post the comment and set `failure`; no
 verdict sets `error`. The run's ending follows the review column of the
 endings table. Over a cap nothing starts and nothing parks;
@@ -505,8 +513,9 @@ rules it out. Docs: `docs/review.md`.
 `success`; findings are one comment and `failure`, with no park and the
 drain still waiting; one process never completes two reviews of a head,
 a failed status write included; a settled status by another login is
-reviewed anyway; a red head is never reviewed, and neither is a `none`
-head before a full `-poll`; a new head restarts that clock; a usage limit
+reviewed anyway; a fork's PR on an `issue-N` branch is never reviewed; a
+red head is never reviewed, and neither is a `none` head before a full
+`-poll`; a new head restarts that clock; a usage limit
 leaves no status and is tried again; over a cap nothing is dispatched and
 nothing parks; a change over 2,000 lines gets `error` and no run;
 `-review` off leaves argv and `gh` calls byte-identical to today's.
@@ -604,15 +613,23 @@ nothing says which. Ticket 8's numbers also need grouping by that, or
 they can't say anything about a class of change.
 
 **Shape.** New `cmd/polako/tier.go`: `tierOf` returns `light` or `full`
-and a short reason. Light needs all of: `success` on the head; checks
-`passing`; changed lines at or under `-light-max-lines` (default 0, so
-nothing is light); every changed path matching a `-light-paths` pattern
-(default none); no path on a built-in never-light list (`.github/**`,
-`.claude/**`, `**/SKILL.md`, `CLAUDE.md`, `AGENTS.md`, `**/*.sh`,
-`Makefile`, `Dockerfile*`, module and lock files); and the issue's author
-and every commenter an `OWNER`, `MEMBER` or `COLLABORATOR`, read from
-`gh api repos/{owner}/{repo}/issues/N` and `gh issue view --json
-comments`.
+and a short reason. It reads the file list ticket 3 builds with renames
+off, so a moved file counts at its old path and its new one. Light needs
+all of:
+`success` on the head, and checks `passing`;
+changed lines at or under `-light-max-lines` (default 0, so nothing is
+light);
+every path, old and new, matching a `-light-paths` pattern (default
+none);
+no path on the built-in never-light list: `.github/**`, `.claude/**`,
+`.claude-plugin/**`, `**/SKILL.md`, `CLAUDE.md`, `AGENTS.md`, `**/*.sh`,
+`Makefile`, `Dockerfile*`, `go.mod`, `go.sum`, `package.json`,
+`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `Cargo.toml`,
+`Cargo.lock`, `pyproject.toml`, `uv.lock`, `requirements*.txt`;
+no binary file, mode change, symlink or submodule in the change;
+and the issue's author and every commenter an `OWNER`, `MEMBER` or
+`COLLABORATOR`, read from `gh api repos/{owner}/{repo}/issues/N` and `gh
+issue view --json comments`.
 `-light-paths` is comma-separated and matched against repo-relative
 paths: `*` stays inside one segment, `**` spans any number. That needs a
 matcher of its own; `path.Match` has no `**`.
@@ -621,9 +638,11 @@ the comment's last line, goes on the issue record as `tier`, and groups
 ticket 8's block. `review -pr` has no issue and reports none. Nothing in
 this ticket branches on it. Documented in `docs/review.md`.
 
-**Done when.** Table tests over each rule and the matcher, including a
-never-light path beating a matching pattern and one outsider's comment
-forcing `full`; `stats` prints merged-as-reviewed per tier.
+**Done when.** Table tests over each rule and the matcher, including: a
+never-light path beating a matching pattern; a file moved from
+`.github/workflows/` into `docs/` is `full`; a replaced image is `full`;
+one outsider's comment forces `full`. `stats` prints merged-as-reviewed
+per tier.
 
 Depends on 8.
 
@@ -636,29 +655,43 @@ read at the moment of the merge, and it should be watchable for a while
 before anything acts on it.
 
 **Shape.** New `cmd/polako/prmerge.go`: `mergeVerdict` returns yes or no
-and why. Pure over facts gathered by its caller. Yes needs all of:
+and why. Its caller gathers the facts fresh, after the status write, not
+from the poll that started the review. Yes needs all of:
+the PR was opened by the account polako runs as, its head is in this
+repository (ticket 6's own-PR rule), and its base is the default branch
+(`baseRefName`, added to `prStatus`'s `--json`);
 the tier is `light` for this head, recomputed now;
-this process set `success` on this exact head — a status read back never
-counts;
+this process's own review of this exact head returned no findings at
+all, nits included — a status read back never counts;
 checks on the head read `passing`, so a repo with no CI never qualifies;
-`mergeStateStatus` is `CLEAN` (added to `prStatus`'s `--json`);
-the base branch's tip is an ancestor of the head, so CI ran on what will
-land;
-the default branch's newest commit has no failing or pending check — one
-read of its check runs and combined status, reduced by `classifyChecks`;
+`mergeStateStatus` is `CLEAN` (also added to `--json`);
+the head isn't behind its base: `gh api
+repos/{owner}/{repo}/compare/<base>...<head sha>` says `behind_by` 0;
+the default branch's tip reduces to `passing` or `none`, read through one
+`gh api graphql` `statusCheckRollup` query so `classifyChecks` gets the
+shapes it already decodes;
 no request for changes stands, an outsider's included;
-neither the issue nor the PR carries the `human-merge` label, read fresh;
-hands-off merges this shift are under the cap, and the breaker (ticket
-12) hasn't tripped.
-Nothing merges here. The review comment's last line says "polako would
-merge this" or "would not: <why>", and the issue record gains
-`would_merge`. `stats` counts them beside merged-as-reviewed.
-`human-merge` joins the labels `setup -apply -policy-labels` creates.
-Documented in `docs/review.md`.
+the issue is open and would still be in the queue — no `needs-human`,
+`proposed`, `design` or `awaiting-answer`, and the `-label` gate label
+still on it;
+neither the issue nor the PR carries `human-merge`;
+hands-off merges this shift are under ticket 12's cap.
+Two answers are transient: `mergeStateStatus` `UNKNOWN`, and a default
+branch still `pending`. Those are asked again on the next three polls of
+the same head. Every other no is final for that head.
+Nothing merges here. With a light class configured — `-light-paths` set
+and `-light-max-lines` above 0 — the status description ends "would
+merge" or "won't merge: <why>", and the issue record gains `would_merge`.
+Without one, none of this runs. `stats` counts would-merge beside
+merged-as-reviewed.
+`human-merge` is a new `labelTable` entry in `labels.go`, not required,
+like `design`: only a person applies it. Documented in `docs/review.md`.
 
 **Done when.** Table tests: every condition, alone, turns a yes into a no
-with its own reason; a `success` this process didn't write is a no; the
-record carries `would_merge`; no `gh pr merge` call exists anywhere.
+with its own reason; a `success` this process didn't write is a no; a
+review with one nit is a no; a fork's PR on an `issue-N` branch is a no;
+`UNKNOWN` is asked again and then given up on; a red default branch is a
+no. No `gh pr merge` call exists anywhere.
 
 Depends on 10.
 
@@ -672,38 +705,62 @@ that click is all an unattended shift is waiting for.
 
 **Shape.** Flags on `work`: `-merge-light` (default off), `-merge-method
 merge|squash|rebase` (default `merge`), `-max-merges` (default 5 a
-shift). Preflight refuses `-merge-light` without `-review`, without a
-`-light-paths` and a `-light-max-lines` above 0, and on `design`.
+shift). `merge-light` joins `envExempt`: a profile can't turn it on.
+Preflight refuses it without `-review`, without a `-light-paths` and a
+`-light-max-lines` above 0, and on `design`; and it prints the class,
+the method and the cap at shift start, the way `-ungated` is announced.
 When ticket 11 says yes, the binary calls `gh pr merge N --<method>
---match-head-commit <sha>`. Never a run, never `--admin`, never `--auto`.
-A refused merge — the branch wants an approval, the method is disabled —
-is logged with what to change, isn't retried, and leaves the PR waiting
-for a person like any other.
-After a merge: one PR comment, `**polako merged this** · light: <reason>
-· review clean at <sha7> · checks green`; a `merged` notification, fired
-for these merges only; `hands_off` on the issue record; a mark on the
-exit summary's `merged` line. The existing MERGED path does the rest.
-The breaker: if the default branch reads red and its newest commit is one
-polako merged this shift, hands-off merging is off for the rest of the
-shift, with a line and a notification saying so. The shift carries on;
-later PRs wait for a person.
-Docs: `docs/review.md`, `security.md`. CLAUDE.md, `docs/VISION.md`,
-README and `docs/behaviour.md` are reworded per "Invariants this
-changes"; `behaviour.md` is at its ceiling, so in place, adding no lines.
-The PR body argues the invariant change out loud.
+--match-head-commit <sha>`. Never a run. Never `--admin`, `--auto` or
+`--delete-branch`.
+Then it reads the PR again. Only a PR that now reads `MERGED` counts: one
+PR comment — `**polako merged this** · light: <reason> · review found
+nothing at <sha7> · checks green` — `hands_off` on the issue record, one
+more toward the cap, and `MERGED` returned at once so the existing path
+cleans up and the drain moves on. A refusal, or a PR still open because
+a merge queue took it, is logged with what to change, is final for that
+head, and leaves the PR waiting for a person.
+There's no separate breaker. Ticket 11's rule is one: a merge that turns
+the default branch red is the last until a person makes it green.
+Docs: `docs/review.md`, `security.md`, and the reworded rule per
+"Invariants this changes" wherever it's stated: CLAUDE.md,
+`docs/VISION.md`, README, `docs/behaviour.md` and `docs/hardening.md`
+(in place; `behaviour.md` is at its ceiling), `docs/releasing.md`'s two
+mentions, `.github/ISSUE_TEMPLATE/feature_request.yml`, `verbUsage`'s
+two lines in `flags.go`, and the header comments of `pr.go` and
+`main.go`. The PR body argues the invariant change out loud.
 
 **Done when.** Drain tests: a PR that qualifies merges with the sha
-pinned and the method flag, and the drain moves on; each condition from
-ticket 11, failing, leaves it for a person; a refused merge isn't retried
-and no call carries `--admin` or `--auto`; the sixth qualifying PR of a
-shift waits; a red default branch after polako's own merge trips the
-breaker; after a restart nothing merges until this process has reviewed
-the head; under `design` the flag is refused; `-merge-light` off makes
-no merge call, with argv and `gh` calls byte-identical to ticket 11's.
+pinned and the method flag, and the drain moves on without waiting a
+poll; each condition from ticket 11, failing, leaves it for a person; a
+refused merge isn't retried, and no call carries `--admin`, `--auto` or
+`--delete-branch`; a PR still open after the call gets no comment and no
+count; the sixth qualifying PR of a shift waits; after a restart a head
+that was already settled doesn't merge; `POLAKO_MERGE_LIGHT` in the
+environment is ignored; `-merge-light` off makes no merge call, with
+argv and `gh` calls byte-identical to ticket 11's.
 
 Depends on 11.
 
 Estimate: L
+
+### 13. Say so when polako merged one
+
+**Problem.** A merge nobody clicked should never be a surprise. `ready`
+would also fire for a PR that is about to merge itself.
+
+**Shape.** `notify.go`: `notifyMerged = "merged"`, fired only for a
+hands-off merge, with the issue and ticket 9's PR number. `ready` is held
+back for a head ticket 11 says yes to, and fires if the merge is then
+refused. The exit summary's `merged` line marks hands-off merges, and
+`stats` counts them. Documented in `docs/review.md`.
+
+**Done when.** Drain tests: a hands-off merge fires `merged` and no
+`ready`; a refused one fires `ready`; a person's merge fires neither new
+event; the summary marks only polako's merges.
+
+Depends on 9, 12.
+
+Estimate: S
 
 ## Considered and not proposed
 
@@ -772,28 +829,37 @@ Worth having. It also hands the reviewer every outsider's comment.
 
 ## What a hands-off merge changes
 
-Tickets 11 and 12, and nothing before them. The rules they hold to:
+Tickets 11 to 13, and nothing before them. The rules they hold to:
 
 - **The human gate moves; it doesn't vanish.** You approve a class of
   change once, as `-light-paths` and `-light-max-lines`, instead of each
   PR. Everything outside it still waits for you.
 - **A model can add a human look and never remove one.** `light` comes
-  from paths, sizes, CI and who wrote the thread. A review only demotes.
-  The never-light list isn't a flag.
+  from paths, sizes, CI and who wrote the thread. Any finding at all, a
+  nit included, sends the PR to you. The never-light list isn't a flag.
+- **Only polako's own PRs.** Opened by the account it runs as, from a
+  branch in this repository, into the default branch.
 - **Only on a verdict this process watched.** A status read back from
-  GitHub buys a re-review, never a merge.
+  GitHub never earns a merge. After a restart, a head already settled
+  waits for you.
 - **Pinned and current.** The merge names the reviewed commit, and the
-  branch has to contain its base's tip.
-- **Bounded.** A cap per shift. A breaker that stops hands-off merging
-  when the default branch goes red after one. A label, `human-merge`,
-  that holds any single issue back.
+  head can't be behind its base. One gap stays: a second merge landing
+  in the seconds between that read and the merge. Only GitHub's "require
+  branches to be up to date" rule closes it.
+- **Bounded.** A cap per shift. No merge while the default branch isn't
+  green, so a merge that breaks it is the last until a person fixes it.
+  A label, `human-merge`, that holds any single issue back.
 - **No approval is faked.** polako doesn't post an approving review, and
   GitHub wouldn't take one from a PR's author. A repo that requires an
   approval keeps its human: the merge is refused and the PR waits.
 
-What it gives up: the one read of a plausible-looking wrong diff. It
-isn't a new door for a hijacked run, which can already push with the
-operator's token unless branch protection binds admins.
+What it gives up: the one read of a plausible-looking wrong diff. Where
+branch protection binds admins, it is also a new way onto the default
+branch, for content inside the class you named. Where it doesn't, a
+hijacked run with the operator's token could already push there.
+
+On a repo whose default branch is red by design at times — this one,
+when a release is overdue — hands-off merging waits until it's green.
 
 Start narrow. Docs-only and small is the class where the worst outcome
 is a wrong sentence. Ticket 11 runs first on purpose: watch what it says
@@ -844,8 +910,8 @@ it would merge for a while before turning ticket 12 on.
 - Whether `-review` becomes the default. Decide after a tagged batch and a
   row in `docs/experiments.md`.
 - Whether the skill's gate shrinks once the supervisor reviews.
-- How to record that a merged PR later needed a fix. The breaker catches
-  a red default branch; nothing catches a bug found a week on. PRs here
+- How to record that a merged PR later needed a fix. A red default branch
+  stops hands-off merging; nothing catches a bug found a week on. PRs here
   merge in minutes, so "merged as reviewed" will read near 100% whatever
   their quality, and can't stand in for it.
 - A fix run's push reads as an answer to a human's request for changes
