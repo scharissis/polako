@@ -139,8 +139,10 @@ So a fully subverted run's worst case is spam behind a label a human
 lifts: up to `-max-issues` junk issues, 10 by default. On a doc with items
 the default cap is the items to file plus 10, so a hijacked run there can
 file that many. Still behind `proposed`, and bounded by the doc: the count
-comes from the doc's items, and no issue text can add one. The same prefix-not-signature, narrowing-not-sandbox caveats above
-still apply. See [`plan`](reference.md#planning-a-backlog-unattended-polako-plan)
+comes from the doc's items, and no issue text can add one. A merged change
+to the doc can, so a doc that grows raises the cap with it; pass
+`-max-issues` to hold a scripted run to a number. The same
+prefix-not-signature, narrowing-not-sandbox caveats above still apply. See [`plan`](reference.md#planning-a-backlog-unattended-polako-plan)
 and [`health`](reference.md#auditing-repository-health-unattended-polako-health).
 
 ## `polako design`
