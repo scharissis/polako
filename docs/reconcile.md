@@ -88,9 +88,9 @@ Then, in that order:
   new issue is checked for its marker and put in its item's milestone.
   The run is capped at the number of items to file plus 10, the room an
   item that turns into an epic and its children needs. An explicit
-  `-max-issues`, or `POLAKO_MAX_ISSUES`, is used as is; below the item
-  count, the `create` line says the run files the first ones in order and
-  a rerun files the rest.
+  `-max-issues`, or `POLAKO_MAX_ISSUES`, is used as is; at or below the
+  item count, the `create` line says the run files items in order up to
+  the cap, epics included, and a rerun files the rest.
 
 An item the run finds already built gets no issue, just a `built:` line in
 its report. Add that item's marker line to the issue that built it, and the

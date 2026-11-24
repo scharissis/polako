@@ -149,11 +149,12 @@ func (c reconChanges) summary(res reconResult, maxIssues int) []string {
 	}
 	if n := len(c.creates); n > 0 {
 		line := fmt.Sprintf("create      %s, one plan-backlog run capped at %d", plural(n, "issue"), maxIssues)
-		if maxIssues < n {
-			// An explicit -max-issues below the count: the skill files items
-			// in order up to the cap, so say which ones and that a rerun,
-			// which finds the rest still missing, files them.
-			line += fmt.Sprintf(" — this run files the first %d in order, a rerun files the rest", maxIssues)
+		if maxIssues <= n {
+			// An explicit -max-issues with no headroom: the skill files items
+			// in order until the cap, and an item that becomes an epic takes
+			// a slot per child, so even a cap equal to the count can stop
+			// short. A rerun finds the rest still missing and files them.
+			line += fmt.Sprintf(" — this run files items in order up to %d issues, epics included; a rerun files the rest", maxIssues)
 		}
 		lines = append(lines, line+": "+ids(c.creates))
 	}

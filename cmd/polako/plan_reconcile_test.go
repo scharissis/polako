@@ -462,16 +462,20 @@ func TestPlanItemsCap(t *testing.T) {
 	}
 }
 
-// An explicit cap below the count files the first items in order; the
-// create line says so, and that a rerun files the rest.
+// An explicit cap with no headroom files items in order and may stop short
+// (an epic takes a slot per child); the create line says so, and that a
+// rerun files the rest.
 func TestReconSummaryCapBelowCount(t *testing.T) {
 	t.Parallel()
 	c := reconChanges{creates: []reconRow{{item: docItem{id: "M1"}}, {item: docItem{id: "M2"}}, {item: docItem{id: "M3"}}}}
-	want := "create      3 issues, one plan-backlog run capped at 2 — this run files the first 2 in order, a rerun files the rest: M1, M2, M3"
-	if got := c.summary(reconResult{}, 2); !slices.Contains(got, want) {
-		t.Errorf("summary = %q, want a line %q", got, want)
+	for _, cap := range []int{2, 3} {
+		want := fmt.Sprintf("create      3 issues, one plan-backlog run capped at %d — this run files items in order up to %d issues, "+
+			"epics included; a rerun files the rest: M1, M2, M3", cap, cap)
+		if got := c.summary(reconResult{}, cap); !slices.Contains(got, want) {
+			t.Errorf("summary = %q, want a line %q", got, want)
+		}
 	}
-	for _, l := range c.summary(reconResult{}, 3) {
+	for _, l := range c.summary(reconResult{}, 4) {
 		if strings.Contains(l, "rerun") {
 			t.Errorf("a cap that covers every item shouldn't mention a rerun: %q", l)
 		}
