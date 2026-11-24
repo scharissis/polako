@@ -63,7 +63,7 @@ Confirm them? [y = all, N = none, or name the wrong ones: ID drops its guess, ID
   mark        6 issues with their items: #4 (M2), #8 (M6), #9 (M7), #9 (M8), #10 (M10), #13 (M12)
   move        6 issues to their item's milestone
   edit        1 issue whose item changed, adding the doc's new text: #5 (M3)
-  create      1 issue, one plan-backlog run capped at 10: M9
+  create      1 issue, one plan-backlog run capped at 11: M9
 Make these changes? [y/N]
 ```
 
@@ -86,6 +86,11 @@ Then, in that order:
 - **Missing items.** One plan-backlog run handed `.polako-scratch/plan-items.md`,
   which lists them with the marker each issue must carry. After it, every
   new issue is checked for its marker and put in its item's milestone.
+  The run is capped at the number of items to file plus 10, the room an
+  item that turns into an epic and its children needs. An explicit
+  `-max-issues`, or `POLAKO_MAX_ISSUES`, is used as is; at or below the
+  item count, the `create` line says the run files items in order up to
+  the cap, epics included, and a rerun files the rest.
 
 An item the run finds already built gets no issue, just a `built:` line in
 its report. Add that item's marker line to the issue that built it, and the

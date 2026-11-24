@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -311,7 +313,7 @@ func TestPlanReconcileAppliesThenTheNextRunChangesNothing(t *testing.T) {
 		"#4     feat: add the http fetcher", // the guess, shown by its title to be confirmed
 		"Confirm them? [y = all, N = none, or name the wrong ones: ID drops its guess, ID=#N points it at #N]",
 		"Make these changes? [y/N]",
-		"create      1 issue, one plan-backlog run capped at 10: M9",
+		"create      1 issue, one plan-backlog run capped at 11: M9", // one item plus the default's 10
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("first run's output missing %q:\n%s", want, out)
@@ -405,6 +407,104 @@ func TestPlanReconcileAsksFirst(t *testing.T) {
 	}
 	if w := r.writes(t); len(w) > 0 {
 		t.Errorf("nothing approved, yet plan wrote:\n  %s", strings.Join(w, "\n  "))
+	}
+}
+
+// On a doc with items the cap follows what plan files: the items to create
+// plus the default's headroom, carried into the create line and the skill's
+// cap argument alike. An explicit -max-issues is used as is.
+func TestPlanReconcileCapFollowsItems(t *testing.T) {
+	t.Parallel()
+	captureLog(t)
+	r := newReconPlanRig(t)
+	for _, tc := range []struct {
+		name      string
+		maxIssues int
+		explicit  bool
+		want      int
+	}{
+		{"defaulted", defaultMaxIssues, false, 1 + defaultMaxIssues},
+		{"explicit", 3, true, 3},
+	} {
+		opt := planOptions{intakeOptions: intakeOptions{maxIssues: tc.maxIssues, dryRun: true}, maxIssuesExplicit: tc.explicit}
+		out, err := r.run(t, opt, "", false)
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", tc.name, err, out)
+		}
+		for _, want := range []string{
+			fmt.Sprintf("create      1 issue, one plan-backlog run capped at %d: M9", tc.want),
+			fmt.Sprintf(" %d %s", tc.want, itemsManifestPath), // the skill's cap argument, right before the items file
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s: -dry-run output missing %q:\n%s", tc.name, want, out)
+			}
+		}
+	}
+}
+
+// The flag-or-env decision over plan's real flag set: argv through a real
+// parse, the environment through a stand-in lookup (t.Setenv would make the
+// test serial). applyEnvDefaults has already put an env value into the flag
+// by the time runPlan asks, so the env cases set the value the same way.
+func TestPlanItemsCap(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		env     string // POLAKO_MAX_ISSUES, "" for unset
+		creates int
+		want    int
+	}{
+		{"defaulted", nil, "", 40, 40 + defaultMaxIssues},
+		{"defaulted, nothing to file", nil, "", 0, defaultMaxIssues},
+		{"flag", []string{"-max-issues", "5"}, "", 40, 5},
+		{"flag at the default's value", []string{"-max-issues", "10"}, "", 40, 10},
+		{"env", nil, "5", 40, 5},
+		{"flag above the count", []string{"-max-issues", "50"}, "", 2, 50},
+	} {
+		var opt planOptions
+		fs := flag.NewFlagSet("plan", flag.ContinueOnError)
+		registerIntakeFlags(fs, &opt.intakeOptions, planVerb)
+		if tc.env != "" {
+			// As applyEnvDefaults does it: Value.Set, not fs.Set, so fs.Visit
+			// doesn't count it as typed.
+			if err := fs.Lookup("max-issues").Value.Set(tc.env); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := fs.Parse(tc.args); err != nil {
+			t.Fatal(err)
+		}
+		lookup := func(name string) (string, bool) {
+			if name == envVarName("max-issues") && tc.env != "" {
+				return tc.env, true
+			}
+			return "", false
+		}
+		opt.maxIssuesExplicit = maxIssuesExplicit(fs, lookup)
+		if got := planItemsCap(tc.creates, opt); got != tc.want {
+			t.Errorf("%s: cap for %d items = %d, want %d", tc.name, tc.creates, got, tc.want)
+		}
+	}
+}
+
+// An explicit cap with no headroom files items in order and may stop short
+// (an epic takes a slot per child); the create line says so, and that a
+// rerun files the rest.
+func TestReconSummaryCapBelowCount(t *testing.T) {
+	t.Parallel()
+	c := reconChanges{creates: []reconRow{{item: docItem{id: "M1"}}, {item: docItem{id: "M2"}}, {item: docItem{id: "M3"}}}}
+	for _, cap := range []int{2, 3} {
+		want := fmt.Sprintf("create      3 issues, one plan-backlog run capped at %d — this run files items in order up to %d issues, "+
+			"epics included; a rerun files the rest: M1, M2, M3", cap, cap)
+		if got := c.summary(reconResult{}, cap); !slices.Contains(got, want) {
+			t.Errorf("summary = %q, want a line %q", got, want)
+		}
+	}
+	for _, l := range c.summary(reconResult{}, 4) {
+		if strings.Contains(l, "rerun") {
+			t.Errorf("a cap that covers every item shouldn't mention a rerun: %q", l)
+		}
 	}
 }
 

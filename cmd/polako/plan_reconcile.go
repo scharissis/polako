@@ -83,6 +83,7 @@ func planReconcile(ctx context.Context, cfg config, opt planOptions, in io.Reade
 			fmt.Fprintln(out, "\nnothing to change: every item has its issue, marked and in place")
 			return nil
 		}
+		cfg, opt = withItemsCap(cfg, opt, len(changes.creates))
 		fmt.Fprintln(out)
 		if len(guessed) > 0 {
 			fmt.Fprintf(out, "a real run asks you to confirm the %d guessed matches first; if you confirmed them all, it would:\n", len(guessed))
@@ -115,6 +116,7 @@ func planReconcile(ctx context.Context, cfg config, opt planOptions, in io.Reade
 		res = reconcile(rin)
 	}
 	changes := planChanges(res, mode)
+	cfg, opt = withItemsCap(cfg, opt, len(changes.creates))
 	if changes.empty() {
 		fmt.Fprintln(out)
 		printChanges(out, changes.summary(res, opt.maxIssues))
@@ -146,6 +148,16 @@ func planReconcile(ctx context.Context, cfg config, opt planOptions, in io.Reade
 		return errors.Join(failed, runErr)
 	}
 	return runErr
+}
+
+// withItemsCap sets the cap the run runs under (planItemsCap) on both copies:
+// cfg's is the kill in scanEvents, opt's the prompt, the log line and the
+// record. Called after the last planChanges, since a rejected guess adds a
+// create.
+func withItemsCap(cfg config, opt planOptions, creates int) (config, planOptions) {
+	opt.maxIssues = planItemsCap(creates, opt)
+	cfg.maxIssues = opt.maxIssues
+	return cfg, opt
 }
 
 // guessedRows is the rows matched only by a guess.

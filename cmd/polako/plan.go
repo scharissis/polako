@@ -70,6 +70,30 @@ type planOptions struct {
 	brief     string
 	milestone string
 	yes       bool // make a reconciliation's changes without asking
+	// maxIssuesExplicit is whether -max-issues came from the flag or the
+	// environment rather than its default. planReconcile can't see the
+	// FlagSet, and only a defaulted cap follows the items (planItemsCap).
+	maxIssuesExplicit bool
+}
+
+// maxIssuesExplicit reports whether -max-issues was given, on argv or as
+// POLAKO_MAX_ISSUES, for a parsed fs. lookupEnv is os.LookupEnv in runPlan;
+// a test passes its own, since t.Setenv would make it serial.
+func maxIssuesExplicit(fs *flag.FlagSet, lookupEnv func(string) (string, bool)) bool {
+	_, fromEnv := lookupEnv(envVarName("max-issues"))
+	return flagWasSet(fs, "max-issues") || fromEnv
+}
+
+// planItemsCap is the cap a plan run on a doc with items runs under. The doc
+// made the cut and the operator approved it, so a defaulted cap only splits a
+// big doc into runs: it becomes the items to file plus the usual headroom,
+// which an item that turns into an epic plus children eats into. An explicit
+// -max-issues is used as is.
+func planItemsCap(creates int, opt planOptions) int {
+	if opt.maxIssuesExplicit {
+		return opt.maxIssues
+	}
+	return creates + defaultMaxIssues
 }
 
 // planVerb is the per-verb wording and defaults registerIntakeFlags takes for
@@ -82,6 +106,7 @@ var planVerb = intakeVerb{
 	focusExample:  "only the observability section",
 	modelCadence:  "happens once per batch",
 	dryRunSubject: "the document",
+	maxIssuesHelp: fmt.Sprintf("; unset here and in POLAKO_MAX_ISSUES, a doc with items gets the items to file plus %d", defaultMaxIssues),
 }
 
 // runPlan is the `plan` subcommand: parse its own flags, preflight, then either
@@ -127,6 +152,7 @@ func runPlan(ctx context.Context, args []string, in io.Reader, isTTY bool, out i
 	if rest := fs.Args(); len(rest) > 0 {
 		return fmt.Errorf("unexpected argument %q — plan takes flags only", rest[0])
 	}
+	opt.maxIssuesExplicit = maxIssuesExplicit(fs, os.LookupEnv)
 
 	cfg, err := planConfig(&opt)
 	if err != nil {
