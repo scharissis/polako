@@ -153,8 +153,10 @@ func (c reconChanges) summary(res reconResult, maxIssues int) []string {
 			// An explicit -max-issues with no headroom: the skill files items
 			// in order until the cap, and an item that becomes an epic takes
 			// a slot per child, so even a cap equal to the count can stop
-			// short. A rerun finds the rest still missing and files them.
-			line += fmt.Sprintf(" — this run files items in order up to %d issues, epics included; a rerun files the rest", maxIssues)
+			// short. Whether anything is left, and how many reruns it takes,
+			// turns on how the run cuts the items, so the line says what to
+			// do rather than promising a rest or a single rerun.
+			line += " — it files items in order up to the cap, epics included; rerun plan for any left over"
 		}
 		lines = append(lines, line+": "+ids(c.creates))
 	}
