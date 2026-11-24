@@ -77,9 +77,12 @@ type planOptions struct {
 }
 
 // maxIssuesExplicit reports whether -max-issues was given, on argv or as
-// POLAKO_MAX_ISSUES — split out of runPlan so the flag-or-env decision is
-// testable without a real environment.
-func maxIssuesExplicit(fromFlag, fromEnv bool) bool { return fromFlag || fromEnv }
+// POLAKO_MAX_ISSUES, for a parsed fs. lookupEnv is os.LookupEnv in runPlan;
+// a test passes its own, since t.Setenv would make it serial.
+func maxIssuesExplicit(fs *flag.FlagSet, lookupEnv func(string) (string, bool)) bool {
+	_, fromEnv := lookupEnv(envVarName("max-issues"))
+	return flagWasSet(fs, "max-issues") || fromEnv
+}
 
 // planItemsCap is the cap a plan run on a doc with items runs under. The doc
 // made the cut and the operator approved it, so a defaulted cap only splits a
@@ -149,8 +152,7 @@ func runPlan(ctx context.Context, args []string, in io.Reader, isTTY bool, out i
 	if rest := fs.Args(); len(rest) > 0 {
 		return fmt.Errorf("unexpected argument %q — plan takes flags only", rest[0])
 	}
-	_, envSet := os.LookupEnv(envVarName("max-issues"))
-	opt.maxIssuesExplicit = maxIssuesExplicit(flagWasSet(fs, "max-issues"), envSet)
+	opt.maxIssuesExplicit = maxIssuesExplicit(fs, os.LookupEnv)
 
 	cfg, err := planConfig(&opt)
 	if err != nil {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -441,23 +442,48 @@ func TestPlanReconcileCapFollowsItems(t *testing.T) {
 	}
 }
 
+// The flag-or-env decision over plan's real flag set: argv through a real
+// parse, the environment through a stand-in lookup (t.Setenv would make the
+// test serial). applyEnvDefaults has already put an env value into the flag
+// by the time runPlan asks, so the env cases set the value the same way.
 func TestPlanItemsCap(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		creates, maxIssues int
-		flag, env          bool
-		want               int
+		name    string
+		args    []string
+		env     string // POLAKO_MAX_ISSUES, "" for unset
+		creates int
+		want    int
 	}{
-		{40, defaultMaxIssues, false, false, 40 + defaultMaxIssues},
-		{0, defaultMaxIssues, false, false, defaultMaxIssues},
-		{40, 5, true, false, 5}, // -max-issues 5
-		{40, 5, false, true, 5}, // POLAKO_MAX_ISSUES=5
-		{2, 50, true, true, 50}, // explicit above the count is used as is too
+		{"defaulted", nil, "", 40, 40 + defaultMaxIssues},
+		{"defaulted, nothing to file", nil, "", 0, defaultMaxIssues},
+		{"flag", []string{"-max-issues", "5"}, "", 40, 5},
+		{"flag at the default's value", []string{"-max-issues", "10"}, "", 40, 10},
+		{"env", nil, "5", 40, 5},
+		{"flag above the count", []string{"-max-issues", "50"}, "", 2, 50},
 	} {
-		opt := planOptions{intakeOptions: intakeOptions{maxIssues: tc.maxIssues}, maxIssuesExplicit: maxIssuesExplicit(tc.flag, tc.env)}
+		var opt planOptions
+		fs := flag.NewFlagSet("plan", flag.ContinueOnError)
+		registerIntakeFlags(fs, &opt.intakeOptions, planVerb)
+		if tc.env != "" {
+			// As applyEnvDefaults does it: Value.Set, not fs.Set, so fs.Visit
+			// doesn't count it as typed.
+			if err := fs.Lookup("max-issues").Value.Set(tc.env); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := fs.Parse(tc.args); err != nil {
+			t.Fatal(err)
+		}
+		lookup := func(name string) (string, bool) {
+			if name == envVarName("max-issues") && tc.env != "" {
+				return tc.env, true
+			}
+			return "", false
+		}
+		opt.maxIssuesExplicit = maxIssuesExplicit(fs, lookup)
 		if got := planItemsCap(tc.creates, opt); got != tc.want {
-			t.Errorf("planItemsCap(%d creates, -max-issues %d, flag %v, env %v) = %d, want %d",
-				tc.creates, tc.maxIssues, tc.flag, tc.env, got, tc.want)
+			t.Errorf("%s: cap for %d items = %d, want %d", tc.name, tc.creates, got, tc.want)
 		}
 	}
 }
