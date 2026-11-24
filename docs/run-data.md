@@ -21,7 +21,7 @@ plan's week-usage percent at pickup and at the terminal state.
 [`polako plan`](reference.md#planning-a-backlog-unattended-polako-plan) and
 [`polako health`](reference.md#auditing-repository-health-unattended-polako-health)
 each write their own kind, `plan` and `health` — one line per run, plus
-`issues_created`, `epics_created`, `cap` (`-max-issues`) and
+`issues_created`, `epics_created`, `cap` (the cap it ran under) and
 `labels_enforced`; `plan` also carries `design` and `milestone`, `health`
 neither, and neither an issue or PR number. Design runs write their own
 `design-run` and `design-issue`, not `run`/`issue`; `stats` skips all four.

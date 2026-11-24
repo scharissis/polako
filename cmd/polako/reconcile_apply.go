@@ -147,9 +147,15 @@ func (c reconChanges) summary(res reconResult, maxIssues int) []string {
 	if len(c.comments) > 0 {
 		lines = append(lines, fmt.Sprintf("comment on  %s whose item changed: %s", plural(len(c.comments), "issue"), refs(c.comments)))
 	}
-	if len(c.creates) > 0 {
-		lines = append(lines, fmt.Sprintf("create      %s, one plan-backlog run capped at %d: %s",
-			plural(len(c.creates), "issue"), maxIssues, ids(c.creates)))
+	if n := len(c.creates); n > 0 {
+		line := fmt.Sprintf("create      %s, one plan-backlog run capped at %d", plural(n, "issue"), maxIssues)
+		if maxIssues < n {
+			// An explicit -max-issues below the count: the skill files items
+			// in order up to the cap, so say which ones and that a rerun,
+			// which finds the rest still missing, files them.
+			line += fmt.Sprintf(" — this run files the first %d in order, a rerun files the rest", maxIssues)
+		}
+		lines = append(lines, line+": "+ids(c.creates))
 	}
 	if len(c.held) > 0 {
 		lines = append(lines, fmt.Sprintf("leave       %s matched only by a guess you didn't confirm: %s", plural(len(c.held), "item"), ids(c.held)))

@@ -70,6 +70,27 @@ type planOptions struct {
 	brief     string
 	milestone string
 	yes       bool // make a reconciliation's changes without asking
+	// maxIssuesExplicit is whether -max-issues came from the flag or the
+	// environment rather than its default. planReconcile can't see the
+	// FlagSet, and only a defaulted cap follows the items (planItemsCap).
+	maxIssuesExplicit bool
+}
+
+// maxIssuesExplicit reports whether -max-issues was given, on argv or as
+// POLAKO_MAX_ISSUES — split out of runPlan so the flag-or-env decision is
+// testable without a real environment.
+func maxIssuesExplicit(fromFlag, fromEnv bool) bool { return fromFlag || fromEnv }
+
+// planItemsCap is the cap a plan run on a doc with items runs under. The doc
+// made the cut and the operator approved it, so a defaulted cap only splits a
+// big doc into runs: it becomes the items to file plus the usual headroom,
+// which an item that turns into an epic plus children eats into. An explicit
+// -max-issues is used as is.
+func planItemsCap(creates int, opt planOptions) int {
+	if opt.maxIssuesExplicit {
+		return opt.maxIssues
+	}
+	return creates + defaultMaxIssues
 }
 
 // planVerb is the per-verb wording and defaults registerIntakeFlags takes for
@@ -82,6 +103,7 @@ var planVerb = intakeVerb{
 	focusExample:  "only the observability section",
 	modelCadence:  "happens once per batch",
 	dryRunSubject: "the document",
+	maxIssuesHelp: fmt.Sprintf("; for a doc with items, the items to file plus %d", defaultMaxIssues),
 }
 
 // runPlan is the `plan` subcommand: parse its own flags, preflight, then either
@@ -127,6 +149,8 @@ func runPlan(ctx context.Context, args []string, in io.Reader, isTTY bool, out i
 	if rest := fs.Args(); len(rest) > 0 {
 		return fmt.Errorf("unexpected argument %q — plan takes flags only", rest[0])
 	}
+	_, envSet := os.LookupEnv(envVarName("max-issues"))
+	opt.maxIssuesExplicit = maxIssuesExplicit(flagWasSet(fs, "max-issues"), envSet)
 
 	cfg, err := planConfig(&opt)
 	if err != nil {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -311,7 +312,7 @@ func TestPlanReconcileAppliesThenTheNextRunChangesNothing(t *testing.T) {
 		"#4     feat: add the http fetcher", // the guess, shown by its title to be confirmed
 		"Confirm them? [y = all, N = none, or name the wrong ones: ID drops its guess, ID=#N points it at #N]",
 		"Make these changes? [y/N]",
-		"create      1 issue, one plan-backlog run capped at 10: M9",
+		"create      1 issue, one plan-backlog run capped at 11: M9", // one item plus the default's 10
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("first run's output missing %q:\n%s", want, out)
@@ -405,6 +406,75 @@ func TestPlanReconcileAsksFirst(t *testing.T) {
 	}
 	if w := r.writes(t); len(w) > 0 {
 		t.Errorf("nothing approved, yet plan wrote:\n  %s", strings.Join(w, "\n  "))
+	}
+}
+
+// On a doc with items the cap follows what plan files: the items to create
+// plus the default's headroom, carried into the create line and the skill's
+// cap argument alike. An explicit -max-issues is used as is.
+func TestPlanReconcileCapFollowsItems(t *testing.T) {
+	t.Parallel()
+	captureLog(t)
+	r := newReconPlanRig(t)
+	for _, tc := range []struct {
+		name      string
+		maxIssues int
+		explicit  bool
+		want      int
+	}{
+		{"defaulted", defaultMaxIssues, false, 1 + defaultMaxIssues},
+		{"explicit", 3, true, 3},
+	} {
+		opt := planOptions{intakeOptions: intakeOptions{maxIssues: tc.maxIssues, dryRun: true}, maxIssuesExplicit: tc.explicit}
+		out, err := r.run(t, opt, "", false)
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", tc.name, err, out)
+		}
+		for _, want := range []string{
+			fmt.Sprintf("create      1 issue, one plan-backlog run capped at %d: M9", tc.want),
+			fmt.Sprintf(" %d %s", tc.want, itemsManifestPath), // the skill's cap argument, right before the items file
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s: -dry-run output missing %q:\n%s", tc.name, want, out)
+			}
+		}
+	}
+}
+
+func TestPlanItemsCap(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		creates, maxIssues int
+		flag, env          bool
+		want               int
+	}{
+		{40, defaultMaxIssues, false, false, 40 + defaultMaxIssues},
+		{0, defaultMaxIssues, false, false, defaultMaxIssues},
+		{40, 5, true, false, 5}, // -max-issues 5
+		{40, 5, false, true, 5}, // POLAKO_MAX_ISSUES=5
+		{2, 50, true, true, 50}, // explicit above the count is used as is too
+	} {
+		opt := planOptions{intakeOptions: intakeOptions{maxIssues: tc.maxIssues}, maxIssuesExplicit: maxIssuesExplicit(tc.flag, tc.env)}
+		if got := planItemsCap(tc.creates, opt); got != tc.want {
+			t.Errorf("planItemsCap(%d creates, -max-issues %d, flag %v, env %v) = %d, want %d",
+				tc.creates, tc.maxIssues, tc.flag, tc.env, got, tc.want)
+		}
+	}
+}
+
+// An explicit cap below the count files the first items in order; the
+// create line says so, and that a rerun files the rest.
+func TestReconSummaryCapBelowCount(t *testing.T) {
+	t.Parallel()
+	c := reconChanges{creates: []reconRow{{item: docItem{id: "M1"}}, {item: docItem{id: "M2"}}, {item: docItem{id: "M3"}}}}
+	want := "create      3 issues, one plan-backlog run capped at 2 — this run files the first 2 in order, a rerun files the rest: M1, M2, M3"
+	if got := c.summary(reconResult{}, 2); !slices.Contains(got, want) {
+		t.Errorf("summary = %q, want a line %q", got, want)
+	}
+	for _, l := range c.summary(reconResult{}, 3) {
+		if strings.Contains(l, "rerun") {
+			t.Errorf("a cap that covers every item shouldn't mention a rerun: %q", l)
+		}
 	}
 }
 

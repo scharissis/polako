@@ -57,7 +57,14 @@ type intakeVerb struct {
 	focusExample  string // -focus example steer
 	modelCadence  string // -model: "happens once per batch" / "happens periodically"
 	dryRunSubject string // -dry-run: "the document" / "the repository"
+	maxIssuesHelp string // -max-issues: appended to the shared help, "" for none
 }
+
+// defaultMaxIssues is -max-issues' default, and the headroom plan adds to the
+// items it files on a doc with items (planItemsCap) — one constant so the two
+// can't drift. Set for free-form planning, where the model picks the cut and
+// fewer, sharper issues beat coverage.
+const defaultMaxIssues = 10
 
 // registerIntakeFlags registers the 16 flags plan and health share on fs,
 // binding them into opt. Each flag's name, default and help string is exactly
@@ -65,7 +72,7 @@ type intakeVerb struct {
 // phrase that differed.
 func registerIntakeFlags(fs *flag.FlagSet, opt *intakeOptions, v intakeVerb) {
 	fs.StringVar(&opt.focus, "focus", "", "free-text steer for the run, e.g. \""+v.focusExample+"\"")
-	fs.IntVar(&opt.maxIssues, "max-issues", 10, "ceiling on the issues a run may create, epics included")
+	fs.IntVar(&opt.maxIssues, "max-issues", defaultMaxIssues, "ceiling on the issues a run may create, epics included"+v.maxIssuesHelp)
 	fs.StringVar(&opt.dir, "dir", ".", v.dirHelp)
 	fs.StringVar(&opt.claudeBin, "claude", "claude", "claude binary to invoke")
 	fs.StringVar(&opt.skill, "skill", v.skillDefault, "skill to run")
