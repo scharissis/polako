@@ -3,7 +3,8 @@ package main
 // `status`'s text report: the snapshot readStatus (status.go) derived, turned
 // into the rows, the PR table and the closing needs-you line. The JSON
 // rendering (statusDoc and its second-renderer derivation) lives in
-// statusjson.go.
+// statusjson.go, and calls nextLine, needsYouParts, statusPlanLine and the
+// PR cell functions here — so their wording is `-json` output too.
 
 import (
 	"fmt"
