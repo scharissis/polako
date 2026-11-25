@@ -391,7 +391,7 @@ func planDocStatusFrom(path string, issues []ghPlanIssue) planDocStatus {
 // row per document, its derived state, its container issues, and how many
 // of those containers' children are still open. Absent when there is
 // nothing to say — no local docs/designs and no gone footer either — the same
-// "no line on a healthy backlog" rule needsYou (status.go) follows.
+// "no line on a healthy backlog" rule needsYou (statusrender.go) follows.
 func printPlanDocs(w io.Writer, rpt report, plans planDocsSnapshot) {
 	if len(plans.docs) == 0 && len(plans.gone) == 0 {
 		return

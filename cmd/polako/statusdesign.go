@@ -1,8 +1,6 @@
 package main
 
 // `status`'s view of design requests: the row and the needs-you clauses.
-// Apart from status.go because that file sits at its size budget
-// (sizebudget_test.go).
 
 import (
 	"fmt"
