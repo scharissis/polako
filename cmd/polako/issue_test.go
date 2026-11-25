@@ -236,8 +236,8 @@ func TestProcessIssueDecidesWhatOneRunLeftBehind(t *testing.T) {
 			// real commits or a dirty worktree is stronger evidence of
 			// progress than progressed() itself asks for, and it spends the
 			// same resumes counter the crash arm's ceiling message reads
-			// (see the invariant on the two counters being one budget,
-			// above). One in the middle of an otherwise pure death-rattle
+			// (see resumeLedger's comment in issue.go on what each
+			// counter bounds). One in the middle of an otherwise pure death-rattle
 			// crash loop must still make the ceiling's sentence say a run
 			// got somewhere.
 			name:  "a clean-exit resume with real work counts toward the ceiling's honesty too",
