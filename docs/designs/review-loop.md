@@ -19,9 +19,12 @@ driven by those findings, and a record of how the human's look went.
 
 The hosted agents can't be the base. They need a Team or Enterprise plan
 and the Claude GitHub App, and polako runs in other people's repos on
-whatever plan they have. So this builds the loop inside polako, on
-`/code-review` — the local engine `/ship` itself reviews with, which works
-on any plan — and stays out of the hosted agents' way.
+whatever plan they have. So this builds the loop inside polako. The
+built-in reviewer is `/code-review`, the local engine `/ship` itself
+reviews with, which works on any plan. But a reviewer here is a contract,
+not a product: any command that prints findings can run beside it or
+instead of it, so the review needn't come from the model, or the vendor,
+that wrote the code.
 
 Merging stays yours by default. The last two tickets add a switch that
 hands polako one class of change you name in advance — say, small edits
@@ -110,6 +113,22 @@ Measured on this worktree at `93b29e4`, 2026-11-24. Claude Code 2.1.331.
   attended terminal session kept in the foreground; their docs say cloud
   sessions don't have them, and the probe container's command list had
   neither.
+- **polako itself is Claude Code only.** `-claude` names the binary every
+  run starts (`flags.go:registerIssueFlags`), and `provider.go` tells
+  billing routes apart, not vendors. Nothing here changes that.
+- **The public criticism of Claude Ship, two days in.** Read from a
+  community thread's summary and from search summaries of write-ups;
+  those pages didn't open from the probe container. Four points recur.
+  You can build this in CI with any model and skip the lock-in. A model
+  reviewing code it probably wrote is an echo chamber, so review with a
+  different one. With auto-merge on, a change can land with nobody
+  looking. And self-built reviewers nitpick on every push.
+- **The evidence for a different reviewer is suggestive, not settled.**
+  As summarised: one vendor of review tools reports that on 500 PRs each
+  written by two vendors' agents, the other vendor's reviewer caught more
+  serious bugs both ways; an unreviewed preprint finds several model
+  families catch more than one. The same sources say a fresh session of
+  the same model, a cold read, gets part of the way.
 - **Not re-read here: GitHub's own docs.** `docs.github.com` didn't resolve
   from that container. The status API and self-review rules below are
   GitHub's documented behaviour, from memory. `gh pr merge --help` does
@@ -120,8 +139,10 @@ Measured on this worktree at `93b29e4`, 2026-11-24. Claude Code 2.1.331.
 After CI goes green on a PR head, the supervisor starts a fresh `claude`
 in the main checkout, like every run, and has it run `/code-review` over
 that exact commit range. The session has Bash and Skill and nothing else,
-its grant is a few git read commands, and it isn't handed the issue. The
-binary reads the findings off the run's `StructuredOutput` calls, scrubs
+its grant is a few git read commands, and it isn't handed the issue.
+`-reviewers` can add a command of the operator's own, or put one in its
+place: another vendor's CLI behind a script, a linter, anything that
+prints findings. The binary collects every reviewer's findings, scrubs
 them, and posts them as one PR comment. Findings marked to fix get one
 fix run, the shape of today's review remediation, with the findings
 inline in its prompt; its push is a new head, which gets reviewed again.
@@ -167,10 +188,12 @@ Then:
 - Every review covers the whole change, `<merge-base>..<head>` by sha,
   with base and head fetched first. Its level follows its size: `low`
   under 30 changed lines, `medium` under 300, `high` from there.
-- A verdict needs a clean exit, a successful full `git diff` naming the
-  head, and at least one accepted `StructuredOutput` call. Findings are
-  the union of the accepted calls. Anything less is `error`, never
-  `success`.
+- Each reviewer in `-reviewers` gives its own verdict. The built-in one
+  needs a clean exit, a successful full `git diff` naming the head, and
+  at least one accepted `StructuredOutput` call. A command needs exit 0
+  and a findings object naming the head. Findings are the union across
+  reviewers, each tagged with who raised it. One reviewer with no
+  verdict makes the whole thing `error`, never `success`.
 - Only `important` findings ask for a fix. Nits and pre-existing bugs are
   listed and left.
 - One fix run a PR (`-review-fixes`), counted in the process like
@@ -199,19 +222,26 @@ How a run's ending maps. A head that moved wins over how the run ended:
 
 The comment, written by the binary:
 
-    **polako review** · `1a2b3c4` · 2 to fix, 1 nit
+    **polako review** · `1a2b3c4` · 2 to fix, 1 nit · by claude, second
 
-    1. **Fix** — `cache.go:23` NewCache never sets `data`, so the first Set panics.
-    2. **Fix** — `parse.go:20` a value containing `=` is cut at the second one.
-    3. Nit — `parse.go:22` the error counts lines from 0.
+    1. **Fix** — `cache.go:23` NewCache never sets `data`, so the first Set panics. (claude, second)
+    2. **Fix** — `parse.go:20` a value containing `=` is cut at the second one. (second)
+
+    <details><summary>1 nit, left alone</summary>
+    Nit — `parse.go:22` the error counts lines from 0. (claude)
+    </details>
 
     Next: a fix run.
+
+Nits and pre-existing bugs sit in the fold, five at most, the rest
+counted. They never start a fix run, so a reviewer that nitpicks can't
+keep a PR churning.
 
 Each location links to that line at that commit. Nothing reads the
 comment back: it's for people.
 
 With `-merge-light` on, a head whose review found nothing at all is then
-put to ticket 11's question. A yes merges it, pinned to that commit. A
+put to ticket 12's question. A yes merges it, pinned to that commit. A
 no leaves it ready for you, like every other PR.
 
 ## What this may read and write
@@ -228,8 +258,14 @@ no leaves it ready for you, like every other PR.
   and the CLI lets its own read-only commands through with no grant. In
   `work` this adds no reach beyond the implementing run's. For
   `review -pr N` on a PR someone else wrote, the diff is their text, and
-  ticket 5 measures whether a planted instruction gets anywhere.
-- **Where it runs.** In `-dir`, on the default branch's own CLAUDE.md and
+  ticket 6 measures whether a planted instruction gets anywhere.
+- **A command reviewer is the operator's own program.** polako runs it in
+  `-dir` with the operator's rights, hands it two shas, and reads one
+  JSON object back. It isn't sandboxed, and where it sends the diff is
+  its business: put another vendor's CLI behind it and the diff goes to
+  that vendor. CLAUDE.md's "what leaves the machine" has to say so. Its
+  findings get the same scrub as the built-in's.
+- **Where the built-in runs.** In `-dir`, on the default branch's own CLAUDE.md and
   settings. Started inside the PR's files, the change under review could
   configure its own reviewer. It reads the change through git objects.
 - **What the reviewer isn't given.** The issue, its comments, PLAN.md. It
@@ -286,8 +322,12 @@ seven or more characters of its sha, and has none of `--stat`,
 `#` before a word broken with a zero-width space; `<` escaped; links
 dropped; a line shaped like a token, a key block or a long random string
 replaced by `withheld`.
-`renderReviewComment(sha, files, findings, next)`: at most 20 findings,
-the rest counted; a location only when `file` is one of `files`.
+`renderReviewComment(sha, files, findings, next)`: at most 20 findings
+to fix, the rest counted; nits and pre-existing bugs inside one
+`<details>` fold, five at most, the rest counted; a location only when
+`file` is one of `files`; each finding followed by the names of the
+reviewers that raised it. The fold is the binary's own markup; finding
+text is still escaped.
 `fixLines`: the same scrubbed lines, for the fix prompt.
 `stream.go`: `runReport` keeps accepted `StructuredOutput` inputs and each
 Bash command with how its result came back.
@@ -307,7 +347,10 @@ outer one keeps the findings; no call, an unknown severity, an error
 result, a `git diff --stat` alone and no diff at all each give no verdict;
 scrub handles a mention, an issue reference, an HTML comment, a link, a
 token shape and an over-long line; a `file` outside `files` renders with
-no location; a 21st finding is counted, not listed. No flag and no
+no location; a 21st finding is counted, not listed; a sixth nit is
+counted inside the fold, and markup in a nit's text can't close the
+fold; a finding two reviewers raised is listed once with both names. No
+flag and no
 behaviour changes.
 
 Estimate: M
@@ -382,7 +425,7 @@ and `review_nits` on it. Nothing is written to GitHub here.
 Test doubles: a helper that builds a real checkout with a bare origin
 carrying `refs/pull/N/head`, and can move that head, in the manner of
 `tidy_test.go` and `sync_test.go`. `reviewRange`'s tests use it here;
-tickets 6 and 7's drain tests need it too, since the drain tests'
+tickets 7 and 8's drain tests need it too, since the drain tests'
 directory isn't a checkout. The fake CLI learns to read its prompt from
 stdin under `-remote`, and its fake `--help` lists `--json-schema`,
 `--tools` and `--disallowedTools`.
@@ -400,7 +443,53 @@ Depends on 1.
 
 Estimate: M
 
-### 4. `polako review -pr N`: review one PR you name
+### 4. A reviewer is any command that prints findings
+
+**Problem.** Ticket 3 ties the review to one vendor's built-in command
+and to stream shapes that vendor doesn't document. And a review by the
+model that wrote the change shares its blind spots. The reviewer has to
+be replaceable, and more than one has to be able to run.
+
+**Shape.** New `cmd/polako/reviewers.go`. A reviewer is a name and one
+of two kinds: the built-in `claude` (ticket 3), or a command.
+`-reviewers` on `work` and `review`: comma-separated, default `claude`.
+An entry spelled `name=command line` is a command reviewer, split by
+`notify.go:splitCommand`. No shell.
+The contract for a command. It runs in `-dir` with stdin closed and
+`POLAKO_REVIEW_BASE`, `POLAKO_REVIEW_HEAD`, `POLAKO_REVIEW_LEVEL`,
+`POLAKO_REVIEW_PR` and `POLAKO_REVIEW_REPO` in its environment. It prints
+one JSON object on stdout — `{"head": "<the head sha>", "findings": […]}`,
+the findings in ticket 1's schema — and exits 0. A non-zero exit, any
+other output, a `head` that isn't the one asked about, or
+`-review-timeout` (default 20m) passing is no verdict from that
+reviewer. Its stderr goes to the shift log.
+`runReviewers` runs each in turn. The combined verdict is `error` if any
+reviewer gave none. Otherwise the findings are the union, each tagged
+with who raised it, and it's `success` only when nobody raised an
+`important`. A second reviewer can add findings and never remove one.
+The comment's first line names who reviewed, with the built-in's model
+id as the ran-on block prints it. When the only reviewer ran on a model
+id that also ran an implementing or fix run this process dispatched for
+the PR, the comment adds: "Same model as the author: a clean result is a
+cold read, not a second opinion."
+Each reviewer gets a run record of its own, reason `pr-review`, with a
+`reviewer` field. A command's has a duration and a verdict and no cost.
+`docs/review.md` gets the contract, an outline of a wrapper around
+another vendor's CLI, and one worked example that needs no model: a
+script that turns a linter's output into findings.
+
+**Done when.** Tests with a fake reviewer command, the test binary, the
+way `-notify`'s tests fake theirs: two reviewers' findings are unioned
+and tagged; one reviewer with no verdict makes the whole verdict
+`error`; a wrong `head`, bad JSON, a non-zero exit and a timeout are
+each no verdict; `-reviewers` without `claude` starts no `claude`
+process for the review; the same-model line appears only when it's true.
+
+Depends on 3.
+
+Estimate: M
+
+### 5. `polako review -pr N`: review one PR you name
 
 **Problem.** The first live review shouldn't happen inside an unattended
 drain. And 175 of this repo's merged PRs never came from an `issue-N`
@@ -408,20 +497,22 @@ branch; they get no review at all today.
 
 **Shape.** `cmd/polako/review.go`, wired in `main.go` and `flags.go`.
 Refuse a PR whose head is in another repository, saying to review it by
-hand or have its branch pushed to this one. Run ticket 3's two halves; a
-change over 2,000 lines gets `error` and no run, as in `work`.
+hand or have its branch pushed to this one. Run `reviewRange`, then
+ticket 4's reviewers; a change over 2,000 lines gets `error` and no run,
+as in `work`.
 Then comment when there are findings — the body on stdin, the way
 `prranon.go:writeRanOn` sends one — and set the status: `success`,
 `failure` ("N left for you": this verb never fixes) or `error`.
-Flags: `-pr`, `-level auto|low|medium|high`, `-model`, `-effort`, `-print`
-(run and print, write nothing to GitHub), `-dry-run`, and from the shared
+Flags: `-pr`, `-level auto|low|medium|high`, `-model`, `-effort`,
+`-reviewers`, `-review-timeout`, `-print` (run and print, write nothing
+to GitHub), `-dry-run`, and from the shared
 set `-dir`, `-claude`, `-ignore-skew`, `-stall`, `-heartbeat`, `-remote`,
 `-run-tag`, `-metrics`, `-log`, `-verbose`. No `-tools`, `-add-tools` or
 `-permission-mode`. `pr` and `print` join `envExempt`. Preflight refuses
 when `claude --help` lacks `--json-schema` or `--tools`, the way
 `gate.go:effortFlagGate` does. The record's kind is `review-run`, through
 `recordKind`, so `stats` skips it instead of reporting an issue #0; that
-is meant, and ticket 8's block counts `work`'s reviews only.
+is meant, and ticket 9's block counts `work`'s reviews only.
 `fakeGh` learns `pr comment`.
 Docs: `docs/review.md`, `security.md` (the grant, the new row),
 `install.md`, `releasing.md`, README's two verb lists, CLAUDE.md per
@@ -436,11 +527,11 @@ and no comment; no verdict gives `error` and a line saying to check
 `gh` write; a cross-repository PR is refused. `TestDocsDocumentEveryFlag`
 passes.
 
-Depends on 2, 3.
+Depends on 2, 4.
 
 Estimate: M
 
-### 5. Eval case `pr-review`: the reviewer under its real grant
+### 6. Eval case `pr-review`: the reviewer under its real grant
 
 **Problem.** The probes ran where every Bash call is auto-allowed, on one
 small diff. Whether the review gets through `reviewerTools` without a
@@ -484,7 +575,7 @@ Depends on 3.
 
 Estimate: M
 
-### 6. `work -review`: review each green head
+### 7. `work -review`: review each green head
 
 **Problem.** A PR reaches the human with the implementing run's own word
 that it's fine. The supervisor has the poll loop to do better and nothing
@@ -497,16 +588,17 @@ completed, when `none` was first seen on the current head, a memo of
 `settledByUs` per head, and whether review is off for this PR.
 The case fires under "How one PR goes"; `prStatus`'s `--json` gains
 `isCrossRepository` for the own-PR rule, and a PR that fails it is
-logged once and waited on as today. After ticket 3's run: nothing to
-fix sets `success`; findings post the comment and set `failure`; no
-verdict sets `error`. The run's ending follows the review column of the
+logged once and waited on as today. After ticket 4's reviewers have run:
+nothing to fix sets `success`; findings post the comment and set
+`failure`; no verdict sets `error`. The run's ending follows the review column of the
 endings table. Over a cap nothing starts and nothing parks;
 `remediable()` stays as it is, and a test of its own holds the cap. A
 failed comment or status write turns review off for the PR.
 Flags on `work`: `-review` (default off), `-review-level`,
-`-review-model`, `-review-effort`. `policy.go`: `pr-review` resolves
+`-review-model`, `-review-effort`, and ticket 4's `-reviewers` and
+`-review-timeout`. `policy.go`: `pr-review` resolves
 label, then the review cell, then `-model`/`-effort`, then inherit.
-Preflight gate as in ticket 4. Never on `design`, the way `reviewShoots`
+Preflight gate as in ticket 5. Never on `design`, the way `reviewShoots`
 rules it out. Docs: `docs/review.md`.
 
 **Done when.** Drain tests through the fake CLI: clean is one review and
@@ -520,18 +612,18 @@ leaves no status and is tried again; over a cap nothing is dispatched and
 nothing parks; a change over 2,000 lines gets `error` and no run;
 `-review` off leaves argv and `gh` calls byte-identical to today's.
 
-Depends on 2, 4, 5.
+Depends on 2, 5, 6.
 
 Estimate: M
 
-### 7. Give a review's findings one fix run
+### 8. Give a review's findings one fix run
 
-**Problem.** Ticket 6 hands every finding to the human. A solo operator
+**Problem.** Ticket 7 hands every finding to the human. A solo operator
 can't even request changes on their own PR, so nothing today turns a
 finding into a fix.
 
 **Shape.** `prreviewloop.go` gains the fix case: a head this process
-reviewed, found things to fix on, and hasn't aimed a fix at. Ticket 6's
+reviewed, found things to fix on, and hasn't aimed a fix at. Ticket 7's
 "findings" outcome becomes: with a fix run left, comment and `pending`;
 otherwise comment and `failure`.
 `remediateFindings` goes through `runRemediation`, reason `findings`
@@ -548,7 +640,7 @@ aimed at and seen again, which covers a post-run read that failed. A
 usage limit clears the aim, the way `handleFailingChecks` clears its
 own memo, so the next poll tries again. Over a cap a fix owed becomes
 `failure`.
-Flag on `work`: `-review-fixes` (default 1; 0 is ticket 6's behaviour).
+Flag on `work`: `-review-fixes` (default 1; 0 is ticket 7's behaviour).
 Docs: `docs/review.md`.
 
 **Done when.** Drain tests: findings, a pushing fix run and a clean second
@@ -558,11 +650,11 @@ limit leaves `pending` and spends no fix run; a `pending` written by
 another process is reviewed again, not fixed blind; over a cap `pending`
 becomes `failure`. A test holds the prompt to the data sentence.
 
-Depends on 6.
+Depends on 7.
 
 Estimate: M
 
-### 8. Record how each reviewed PR merged; `stats` reports it
+### 9. Record how each reviewed PR merged; `stats` reports it
 
 **Problem.** "Should a human look at this kind of change" has no data
 behind it. The records hold cost and size, not what review found or how
@@ -577,17 +669,20 @@ comes from run records: reasons `pr-review` and `findings`, and ticket
 3's fields.
 New `cmd/polako/statsreview.go`: a review block — PRs reviewed, clean
 first time, fixed by the fix run, left for you, no verdict, merged as
-reviewed — in text, `-json` and `-html`. Documented in `docs/review.md`,
-since `docs/run-data.md` is at its budget.
+reviewed — in text, `-json` and `-html`. With more than one reviewer it
+adds a line each: findings raised, and how many of those nobody else
+raised. That is the operator's own answer to whether a second reviewer
+earns its keep. Documented in `docs/review.md`, since `docs/run-data.md`
+is at its budget.
 
 **Done when.** Record tests cover the three values; the stats goldens
 show the block; a data set with no review runs prints none of it.
 
-Depends on 7.
+Depends on 8.
 
 Estimate: M
 
-### 9. A `ready` notification when a PR's review settles
+### 10. A `ready` notification when a PR's review settles
 
 **Problem.** The one moment a human is needed on a healthy PR fires no
 hook.
@@ -602,14 +697,14 @@ ceiling, so nothing is added there.
 **Done when.** A drain test sees one `ready` per settled head, none
 while a fix is owed, and none with `-review` off.
 
-Depends on 7.
+Depends on 8.
 
 Estimate: S
 
-### 10. An advisory tier: say which PRs you could skim
+### 11. An advisory tier: say which PRs you could skim
 
 **Problem.** Some changes plainly need less of a look than others, and
-nothing says which. Ticket 8's numbers also need grouping by that, or
+nothing says which. Ticket 9's numbers also need grouping by that, or
 they can't say anything about a class of change.
 
 **Shape.** New `cmd/polako/tier.go`: `tierOf` returns `light` or `full`
@@ -635,7 +730,7 @@ paths: `*` stays inside one segment, `**` spans any number. That needs a
 matcher of its own; `path.Match` has no `**`.
 Both flags are `work`'s. The tier shows in the status description and
 the comment's last line, goes on the issue record as `tier`, and groups
-ticket 8's block. `review -pr` has no issue and reports none. Nothing in
+ticket 9's block. `review -pr` has no issue and reports none. Nothing in
 this ticket branches on it. Documented in `docs/review.md`.
 
 **Done when.** Table tests over each rule and the matcher, including: a
@@ -644,11 +739,11 @@ never-light path beating a matching pattern; a file moved from
 one outsider's comment forces `full`. `stats` prints merged-as-reviewed
 per tier.
 
-Depends on 8.
+Depends on 9.
 
 Estimate: M
 
-### 11. Decide, without merging, whether a light PR could merge now
+### 12. Decide, without merging, whether a light PR could merge now
 
 **Problem.** The tier says what a person could skim. Merging needs more,
 read at the moment of the merge, and it should be watchable for a while
@@ -658,11 +753,16 @@ before anything acts on it.
 and why. Its caller gathers the facts fresh, after the status write, not
 from the poll that started the review. Yes needs all of:
 the PR was opened by the account polako runs as, its head is in this
-repository (ticket 6's own-PR rule), and its base is the default branch
+repository (ticket 7's own-PR rule), and its base is the default branch
 (`baseRefName`, added to `prStatus`'s `--json`);
 the tier is `light` for this head, recomputed now;
-this process's own review of this exact head returned no findings at
-all, nits included — a status read back never counts;
+every reviewer's review of this exact head, run by this process,
+returned no findings at all, nits included — a status read back never
+counts;
+at least one of those reviewers wasn't the author: a command reviewer,
+or the built-in on a model id that ran no implementing or fix run this
+process dispatched for the PR. After a restart only a command reviewer
+counts;
 checks on the head read `passing`, so a repo with no CI never qualifies;
 `mergeStateStatus` is `CLEAN` (also added to `--json`);
 the head isn't behind its base: `gh api
@@ -675,7 +775,7 @@ the issue is open and would still be in the queue — no `needs-human`,
 `proposed`, `design` or `awaiting-answer`, and the `-label` gate label
 still on it;
 neither the issue nor the PR carries `human-merge`;
-hands-off merges this shift are under ticket 12's cap.
+hands-off merges this shift are under ticket 13's cap.
 Two answers are transient: `mergeStateStatus` `UNKNOWN`, and a default
 branch still `pending`. Those are asked again on the next three polls of
 the same head. Every other no is final for that head.
@@ -689,15 +789,17 @@ like `design`: only a person applies it. Documented in `docs/review.md`.
 
 **Done when.** Table tests: every condition, alone, turns a yes into a no
 with its own reason; a `success` this process didn't write is a no; a
-review with one nit is a no; a fork's PR on an `issue-N` branch is a no;
+review with one nit is a no; a clean review by the built-in alone, on
+the model that wrote the change, is a no; the same review beside a clean
+command reviewer is a yes; a fork's PR on an `issue-N` branch is a no;
 `UNKNOWN` is asked again and then given up on; a red default branch is a
 no. No `gh pr merge` call exists anywhere.
 
-Depends on 10.
+Depends on 11.
 
 Estimate: M
 
-### 12. `work -merge-light`: merge the class of PR you named
+### 13. `work -merge-light`: merge the class of PR you named
 
 **Problem.** One issue in flight means the queue stops at every PR until
 a person clicks. For a class of change the operator would merge unread,
@@ -709,7 +811,7 @@ shift). `merge-light` joins `envExempt`: a profile can't turn it on.
 Preflight refuses it without `-review`, without a `-light-paths` and a
 `-light-max-lines` above 0, and on `design`; and it prints the class,
 the method and the cap at shift start, the way `-ungated` is announced.
-When ticket 11 says yes, the binary calls `gh pr merge N --<method>
+When ticket 12 says yes, the binary calls `gh pr merge N --<method>
 --match-head-commit <sha>`. Never a run. Never `--admin`, `--auto` or
 `--delete-branch`.
 Then it reads the PR again. Only a PR that now reads `MERGED` counts: one
@@ -719,7 +821,7 @@ more toward the cap, and `MERGED` returned at once so the existing path
 cleans up and the drain moves on. A refusal, or a PR still open because
 a merge queue took it, is logged with what to change, is final for that
 head, and leaves the PR waiting for a person.
-There's no separate breaker. Ticket 11's rule is one: a merge that turns
+There's no separate breaker. Ticket 12's rule is one: a merge that turns
 the default branch red is the last until a person makes it green.
 Docs: `docs/review.md`, `security.md`, and the reworded rule per
 "Invariants this changes" wherever it's stated: CLAUDE.md,
@@ -731,26 +833,26 @@ two lines in `flags.go`, and the header comments of `pr.go` and
 
 **Done when.** Drain tests: a PR that qualifies merges with the sha
 pinned and the method flag, and the drain moves on without waiting a
-poll; each condition from ticket 11, failing, leaves it for a person; a
+poll; each condition from ticket 12, failing, leaves it for a person; a
 refused merge isn't retried, and no call carries `--admin`, `--auto` or
 `--delete-branch`; a PR still open after the call gets no comment and no
 count; the sixth qualifying PR of a shift waits; after a restart a head
 that was already settled doesn't merge; `POLAKO_MERGE_LIGHT` in the
 environment is ignored; `-merge-light` off makes no merge call, with
-argv and `gh` calls byte-identical to ticket 11's.
+argv and `gh` calls byte-identical to ticket 12's.
 
-Depends on 11.
+Depends on 12.
 
 Estimate: L
 
-### 13. Say so when polako merged one
+### 14. Say so when polako merged one
 
 **Problem.** A merge nobody clicked should never be a surprise. `ready`
 would also fire for a PR that is about to merge itself.
 
 **Shape.** `notify.go`: `notifyMerged = "merged"`, fired only for a
-hands-off merge, with the issue and ticket 9's PR number. `ready` is held
-back for a head ticket 11 says yes to, and fires if the merge is then
+hands-off merge, with the issue and ticket 10's PR number. `ready` is held
+back for a head ticket 12 says yes to, and fires if the merge is then
 refused. The exit summary's `merged` line marks hands-off merges, and
 `stats` counts them. Documented in `docs/review.md`.
 
@@ -758,7 +860,7 @@ refused. The exit summary's `merged` line marks hands-off merges, and
 `ready`; a refused one fires `ready`; a person's merge fires neither new
 event; the summary marks only polako's merges.
 
-Depends on 9, 12.
+Depends on 10, 13.
 
 Estimate: S
 
@@ -767,6 +869,25 @@ Estimate: S
 **Build on the hosted agents.** Team or Enterprise only, usage billed on
 top, two of the three in beta, and an organization-owned GitHub App. A
 core feature can't need what most repos polako runs in don't have.
+
+**Keep `/code-review` as the only reviewer.** It was the first draft.
+One vendor's built-in command, read through shapes that vendor doesn't
+document, reviewing what its own model wrote. The contract in ticket 4
+costs one file and makes the review replaceable.
+
+**Require a second vendor on every review.** It would answer the
+echo-chamber worry outright, and it would mean polako doesn't review at
+all until you've wired something up. Out of the box it reviews with a
+fresh session and says so on the PR; hands-off merging is where a second
+opinion is required.
+
+**Read a review bot's PR comments as a third kind of reviewer.** Most
+hosted reviewers, and most self-built ones in CI, report as comments
+from a bot account. Naming that account in `-reviewers` and reading its
+comments on the head would let any of them drive the fix run with no
+script. It fits ticket 4's seam. It also needs rules nobody has tested:
+which of a bot's comments count, how long to wait for one, what a silent
+bot means. Next, if a command isn't enough.
 
 **Open the PR, then hand it to PR Steward.** It does what polako's three
 remediations do, from Anthropic's cloud. It needs the plan and the App,
@@ -782,7 +903,9 @@ the reviewed commit, made at the moment of the verdict, is tighter.
 
 **Let Claude Approvals hold the policy.** It is the right tool for a
 repo with several people: seats, paths, an approving review from an
-identity that isn't the author. Same plan gate as the rest.
+identity that isn't the author. Same plan gate as the rest, and the
+policy then lives in one vendor's file format. Here the policy is two
+flags and a fixed list, decided by plain code with no model in it.
 
 **Call `/ship` or `/steward` from a run.** They watch from an attended
 foreground session and stop when it ends. A `-p` run is one turn.
@@ -814,7 +937,7 @@ and adds a flip that a crash strands. The status and `ready` say the same.
 **Re-review only the fix run's commits.** Cheaper, but it stamps a head
 on the strength of a review of part of it.
 
-**Drop the skill's own gate now.** Maybe, once ticket 8 says how often
+**Drop the skill's own gate now.** Maybe, once ticket 9 says how often
 the second review finds something. A measured experiment, not a guess.
 
 **An approving review from polako.** GitHub won't take one from a PR's
@@ -829,7 +952,7 @@ Worth having. It also hands the reviewer every outsider's comment.
 
 ## What a hands-off merge changes
 
-Tickets 11 to 13, and nothing before them. The rules they hold to:
+Tickets 12 to 14, and nothing before them. The rules they hold to:
 
 - **The human gate moves; it doesn't vanish.** You approve a class of
   change once, as `-light-paths` and `-light-max-lines`, instead of each
@@ -839,6 +962,9 @@ Tickets 11 to 13, and nothing before them. The rules they hold to:
   nit included, sends the PR to you. The never-light list isn't a flag.
 - **Only polako's own PRs.** Opened by the account it runs as, from a
   branch in this repository, into the default branch.
+- **Never on the author's word alone.** At least one reviewer has to be
+  something other than the model that wrote the change: a different
+  model, or a command of yours. A different vendor is the stronger pick.
 - **Only on a verdict this process watched.** A status read back from
   GitHub never earns a merge. After a restart, a head already settled
   waits for you.
@@ -862,8 +988,8 @@ On a repo whose default branch is red by design at times — this one,
 when a release is overdue — hands-off merging waits until it's green.
 
 Start narrow. Docs-only and small is the class where the worst outcome
-is a wrong sentence. Ticket 11 runs first on purpose: watch what it says
-it would merge for a while before turning ticket 12 on.
+is a wrong sentence. Ticket 12 runs first on purpose: watch what it says
+it would merge for a while before turning ticket 13 on.
 
 ## If you have Claude Ship
 
@@ -892,7 +1018,11 @@ it would merge for a while before turning ticket 12 on.
   created by the account polako runs as. Still GitHub. A restart that
   can't vouch for one reviews again.
 - **What leaves the machine** gains new content on an old destination:
-  review findings in a PR comment, and a status line of counts.
+  review findings in a PR comment, and a status line of counts. And one
+  thing polako doesn't send but makes possible: a command reviewer may
+  send the diff wherever its author pointed it.
+- **A new interface to keep stable:** the command reviewer's contract —
+  five `POLAKO_REVIEW_*` variables in, one findings object out.
 - **Eleven verbs.** `review` starts a run, like `work` and `design`.
   CLAUDE.md gets its write-surface bullet: one PR comment and one commit
   status on the PR you named, two fetches, nothing else.
@@ -903,12 +1033,19 @@ it would merge for a while before turning ticket 12 on.
   `-light-*` and `-merge-*` are `work`'s flags, documented in
   `docs/review.md` because `docs/reference.md` is at its ceiling.
 - **Unattended means no prompts** holds for the reviewer only once ticket
-  5 is green. That's why ticket 6 waits on it.
+  6 is green. That's why ticket 7 waits on it.
 
 ## Left open
 
 - Whether `-review` becomes the default. Decide after a tagged batch and a
   row in `docs/experiments.md`.
+- Whether a second reviewer earns its keep here. Ticket 9 counts what
+  each reviewer raised that nobody else did; read that before believing
+  either side of the echo-chamber argument.
+- polako still writes code with Claude Code alone. A vendor-neutral
+  implementer is a different, larger design. After this one, the review,
+  the verdict, the tier and the merge don't care who wrote the code or
+  who reviewed it; only ticket 3's built-in reviewer knows a vendor.
 - Whether the skill's gate shrinks once the supervisor reviews.
 - How to record that a merged PR later needed a fix. A red default branch
   stops hands-off merging; nothing catches a bug found a week on. PRs here
@@ -917,6 +1054,6 @@ it would merge for a while before turning ticket 12 on.
 - A fix run's push reads as an answer to a human's request for changes
   made while it ran, by date. The human would have to ask again.
 - Whether 2,000 changed lines is the right place to stop reviewing.
-  Ticket 5 measures 300; nothing measures the ceiling.
+  Ticket 6 measures 300; nothing measures the ceiling.
 - The repo's GitHub description says it never merges anything itself.
-  That's yours to reword if ticket 12 ships.
+  That's yours to reword if ticket 13 ships.
