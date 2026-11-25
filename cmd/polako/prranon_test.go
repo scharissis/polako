@@ -48,9 +48,13 @@ func TestSpliceRanOnAppendsAtTheEnd(t *testing.T) {
 	t.Parallel()
 	line := []prRanOn{{combo: "anthropic · m · effort high", reasons: []string{"implement"}}}
 	block := ranOnBlock("- anthropic · m · effort high (implement)") + "\n"
-	for _, body := range []string{"Summary.", "Summary.\n", "Summary.\n\n", "Closes #7\n\nThen more.\n"} {
-		if got, want := spliceRanOn(body, line), strings.TrimRight(body, "\n")+"\n\n"+block; got != want {
+	for _, body := range []string{"Summary.", "Summary.\n", "Summary.\n\n", "Summary.\n\n\n", "Summary. \r\n\r\n\r\n", "Closes #7\n\nThen more.\n"} {
+		got, want := spliceRanOn(body, line), strings.TrimRight(body, " \r\n")+"\n\n"+block
+		if got != want {
 			t.Errorf("body %q:\n got %q\nwant %q", body, got, want)
+		}
+		if again := spliceRanOn(got, line); again != got {
+			t.Errorf("body %q: a second splice changed it:\n got %q\nwant %q", body, again, got)
 		}
 	}
 	if got, want := spliceRanOn("", line), block; got != want {

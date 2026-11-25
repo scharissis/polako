@@ -151,6 +151,9 @@ func spliceRanOn(body string, ours []prRanOn) string {
 		return body[:at] + blankLineBefore(body[:at]) + block + "\n\n" + body[at:] + after
 	}
 	if begin < 0 {
+		// Trimmed as the move above trims it, so splicing the result again
+		// changes nothing: writeRanOn reads "unchanged" as "already there".
+		body = strings.TrimRight(body, " \t\r\n")
 		after = "\n"
 	}
 	return body + blankLineBefore(body) + block + after
