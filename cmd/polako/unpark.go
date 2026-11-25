@@ -157,7 +157,7 @@ type parkListItem struct {
 	design bool
 	// work is read separately from the rest of this struct — it needs
 	// gh calls readParkListItem doesn't make, and readParkListItems is
-	// shared with status.go's own needs-you line, which has no use for it.
+	// shared with statusrender.go's own needs-you line, which has no use for it.
 	// See readParkWork.
 	work parkWork
 	// local is what inspectLeftWork finds on this machine's disk — commits or
@@ -233,7 +233,7 @@ func readParkedIssues(ctx context.Context, cfg config, only int, localWork bool)
 // readParkListItems reads every named issue's latest park comment, keyed by
 // issue number — the one gh-viewer-login read and the per-issue comment
 // reads readParkedIssues itself needs, factored out so status's own
-// needs-you line (status.go) can reuse the same viewer-only read and
+// needs-you line (statusrender.go) can reuse the same viewer-only read and
 // strict-shape filter without re-deriving the parked queue a second time.
 // Empty for no issues, so a caller with nothing parked pays for no gh call
 // at all.

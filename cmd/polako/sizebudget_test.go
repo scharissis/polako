@@ -37,10 +37,12 @@ import (
 // whole tree already clears them and the allowlists below stay short — the
 // entries are then the real outliers, not a census.
 //
-//   - fileBudget: every non-test file is already under 1,000 lines — the
-//     largest, metrics.go, sits ~60 lines clear — so fileDebt is empty and a
-//     new entry would mean a real regression, not the accretion epic's
-//     leftovers (stats.go, the last of those, was split up by issue #344).
+//   - fileBudget: every non-test file is already under 1,000 lines, so
+//     fileDebt is empty and a new entry would mean a real regression, not
+//     the accretion epic's leftovers (stats.go, the last of those, was split
+//     up by issue #344). No headroom figure here on purpose: the last one
+//     went stale while status.go grew to exactly the budget (issue #778).
+//     `go run ./scripts/health` prints the current sizes.
 //   - funcBudget: just over two of the health report's 60-line call-out
 //     screens, plus a signature and braces — chosen the same way, so funcDebt
 //     is empty too. drain.go:drain was the one function over it until issue
