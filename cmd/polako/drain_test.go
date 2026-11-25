@@ -4881,8 +4881,6 @@ func TestDrainSkipsAHeldBackIssueAndWorksTheNextOne(t *testing.T) {
 	}
 }
 
-// --- the pieces, on their own ---
-
 // The design gate, end to end, with and without -strict-order: the fold that
 // puts awaiting-answer back in ready must not reach a design request, or the
 // drain would sit waiting on #2's thread and then run implement-issue on it.
@@ -4933,6 +4931,8 @@ func TestDrainWorksNoDesignRequest(t *testing.T) {
 		})
 	}
 }
+
+// --- the pieces, on their own ---
 
 // A checks/review/conflict park follows a remediation run, not the implement
 // run from earlier — resumeHint has to send the operator to that transcript
