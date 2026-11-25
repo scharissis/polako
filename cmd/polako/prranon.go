@@ -235,7 +235,8 @@ var ghServerError = regexp.MustCompile(`(HTTP|status code:) 5\d\d`)
 
 // ghRefused reports an error GitHub won't answer differently a second time:
 // a token it rejects or one that may not write here. A 403 naming a rate
-// limit is the other kind of 403, and passes with time.
+// limit — "abuse detection" in GitHub's older wording — is the other kind of
+// 403, and passes with time.
 func ghRefused(err error) bool {
 	s := err.Error()
 	// The last three carry no status: `gh pr edit` is a GraphQL mutation, and
@@ -249,7 +250,8 @@ func ghRefused(err error) bool {
 		}
 	}
 	forbidden := strings.Contains(s, "HTTP 403") || strings.Contains(s, "status code: 403")
-	return forbidden && !strings.Contains(strings.ToLower(s), "rate limit")
+	low := strings.ToLower(s)
+	return forbidden && !strings.Contains(low, "rate limit") && !strings.Contains(low, "abuse detection")
 }
 
 // ranOnHint is what the operator can do about a ran-on write that failed

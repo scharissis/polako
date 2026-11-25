@@ -348,6 +348,7 @@ func TestRanOnHintFitsTheError(t *testing.T) {
 		{"To get started with GitHub CLI, please run:  gh auth login", true, ranOnAuth},
 		{"HTTP 403: API rate limit exceeded for user ID 1.", false, ""},
 		{"HTTP 403: You have exceeded a secondary rate limit.", false, ""},
+		{"HTTP 403: You have triggered an abuse detection mechanism. Please wait a few minutes.", false, ""},
 		{"HTTP 502: Bad Gateway (https://api.github.com/graphql)", false, ranOnServer},
 		{"non-200 OK status code: 504 Gateway Timeout", false, ranOnServer},
 		{"could not connect to api.github.com", false, ""},
