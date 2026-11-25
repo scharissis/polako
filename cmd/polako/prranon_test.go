@@ -307,6 +307,30 @@ func TestWriteRanOnWarnsOnceWhenEveryTryFails(t *testing.T) {
 	}
 }
 
+// A body that can't be read is the other way to the warning: ghReads reads,
+// no edit, and the read's own error in the one warning.
+func TestWriteRanOnWarnsOnceWhenTheBodyCannotBeRead(t *testing.T) {
+	t.Parallel()
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		PRs:      map[string]*fakePR{"issue-1": {Number: 42, Body: "Closes #1\n"}},
+		FailWith: map[string]*fakeFailure{"pr view": {Times: 100, Stderr: "HTTP 502: Bad Gateway (https://api.github.com/graphql)"}},
+	})
+	st := &issueState{ranOn: []prRanOn{{combo: "c", reasons: []string{"implement"}}}}
+	writeRanOn(context.Background(), cfg, 42, st)
+	final := finalGhState(t, path)
+	if left := final.FailWith["pr view"].Times; left != 100-ghReads {
+		t.Errorf("pr view ran %d times, want %d", 100-left, ghReads)
+	}
+	if strings.Contains(final.PRs["issue-1"].Body, ranOnBegin) {
+		t.Errorf("an unread body was edited: %q", final.PRs["issue-1"].Body)
+	}
+	log := buf.String()
+	if strings.Count(log, ranOnFailed) != 1 || strings.Count(log, "transient:") != ghReads-1 || !strings.Contains(log, " pr view 42") {
+		t.Errorf("want %d retries and one warning naming the read:\n%s", ghReads-1, log)
+	}
+}
+
 // A 403 that names a rate limit passes with time, so it isn't a refusal; an
 // error of neither kind gets no hint at all.
 func TestRanOnHintFitsTheError(t *testing.T) {

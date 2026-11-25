@@ -328,9 +328,6 @@ func writeRanOn(ctx context.Context, cfg config, prNumber int, st *issueState) {
 		// last try never got as far as an edit.
 		last := attempt > ghReads || (attempt == ghReads && !readOK)
 		if last || ghRefused(err) {
-			if last && editErr != nil {
-				err = editErr
-			}
 			cfg.narrate(sevWarning, "could not note on PR #%d which provider, model and effort ran on it (%v) — "+
 				"the shift continues%s", prNumber, err, ranOnHint(err))
 			return
