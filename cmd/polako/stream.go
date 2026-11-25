@@ -537,7 +537,7 @@ func isIssueCreate(name string, input json.RawMessage) bool {
 // the rest are that wakeup, and belong in the shift log rather than on an
 // operator's glance. Per invocation, not per process: a genuine --resume is a
 // new dispatchClaude call with a new eventLog, so it still announces itself,
-// and the drain_test.go assertions counting "session started" per run stay
+// and the test assertions counting "session started" per run stay
 // exact. The stage narrator lives here for the same per-invocation reason —
 // see stages.go.
 type eventLog struct {
