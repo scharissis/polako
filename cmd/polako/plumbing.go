@@ -247,8 +247,9 @@ func captureAll(ctx context.Context, dir string, env []string, stdin io.Reader, 
 // errorPage matches the HTML page gh's GraphQL client quotes after an HTTP
 // error's status — `non-200 OK status code: 502 Bad Gateway body: "<html>…"`
 // — to the end of that line. gh escapes the page's own newlines, so it is
-// one line however long the page is.
-var errorPage = regexp.MustCompile(`(?i) body: "<(html|!doctype)[^\n]*`)
+// one line however long the page is. Any body that opens on a tag counts,
+// past escaped whitespace: proxies don't agree on how a page starts.
+var errorPage = regexp.MustCompile(`(?i) body: "(\\[rnt]|\s)*<[a-z!?][^\n]*`)
 
 // trimErrorPage drops that page from a command's stderr. The status before
 // it says everything the page does, and the page is a proxy's boilerplate

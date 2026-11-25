@@ -371,9 +371,10 @@ func TestTrimErrorPageKeepsTheStatus(t *testing.T) {
 	for in, want := range map[string]string{
 		gh502:                            "non-200 OK status code: 502 Bad Gateway",
 		"warn\n" + gh502 + "\nlast line": "warn\nnon-200 OK status code: 502 Bad Gateway\nlast line",
-		`status code: 503 body: "<!DOCTYPE html><html></html>"`: "status code: 503",
-		"could not connect to api.github.com\n":                 "could not connect to api.github.com\n",
-		`HTTP 422: Validation Failed body: "not a page"`:        `HTTP 422: Validation Failed body: "not a page"`,
+		`status code: 503 body: "<!DOCTYPE html><html></html>"`:         "status code: 503",
+		`status code: 504 body: "\r\n <head><title>504</title></head>"`: "status code: 504",
+		"could not connect to api.github.com\n":                         "could not connect to api.github.com\n",
+		`HTTP 422: Validation Failed body: "not a page"`:                `HTTP 422: Validation Failed body: "not a page"`,
 		"": "",
 	} {
 		if got := trimErrorPage(in); got != want {
