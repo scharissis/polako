@@ -90,9 +90,9 @@ func TestSourceStaysWithinSizeBudget(t *testing.T) {
 	seenFile := map[string]bool{}
 	for _, f := range files {
 		if f.isTest {
-			// Test files are exempt on purpose: a long drain_test.go is
-			// table-driven coverage, which is a different thing from a
-			// source file that has taken on too many jobs.
+			// Test files are exempt on purpose: a long test file is
+			// coverage, which is a different thing from a source file
+			// that has taken on too many jobs.
 			continue
 		}
 		if debt, listed := fileDebt[f.base]; listed {
