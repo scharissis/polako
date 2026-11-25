@@ -235,7 +235,12 @@ var ghServerError = regexp.MustCompile(`(HTTP|status code:) 5\d\d`)
 // limit is the other kind of 403, and passes with time.
 func ghRefused(err error) bool {
 	s := err.Error()
-	for _, sure := range []string{"HTTP 401", "status code: 401", "Bad credentials", "Resource not accessible"} {
+	// The last three carry no status: `gh pr edit` is a GraphQL mutation, and
+	// GraphQL refuses with a 200 and a message, or gh refuses before asking.
+	for _, sure := range []string{
+		"HTTP 401", "status code: 401", "Bad credentials", "Resource not accessible",
+		"not been granted the required scopes", "does not have the correct permissions", "gh auth login",
+	} {
 		if strings.Contains(s, sure) {
 			return true
 		}
