@@ -12,10 +12,11 @@ import (
 
 // processIssue holds the switch that decides resume against wait against give
 // up, and it is the most intricate thing in the package. The drain tests in
-// drain_test.go reach most of its branches, but each one reaches them incidentally, through
-// whichever route the issue it was really about happened to take. These drive
-// the function itself, one case per branch, so a branch that stops behaving
-// fails by name rather than by whichever end-to-end test noticed first.
+// drain_test.go reach most of its branches, but each one reaches them
+// incidentally, through whichever route the issue it was really about happened
+// to take. These drive the function itself, one case per branch, so a branch
+// that stops behaving fails by name rather than by whichever end-to-end test
+// noticed first.
 //
 // Runs are counted off the init event the supervisor logs for every
 // invocation, and the resume is read out of the same log — no state the fakes
