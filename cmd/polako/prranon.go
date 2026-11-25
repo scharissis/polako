@@ -226,10 +226,50 @@ func ranOnMarkers(body string) (begin, end int) {
 	return begin, end
 }
 
+// ghServerError matches a GitHub 5xx in gh's error text, in the REST client's
+// spelling and the GraphQL client's.
+var ghServerError = regexp.MustCompile(`(HTTP|status code:) 5\d\d`)
+
+// ghRefused reports an error GitHub won't answer differently a second time:
+// a token it rejects or one that may not write here. A 403 naming a rate
+// limit is the other kind of 403, and passes with time.
+func ghRefused(err error) bool {
+	s := err.Error()
+	for _, sure := range []string{"HTTP 401", "status code: 401", "Bad credentials", "Resource not accessible"} {
+		if strings.Contains(s, sure) {
+			return true
+		}
+	}
+	forbidden := strings.Contains(s, "HTTP 403") || strings.Contains(s, "status code: 403")
+	return forbidden && !strings.Contains(strings.ToLower(s), "rate limit")
+}
+
+// ranOnHint is what the operator can do about a ran-on write that failed
+// for good: something for a refusal, nothing for GitHub's own 5xx, and no
+// guess for anything else.
+func ranOnHint(err error) string {
+	switch {
+	case ghRefused(err):
+		return "; check `gh auth status` can edit PRs here"
+	case ghServerError.MatchString(err.Error()):
+		return "; GitHub had a server error, so there's nothing to fix here"
+	}
+	return ""
+}
+
 // writeRanOn puts the issue's lines on its PR. Best-effort like postSummary:
-// a failed read or write is one log line, never a park, a retry or a stopped
+// a write that fails for good is one warning, never a park or a stopped
 // shift. The body goes to gh on stdin, never argv — a failed call's error
 // quotes its argv, and nothing from the body may reach the shift log.
+//
+// It is the one write that retries (see retryRead for why the rest don't).
+// Nothing after it would: it runs after the run that opens the PR and after
+// a remediation that pushes, so a one-run issue gets no second call. And
+// repeating is safe: every try reads the body first, and spliceRanOn hands
+// back a body that already holds these lines unchanged, so a try after an
+// edit that landed sends nothing. That read is also how a lost reply is
+// told from a lost write — GitHub can save the edit and then answer 502 —
+// which is why a failed last edit gets one more read before the warning.
 func writeRanOn(ctx context.Context, cfg config, prNumber int, st *issueState) {
 	if cfg.dryRun || prNumber == 0 || len(st.ranOn) == 0 {
 		return
@@ -240,27 +280,59 @@ func writeRanOn(ctx context.Context, cfg config, prNumber int, st *issueState) {
 		return
 	}
 	n := strconv.Itoa(prNumber)
-	out, err := gh(ctx, cfg, "pr", "view", n, "--json", "body")
-	var v struct {
-		Body string `json:"body"`
-	}
-	if err == nil {
-		err = json.Unmarshal(out, &v)
-	}
-	if err == nil {
-		next := spliceRanOn(v.Body, st.ranOn)
-		if next == v.Body {
-			st.ranOnSent = sent
+	// editErr is the last edit's failure, kept past the read that follows it:
+	// when that read shows the block still missing, this is the reason.
+	var editErr error
+	for attempt := 1; ; attempt++ {
+		out, err := gh(ctx, cfg, "pr", "view", n, "--json", "body")
+		var v struct {
+			Body string `json:"body"`
+		}
+		if err == nil {
+			err = json.Unmarshal(out, &v)
+		}
+		readOK := err == nil
+		if readOK {
+			next := spliceRanOn(v.Body, st.ranOn)
+			if next == v.Body {
+				st.ranOnSent = sent
+				// Already there before this call asked: nothing was written,
+				// so nothing is logged.
+				if editErr != nil {
+					cfg.detailf("noted on PR #%d which provider, model and effort ran on it", prNumber)
+				}
+				return
+			}
+			if attempt > ghReads {
+				err = editErr
+			} else if _, err = ghStdin(ctx, cfg, next, "pr", "edit", n, "--body-file", "-"); err == nil {
+				st.ranOnSent = sent
+				cfg.detailf("noted on PR #%d which provider, model and effort ran on it", prNumber)
+				return
+			} else {
+				editErr = err
+			}
+		}
+		if ctx.Err() != nil {
 			return
 		}
-		_, err = ghStdin(ctx, cfg, next, "pr", "edit", n, "--body-file", "-")
+		// Out of tries: the check read after the last edit just ran, or the
+		// last try never got as far as an edit.
+		last := attempt > ghReads || (attempt == ghReads && !readOK)
+		if last || ghRefused(err) {
+			if last && editErr != nil {
+				err = editErr
+			}
+			cfg.narrate(sevWarning, "could not note on PR #%d which provider, model and effort ran on it (%v) — "+
+				"the shift continues%s", prNumber, err, ranOnHint(err))
+			return
+		}
+		if attempt < ghReads {
+			cfg.narrate(sevWarning, "transient: noting on PR #%d what ran on it failed (%v) — will retry in %s (%d of %d)",
+				prNumber, err, dur(cfg.ghRetryWait), attempt, ghReads)
+		}
+		if sleep(ctx, cfg.ghRetryWait) != nil {
+			return
+		}
 	}
-	if err != nil {
-		cfg.narrate(sevWarning, "could not note on PR #%d which provider, model and effort ran on it (%v) — "+
-			"the shift continues; check `gh auth status` can edit PRs here, and the next run's write retries it",
-			prNumber, err)
-		return
-	}
-	st.ranOnSent = sent
-	cfg.detailf("noted on PR #%d which provider, model and effort ran on it", prNumber)
 }

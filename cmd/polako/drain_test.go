@@ -97,6 +97,10 @@ type ghState struct {
 	// when it cannot reach GitHub, and then it answers normally again. Keyed by
 	// the two-word call so a test can be flaky about exactly one lookup.
 	FailReads map[string]int `json:"fail_reads"`
+	// FailWith is GitHub answering a call with an error of the test's own
+	// choosing, where FailReads only ever fails to connect. Keyed like
+	// FailReads. See fakeFailure.
+	FailWith map[string]*fakeFailure `json:"fail_with"`
 
 	// HiddenRepos are repositories the token can't see: `pr list --repo`
 	// naming one fails the way gh does on a 404, every time, and stats's
@@ -391,6 +395,16 @@ func writeGhState(path string, st *ghState) error {
 // so does one that wrote back exactly what was already there.
 const fakeGhLogEnv = "POLAKO_FAKE_GH_LOG"
 
+// fakeFailure fails the next Times calls of a kind with Stderr, verbatim,
+// and exit 1. Apply makes the call first and then fails it: a write that
+// landed whose reply was lost, the way a 502 from a proxy in front of
+// GitHub leaves it.
+type fakeFailure struct {
+	Times  int    `json:"times"`
+	Stderr string `json:"stderr"`
+	Apply  bool   `json:"apply"`
+}
+
 // fakeGh answers one gh invocation and persists anything it changed.
 func fakeGh(path string, args []string) int {
 	if dest := os.Getenv(fakeGhLogEnv); dest != "" {
@@ -522,6 +536,17 @@ func answerGh(st *ghState, args []string) (out string, changed bool, code int) {
 	if n := st.FailReads[failKey]; n > 0 {
 		st.FailReads[failKey] = n - 1
 		fmt.Fprintf(os.Stderr, "could not connect to api.github.com\n")
+		return "", true, 1
+	}
+	if f := st.FailWith[failKey]; f != nil && f.Times > 0 {
+		f.Times--
+		if f.Apply {
+			// Out of the map for the real answer, or it would fail again.
+			delete(st.FailWith, failKey)
+			answerGh(st, args)
+			st.FailWith[failKey] = f
+		}
+		fmt.Fprintln(os.Stderr, f.Stderr)
 		return "", true, 1
 	}
 

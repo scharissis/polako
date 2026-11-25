@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -149,8 +150,11 @@ const ghRetryDelay = 3 * time.Second
 //
 // Reads only, deliberately. A retried write is a write that can happen twice —
 // a second park comment on a thread, a duplicate close — and none of the writes
-// here is idempotent enough to be worth that. `git fetch origin` counts as a
-// read: it fails for the same just-woken network, and twice is the same as once.
+// that go through here is idempotent enough to be worth that. `git fetch
+// origin` counts as a read: it fails for the same just-woken network, and
+// twice is the same as once. The one write that does repeat is the ran-on
+// block, in its own loop (writeRanOn): it reads the body before every edit
+// and sends nothing when its lines are already there, so twice is once.
 func retryRead[T any](ctx context.Context, cfg config, what string, read func() (T, error)) (T, error) {
 	var zero T
 	for attempt := 1; ; attempt++ {
@@ -235,9 +239,22 @@ func captureAll(ctx context.Context, dir string, env []string, stdin io.Reader, 
 			return out, ctx.Err()
 		}
 		return out, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err,
-			strings.TrimSpace(errBuf.String()))
+			strings.TrimSpace(trimErrorPage(errBuf.String())))
 	}
 	return out, nil
+}
+
+// errorPage matches the HTML page gh's GraphQL client quotes after an HTTP
+// error's status — `non-200 OK status code: 502 Bad Gateway body: "<html>…"`
+// — to the end of that line. gh escapes the page's own newlines, so it is
+// one line however long the page is.
+var errorPage = regexp.MustCompile(`(?i) body: "<(html|!doctype)[^\n]*`)
+
+// trimErrorPage drops that page from a command's stderr. The status before
+// it says everything the page does, and the page is a proxy's boilerplate
+// that would otherwise fill every log line the error reaches.
+func trimErrorPage(stderr string) string {
+	return errorPage.ReplaceAllString(stderr, "")
 }
 
 func sleep(ctx context.Context, d time.Duration) error {

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -186,13 +187,14 @@ func TestDrainNotesRanOnInThePRBody(t *testing.T) {
 	}
 }
 
-// Best-effort: a refused edit is one warning, and the drain goes on to merge.
+// Best-effort: an edit that fails on every try is one warning, and the drain
+// goes on to merge.
 func TestDrainCarriesOnWhenTheRanOnWriteFails(t *testing.T) {
 	t.Parallel()
 	buf := captureLog(t)
 	cfg, path := drainConfig(t, "implementmerged", &ghState{
 		Issues:    map[string]*fakeIssue{"1": {Open: true}},
-		FailReads: map[string]int{"pr edit": 1},
+		FailReads: map[string]int{"pr edit": 100},
 	})
 	if err := drain(context.Background(), cfg); err != nil {
 		t.Fatalf("drain: %v", err)
@@ -206,6 +208,145 @@ func TestDrainCarriesOnWhenTheRanOnWriteFails(t *testing.T) {
 	}
 	if want := "could not note on PR #42 which provider, model and effort ran on it"; !strings.Contains(buf.String(), want) {
 		t.Errorf("log is missing %q\n%s", want, buf.String())
+	}
+}
+
+// gh502 is gh's own text for a 502 from the proxy in front of GitHub, page
+// and all, as issue #775 logged it.
+const gh502 = `non-200 OK status code: 502 Bad Gateway body: "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n</body>\r\n</html>\r\n"`
+
+const (
+	ranOnNoted  = "noted on PR #42 which provider"
+	ranOnFailed = "could not note on PR #42"
+	ranOnAuth   = "gh auth status"
+	ranOnServer = "GitHub had a server error"
+)
+
+// ranOnWrite runs one writeRanOn against a PR whose `pr edit` fails the way
+// fail says, and hands back the log and the state it left.
+func ranOnWrite(t *testing.T, fail *fakeFailure) (string, *ghState) {
+	t.Helper()
+	buf := captureLog(t)
+	cfg, path := drainConfig(t, "stream", &ghState{
+		PRs:      map[string]*fakePR{"issue-1": {Number: 42, Body: "Summary.\n\nCloses #1\n"}},
+		FailWith: map[string]*fakeFailure{"pr edit": fail},
+	})
+	st := &issueState{ranOn: []prRanOn{{combo: "c", reasons: []string{"implement"}}}}
+	writeRanOn(context.Background(), cfg, 42, st)
+	return buf.String(), finalGhState(t, path)
+}
+
+// GitHub saved the edit and lost the reply (issue #775): the next try's read
+// finds the block, sends nothing more, and it ends as a write that worked.
+func TestWriteRanOnTakesALostReplyForALandedEdit(t *testing.T) {
+	t.Parallel()
+	log, st := ranOnWrite(t, &fakeFailure{Times: 100, Stderr: gh502, Apply: true})
+	if n := strings.Count(st.PRs["issue-1"].Body, ranOnBegin); n != 1 {
+		t.Errorf("PR body holds %d blocks, want 1: %q", n, st.PRs["issue-1"].Body)
+	}
+	if left := st.FailWith["pr edit"].Times; left != 99 {
+		t.Errorf("pr edit ran %d times, want 1: the block was there on the second read", 100-left)
+	}
+	if !strings.Contains(log, ranOnNoted) || strings.Contains(log, ranOnFailed) {
+		t.Errorf("want the success line and no warning:\n%s", log)
+	}
+	if strings.Contains(log, "<html>") || !strings.Contains(log, "502 Bad Gateway") {
+		t.Errorf("want the status without the page:\n%s", log)
+	}
+}
+
+func TestWriteRanOnRetriesAFailedEdit(t *testing.T) {
+	t.Parallel()
+	log, st := ranOnWrite(t, &fakeFailure{Times: 2, Stderr: gh502})
+	if !strings.Contains(st.PRs["issue-1"].Body, "- c (implement)") {
+		t.Errorf("the third try didn't land the block: %q\n%s", st.PRs["issue-1"].Body, log)
+	}
+	if n := strings.Count(log, "transient: noting on PR #42"); n != 2 {
+		t.Errorf("logged %d retries, want 2:\n%s", n, log)
+	}
+	if !strings.Contains(log, ranOnNoted) || strings.Contains(log, ranOnFailed) {
+		t.Errorf("want the success line and no warning:\n%s", log)
+	}
+}
+
+// A refusal answers the same way every time, so it gets one try and the
+// hint that fits it.
+func TestWriteRanOnDoesNotRetryARefusal(t *testing.T) {
+	t.Parallel()
+	log, st := ranOnWrite(t, &fakeFailure{Times: 100, Stderr: "HTTP 403: Resource not accessible by integration (https://api.github.com/graphql)"})
+	if left := st.FailWith["pr edit"].Times; left != 99 {
+		t.Errorf("pr edit ran %d times, want 1", 100-left)
+	}
+	if strings.Count(log, ranOnFailed) != 1 || !strings.Contains(log, ranOnAuth) || strings.Contains(log, "transient:") {
+		t.Errorf("want one warning with the auth hint and no retry:\n%s", log)
+	}
+}
+
+// Every try fails and the last read still shows no block: one warning, and a
+// 502 isn't the operator's to fix.
+func TestWriteRanOnWarnsOnceWhenEveryTryFails(t *testing.T) {
+	t.Parallel()
+	log, st := ranOnWrite(t, &fakeFailure{Times: 100, Stderr: gh502})
+	if left := st.FailWith["pr edit"].Times; left != 100-ghReads {
+		t.Errorf("pr edit ran %d times, want %d", 100-left, ghReads)
+	}
+	if strings.Contains(st.PRs["issue-1"].Body, ranOnBegin) {
+		t.Errorf("a failed edit wrote the block: %q", st.PRs["issue-1"].Body)
+	}
+	if strings.Count(log, ranOnFailed) != 1 || !strings.Contains(log, ranOnServer) {
+		t.Errorf("want one warning with the server-error hint:\n%s", log)
+	}
+	for _, not := range []string{ranOnAuth, "next run", "<html>", ranOnNoted} {
+		if strings.Contains(log, not) {
+			t.Errorf("log has %q:\n%s", not, log)
+		}
+	}
+}
+
+// A 403 that names a rate limit passes with time, so it isn't a refusal; an
+// error of neither kind gets no hint at all.
+func TestRanOnHintFitsTheError(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		stderr  string
+		refused bool
+		hint    string
+	}{
+		{"HTTP 401: Bad credentials (https://api.github.com/graphql)", true, ranOnAuth},
+		{"HTTP 403: Must have admin rights to Repository.", true, ranOnAuth},
+		{"GraphQL: Resource not accessible by personal access token (updatePullRequest)", true, ranOnAuth},
+		{"HTTP 403: API rate limit exceeded for user ID 1.", false, ""},
+		{"HTTP 403: You have exceeded a secondary rate limit.", false, ""},
+		{"HTTP 502: Bad Gateway (https://api.github.com/graphql)", false, ranOnServer},
+		{"non-200 OK status code: 504 Gateway Timeout", false, ranOnServer},
+		{"could not connect to api.github.com", false, ""},
+	} {
+		err := errors.New("gh pr edit 502 --body-file -: exit status 1: " + tc.stderr)
+		if got := ghRefused(err); got != tc.refused {
+			t.Errorf("ghRefused(%q) = %v, want %v", tc.stderr, got, tc.refused)
+		}
+		got := ranOnHint(err)
+		if (tc.hint == "") != (got == "") || !strings.Contains(got, tc.hint) {
+			t.Errorf("ranOnHint(%q) = %q, want it to hold %q", tc.stderr, got, tc.hint)
+		}
+	}
+}
+
+// The page goes, the status before it stays, and stderr with no page —
+// other lines around one included — is left alone.
+func TestTrimErrorPageKeepsTheStatus(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		gh502:                            "non-200 OK status code: 502 Bad Gateway",
+		"warn\n" + gh502 + "\nlast line": "warn\nnon-200 OK status code: 502 Bad Gateway\nlast line",
+		`status code: 503 body: "<!DOCTYPE html><html></html>"`: "status code: 503",
+		"could not connect to api.github.com\n":                 "could not connect to api.github.com\n",
+		`HTTP 422: Validation Failed body: "not a page"`:        `HTTP 422: Validation Failed body: "not a page"`,
+		"": "",
+	} {
+		if got := trimErrorPage(in); got != want {
+			t.Errorf("trimErrorPage(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
