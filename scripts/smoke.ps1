@@ -11,8 +11,8 @@
 # assets; `go install ...@vX.Y.Z` resolving against the remote; the marketplace
 # ref naming a tag that exists; the plugin installing from the tag about to be
 # published; and the binary and the plugin agreeing on a version. It cannot
-# cover the skill actually taking an issue to a PR - see "Cutting a release" in
-# the README for that half.
+# cover the skill actually taking an issue to a PR - see "Smoke-testing the
+# skill" in docs/releasing.md for that half.
 #
 # Every check runs and the failures are summarised at the end, rather than the
 # first one aborting: deciding whether to publish is easier with the whole
@@ -501,7 +501,8 @@ try {
 
     Write-Host ''
     Write-Host 'The skill half is not covered by any of this. Before merging the publish PR,'
-    Write-Host "drive one real issue through $Version - see ""Cutting a release"" in the README."
+    Write-Host "drive one real issue through $Version - see ""Smoke-testing the skill"" in"
+    Write-Host 'docs/releasing.md.'
     Write-Host ''
     Write-Host "Then merge the publish PR moving the marketplace ref to $pluginTag - the"
     Write-Host 'Release workflow opens it; open it by hand only if it is missing.'
