@@ -36,10 +36,9 @@ func renderStatus(w io.Writer, rpt report, cfg config, snap statusSnapshot) {
 	}
 }
 
-// statusPlanLine is the same row usageLine builds for work's startup
-// banner, reused rather than re-derived: the "second renderer, not a second
-// pipeline" rule statusjson.go already applies to statusDocFrom, held to a
-// single fact source here too.
+// statusPlanLine is usageLine's row, shared by the text and JSON renderers
+// rather than re-derived: the "second renderer, not a second pipeline" rule
+// statusjson.go already applies to statusDocFrom.
 func statusPlanLine(snap statusSnapshot) string {
 	if snap.usage == nil {
 		return ""
