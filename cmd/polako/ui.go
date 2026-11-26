@@ -153,7 +153,7 @@ func (u *ui) emit(p []byte, milestone bool, sev severity) {
 	defer u.mu.Unlock()
 	now := time.Now()
 	if milestone || u.verbose {
-		if s := u.termStamp(now); s != "" {
+		if s := u.termStamp(now, sev); s != "" {
 			io.WriteString(u.terminal, s)
 		}
 		io.WriteString(u.terminal, u.style.render(string(p), milestone, sev))
@@ -170,7 +170,7 @@ func (u *ui) emit(p []byte, milestone bool, sev severity) {
 		// Straight to the terminal rather than through the logger, which would
 		// re-enter emit while mu is held — but still through render, so this
 		// warning gets the same yellow the styler promises it.
-		if s := u.termStamp(now); s != "" {
+		if s := u.termStamp(now, sevWarning); s != "" {
 			io.WriteString(u.terminal, s)
 		}
 		io.WriteString(u.terminal, u.style.render(fmt.Sprintf(logLostFmt+"\n", err), true, sevWarning))
@@ -182,11 +182,20 @@ func (u *ui) emit(p []byte, milestone bool, sev severity) {
 // every other colour, so NO_COLOR, TERM=dumb and Windows get it unstyled
 // rather than dropped; stampFull is the same full stampLayout a pipe or
 // redirect has always seen.
-func (u *ui) termStamp(now time.Time) string {
+//
+// A settings row on a TTY gets blanks instead: the startup block prints in
+// one instant, so its header's stamp already dates every row, and ten copies
+// of the same second add nothing. The blanks keep the rows aligned under the
+// header. Piped output keeps the full stamp on every row, which
+// docs/designs/done/terminal-output.md §2 promised for compatibility.
+func (u *ui) termStamp(now time.Time, sev severity) string {
 	switch u.stamp {
 	case stampOff:
 		return ""
 	case stampTTYDim:
+		if sev == sevSettings {
+			return strings.Repeat(" ", len(ttyStampLayout))
+		}
 		return u.style.dim(now.Format(ttyStampLayout))
 	default:
 		return now.Format(stampLayout)
