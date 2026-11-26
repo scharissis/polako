@@ -194,44 +194,41 @@ func TestSampleTickScalesWithInterval(t *testing.T) {
 	}
 }
 
-// TestPreflightPairsSaysNothingUnasked pins the gate each row promises: unset
-// (the zero-value config, no log path) produces exactly one row — the
-// unconditional epics disclosure — and nothing else. Every other row earns its
-// keep only when there is something to disclose.
+// TestPreflightPairsSaysNothingUnasked pins the gate each row promises: the
+// zero-value config produces exactly one row — model, which always shows —
+// and nothing else. Every other row earns its keep only when there is
+// something to disclose.
 func TestPreflightPairsSaysNothingUnasked(t *testing.T) {
 	t.Parallel()
 	got := preflightPairs(config{})
-	if len(got) != 1 || got[0][0] != "epics" {
-		t.Errorf("preflightPairs(zero value) = %v, want only the epics row", got)
+	if len(got) != 1 || got[0][0] != "model" || got[0][1] != "Claude Code's default, effort default" {
+		t.Errorf("preflightPairs(zero value) = %v, want only the default model row", got)
 	}
 }
 
-// TestPreflightPairsGatesAndOrdersEveryRow is the regression test the code
-// review that shipped this function found missing: preflightPairs replaced
-// eight independently-gated narrate/log calls with one function, and nothing
-// pinned either the gating or the row order that resulted. One config with
-// every condition set exercises every row in one pass; the order asserted
-// here is the order the old sentences printed in, which the row order is
-// meant to preserve (see preflightPairs's doc comment).
+// TestPreflightPairsGatesAndOrdersEveryRow sets every condition at once and
+// pins both the gating and the reading order: what runs, its limits, what
+// reaches past this terminal, then where to look afterwards.
 func TestPreflightPairsGatesAndOrdersEveryRow(t *testing.T) {
 	t.Parallel()
 	cfg := config{
-		label:       "ready",
-		model:       "opus",
-		effort:      "medium",
-		dryRun:      true,
-		maxCost:     15,
-		usage:       &usageSnapshot{pools: []usagePool{{name: "session", percent: 10}}},
-		postSummary: true,
-		notifyCmd:   "notify-send",
-		remote:      true,
-		rec:         &recorder{dir: "/tmp/metrics"},
-		shiftID:     "abc123",
-		logPath:     "/tmp/logs/shift.log",
+		label:           "ready",
+		model:           "opus",
+		effort:          "medium",
+		dryRun:          true,
+		maxCost:         15,
+		maxSessionUsage: 97,
+		usage:           &usageSnapshot{pools: []usagePool{{name: "session", percent: 10}}},
+		postSummary:     true,
+		notifyCmd:       "notify-send",
+		remote:          true,
+		rec:             &recorder{dir: "/tmp/metrics"},
+		shiftID:         "abc123",
+		logPath:         "/tmp/logs/shift.log",
 	}
 	got := preflightPairs(cfg)
 	wantLabels := []string{
-		"epics", "queue", "model", "dry-run", "caps", "plan", "post-summary", "notify", "remote", "run data", "shift", "shift log",
+		"dry-run", "model", "limits", "usage", "notify", "post-summary", "remote", "shift", "log", "run data",
 	}
 	if len(got) != len(wantLabels) {
 		t.Fatalf("preflightPairs with every condition set = %d rows %v, want %d rows %v",
@@ -242,43 +239,49 @@ func TestPreflightPairsGatesAndOrdersEveryRow(t *testing.T) {
 			t.Errorf("row %d label = %q, want %q (full: %v)", i, got[i][0], want, got)
 		}
 	}
-	if !strings.Contains(got[1][1], `"ready"`) {
-		t.Errorf("queue row = %q, want it to name the -label value", got[1][1])
+	rows := map[string]string{}
+	for _, p := range got {
+		rows[p[0]] = p[1]
 	}
-	if !strings.Contains(got[2][1], "model opus") || !strings.Contains(got[2][1], "effort medium") {
-		t.Errorf("model row = %q, want it to name both dispatch knobs", got[2][1])
+	for label, want := range map[string]string{
+		"model":  "opus, effort medium",
+		"limits": "$15 per issue",
+		"usage":  "session 10% (pauses at 97%)",
+		"notify": "notify-send — on park, question, empty backlog, early stop",
+		"shift":  "abc123 — polako stats -shift abc123",
+		// Through homeTilde, so a HOME of /tmp doesn't break the test.
+		"log":      homeTilde("/tmp/logs/shift.log") + " — full transcript, local (-log off)",
+		"run data": homeTilde("/tmp/metrics") + " — numbers only, local (-metrics off)",
+	} {
+		if rows[label] != want {
+			t.Errorf("%s row = %q, want %q", label, rows[label], want)
+		}
 	}
-	if !strings.Contains(got[5][1], "session 10%") {
-		t.Errorf("plan row = %q, want the usage snapshot rendered", got[5][1])
-	}
-	if !strings.Contains(got[9][1], "/tmp/metrics") || !strings.Contains(got[10][1], "abc123") {
-		t.Errorf("run data/shift rows = %v, want the recorder dir and shift id named", got[9:11])
+	// CLAUDE.md calls this row the operator's only notice of Remote Control.
+	if r := rows["remote"]; !strings.Contains(r, "claude.ai account") || !strings.Contains(r, "-remote=false") {
+		t.Errorf("remote row = %q, want it to name the claude.ai account and the off switch", r)
 	}
 }
 
-// modelEffortLine discloses the by-size cells and the remediation pair too,
-// since a POLAKO_* variable can set any of them silently — same reasoning as
-// every other unprompted preflight row.
-func TestModelEffortLine(t *testing.T) {
+// The model row always shows, and discloses the by-size cells and the
+// remediation pair too, since a POLAKO_* variable can set any of them
+// silently.
+func TestModelRow(t *testing.T) {
 	t.Parallel()
-	if got := modelEffortLine(config{}); got != "" {
-		t.Errorf("modelEffortLine(zero value) = %q, want empty", got)
-	}
-	got := modelEffortLine(config{
-		model: "opus", effort: "medium",
-		modelBySize: "S=sonnet,L=opus", effortBySize: "S=medium,L=max",
-	})
-	for _, want := range []string{"model opus", "effort medium", "model-by-size S=sonnet,L=opus", "effort-by-size S=medium,L=max"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("modelEffortLine = %q, missing %q", got, want)
+	for name, tc := range map[string]struct {
+		cfg  config
+		want string
+	}{
+		"nothing set": {config{}, "Claude Code's default, effort default"},
+		"effort only": {config{effort: "high"}, "Claude Code's default, effort high"},
+		"by size": {config{model: "opus", effort: "medium", modelBySize: "S=sonnet,L=opus", effortBySize: "S=medium,L=max"},
+			"opus, effort medium, model-by-size S=sonnet,L=opus, effort-by-size S=medium,L=max"},
+		"remediation": {config{model: "opus", remediationModel: "sonnet", remediationEffort: "medium"},
+			"opus, effort default, remediation-model sonnet, remediation-effort medium"},
+	} {
+		if got := modelRow(tc.cfg); got != tc.want {
+			t.Errorf("%s: modelRow = %q, want %q", name, got, tc.want)
 		}
-	}
-	if got := modelEffortLine(config{modelBySize: "S=sonnet"}); got != "model-by-size S=sonnet" {
-		t.Errorf("modelEffortLine(model-by-size alone) = %q, want just that part", got)
-	}
-	got = modelEffortLine(config{model: "opus", remediationModel: "sonnet", remediationEffort: "medium"})
-	if want := "model opus, remediation-model sonnet, remediation-effort medium"; got != want {
-		t.Errorf("modelEffortLine(remediation pair) = %q, want %q", got, want)
 	}
 }
 

@@ -55,17 +55,22 @@ func TestRunLimitLeavesOnlyWhatTheIssueHasLeft(t *testing.T) {
 
 // A cap set in a shell profile is still a cap, so startup names the ones in
 // force rather than leaving a park to quote a flag nobody typed.
-func TestCapNotesNameEveryCapInForce(t *testing.T) {
+func TestLimitsRowNamesEveryCapInForce(t *testing.T) {
 	t.Parallel()
-	if got := capNotes(config{}); got != "" {
-		t.Errorf("capNotes with no caps = %q, want nothing said", got)
-	}
-	got := capNotes(config{maxCost: 15, maxIssueTime: 90 * time.Minute, maxSessionCost: 200,
-		maxSessionUsage: 80, maxWeekUsage: 90})
-	for _, want := range []string{"-max-cost $15.00", "-max-issue-time 1h30m", "-max-session-cost $200.00",
-		"-max-session-usage 80%", "-max-week-usage 90%"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("capNotes = %q, missing %q", got, want)
+	for name, tc := range map[string]struct {
+		cfg  config
+		want string
+	}{
+		"none": {config{}, ""},
+		// Usage thresholds live on the usage row, not here.
+		"usage only": {config{maxSessionUsage: 80, maxWeekUsage: 90}, ""},
+		"all":        {config{maxCost: 15, maxIssueTime: 90 * time.Minute, maxSessionCost: 200}, "$15 and 1h30m per issue, $200 per shift"},
+		"time only":  {config{maxIssueTime: 45 * time.Minute}, "45m per issue"},
+		"cents":      {config{maxCost: 2.5}, "$2.50 per issue"},
+		"shift only": {config{maxSessionCost: 50}, "$50 per shift"},
+	} {
+		if got := limitsRow(tc.cfg); got != tc.want {
+			t.Errorf("%s: limitsRow = %q, want %q", name, got, tc.want)
 		}
 	}
 }

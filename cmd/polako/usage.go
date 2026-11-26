@@ -1,8 +1,8 @@
 package main
 
 // The usage probe: one reader for `claude -p "/usage" --output-format
-// json`, and the one line both `work`'s startup banner and `polako status`
-// print from it. It decides nothing and records nothing — the gate and the
+// json`, and `polako status`'s plan line built from it (work's startup row
+// is usageRow, startupblock.go). It decides nothing and records nothing — the gate and the
 // ledger that will build on this reader are #135's other two siblings, not
 // this file.
 
@@ -296,8 +296,7 @@ func formatUsageReset(t time.Time) string {
 	return t.Format("Jan 2, 3:04pm")
 }
 
-// usageLine builds the one line both work's startup banner and `polako
-// status` print from a snapshot: "plan: session 42%, week 52% (resets Sep
+// usageLine builds the line `polako status` prints from a snapshot: "plan: session 42%, week 52% (resets Sep
 // 2, 6pm) — polako was 29% of the last 24h". Empty when there is nothing to
 // say — no session and no week pool at all — which callers treat as
 // absent rather than printing a row with nothing in it: a missing line

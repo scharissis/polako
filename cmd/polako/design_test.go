@@ -145,7 +145,10 @@ func TestDesignPairsDropWhatOneIssueDoesNot(t *testing.T) {
 			t.Errorf("design's recap has a %q row: %v", gone, rows)
 		}
 	}
-	if strings.Contains(rows["notify"], "backlog clears") {
+	if rows["model"] == "" || rows["run data"] == "" {
+		t.Errorf("design's recap lost the model or run data row: %v", rows)
+	}
+	if strings.Contains(rows["notify"], "backlog") {
 		t.Errorf("notify row promises a backlog event: %q", rows["notify"])
 	}
 	if rows["wait"] == "" {

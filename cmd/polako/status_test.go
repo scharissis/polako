@@ -1579,8 +1579,7 @@ func TestRunStatusRejectsAnArgument(t *testing.T) {
 	}
 }
 
-// status prints the same "plan" line work's startup banner does, read from
-// the same usage probe — one renderer per fact, not two.
+// status prints its "plan" line from the usage probe when it answers.
 func TestStatusReportsThePlanLineWhenTheProbeAnswers(t *testing.T) {
 	t.Parallel()
 	cfg, _ := statusConfigFor(t, &ghState{Issues: map[string]*fakeIssue{"1": {Open: true}}})

@@ -242,7 +242,7 @@ func designPreflight(ctx context.Context, cfg *config, opt designOptions) (int, 
 	if !labelled {
 		labelDesignIssue(ctx, *cfg, issue)
 	}
-	cfg.logf("%s — running /%s on issue #%d, polling every %s", cfg.repo, cfg.skill, issue, cfg.poll)
+	cfg.logf("%s", startupHeader(polakoVersion(), cfg.repo, fmt.Sprintf("issue #%d", issue), cfg.skill, cfg.poll))
 	settingsBlock(*cfg, designPairs(*cfg))
 	return issue, nil
 }
@@ -349,8 +349,6 @@ func designPairs(cfg config) [][2]string {
 	var pairs [][2]string
 	for _, p := range preflightPairs(cfg) {
 		switch p[0] {
-		case "epics":
-			continue // design closes no containers
 		case "shift":
 			// stats skips design kinds, so its -shift pointer would name an
 			// empty report — resumeHint drops it for the same reason.
@@ -358,8 +356,7 @@ func designPairs(cfg config) [][2]string {
 		case "dry-run":
 			p[1] = "printing the invocation only — no claude run, no GitHub write, no run data"
 		case "notify":
-			p[1] = fmt.Sprintf("on — `%s` runs when the issue parks, asks a question, or the run stops early",
-				cfg.notifyCmd)
+			p[1] = cfg.notifyCmd + " — on park, question, early stop"
 		}
 		pairs = append(pairs, p)
 	}

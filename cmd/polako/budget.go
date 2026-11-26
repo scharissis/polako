@@ -9,7 +9,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -56,29 +55,6 @@ func runLimit(cfg config, t issueTally) time.Duration {
 
 // runTime is how long this shift's runs on one issue have taken.
 func runTime(t issueTally) time.Duration { return time.Duration(t.wallMS) * time.Millisecond }
-
-// capNotes names the caps in force, for the startup line. Worth saying out
-// loud because the environment can set any flag: a park whose reason names a
-// -max-cost nobody typed is a mystery, and this is where it stops being one.
-func capNotes(cfg config) string {
-	var parts []string
-	if cfg.maxCost > 0 {
-		parts = append(parts, "-max-cost "+usd(cfg.maxCost)+" per issue")
-	}
-	if cfg.maxIssueTime > 0 {
-		parts = append(parts, "-max-issue-time "+dur(cfg.maxIssueTime)+" of run time per issue")
-	}
-	if cfg.maxSessionCost > 0 {
-		parts = append(parts, "-max-session-cost "+usd(cfg.maxSessionCost)+" for this shift")
-	}
-	if cfg.maxSessionUsage > 0 {
-		parts = append(parts, fmt.Sprintf("-max-session-usage %d%% for this shift", cfg.maxSessionUsage))
-	}
-	if cfg.maxWeekUsage > 0 {
-		parts = append(parts, fmt.Sprintf("-max-week-usage %d%% for this shift", cfg.maxWeekUsage))
-	}
-	return strings.Join(parts, ", ")
-}
 
 // usageGateOn is whether either usage cap is set. Every probe call this file
 // makes on the usage gate's behalf is guarded by it, so a shift that sets

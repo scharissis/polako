@@ -307,8 +307,7 @@ file, and `-since` can't separate them. So every shift stamps its records
 with a random id, once at startup:
 
 ```
-  run data  /Users/you/.polako/metrics — numbers only, never leaves this machine (-metrics off to disable)
-  shift     7f3a91c4 — `polako stats -shift 7f3a91c4` reports on it alone
+  shift     7f3a91c4 — polako stats -shift 7f3a91c4
 ```
 
 Nothing else reads that id back. Two questions it makes exact:
