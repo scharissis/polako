@@ -9,8 +9,9 @@ import (
 	"time"
 )
 
-// startupHeader is the first line of a shift: what binary, which repo, which
-// issues, which skill, how often it looks. The rows under it are the settings.
+// startupHeader opens the settings block: what binary, which repo, which
+// issues, which skill, how often it looks. Preflight warnings print before
+// it; the rows under it are the settings.
 func startupHeader(version, repo, scope, skill string, poll time.Duration) string {
 	head := repo
 	if version != "" {
