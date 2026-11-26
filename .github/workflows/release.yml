@@ -183,6 +183,23 @@ jobs:
           git commit -am "chore: publish $version — move the marketplace ref to $ref"
           git push origin "$branch"
 
+          # Whether the skill half changed, so the body can say whether the
+          # one check no workflow makes — a real issue driven through the
+          # release — is owed. Measured from what installs resolve to now,
+          # not the previous tag: a release tagged but never published moved
+          # nobody. Two tagged trees diff without the history between them,
+          # so one shallow fetch of the old tag is enough. Test files are left
+          # out, the same line TestShippingFixesDoNotSitUnreleased draws. Best
+          # effort: a failed lookup leaves the body asking the question
+          # instead of failing the publish over a note.
+          skills=""
+          known=false
+          if git fetch -q --depth=1 origin "refs/tags/$current:refs/tags/$current" 2>/dev/null &&
+            skills=$(git diff --name-only "refs/tags/$current" "$GITHUB_SHA" -- skills ':(exclude)*_test.go'); then
+            known=true
+          fi
+          skillDoc="https://github.com/$GITHUB_REPOSITORY/blob/main/docs/releasing.md#smoke-testing-the-skill"
+
           {
             echo "Merging this one line is the act of publishing $version: installs"
             echo "resolve the marketplace ref, so nobody is on the release until this"
@@ -193,10 +210,30 @@ jobs:
             echo "and its five binaries, \`go install\`, and a plugin install with this"
             echo "very ref moved. Merge once it's green."
             echo
-            echo "Before merging: **if the skill half changed, drive one real issue"
-            echo "through $version** and note here which one — see"
-            echo "[Smoke-testing the skill](https://github.com/$GITHUB_REPOSITORY/blob/main/docs/releasing.md#smoke-testing-the-skill)."
-            echo "If the backlog was empty, say that instead."
+            if [ "$known" != true ]; then
+              echo "Before merging: **if the skill half changed, drive one real issue"
+              echo "through $version** and note here which one — see"
+              echo "[Smoke-testing the skill]($skillDoc)."
+              echo "If the backlog was empty, say that instead."
+            elif [ -n "$skills" ]; then
+              echo "**The skill half changed** since $current, the release installs"
+              echo "resolve to now:"
+              echo
+              printf '%s\n' "$skills" | head -10 | sed 's/.*/- `&`/'
+              count=$(printf '%s\n' "$skills" | wc -l)
+              if [ "$count" -gt 10 ]; then
+                echo "- and $((count - 10)) more"
+              fi
+              echo
+              echo "Before merging, **drive one real issue through $version** and note"
+              echo "here which one — see [Smoke-testing the skill]($skillDoc). If the"
+              echo "backlog was empty, say that instead."
+            else
+              echo "Nothing under \`skills/\` changed since $current, the release"
+              echo "installs resolve to now, so there's no skill change to drive an"
+              echo "issue through. That's no proof a run still works: a binary change"
+              echo "can break one too."
+            fi
             if [ "$HAS_RELEASE_TOKEN" != "true" ]; then
               echo
               echo "CI and the smoke check don't start on their own for a bot-opened"
