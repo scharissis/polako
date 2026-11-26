@@ -134,7 +134,8 @@ func main() {
 // like they always did, and a TTY gets a dim, time-only stamp instead of
 // dropping it — worn quietly rather than shown or hidden outright, and
 // deliberately not conditioned on whether a shift log exists this run —
-// plus colour when the platform and NO_COLOR allow it.
+// plus colour when the platform and NO_COLOR allow it. The one exception is
+// the TTY's startup settings rows, which sit under blanks (see termStamp).
 func useWorkSinks(verbose bool) {
 	sinks.verbose = verbose
 	if isTerminal(os.Stderr) {
