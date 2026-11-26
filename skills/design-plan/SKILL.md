@@ -74,7 +74,7 @@ Unattended means no prompts: `--allowedTools` grants a fixed set of command
 prefixes. Anything outside it — `cd` among them, along with `EnterWorktree`
 or any other tool `ToolSearch` surfaces for moving the session's own working
 directory — raises a confirmation nobody is there to answer. That can hang
-the run outright; #138's shift log shows the other way it fails, faster and
+the run outright; polako #138's shift log shows the other way it fails, faster and
 just as badly — the rejected confirmation left the model to end its turn on
 its own a few seconds later, "finished (ok)," having produced nothing. Either
 way the supervisor sees no progress and parks a perfectly good issue.
@@ -148,7 +148,7 @@ the mechanism every question uses.
    it's the exact pathspec given. Never an inline `gh issue comment $issue
    --body "..."` — the text passes through shell quoting on its way there,
    and a stray escape (`'\''`, `\"`, a literal `\n`) lands on a public thread
-   (issue #390). No `rm` is in this run's grant; `git clean` is the mechanism
+   (polako issue #390). No `rm` is in this run's grant; `git clean` is the mechanism
    already available for it.
 2. Flag it with exactly:
 
