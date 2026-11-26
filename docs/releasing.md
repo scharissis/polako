@@ -57,6 +57,14 @@ pipeline still works and each PR just carries that one approval click. Mind
 the token's expiry date: an expired one fails the PR-opening step loudly, and
 refreshing the secret is the fix.
 
+**Then require the smoke check,** so a red smoke run blocks the publish instead
+of waiting to be noticed: *Settings → Rules → Rulesets* (or *Branches*, for a
+classic rule on `main`) → *Require status checks to pass* → add `smoke`, from
+*GitHub Actions*. Only a publish PR runs it. Every other PR reports it as
+skipped, which GitHub counts as passing, so nothing else waits on it. Keep
+`RELEASE_TOKEN` set if you do: a bot-opened release PR runs no `pull_request`
+workflows on its own, so a required check can sit unreported there.
+
 | Tag | Who needs it |
 | --- | --- |
 | `polako--v0.4.0` | The Claude plugin tooling. `claude plugin tag` creates it, and refuses if `plugin.json` and the marketplace entry disagree. It is also what the marketplace entry's `ref` pins to, and what a `dependencies` range would resolve against. |
@@ -86,24 +94,28 @@ refreshing the secret is the fix.
    both tags on the merge commit and hands `vX.Y.Z` to *Release*, which
    cross-compiles the five targets with the tag stamped in, writes a
    `checksums.txt` over them, publishes the GitHub release with the
-   changelog section as its body and all six assets attached, starts a
-   *Smoke* run, and opens the publish PR.
+   changelog section as its body and all six assets attached, and opens the
+   publish PR.
 
-3. **Merge the publish PR.** It moves the `ref` in
-   [`marketplace.json`](../.claude-plugin/marketplace.json) to the new tag, and
-   merging that one line is the moment anybody is exposed to the release —
-   `polako update` too, which reads that `ref` and reports the previous
-   release as `published:` until this merges. Its
-   body says what to check first: the *Smoke* run — every check CI can't make
-   before the tags exist, from the five attached binaries' sizes, the
-   downloaded one's `checksums.txt` sum and `-ldflags` version stamp,
-   through `go install ...@vX.Y.Z` resolving, to the plugin
-   installing with the ref moved and a session listing the skill, all against
-   a throwaway `CLAUDE_CONFIG_DIR` so no machine moves onto the release early
-   (it runs [`smoke.sh`](../scripts/smoke.sh); `./scripts/smoke.sh` asks the same
-   questions from a checkout) — and, when the skill half changed, one real
-   issue driven through the release, which no workflow can do for you: see
-   [Smoke-testing the skill](#smoke-testing-the-skill).
+3. **Merge the publish PR once its `smoke` check is green.** It moves the
+   `ref` in [`marketplace.json`](../.claude-plugin/marketplace.json) to the
+   new tag, and merging that one line is the moment anybody is exposed to the
+   release — `polako update` too, which reads that `ref` and reports the
+   previous release as `published:` until this merges. The check is the
+   *Smoke* workflow, run on the PR itself: every check CI can't make before
+   the tags exist, from the five attached binaries' sizes, the downloaded
+   one's `checksums.txt` sum and `-ldflags` version stamp, through
+   `go install ...@vX.Y.Z` resolving, to the plugin installing with the ref
+   moved and a session listing the skill, all against a throwaway
+   `CLAUDE_CONFIG_DIR` so no machine moves onto the release early (it runs
+   [`smoke.sh`](../scripts/smoke.sh); `./scripts/smoke.sh` asks the same
+   questions from a checkout). The PR's body says whether the skill half —
+   `skills/`, tests aside — changed since the release installs resolve to
+   now, and if it did, asks for the one check no workflow can make for you:
+   one real issue driven through the release — see
+   [Smoke-testing the skill](#smoke-testing-the-skill). An unchanged
+   `skills/` is no proof on its own, since a binary change can break a run
+   too.
 
 **Rolling back** is reverting the publish commit; tags never move. Tagging and
 publishing are separate on purpose: a `ref` moved in the release commit would
@@ -117,6 +129,10 @@ stand from GitHub — which tags, release and PR already exist — finishes what
 missing, and leaves what's done alone. A pipeline that died half-way is
 recovered by re-running *Cut a release* from the Actions tab; *Release* can be
 dispatched on the `vX.Y.Z` tag ref and *Smoke* on any version, the same way.
+A publish PR's own `smoke` check re-runs from the PR, but a re-run reuses the
+commit it first ran on. To pick up a `smoke.sh` fix merged since, bring the
+branch up to date with `main` (the PR's *Update branch* button), which starts
+a fresh run.
 
 The by-hand path still works, and refuses in the same places.
 [`release.sh`](../scripts/release.sh) / [`release.ps1`](../scripts/release.ps1) push
@@ -125,7 +141,7 @@ tree, a missing changelog section, and a Claude Code too old for `claude
 plugin tag`, and runs `claude plugin validate .` before either tag exists,
 because both tags go public before any CI sees them. Pushing `vX.Y.Z` by hand
 triggers *Release*, so the two paths converge from there: binaries, GitHub
-release, smoke run, publish PR.
+release, publish PR and its smoke check.
 
 **Installs resolve to a tag, not to `main`.** The marketplace entry is an
 explicit `github` source with a `ref`, so a version number identifies exactly

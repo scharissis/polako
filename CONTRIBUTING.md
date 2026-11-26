@@ -26,7 +26,8 @@ go test ./...
 `check` runs `gofmt`, `go vet` and the full test suite — the same three things
 CI runs, on Linux, macOS and Windows. `smoke` is its opposite number and is not
 part of this loop: it needs the network, `gh` and a real `claude`, and it only
-has anything to check once a release is tagged — see
+has anything to check once a release is tagged, so it runs as the publish PR's
+own check — see
 [Cutting a release](docs/releasing.md#cutting-a-release). The plugin side has its own validator,
 which the release scripts and workflows all run for you:
 

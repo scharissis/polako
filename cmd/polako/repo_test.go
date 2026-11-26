@@ -1780,13 +1780,14 @@ func TestQuestionPathHasAShape(t *testing.T) {
 
 // The release pipeline is workflows coupled by filename: cut-release.yml
 // watches plugin.json for the version changing and dispatches release.yml on
-// the tag it pushes; release.yml dispatches smoke.yml and ci.yml;
-// start-release.yml dispatches ci.yml on the release PR it opens. Every
-// dispatch exists because GitHub suppresses workflow runs for events a
-// workflow's own token caused, and every one resolves its target by filename
-// at run time — so a renamed or restructured workflow does not fail anything,
-// it just quietly never runs, and the merge that should have cut a release
-// does nothing at all.
+// the tag it pushes; release.yml opens the publish PR on the branch smoke.yml
+// runs for, and dispatches ci.yml and smoke.yml onto it when the PR is
+// bot-authored; start-release.yml dispatches ci.yml on the release PR it
+// opens. Every dispatch exists because GitHub suppresses workflow runs for
+// events a workflow's own token caused, and every one resolves its target by
+// filename at run time — so a renamed or restructured workflow does not fail
+// anything, it just quietly never runs, and the merge that should have cut a
+// release does nothing at all.
 func TestReleaseWorkflowsStayCoupled(t *testing.T) {
 	t.Parallel()
 	couplings := map[string][]string{
@@ -1794,9 +1795,12 @@ func TestReleaseWorkflowsStayCoupled(t *testing.T) {
 		// release; workflow_dispatch is the documented recovery re-run.
 		"cut-release.yml": {".claude-plugin/plugin.json", "release.yml", "workflow_dispatch"},
 		// workflow_dispatch is what cut-release.yml calls, since its tag push
-		// cannot trigger the push trigger.
-		"release.yml": {"workflow_dispatch", "smoke.yml", "ci.yml"},
-		"smoke.yml":   {"workflow_dispatch", "scripts/smoke.sh"},
+		// cannot trigger the push trigger. The publish branch's name is half a
+		// contract, the way issue-N is: smoke.yml picks the PR out by it.
+		"release.yml": {"workflow_dispatch", "smoke.yml", "ci.yml", "publish-$version"},
+		// pull_request is how the smoke reaches the publish PR at all, and the
+		// head-branch test is the other half of release.yml's branch name.
+		"smoke.yml": {"workflow_dispatch", "pull_request", "startsWith(github.head_ref, 'publish-')", "scripts/smoke.sh"},
 		// The release commit convention is spelled here as well as in the
 		// README; ci.yml is dispatched onto the PR branch it opens.
 		"start-release.yml": {"ci.yml", "chore(release):"},
@@ -1809,6 +1813,27 @@ func TestReleaseWorkflowsStayCoupled(t *testing.T) {
 				t.Errorf(".github/workflows/%s no longer mentions %q — the release pipeline is held together by that name and breaks silently without it", file, want)
 			}
 		}
+	}
+}
+
+// smoke.yml is the publish PR's check, and a check is only safe to require if
+// it reports on every PR. GitHub counts a job its own `if` skipped as passing,
+// but a workflow a trigger filter left out reports nothing, and a required
+// check that never reports holds the PR forever. The required check is
+// matched by the job's name, held in a repository setting no test can read,
+// so renaming the job strands every PR the same way.
+func TestSmokeCheckReportsOnEveryPR(t *testing.T) {
+	t.Parallel()
+	content := readRepoFile(t, ".github", "workflows", "smoke.yml")
+	for _, filter := range []string{"branches:", "branches-ignore:", "paths:", "paths-ignore:", "types:"} {
+		if strings.Contains(content, filter) {
+			t.Errorf(".github/workflows/smoke.yml filters its triggers with %q — a PR the filter leaves out never"+
+				" reports the smoke check, and a required one then holds that PR forever; filter in the job's `if` instead", filter)
+		}
+	}
+	if !slices.Contains(strings.Split(content, "\n"), "  smoke:") {
+		t.Error(".github/workflows/smoke.yml has no job named smoke any more — a required smoke check is matched by" +
+			" that name, so every PR would wait on a check that never reports")
 	}
 }
 

@@ -1,13 +1,21 @@
 name: Smoke
 
-# scripts/smoke.sh, run where the release pipeline can start it: release.yml
-# dispatches it the moment a release is published, and the Actions tab re-runs
-# it by hand for any version. Advisory by design — a red run here blocks
-# nothing by itself; it is the evidence the publish PR asks a human to read
-# before merging. The script writes nothing outside a temporary directory, so
-# running it here moves no machine, and no user, onto the release.
+# scripts/smoke.sh, as the publish PR's own check. Merging that PR is the act
+# of publishing, so the smoke runs on it: the pull_request run below, on the
+# PR's head commit, where the verdict sits beside CI's and can be required
+# before the merge (docs/releasing.md says how). Dispatched on main instead,
+# the verdict sat where nobody looked: from 0.24.0 to 0.37.0 every smoke run
+# went red on the same false alarm, and all fifteen publish PRs merged anyway.
+#
+# The Actions tab still dispatches it by hand, for any version. The script
+# writes nothing outside a temporary directory, so running it here moves no
+# machine, and no user, onto the release.
 
 on:
+  # No branches or paths filter, on purpose: a workflow a filter leaves out
+  # reports nothing, and a required check that never reports holds the PR
+  # forever. A job skipped by its own `if` reports as passing instead.
+  pull_request:
   workflow_dispatch:
     inputs:
       version:
@@ -18,7 +26,15 @@ permissions:
   contents: read
 
 jobs:
+  # The required check is named after this job. Rename it and every PR waits
+  # on a check that never reports.
   smoke:
+    # Only a publish PR has a release to test. Every other PR skips this
+    # without starting a runner, so it can't go red there: on an issue-N PR a
+    # red check starts a paid run to fix a branch that isn't broken. The
+    # branch name is the one release.yml gives the PR; which release gets
+    # tested is read from the PR itself, in the last step.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'publish-')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -54,4 +70,19 @@ jobs:
       - name: smoke-test the release
         env:
           VERSION: ${{ inputs.version }}
-        run: ./scripts/smoke.sh "$VERSION"
+        run: |
+          # On a PR, the release under test is the one merging it publishes:
+          # the tag its marketplace ref moves to. Read from the ref rather
+          # than the branch name, so a hand-edited publish PR is tested for
+          # what it would actually do.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            ref=$(jq -r '.plugins[] | select(.name == "polako") | .source.ref' .claude-plugin/marketplace.json)
+            case "$ref" in
+            polako--v*) VERSION=${ref#polako--v} ;;
+            *)
+              echo "::error::this PR's marketplace ref is \"$ref\", not polako--vX.Y.Z, so there is no release to smoke-test. A publish PR moves the ref to the tag it publishes."
+              exit 1
+              ;;
+            esac
+          fi
+          ./scripts/smoke.sh "$VERSION"
