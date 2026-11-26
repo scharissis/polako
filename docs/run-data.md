@@ -308,7 +308,6 @@ with a random id, once at startup:
 
 ```
   shift     7f3a91c4 — polako stats -shift 7f3a91c4
-  run data  ~/.polako/metrics — numbers only, local (-metrics off)
 ```
 
 Nothing else reads that id back. Two questions it makes exact:
