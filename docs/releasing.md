@@ -109,9 +109,9 @@ workflows on its own, so a required check can sit unreported there.
    moved and a session listing the skill, all against a throwaway
    `CLAUDE_CONFIG_DIR` so no machine moves onto the release early (it runs
    [`smoke.sh`](../scripts/smoke.sh); `./scripts/smoke.sh` asks the same
-   questions from a checkout). The PR's body says whether the skill half —
-   `skills/`, tests aside — changed since the release installs resolve to
-   now, and if it did, asks for the one check no workflow can make for you:
+   questions from a checkout). The PR's body says whether any skill files
+   (`skills/`, tests aside) changed since the release installs resolve to
+   now, and if they did, asks for the one check no workflow can make for you:
    one real issue driven through the release — see
    [Smoke-testing the skill](#smoke-testing-the-skill). An unchanged
    `skills/` is no proof on its own, since a binary change can break a run
