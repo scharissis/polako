@@ -347,6 +347,50 @@ func TestTTYStampUnstyledWithoutColour(t *testing.T) {
 	}
 }
 
+// TestTTYSettingsRowsGetBlankGutter: the startup block prints in one instant,
+// so on a TTY only its header carries a stamp and the rows under it get
+// blanks the stamp's width, styled or not. The shift log still stamps every
+// row in full.
+func TestTTYSettingsRowsGetBlankGutter(t *testing.T) {
+	t.Parallel()
+	blank := strings.Repeat(" ", len(ttyStampLayout))
+	for _, style := range []styler{{on: true}, {on: false}} {
+		var term, file bytes.Buffer
+		u := &ui{terminal: &term, stamp: stampTTYDim, style: style, file: &file}
+
+		u.logf("o/r — running /polako:implement-issue per issue")
+		u.narrate(sevSettings, "  queue  label %q", "ready")
+
+		lines := strings.Split(strings.TrimSuffix(term.String(), "\n"), "\n")
+		if len(lines) != 2 {
+			t.Fatalf("styled=%v: want 2 terminal lines, got %q", style.on, term.String())
+		}
+		if !regexp.MustCompile(`^(\x1b\[2m)?\d{2}:\d{2}:\d{2} `).MatchString(lines[0]) {
+			t.Errorf("styled=%v: header should keep its stamp, got %q", style.on, lines[0])
+		}
+		if lines[1] != blank+style.dim(`  queue  label "ready"`) {
+			t.Errorf("styled=%v: settings row should sit under %d blanks, got %q", style.on, len(blank), lines[1])
+		}
+		for _, l := range strings.Split(strings.TrimSuffix(file.String(), "\n"), "\n") {
+			if !stamped.MatchString(l) {
+				t.Errorf("styled=%v: shift log should stamp every row in full, got %q", style.on, l)
+			}
+		}
+	}
+}
+
+func TestPipedSettingsRowsKeepFullStamp(t *testing.T) {
+	t.Parallel()
+	var term bytes.Buffer
+	u := &ui{terminal: &term} // stampFull, the zero value
+
+	u.narrate(sevSettings, "  queue  label %q", "ready")
+
+	if !stamped.MatchString(term.String()) {
+		t.Errorf("piped settings row should keep the full stamp, got %q", term.String())
+	}
+}
+
 func TestPipedStampStaysFullLayout(t *testing.T) {
 	t.Parallel()
 	var term, file bytes.Buffer

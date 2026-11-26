@@ -134,7 +134,8 @@ func main() {
 // like they always did, and a TTY gets a dim, time-only stamp instead of
 // dropping it — worn quietly rather than shown or hidden outright, and
 // deliberately not conditioned on whether a shift log exists this run —
-// plus colour when the platform and NO_COLOR allow it.
+// plus colour when the platform and NO_COLOR allow it. The one exception is
+// the TTY's startup settings rows, which sit under blanks (see termStamp).
 func useWorkSinks(verbose bool) {
 	sinks.verbose = verbose
 	if isTerminal(os.Stderr) {
@@ -293,10 +294,11 @@ func run(ctx context.Context, cfg config) error {
 
 // settingsBlock narrates the startup recap as one aligned block: every row at
 // settings severity — dim on a TTY, plain piped — through narrate, so each
-// still gets its own timestamp and its own copy in the shift log exactly like
-// any other narration. printPairs (statsrender.go) cannot be reused directly here:
-// it writes straight to an io.Writer, bypassing emit() entirely, which would
-// lose both of those. pairWidth is what the two share, so the startup block
+// gets emit's gutter and its own stamped copy in the shift log exactly like
+// any other narration. On a TTY that gutter is blanks rather than a stamp
+// (see termStamp); piped it is the full stamp. printPairs (statsrender.go)
+// cannot be reused directly here: it writes straight to an io.Writer,
+// bypassing emit() entirely, which would lose both of those. pairWidth is what the two share, so the startup block
 // lines up the same way status and stats already do.
 func settingsBlock(cfg config, pairs [][2]string) {
 	width := pairWidth(pairs)

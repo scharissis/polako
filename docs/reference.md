@@ -186,9 +186,9 @@ an issue across restarts. `-log <dir>` moves it, `-log off` disables it, a
 bad directory warns once and the shift continues on the terminal alone, and
 `-dry-run` writes no log at all. The terminal wears its own timestamp
 lightly — a dim `15:04:05` on a TTY (plain under `NO_COLOR` or Windows), the
-full `2006/01/02 15:04:05` with no colour when piped — but the per-tool-call
-`[claude]` lines live in the shift log now, not stderr, so grep the log, or
-run `-verbose` to put the stream back.
+full `2006/01/02 15:04:05` with no colour when piped. On a TTY the startup
+block stamps only its first line. `[claude]` tool-call lines live in the
+shift log, not stderr: grep it, or run `-verbose` to put them back.
 
 ### Setting defaults from the environment
 
