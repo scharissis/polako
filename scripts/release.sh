@@ -78,7 +78,7 @@ git push origin "refs/tags/v$version"
 
 echo "pushed polako--v$version and v$version"
 echo "the Release workflow runs on v$version: binaries, the GitHub release,"
-echo "a Smoke run, and the publish PR"
+echo "and the publish PR, which smoke-tests the release as its check"
 
 # Whether step 3 is still owed. The full rule - the pinned ref must never be
 # ahead of plugin.json - is enforced by TestMarketplaceRefIsNotAheadOfTheVersion
@@ -90,11 +90,8 @@ if [ "$ref" = "polako--v$version" ]; then
 else
   echo
   echo "STEP 3 - nobody is on $version yet. The marketplace entry still pins $ref."
-  echo "Smoke-test the release - the dispatched Smoke run under Actions, or"
-  echo "locally:"
+  echo "The Release workflow opens a publish PR that moves it to polako--v$version."
+  echo "Merge that once its smoke check is green. To smoke-test locally as well:"
   echo
   echo "  ./scripts/smoke.sh"
-  echo
-  echo "then merge the publish PR the Release workflow opens, which moves that"
-  echo "ref to polako--v$version."
 fi

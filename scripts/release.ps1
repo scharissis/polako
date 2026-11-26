@@ -46,7 +46,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "pushed polako--v$version and v$version"
 Write-Host "the Release workflow runs on v$version: binaries, the GitHub release,"
-Write-Host 'a Smoke run, and the publish PR'
+Write-Host 'and the publish PR, which smoke-tests the release as its check'
 
 # Whether step 3 is still owed. The full rule is enforced by a test on every PR.
 $ref = ((Get-Content .claude-plugin\marketplace.json -Raw | ConvertFrom-Json).plugins[0].source).ref
@@ -55,10 +55,8 @@ if ($ref -eq "polako--v$version") {
 } else {
   Write-Host ''
   Write-Host "STEP 3 - nobody is on $version yet. The marketplace entry still pins $ref."
-  Write-Host 'Smoke-test the release - the dispatched Smoke run under Actions, or locally:'
+  Write-Host "The Release workflow opens a publish PR that moves it to polako--v$version."
+  Write-Host 'Merge that once its smoke check is green. To smoke-test locally as well:'
   Write-Host ''
   Write-Host '  .\scripts\smoke.ps1'
-  Write-Host ''
-  Write-Host 'then merge the publish PR the Release workflow opens, which moves that'
-  Write-Host "ref to polako--v$version."
 }

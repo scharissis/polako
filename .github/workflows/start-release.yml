@@ -191,11 +191,11 @@ jobs:
             echo "anything else that deserves prose, then merge."
             echo
             echo "From the merge, the rest is automatic: *Cut a release* tags the merge"
-            echo "commit twice, *Release* builds the five binaries and publishes the"
-            echo "GitHub release with this changelog section as its body, a *Smoke* run"
-            echo "starts, and a publish PR opens. Nobody is on $NEXT until that publish"
-            echo "PR merges, so this PR can sit, be edited, or be closed unmerged"
-            echo "without anyone seeing a release."
+            echo "commit twice, *Release* builds the five binaries, publishes the GitHub"
+            echo "release with this changelog section as its body, and opens a publish"
+            echo "PR whose *smoke* check tests that release. Nobody is on $NEXT until"
+            echo "that publish PR merges, so this PR can sit, be edited, or be closed"
+            echo "unmerged without anyone seeing a release."
           } > /tmp/body.md
           if ! gh pr create --base main --head "release-$NEXT" \
               --title "chore(release): $NEXT" --body-file /tmp/body.md; then

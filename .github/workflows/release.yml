@@ -122,23 +122,18 @@ jobs:
             gh release create "$GITHUB_REF_NAME" dist/* "$NOTES_ARG"
           fi
 
-      - name: start a smoke run
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # The tags and the published release are what smoke.sh checks, so
-          # this is the first moment it can be asked. Advisory by design: its
-          # verdict gates the publish PR in a human's hands, not this
-          # workflow, and a red smoke run un-publishes nothing.
-          gh workflow run smoke.yml --ref main -f "version=${GITHUB_REF_NAME#v}"
-
+      # Opening the PR is also what starts the smoke run: smoke.yml runs on a
+      # publish PR's pull_request event, so its verdict lands on the PR
+      # itself. The tags and the published release are what it checks, which
+      # is why this comes last.
       - name: open the publish PR
         env:
           # The operator's token when the repo has one — same reasoning as
-          # start-release.yml: a bot-authored PR has its pull_request CI held
-          # behind an approval button on every PR, and a RELEASE_TOKEN secret
-          # makes the PR the operator's instead. Falls back to the workflow
-          # token, bot-authored, where no secret is configured.
+          # start-release.yml: a bot-authored PR has its pull_request runs (CI
+          # and the smoke check) held behind an approval button on every PR,
+          # and a RELEASE_TOKEN secret makes the PR the operator's instead.
+          # Falls back to the workflow token, bot-authored, where no secret is
+          # configured.
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
           HAS_RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN != '' }}
           WORKFLOW_TOKEN: ${{ github.token }}
@@ -193,20 +188,20 @@ jobs:
             echo "resolve the marketplace ref, so nobody is on the release until this"
             echo "lands. Rolling back later is reverting this commit; tags never move."
             echo
-            echo "Before merging:"
+            echo "The **smoke** check on this PR runs \`scripts/smoke.sh\` against"
+            echo "$GITHUB_REF_NAME: the tags, the [release](https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME)"
+            echo "and its five binaries, \`go install\`, and a plugin install with this"
+            echo "very ref moved. Merge once it's green."
             echo
-            echo "- **Check the [Smoke run](https://github.com/$GITHUB_REPOSITORY/actions/workflows/smoke.yml)**"
-            echo "  dispatched for $GITHUB_REF_NAME — it covers the tags, the"
-            echo "  [release](https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME)"
-            echo "  and its five binaries, \`go install\`, and a plugin install with this"
-            echo "  very ref moved."
-            echo "- **If the skill half changed, drive one real issue through $version"
-            echo "  first** and note here which one — see \"Smoke-testing the skill\" in"
-            echo "  the README. If the backlog was empty, say that instead."
+            echo "Before merging: **if the skill half changed, drive one real issue"
+            echo "through $version** and note here which one — see"
+            echo "[Smoke-testing the skill](https://github.com/$GITHUB_REPOSITORY/blob/main/docs/releasing.md#smoke-testing-the-skill)."
+            echo "If the backlog was empty, say that instead."
             if [ "$HAS_RELEASE_TOKEN" != "true" ]; then
               echo
-              echo "CI does not start on its own for a bot-opened PR; a run was"
-              echo "dispatched for this branch, and any push to it triggers CI normally."
+              echo "CI and the smoke check don't start on their own for a bot-opened"
+              echo "PR; both were dispatched for this branch, and any push to it"
+              echo "triggers them normally."
             fi
           } > body.md
           if ! gh pr create --base main --head "$branch" \
@@ -216,9 +211,12 @@ jobs:
             echo "::error::could not open the publish PR; the branch was deleted again. If the error above says GitHub Actions is not permitted to create pull requests, enable it once — Settings → Actions → General → Workflow permissions → 'Allow GitHub Actions to create and approve pull requests' — then re-run this workflow on the tag."
             exit 1
           fi
-          # The operator-token PR triggers pull_request CI by itself; only
-          # the bot-authored fallback needs the dispatch, under the workflow
-          # token, since the PAT is deliberately not granted Actions access.
+          # The operator-token PR starts its pull_request runs, CI and the
+          # smoke check, by itself. Only the bot-authored fallback needs them
+          # dispatched, under the workflow token, since the PAT is
+          # deliberately not granted Actions access — on the publish branch,
+          # so both checks land on the PR's own head commit.
           if [ "$HAS_RELEASE_TOKEN" != "true" ]; then
             GH_TOKEN=$WORKFLOW_TOKEN gh workflow run ci.yml --ref "$branch"
+            GH_TOKEN=$WORKFLOW_TOKEN gh workflow run smoke.yml --ref "$branch" -f "version=$version"
           fi
