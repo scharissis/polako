@@ -57,10 +57,11 @@ func modelRow(cfg config) string {
 	return strings.Join(parts, ", ")
 }
 
-// limitsRow names the cost and time caps in force. Worth saying because the
-// environment can set any of them: a park that names a cap nobody typed is a
-// mystery, and this is where it stops being one. The usage thresholds live on
-// the usage row, beside the readings they're compared against.
+// limitsRow names the cost and time caps in force, in plain words rather than
+// flag names. Worth saying because the environment can set any of them, so a
+// park quoting a cap nobody typed has its number on screen at startup. The
+// usage thresholds live on the usage row, beside the readings they're
+// compared against.
 func limitsRow(cfg config) string {
 	var perIssue []string
 	if cfg.maxCost > 0 {
