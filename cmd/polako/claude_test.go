@@ -244,11 +244,11 @@ func TestPreflightPairsGatesAndOrdersEveryRow(t *testing.T) {
 		rows[p[0]] = p[1]
 	}
 	for label, want := range map[string]string{
-		"model":    "opus, effort medium",
-		"limits":   "$15 per issue",
-		"usage":    "session 10% (pauses at 97%)",
-		"notify":   "notify-send — on park, question, empty backlog, early stop",
-		"shift":    "abc123 — polako stats -shift abc123",
+		"model":  "opus, effort medium",
+		"limits": "$15 per issue",
+		"usage":  "session 10% (pauses at 97%)",
+		"notify": "notify-send — on park, question, empty backlog, early stop",
+		"shift":  "abc123 — polako stats -shift abc123",
 		// Through homeTilde, so a HOME of /tmp doesn't break the test.
 		"log":      homeTilde("/tmp/logs/shift.log") + " — full transcript, local (-log off)",
 		"run data": homeTilde("/tmp/metrics") + " — numbers only, local (-metrics off)",
