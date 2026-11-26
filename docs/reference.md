@@ -55,9 +55,10 @@ leap of faith. `-dry-run` takes it out:
 
 ```bash
 $ polako work -dir ../my-project -dry-run
-example/my-project — running /polako:implement-issue per issue, polling every 5m0s
+polako 0.42.0 · example/my-project — all open issues, /polako:implement-issue, polling every 5m
   dry-run  resolving the next issue only — no claude run, no GitHub write, no run data
-  remote   on — each run registers with Remote Control under the operator's own claude.ai account, watchable and typeable from claude.ai/code or the app (-remote=false keeps runs to this machine)
+  model    Claude Code's default, effort default
+  remote   on — runs show in your claude.ai account to watch and type into (-remote=false keeps them local)
 ready: #12, #14, #19
 waiting on an answer: #9
 issue #12 would be worked next; the invocation follows on stdout
@@ -65,13 +66,12 @@ issue #12 would be worked next; the invocation follows on stdout
 claude -p --input-format stream-json --permission-mode acceptEdits -n 'polako example/my-project#12' --allowedTools '…' --output-format stream-json --verbose
 ```
 
-It resolves the next issue exactly as a real shift would — same queue,
-`-skip`, `needs-human` exclusions, same preference for an issue awaiting an
-answer — then stops: every call is a read, no labels declared, run-data
-recording and the shift log both forced off. Narration goes to stderr, the
-shell-quoted invocation alone to stdout, so `polako work -dry-run | pbcopy`
-gives you something to run by hand; the real run passes those arguments
-straight to the CLI, never through a shell.
+It resolves the next issue as a real shift would — same queue, `-skip`,
+`needs-human` exclusions, same preference for an issue awaiting an answer —
+then stops: every call is a read, no labels declared, run data and the shift
+log both off. Narration goes to stderr, the shell-quoted invocation alone to
+stdout, so `polako work -dry-run | pbcopy` gives you something to run by
+hand; the real run passes those arguments to the CLI, never a shell.
 
 If the next issue's branch already has a PR, you get what polako would
 actually do with it instead — wait on an open one, close behind a merged
@@ -150,7 +150,7 @@ unwatched" — `-remote=false` keeps runs to this machine.
 Each shift writes one complete log of itself to a file, named at startup:
 
 ```
-  shift log  /Users/you/.polako/logs/example--my-project--3f9a1c02.log — the whole claude transcript stream, kept on this machine (-log off to disable)
+  log  ~/.polako/logs/example--my-project--3f9a1c02.log — full transcript, local (-log off)
 ```
 
 The file holds everything the shift narrates, timestamped: every terminal
