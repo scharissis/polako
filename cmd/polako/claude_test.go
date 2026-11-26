@@ -249,8 +249,9 @@ func TestPreflightPairsGatesAndOrdersEveryRow(t *testing.T) {
 		"usage":    "session 10% (pauses at 97%)",
 		"notify":   "notify-send — on park, question, empty backlog, early stop",
 		"shift":    "abc123 — polako stats -shift abc123",
-		"log":      "/tmp/logs/shift.log — full transcript, local (-log off)",
-		"run data": "/tmp/metrics — numbers only, local (-metrics off)",
+		// Through homeTilde, so a HOME of /tmp doesn't break the test.
+		"log":      homeTilde("/tmp/logs/shift.log") + " — full transcript, local (-log off)",
+		"run data": homeTilde("/tmp/metrics") + " — numbers only, local (-metrics off)",
 	} {
 		if rows[label] != want {
 			t.Errorf("%s row = %q, want %q", label, rows[label], want)
