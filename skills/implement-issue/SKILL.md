@@ -51,10 +51,11 @@ Unattended means no prompts: `--allowedTools` grants a fixed set of command
 prefixes. Anything outside it — `cd` among them, along with `EnterWorktree`
 or any other tool `ToolSearch` surfaces for moving the session's own working
 directory — raises a confirmation nobody is there to answer. That can hang
-the run outright; polako #138's shift log shows the other way it fails, faster and
-just as badly — the rejected confirmation left the model to end its turn on
-its own a few seconds later, "finished (ok)," having produced nothing. Either
-way the supervisor sees no progress and parks a perfectly good issue.
+the run outright; polako #138's shift log shows the other way it fails,
+faster and just as badly — the rejected confirmation left the model to end
+its turn on its own a few seconds later, "finished (ok)," having produced
+nothing. Either way the supervisor sees no progress and parks a perfectly
+good issue.
 
 So: never reach for a tool on the chance it is granted, and never `cd`. Work
 in another directory by naming it instead — `git -C <path>`, `go -C <path>`,
@@ -132,8 +133,8 @@ stopping to ask.)
    pathspec given. Never an inline `gh issue comment $issue --body "..."` —
    the text passes through shell quoting on its way there, and a stray
    escape (`'\''`, `\"`, a literal `\n`) lands on a public thread (polako
-   issue #390). No `rm` is in this run's grant; `git clean` is the mechanism
-   already available for it.
+   issue #390). No `rm` is in this run's grant; `git clean` is the
+   mechanism already available for it.
 2. Flag it with exactly:
 
        gh issue edit $issue --add-label awaiting-answer
@@ -418,7 +419,8 @@ Test whether PLAN.md exists by Read-ing `<worktree>/PLAN.md` directly — a
 missing file is a normal, handleable Read error, and Read is already granted
 for the absolute-path reading Phase 1 sets up. Never a Bash existence check
 like `ls`, `test -f` or `[ -f ]`: none of those are in the allowlist, and a
-run that reaches for one has no way to recover within its turn (polako issue #275).
+run that reaches for one has no way to recover within its turn (polako
+issue #275).
 If PLAN.md doesn't exist in the worktree, or new answers have appeared:
 1. Study the issue and relevant code. If that study turns up verified
    evidence the issue needs no code change at all, see "Closing an issue
@@ -648,8 +650,9 @@ don't post again, and stop.
       300 or more — three disjoint bands, so a count of exactly 300 is
       unambiguously `high`. A one-line `docs:` fix reaching this gate should
       not cost what a rewrite of a core file does, and the level is the
-      only lever the run holds over that (polako issues #225, #255). State in your turn which level you picked and
-      the changed-line count behind it, so the choice is auditable.
+      only lever the run holds over that (polako issues #225, #255). State
+      in your turn which level you picked and the changed-line count behind
+      it, so the choice is auditable.
 
       `cheap` never invokes the review skill. Do a single self-review pass
       instead: re-read the full diff critically for correctness, edge cases,
@@ -698,8 +701,8 @@ don't post again, and stop.
       written there lands outside the branch entirely (polako issue #219).
       Invoking the review is one call, but its return is not automatically the
       result — a return that reads as a finished report is not proof it is
-      one, since polako #472's own incident was the review's verification pass still
-      running after every finder had already reported in. So treat *any*
+      one, since polako #472's own incident was the review's verification
+      pass still running after every finder had already reported in. So treat *any*
       return the same way, never branching on how complete its prose sounds:
       checkpoint whatever findings it lists — none, some, or all — into
       PLAN.md's `## Review` section right away, each marked "pending,
@@ -714,8 +717,8 @@ don't post again, and stop.
       Then confirm with the one check that does not depend on reading
       anyone's prose: `ListAgents`. Nothing review-related running — no
       finder subagents, and the review's own verification pass too, since
-      that is specifically what polako #472 was still waiting on — means done, no
-      matter how the return read. Anything still running means this is
+      that is specifically what polako #472 was still waiting on — means
+      done, no matter how the return read. Anything still running means this is
       backgrounded work under the one-turn section's own rule: poll slowly,
       a check every minute or two, not seconds, checkpointing each further
       finder notification the same way as it lands, then check `ListAgents`
@@ -1082,8 +1085,8 @@ don't post again, and stop.
      the remote" — never the rejection's raw text. Never retry with
      `--force`, another remote or another branch name.
      The question has to be enough to act on without digging (polako
-     issue #740). Name where the branch is: `<worktree>`'s path relative to the
-     main checkout — `.worktrees/issue-$issue` when Phase 1 made it, the
+     issue #740). Name where the branch is: `<worktree>`'s path relative to
+     the main checkout — `.worktrees/issue-$issue` when Phase 1 made it, the
      real path whenever Phase 1 found it somewhere else; repo-relative,
      never absolute — and say the push works from any checkout of the
      repo, since the commits are on the local `issue-$issue` branch. Then
