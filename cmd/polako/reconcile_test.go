@@ -62,7 +62,7 @@ func reconFixture(t *testing.T, issuesFile string) reconInput {
 
 // rowLine is a row as one comparable line: id, state, issues, PRs, actions.
 func rowLine(r reconRow) string {
-	return r.item.id + " " + reconStateCell(r) + "|" + reconIssueCell(r) + "|" + refList(r.prs) + "|" + reconActionCell(r)
+	return r.item.id + " " + reconStateCell(r) + "|" + reconIssueCell(r) + "|" + issueRefs(r.prs) + "|" + reconActionCell(r)
 }
 
 func rowByID(t *testing.T, res reconResult, id string) reconRow {

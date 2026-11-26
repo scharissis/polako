@@ -48,6 +48,16 @@ func plural(n int, unit string) string {
 	return fmt.Sprintf("%d %ss", n, unit)
 }
 
+// issueRefs renders a list of issue numbers the way the rest of the output
+// spells them.
+func issueRefs(numbers []int) string {
+	refs := make([]string, len(numbers))
+	for i, n := range numbers {
+		refs[i] = "#" + strconv.Itoa(n)
+	}
+	return strings.Join(refs, ", ")
+}
+
 // issueRanges names a set of issues the short way a batch earns: a run files
 // its issues back to back, so "#399–#405" says what seven numbers would. Runs
 // of two or more collapse, anything else is listed, ascending either way.

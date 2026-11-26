@@ -50,7 +50,7 @@ func renderRecon(w io.Writer, rpt report, repo string, res reconResult) {
 	rows := make([][]string, 0, len(res.rows))
 	for _, r := range res.rows {
 		rows = append(rows, []string{r.item.id, clipRunes(r.item.name, reconNameWidth), reconStateCell(r),
-			reconIssueCell(r), refList(r.prs), reconActionCell(r), reconNoteCell(r)})
+			reconIssueCell(r), issueRefs(r.prs), reconActionCell(r), reconNoteCell(r)})
 	}
 	header := []string{"id", "item", "state", "issue", "pr", "action", "note"}
 	printTable(w, rpt, reconHeader(res), header, rows, len(header))
@@ -124,7 +124,7 @@ func reconNoteCell(r reconRow) string {
 		notes = append(notes, "shares its issue with "+strings.Join(r.shares, ", "))
 	}
 	if len(r.dupes) > 0 {
-		notes = append(notes, "also marked: "+refList(r.dupes))
+		notes = append(notes, "also marked: "+issueRefs(r.dupes))
 	}
 	if r.closest > 0 {
 		notes = append(notes, "closest #"+strconv.Itoa(r.closest))
@@ -160,14 +160,6 @@ func reconFooter(res reconResult) []string {
 		lines = append(lines, fmt.Sprintf("only the first %d issues and PRs were read — rows past them may say missing when they aren't", reconListLimit))
 	}
 	return lines
-}
-
-func refList(nums []int) string {
-	refs := make([]string, len(nums))
-	for i, n := range nums {
-		refs[i] = "#" + strconv.Itoa(n)
-	}
-	return strings.Join(refs, ", ")
 }
 
 // clipRunes cuts s to width runes, ending in "..." when it had to.
