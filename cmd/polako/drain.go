@@ -842,16 +842,6 @@ func parkGrantsBlock(results []issueResult) []string {
 	}
 }
 
-// issueRefs renders a list of issue numbers the way the rest of the output
-// spells them.
-func issueRefs(numbers []int) string {
-	refs := make([]string, len(numbers))
-	for i, n := range numbers {
-		refs[i] = "#" + strconv.Itoa(n)
-	}
-	return strings.Join(refs, ", ")
-}
-
 // pickLowest returns the smallest number not in skip, or 0 if none remain.
 func pickLowest(numbers []int, skip map[int]bool) int {
 	lowest := 0
