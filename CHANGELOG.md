@@ -13,6 +13,19 @@ still written by a person, in the release PR, because no PR list can say what
 a change means for a machine working a backlog overnight — those lines are the
 ones worth reading before upgrading one.
 
+## [0.43.0]
+
+### What's Changed
+* refactor: drop refList, a copy of issueRefs by @scharissis in https://github.com/scharissis/polako/pull/787 (closes #780)
+* docs: mark polako's own issue numbers as polako's in shipped skills by @scharissis in https://github.com/scharissis/polako/pull/788 (closes #781)
+* feat: run the smoke test as a check on the publish PR by @scharissis in https://github.com/scharissis/polako/pull/789
+* feat: tighten work's startup block — version up top, model always, no epics row by @scharissis in https://github.com/scharissis/polako/pull/790 (closes #784)
+* docs: the publish PR says "skill files", not "the skill half" by @scharissis in https://github.com/scharissis/polako/pull/791
+* feat: stamp only the first line of the startup block on a terminal by @scharissis in https://github.com/scharissis/polako/pull/792 (closes #785)
+
+
+**Full Changelog**: https://github.com/scharissis/polako/compare/v0.42.0...v0.43.0
+
 ## [0.42.0]
 
 ### What's Changed
